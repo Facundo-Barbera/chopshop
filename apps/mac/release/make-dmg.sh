@@ -12,7 +12,7 @@ APP="${1:-}"; DMG="${2:-}"
 if [ ! -d "$APP/Contents" ] || [ -z "$DMG" ]; then die "uso: make-dmg.sh <Chopshop.app> <Chopshop-VERSION.dmg>"; fi
 if [[ "$DMG" != *.dmg ]]; then die "el DMG debe terminar en .dmg"; fi
 
-if [ "${REQUIRE_STAPLE:-0}" = 1 ]; then xcrun stapler validate "$APP"; fi
+if [ "${REQUIRE_STAPLE:-0}" = 1 ]; then stapler_retry validate "$APP"; fi
 
 stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
@@ -20,7 +20,7 @@ trap 'rm -rf "$stage"' EXIT
 ditto "$APP" "$stage/$(basename "$APP")"
 ln -s /Applications "$stage/Applications"
 codesign --verify --deep --strict --verbose=2 "$stage/$(basename "$APP")"
-if [ "${REQUIRE_STAPLE:-0}" = 1 ]; then xcrun stapler validate "$stage/$(basename "$APP")"; fi
+if [ "${REQUIRE_STAPLE:-0}" = 1 ]; then stapler_retry validate "$stage/$(basename "$APP")"; fi
 
 mkdir -p "$(dirname "$DMG")"
 rm -f "$DMG" "$DMG.sha256"

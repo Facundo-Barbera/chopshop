@@ -18,7 +18,7 @@ ditto -x -k "$ZIP" "$check"
 unpacked="$check/$(basename "$APP")"
 [ -d "$unpacked" ] || die "el zip no contiene $(basename "$APP") en su raíz"
 codesign --verify --deep --strict --verbose=2 "$unpacked"
-if [ "${REQUIRE_STAPLE:-0}" = 1 ]; then xcrun stapler validate "$unpacked"; fi
+if [ "${REQUIRE_STAPLE:-0}" = 1 ]; then stapler_retry validate "$unpacked"; fi
 
 sum="$(shasum -a 256 "$ZIP" | awk '{print $1}')"
 printf '%s  %s\n' "$sum" "$(basename "$ZIP")" > "$ZIP.sha256"
