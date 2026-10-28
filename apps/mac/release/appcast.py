@@ -395,7 +395,7 @@ def cmd_derive_public(_a):
 def cmd_check_key(a):
     derived = public_from_sparkle_secret(_read_stdin_secret())
     if derived != base64.b64decode(a.public):
-        print("ERROR: la clave privada (SPARKLE_ED_PRIVATE_KEY) no corresponde a SPARKLE_PUBLIC_ED_KEY", file=sys.stderr)
+        print("ERROR: la clave privada (SPARKLE_ED_PRIVATE_KEY) no corresponde a SPARKLE_ED_PUBLIC_KEY", file=sys.stderr)
         return 1
     print("clave privada y pública de Sparkle coinciden")
     return 0

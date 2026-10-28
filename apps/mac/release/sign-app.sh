@@ -2,7 +2,8 @@
 # Firma Chopshop.app de dentro hacia fuera (hardened runtime + sello de tiempo + entitlements mínimos).
 #   sign-app.sh <Chopshop.app>
 # Env: SIGN_IDENTITY (hash SHA-1 de Developer ID Application; "-" = ad-hoc para dry-run),
-#      SIGN_KEYCHAIN (keychain temporal, opcional), ENTITLEMENTS (por defecto Chopshop.entitlements).
+#      SIGN_KEYCHAIN (keychain temporal, opcional), ENTITLEMENTS (por defecto Chopshop.entitlements),
+#      APPLE_TEAM_ID (si se define y la firma es real, el TeamIdentifier resultante debe coincidir).
 # Orden: todo el código anidado (XPC, Autoupdate, Updater.app, binarios sueltos...) del más profundo al más
 # superficial, luego Sparkle.framework y por último la app. Es el orden que exige Sparkle con hardened runtime
 # y se obtiene ordenando por profundidad, sin depender de la estructura interna de cada versión de Sparkle.
@@ -54,5 +55,8 @@ codesign --verify --deep --strict --verbose=2 "$APP"
 codesign -d --verbose=2 "$APP" 2>&1 | grep 'flags=0x[0-9a-f]*(.*runtime' >/dev/null || die "la app firmada no tiene hardened runtime"
 if [ "$IDENTITY" != "-" ]; then
   codesign -d --verbose=2 "$APP" 2>&1 | grep '^Timestamp=' >/dev/null || die "la firma no lleva sello de tiempo seguro"
+  if [ -n "${APPLE_TEAM_ID:-}" ]; then
+    codesign -d --verbose=2 "$APP" 2>&1 | grep -x "TeamIdentifier=$APPLE_TEAM_ID" >/dev/null || die "el TeamIdentifier de la firma no coincide con APPLE_TEAM_ID"
+  fi
 fi
 log "firma verificada ($count componente(s) anidados)"

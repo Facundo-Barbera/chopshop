@@ -5,9 +5,8 @@
 #   r2.sh push-appcast <dir>            sube solo appcast.xml
 #   r2.sh retire <nombre>...            mueve objetos a retired/ (rollback; nunca se borran)
 #   r2.sh verify <dir> [<zip>]          comprueba por HTTP público que el feed publicado es el nuestro y el zip es idéntico
-#   r2.sh purge                         purga la caché de Cloudflare del appcast (solo si hay token y zona)
-# Env: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET, UPDATES_BASE_URL; R2_PREFIX (opcional,
-# debe corresponder a la ruta de UPDATES_BASE_URL); CLOUDFLARE_API_TOKEN + CLOUDFLARE_ZONE_ID (opcionales).
+# Env: R2_ACCOUNT_ID (var), R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY (secrets), R2_BUCKET, UPDATES_BASE_URL (el bucket se
+# sirve en la raíz de esa URL).
 # Política: NUNCA se usa --delete ni se borran zips anteriores (los necesitan los deltas); solo `retire` mueve.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -22,8 +21,7 @@ r2_env() {
   # R2 no acepta las sumas de verificación CRC por defecto de las versiones recientes del CLI
   export AWS_REQUEST_CHECKSUM_CALCULATION=when_required AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
   ENDPOINT="https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com"
-  PREFIX="$(strip_slash "${R2_PREFIX:-}")"
-  if [ -n "$PREFIX" ]; then PREFIX="$PREFIX/"; fi
+  PREFIX=""   # el bucket se usa en su raíz: UPDATES_BASE_URL apunta ahí
   S3="s3://$R2_BUCKET/$PREFIX"
 }
 r2() { aws --endpoint-url "$ENDPOINT" "$@"; }
@@ -162,22 +160,6 @@ cmd_verify() {
   log "verificación pública OK: feed y archivos accesibles en la URL de actualizaciones"
 }
 
-cmd_purge() {
-  if [ -z "${CLOUDFLARE_API_TOKEN:-}" ] || [ -z "${CLOUDFLARE_ZONE_ID:-}" ]; then
-    log "sin CLOUDFLARE_API_TOKEN/CLOUDFLARE_ZONE_ID: no se purga caché (el appcast ya caduca en 60 s)"
-    return 0
-  fi
-  require_env UPDATES_BASE_URL
-  local base
-  base="$(strip_slash "$UPDATES_BASE_URL")"
-  # El token va por stdin (-K -), nunca en argv ni en el log
-  printf 'header = "Authorization: Bearer %s"\n' "$CLOUDFLARE_API_TOKEN" | curl --fail --silent --show-error --proto '=https' \
-    -K - -X POST -H 'Content-Type: application/json' \
-    --data "{\"files\":[\"$base/appcast.xml\"]}" \
-    "https://api.cloudflare.com/client/v4/zones/$CLOUDFLARE_ZONE_ID/purge_cache" --output /dev/null
-  log "caché de Cloudflare purgada para appcast.xml"
-}
-
 sub="${1:-}"; shift || true
 case "$sub" in
   pull | push | push-appcast | retire) r2_env ;;
@@ -188,6 +170,5 @@ case "$sub" in
   push-appcast) cmd_push_appcast "$@" ;;
   retire) cmd_retire "$@" ;;
   verify) cmd_verify "$@" ;;
-  purge) cmd_purge ;;
-  *) die "uso: r2.sh <pull|push|push-appcast|retire|verify|purge> ..." ;;
+  *) die "uso: r2.sh <pull|push|push-appcast|retire|verify> ..." ;;
 esac

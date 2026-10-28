@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Notariza la app (App Store Connect API key), grapa el ticket y verifica con las herramientas de Apple.
 #   notarize.sh <Chopshop.app> <zip_para_enviar>
-# Env: APPLE_API_KEY_P8_BASE64, APPLE_API_KEY_ID, APPLE_API_ISSUER; NOTARY_TIMEOUT (30m).
+# Env: ASC_API_KEY_P8_BASE64, ASC_API_KEY_ID, ASC_API_ISSUER_ID; NOTARY_TIMEOUT (30m).
 # Si Apple no acepta el envío, imprime `notarytool log` (no contiene secretos) y falla. La .p8 solo vive en
 # un archivo temporal 0600 que se borra al salir (y también en el paso de limpieza del workflow).
 # La identidad del certificado se enmascara en logs aunque spctl la imprima.
@@ -11,14 +11,14 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
 APP="${1:-}"; ZIP="${2:-}"
 [ -d "$APP/Contents" ] && [ -n "$ZIP" ] || die "uso: notarize.sh <Chopshop.app> <zip_para_enviar>"
-require_env APPLE_API_KEY_P8_BASE64 APPLE_API_KEY_ID APPLE_API_ISSUER
+require_env ASC_API_KEY_P8_BASE64 ASC_API_KEY_ID ASC_API_ISSUER_ID
 TMP="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
 KEY="$TMP/chopshop-notary-$$.p8"
 RESULT="$TMP/chopshop-notary-result-$$.json"
 trap 'rm -f "$KEY" "$RESULT"' EXIT
-printf '%s' "$APPLE_API_KEY_P8_BASE64" | base64 --decode > "$KEY"
+printf '%s' "$ASC_API_KEY_P8_BASE64" | base64 --decode > "$KEY"
 chmod 600 "$KEY"
-auth=(--key "$KEY" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER")
+auth=(--key "$KEY" --key-id "$ASC_API_KEY_ID" --issuer "$ASC_API_ISSUER_ID")
 
 ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
 log "enviando a notarizar (espera hasta ${NOTARY_TIMEOUT:-30m})"

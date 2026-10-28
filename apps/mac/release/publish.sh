@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Publica un release ya firmado y notarizado en R2 con el orden seguro. Orquesta:
 #   pull del feed y zips previos -> comprobaciones (monotonía, no pisar) -> notas -> generate_appcast (+deltas)
-#   -> validación -> subir zips/deltas/notas -> appcast AL FINAL -> verificación por HTTP -> purga de caché.
+#   -> validación -> subir zips/deltas/notas -> appcast AL FINAL -> verificación por HTTP.
 #   publish.sh <Chopshop-VERSION.zip>
 # Env: TAG, VERSION (corta), BUILD_NUMBER, CHANNEL (vacío = estable), más las de appcast.sh y r2.sh.
 #      NOTES_MD_OUT (opcional): ruta donde dejar las notas en markdown (para la GitHub Release).
@@ -34,7 +34,6 @@ if [ -n "${NOTES_MD_OUT:-}" ]; then cp "$work/notes/$VERSION.md" "$NOTES_MD_OUT"
 bash "$HERE/appcast.sh" "$work" --new-build "$BUILD_NUMBER" --version "$VERSION" --channel "${CHANNEL:-}"
 bash "$HERE/r2.sh" push "$work" "$VERSION"
 bash "$HERE/r2.sh" verify "$work" "$NAME"
-bash "$HERE/r2.sh" purge
 
 BASE="$(strip_slash "$UPDATES_BASE_URL")"
 summary "### Publicado en R2"

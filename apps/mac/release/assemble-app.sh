@@ -4,7 +4,7 @@
 # Así el Info.plist de desarrollo y el de release no divergen (cualquier clave nueva de build.sh se conserva).
 #
 # Entrada (env): SHORT_VERSION, BUILD_NUMBER (obligatorias); BUNDLE_ID (com.example.chopshop),
-#   MIN_MACOS_VERSION (13.0), SPARKLE_FEED_URL, SPARKLE_PUBLIC_ED_KEY, SPARKLE_AUTO_UPDATE (false),
+#   MIN_MACOS_VERSION (13.0), UPDATES_BASE_URL (el feed es <URL>/appcast.xml), SPARKLE_ED_PUBLIC_KEY, SPARKLE_AUTO_UPDATE (false),
 #   SPARKLE_CHECK_INTERVAL (86400), APP_OUT (apps/mac/build/release/Chopshop.app),
 #   RELEASE_MODE=release|dryrun (en release faltar el feed o la clave pública es un error),
 #   BUILD_SCRIPT (solo para pruebas: sustituye a apps/mac/build.sh).
@@ -19,16 +19,17 @@ MIN_MACOS_VERSION="${MIN_MACOS_VERSION:-13.0}"
 AUTO_UPDATE="${SPARKLE_AUTO_UPDATE:-false}"
 CHECK_INTERVAL="${SPARKLE_CHECK_INTERVAL:-86400}"
 MODE="${RELEASE_MODE:-release}"
-FEED="${SPARKLE_FEED_URL:-}"
-PUBKEY="${SPARKLE_PUBLIC_ED_KEY:-}"
+FEED=""
+if [ -n "${UPDATES_BASE_URL:-}" ]; then FEED="$(strip_slash "$UPDATES_BASE_URL")/appcast.xml"; fi
+PUBKEY="${SPARKLE_ED_PUBLIC_KEY:-}"
 PLISTBUDDY="${PLISTBUDDY:-/usr/libexec/PlistBuddy}"
 
 case "$AUTO_UPDATE" in true | false) ;; *) die "SPARKLE_AUTO_UPDATE debe ser true o false" ;; esac
 if [ "$MODE" = release ]; then
-  [ -n "$FEED" ] || die "SPARKLE_FEED_URL vacío: sin feed la app publicada no podría actualizarse"
-  [ -n "$PUBKEY" ] || die "SPARKLE_PUBLIC_ED_KEY vacía: sin clave pública Sparkle rechazaría todas las actualizaciones"
+  [ -n "$FEED" ] || die "UPDATES_BASE_URL vacío: sin feed la app publicada no podría actualizarse"
+  [ -n "$PUBKEY" ] || die "SPARKLE_ED_PUBLIC_KEY vacía: sin clave pública Sparkle rechazaría todas las actualizaciones"
 fi
-if [ -n "$PUBKEY" ] && [ "$(b64_len "$PUBKEY")" != 32 ]; then die "SPARKLE_PUBLIC_ED_KEY no es base64 de 32 bytes"; fi
+if [ -n "$PUBKEY" ] && [ "$(b64_len "$PUBKEY")" != 32 ]; then die "SPARKLE_ED_PUBLIC_KEY no es base64 de 32 bytes"; fi
 
 # 1) UI (pnpm) + Swift + motor + Info.plist base: lo hace build.sh con la ruta de salida parametrizada
 log "build.sh -> $OUT"
@@ -68,7 +69,7 @@ if [ -n "$FEED" ] && [ -n "$PUBKEY" ]; then
   plist_put SURequireSignedFeed bool true
   plist_put SUVerifyUpdateBeforeExtraction bool true
 else
-  warn "sin SPARKLE_FEED_URL/SPARKLE_PUBLIC_ED_KEY: la app no incluirá claves de Sparkle (updater desactivado)"
+  warn "sin UPDATES_BASE_URL/SPARKLE_ED_PUBLIC_KEY: la app no incluirá claves de Sparkle (updater desactivado)"
   for k in SUFeedURL SUPublicEDKey SUEnableAutomaticChecks SUAutomaticallyUpdate SUScheduledCheckInterval SURequireSignedFeed SUVerifyUpdateBeforeExtraction; do plist_del "$k"; done
 fi
 
