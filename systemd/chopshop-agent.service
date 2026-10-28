@@ -1,0 +1,43 @@
+# chopshop-agent: unidad de usuario de systemd (PLANTILLA con marcadores @...@).
+#
+# No se copia tal cual: `chopshop agent print-unit` (o scripts/install-user-unit.sh) la renderiza con las rutas de TU entorno
+# (ejecutable, PATH, carpetas de escritura). Marcadores entre arrobas: EXEC_START, PATH, READ_WRITE_PATHS, EXTRA_ENVIRONMENT.
+#
+# Esta unidad NUNCA se habilita desde el repo ni desde el instalador: `[Install]` es solo texto. Para probarla:
+#   systemctl --user start chopshop-agent ; systemctl --user status chopshop-agent ; systemctl --user stop chopshop-agent
+# Guía completa: docs/agent-service.md
+[Unit]
+Description=Chopshop agent (metricas por app/proyecto, hilos de T3, recursos compartidos)
+Documentation=https://github.com/Facundo-Barbera/chopshop/blob/main/docs/agent-service.md
+StartLimitIntervalSec=300
+StartLimitBurst=20
+
+[Service]
+Type=simple
+ExecStart=@EXEC_START@
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=20
+Environment=PYTHONUNBUFFERED=1
+Environment="PATH=@PATH@"
+@EXTRA_ENVIRONMENT@
+SyslogIdentifier=chopshop-agent
+
+# Recursos: el agente debe pasar desapercibido (los topes son suaves; ajusta con un drop-in si lo necesitas).
+Slice=chopshop.slice
+Nice=10
+CPUQuota=30%
+MemoryHigh=192M
+MemoryMax=384M
+
+# Endurecimiento: sistema de archivos de solo lectura salvo lo que el agente necesita escribir.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=@READ_WRITE_PATHS@
+RestrictSUIDSGID=yes
+LockPersonality=yes
+UMask=0077
+
+[Install]
+WantedBy=default.target

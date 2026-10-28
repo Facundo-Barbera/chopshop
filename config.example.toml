@@ -45,11 +45,21 @@ token_file = "~/.chopshop/agent/host-b.token"
 # El agente (chopshop-agent), uno por máquina.
 [agent]
 machine_id = "host-b"                     # vacío = nombre de host de la máquina
-bind = "auto"                             # "auto" = IP de Tailscale (nunca 0.0.0.0); o una IP concreta, p. ej. "100.64.0.10"
+bind = "127.0.0.1"                        # solo local por defecto. Para otras máquinas: "auto" (IP de Tailscale) o una IP concreta,
+                                          # p. ej. "100.64.0.10". Nunca 0.0.0.0 ni "::" (el agente se niega a arrancar).
 port = 3790
-owner_login = "usuario@"                  # identidad Tailscale con permiso total (vacío = solo origen local)
-allowed_logins = ["invitado@"]            # identidades con acceso de solo lectura
-token_file = "~/.chopshop/agent/token"    # bearer para clientes sin identidad Tailscale (0600)
+auth = "tailscale+token"                  # "tailscale+token": identidad Tailscale (+ bearer para escribir) | "token": solo bearer
+                                          # | "none-local": nada de red, solo el origen local
+trust_local = true                        # el origen local (MCP / CLI de esta máquina) no necesita identidad ni bearer
+local_listener = true                     # si bind no es loopback, escucha además en 127.0.0.1:<port> para el MCP/CLI locales
+tailscale_bin = "tailscale"               # CLI de Tailscale (para `whois` y bind = "auto")
+owner_login = "usuario@"                  # login Tailscale COMPLETO con permiso total (como lo muestra `tailscale whois`);
+                                          # esto es un marcador. Vacío = solo origen local
+allowed_logins = ["invitado@"]            # logins con acceso de solo lectura (mismo formato)
+allow_request_cmd = false                 # true = POST /leases/request puede traer su propio `cmd` (por defecto solo el de la config)
+t3_enabled = true                         # false = máquina solo sensor: no se vigila T3
+import_legacy = true                      # al arrancar, importa <home>/events.jsonl del motor viejo si existe
+token_file = "~/.chopshop/agent/token"    # bearer (0600); se crea con `chopshop agent token`
 db_path = "~/.chopshop/agent/agent.db"
 sample_interval = 10                      # segundos entre muestras de métricas
 t3_poll_interval = 5                      # segundos entre sondeos de T3
@@ -102,8 +112,13 @@ agent_cgroup = ""                         # ruta del slice de agentes de T3 (vac
 [agent.webhook_files]
 bot = "~/.config/chopshop/webhooks/bot.url"
 
-# Retención del historial de métricas.
+# Retención del historial de métricas y de eventos.
 [agent.retention]
 raw_hours = 24
 m1_days = 30
 h1_days = 365
+events_days = 90                          # eventos (y sus entregas) más viejos que esto se borran
+
+# Unidad systemd --user (`chopshop agent print-unit`).
+[agent.service]
+read_write_paths = []                     # rutas extra de escritura (ProtectSystem=strict); ya incluye home, db_path y general.home
