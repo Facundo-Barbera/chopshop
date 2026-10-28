@@ -650,6 +650,104 @@ class TestDmg(WorkDir):
         self.assertNotEqual(self.run_sh("notarize.sh", [os.path.join(self.tmp, "no.dmg")], env=self.notary_env()).returncode, 0)
 
 
+class TestStaplerRetry(WorkDir):
+    """staple/validate consultan CloudKit y fallan a veces por red (Error 68): se reintentan con backoff, sin debilitar nada."""
+
+    MACHO = TestSignAndNotarize.MACHO
+    make_app = TestSignAndNotarize.make_app
+    notary_env = TestSignAndNotarize.notary_env
+
+    def env(self, **extra):
+        return dict(self.notary_env(), FAKE_STAPLER_FAILS=os.path.join(self.tmp, "n"), **extra)
+
+    def stapler_calls(self, action):
+        return [c for c in self.calls() if c.startswith("xcrun stapler " + action)]
+
+    def sleeps(self):
+        return [c.split()[1] for c in self.calls() if c.startswith("sleep ")]
+
+    def notarize(self, **extra):
+        return self.run_sh("notarize.sh", [self.make_app(), os.path.join(self.tmp, "submit.zip")], env=self.env(**extra))
+
+    def test_transient_validate_failure_is_retried_until_it_succeeds(self):
+        r = self.notarize(FAKE_STAPLER_ACTION="validate", FAKE_STAPLER_FAIL_COUNT="3")
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        self.assertEqual(len(self.stapler_calls("validate")), 4)
+        self.assertEqual(len(self.stapler_calls("staple")), 1)
+        self.assertEqual(self.sleeps(), ["5", "10", "20"])
+        self.assertIn("reintento", r.stderr)
+        # tras el reintento siguen exigidos spctl y codesign, y notarytool submit se hizo una sola vez
+        calls = self.calls()
+        self.assertEqual(len([c for c in calls if c.startswith("xcrun notarytool submit")]), 1)
+        self.assertLess(max(i for i, c in enumerate(calls) if c.startswith("xcrun stapler validate")),
+                        next(i for i, c in enumerate(calls) if c.startswith("spctl --assess")))
+        self.assertTrue(any(c.startswith("codesign --verify --deep --strict") for c in calls))
+
+    def test_transient_staple_failure_is_retried_and_validate_still_runs(self):
+        r = self.notarize(FAKE_STAPLER_ACTION="staple", FAKE_STAPLER_FAIL_COUNT="2", FAKE_STAPLER_RC="65")
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        self.assertEqual(len(self.stapler_calls("staple")), 3)
+        self.assertEqual(len(self.stapler_calls("validate")), 1)
+        self.assertEqual(self.sleeps(), ["5", "10"])
+
+    def test_backoff_is_capped_and_gives_up_after_the_last_attempt(self):
+        r = self.notarize(FAKE_STAPLER_ACTION="validate", FAKE_STAPLER_FAIL_COUNT="99")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(len(self.stapler_calls("validate")), 8)
+        self.assertEqual(self.sleeps(), ["5", "10", "20", "40", "60", "60", "60"])
+        self.assertIn("falló tras 8 intentos", r.stderr)
+        self.assertIn("código de salida: 68", r.stderr)
+        self.assertIn("Error 68", r.stderr, "se conserva el último error de stapler")
+        # no se llega a las verificaciones siguientes ni se reintenta la notarización
+        calls = self.calls()
+        self.assertFalse(any(c.startswith("spctl --assess") for c in calls))
+        self.assertEqual(len([c for c in calls if c.startswith("xcrun notarytool submit")]), 1)
+
+    def test_attempts_and_delay_are_configurable(self):
+        r = self.notarize(FAKE_STAPLER_ACTION="staple", FAKE_STAPLER_FAIL_COUNT="99", STAPLER_ATTEMPTS="3", STAPLER_RETRY_DELAY="0")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(len(self.stapler_calls("staple")), 3)
+        self.assertEqual(self.sleeps(), ["0", "0"])
+        self.assertFalse(self.stapler_calls("validate"))
+
+    def test_invalid_retry_settings_fail_fast(self):
+        app, zip_path = self.make_app(), os.path.join(self.tmp, "submit.zip")
+        for bad in ({"STAPLER_ATTEMPTS": "0"}, {"STAPLER_RETRY_DELAY": "abc"}):
+            r = self.run_sh("notarize.sh", [app, zip_path], env=self.env(**bad))
+            self.assertNotEqual(r.returncode, 0)
+        self.assertFalse(self.stapler_calls("staple"))
+
+    def test_dmg_staple_and_validate_are_retried_and_checksum_refreshed(self):
+        dmg = os.path.join(self.tmp, "Chopshop-1.0.0.dmg")
+        spit(dmg, b"dmg-falso", "wb")
+        r = self.run_sh("notarize.sh", [dmg], env=self.env(FAKE_STAPLER_FAIL_COUNT="2"))
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        self.assertEqual(len(self.stapler_calls("staple")), 3)
+        self.assertEqual(len(self.stapler_calls("validate")), 3)
+        self.assertTrue(any(c.startswith("spctl -a -t open --context context:primary-signature") for c in self.calls()))
+        self.assertRegex(read(dmg + ".sha256"), r"^[0-9a-f]{64}  Chopshop-1\.0\.0\.dmg\n$")
+
+    def test_make_dmg_and_package_retry_validate(self):
+        env = {"REQUIRE_STAPLE": "1", "FAKE_STAPLER_FAILS": os.path.join(self.tmp, "n"), "FAKE_STAPLER_FAIL_COUNT": "1"}
+        app = self.make_app()
+        r = self.run_sh("make-dmg.sh", [app, os.path.join(self.tmp, "dist", "Chopshop-1.0.0.dmg")], env=env)
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        self.assertEqual(len(self.stapler_calls("validate")), 3)  # 1 fallo + 2 validaciones
+        os.remove(os.path.join(self.tmp, "n.validate"))
+        r = self.run_sh("package.sh", [app, os.path.join(self.tmp, "dist", "Chopshop-1.0.0.zip")], env=env)
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        self.assertEqual(len(self.stapler_calls("validate")), 5)
+
+    def test_no_script_or_workflow_calls_stapler_directly(self):
+        for name in sorted(os.listdir(RELEASE)):
+            if name.endswith(".sh") and name != "lib.sh":
+                self.assertNotIn("xcrun stapler", read(RELEASE, name), name)
+        self.assertEqual(read(RELEASE, "lib.sh").count('xcrun stapler "$action"'), 1)
+        wf = read(RELEASE, "..", "..", "..", ".github", "workflows", "release-mac.yml")
+        self.assertNotIn("xcrun stapler", wf)
+        self.assertIn("stapler_retry validate", wf)
+
+
 # ---------------------------------------------------------------------------
 class TestAssemble(WorkDir):
     """assemble-app.sh + embed-sparkle.sh con un build.sh, PlistBuddy y otool falsos."""
@@ -1230,7 +1328,7 @@ class TestWorkflows(unittest.TestCase):
         check = steps["Comprobar el zip descargado (checksum y firma)"]["run"]
         for cmd in ('shasum -a 256 -c "Chopshop-${VERSION}.dmg.sha256"', 'codesign --verify --strict --verbose=2 "Chopshop-${VERSION}.dmg"',
                     'spctl -a -t open --context context:primary-signature -vv "Chopshop-${VERSION}.dmg"',
-                    'xcrun stapler validate "Chopshop-${VERSION}.dmg"'):
+                    'stapler_retry validate "Chopshop-${VERSION}.dmg"'):
             self.assertIn(cmd, check)
         self.assertLess(check.index('if [ "$DRY_RUN" != "true" ]'), check.index("spctl -a -t open"))
 

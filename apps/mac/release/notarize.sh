@@ -55,17 +55,17 @@ if [ "$rc" -ne 0 ] || [ "$status" != "Accepted" ]; then
 fi
 log "notarización aceptada ($sub_id)"
 
-xcrun stapler staple "$TARGET"
+stapler_retry staple "$TARGET"
 if [ "$KIND" = dmg ]; then
   # Verificación visible en el log; cualquiera que falle aborta. El ticket modifica el DMG: el checksum se recalcula DESPUÉS.
   codesign --verify --strict --verbose=2 "$TARGET"
   spctl -a -t open --context context:primary-signature -vv "$TARGET" 2>&1 | sed 's/^origin=.*/origin=<oculto>/'
-  xcrun stapler validate "$TARGET"
+  stapler_retry validate "$TARGET"
   write_sha256 "$TARGET" >/dev/null
   log "DMG: firma, Gatekeeper y ticket grapado verificados; checksum actualizado"
   exit 0
 fi
-xcrun stapler validate "$TARGET"
+stapler_retry validate "$TARGET"
 # spctl imprime "origin=Developer ID Application: <nombre> (<TeamID>)": se oculta por si el logger no lo enmascarara
 spctl --assess --type execute -vv "$TARGET" 2>&1 | sed 's/^origin=.*/origin=<oculto>/'
 codesign --verify --deep --strict --verbose=2 "$TARGET"

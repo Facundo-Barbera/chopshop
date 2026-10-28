@@ -299,6 +299,8 @@ jobs:
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
+          # stapler_retry: staple/validate con reintentos (CloudKit falla a veces por red)
+          source "$GITHUB_WORKSPACE/apps/mac/release/lib.sh"
           cd "$RUNNER_TEMP/dl"
           shasum -a 256 -c "Chopshop-${VERSION}.zip.sha256"
           shasum -a 256 -c "Chopshop-${VERSION}.dmg.sha256"
@@ -310,12 +312,12 @@ jobs:
               echo "::error::la app no está firmada con Developer ID del equipo APPLE_TEAM_ID: no se publica una release sin firma"
               exit 1
             fi
-            xcrun stapler validate "$check/Chopshop.app"
+            stapler_retry validate "$check/Chopshop.app"
             spctl --assess --type execute -vv "$check/Chopshop.app" 2>&1 | sed 's/^origin=.*/origin=<oculto>/'
             # el DMG que se adjunta a la GitHub Release: firmado, aceptado por Gatekeeper y con el ticket grapado
             codesign --verify --strict --verbose=2 "Chopshop-${VERSION}.dmg"
             spctl -a -t open --context context:primary-signature -vv "Chopshop-${VERSION}.dmg" 2>&1 | sed 's/^origin=.*/origin=<oculto>/'
-            xcrun stapler validate "Chopshop-${VERSION}.dmg"
+            stapler_retry validate "Chopshop-${VERSION}.dmg"
           fi
           rm -rf "$check"
 

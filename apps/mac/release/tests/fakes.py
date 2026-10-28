@@ -91,6 +91,22 @@ if args[:2] == ["notarytool", "submit"]:
     sys.exit(0 if status == "Accepted" else 1)
 elif args[:2] == ["notarytool", "log"]:
     print('{"status": "Invalid", "issues": [{"message": "El binario no esta firmado"}]}')
+elif args[0] == "stapler" and os.environ.get("FAKE_STAPLER_FAILS"):
+    # fallo transitorio de red de Apple (CloudKit): falla las N primeras llamadas de la acción indicada (o de todas)
+    only = os.environ.get("FAKE_STAPLER_ACTION", "")
+    if not only or only == args[1]:
+        counter = os.environ["FAKE_STAPLER_FAILS"] + "." + args[1]
+        n = int(open(counter).read()) if os.path.exists(counter) else 0
+        open(counter, "w").write(str(n + 1))
+        if n < int(os.environ.get("FAKE_STAPLER_FAIL_COUNT", "1")):
+            sys.stderr.write("Error Domain=NSURLErrorDomain Code=-1005 \\"The network connection was lost.\\" "
+                             "(api.apple-cloudkit.com ticket-delivery)\\nThe %s action failed! Error 68.\\n" % args[1])
+            sys.exit(int(os.environ.get("FAKE_STAPLER_RC", "68")))
+'''
+
+SHIMS["sleep"] = PRELUDE + '''
+# sin esperas reales: solo deja constancia de cuánto se habría esperado
+log("sleep", *sys.argv[1:])
 '''
 
 SHIMS["ditto"] = PRELUDE + '''

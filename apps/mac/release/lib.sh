@@ -89,3 +89,33 @@ is_macho() {
   esac
   return 1
 }
+
+# stapler_retry <staple|validate> <ruta>: ejecuta `xcrun stapler <acción> <ruta>` con reintentos y backoff exponencial.
+# staple/validate consultan CloudKit (ticket-delivery) y fallan a veces por la red de Apple (NSURLErrorDomain -1005,
+# «Error 68») aunque la notarización esté aceptada. Se reintenta ante cualquier salida no cero de stapler; al agotar los
+# intentos falla con el último código. NO sustituye ninguna verificación: el éxito exige que stapler termine en 0.
+# Env: STAPLER_ATTEMPTS (8), STAPLER_RETRY_DELAY (5 s, se duplica en cada intento), STAPLER_RETRY_MAX_DELAY (60 s);
+# con STAPLER_RETRY_DELAY=0 no hay espera (pruebas). Con los valores por defecto espera 5,10,20,40,60,60,60 s.
+stapler_retry() {
+  local action="${1:-}" target="${2:-}"
+  local max="${STAPLER_ATTEMPTS:-8}" delay="${STAPLER_RETRY_DELAY:-5}" cap="${STAPLER_RETRY_MAX_DELAY:-60}"
+  local attempt=1 rc=0
+  case "$action" in staple | validate) ;; *) die "stapler_retry: acción no válida '$action' (staple|validate)" ;; esac
+  if [ -z "$target" ]; then die "stapler_retry: falta la ruta a $action"; fi
+  case "$max$delay$cap" in '' | *[!0-9]*) die "stapler_retry: STAPLER_ATTEMPTS, STAPLER_RETRY_DELAY y STAPLER_RETRY_MAX_DELAY deben ser enteros" ;; esac
+  if [ "$max" -lt 1 ]; then die "stapler_retry: STAPLER_ATTEMPTS debe ser >= 1"; fi
+  while true; do
+    rc=0
+    xcrun stapler "$action" "$target" || rc=$?
+    if [ "$rc" -eq 0 ]; then return 0; fi
+    if [ "$attempt" -ge "$max" ]; then
+      printf '::error::stapler %s falló tras %s intentos (último código de salida: %s)\n' "$action" "$attempt" "$rc" >&2
+      return "$rc"
+    fi
+    warn "stapler $action falló (código $rc; intento $attempt/$max); reintento en ${delay}s"
+    sleep "$delay"
+    attempt=$((attempt + 1))
+    delay=$((delay * 2))
+    if [ "$delay" -gt "$cap" ]; then delay="$cap"; fi
+  done
+}
