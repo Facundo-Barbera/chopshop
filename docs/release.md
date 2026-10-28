@@ -163,6 +163,10 @@ gh secret set R2_SECRET_ACCESS_KEY
 
 Recomendado: en **Settings → Environments → `release`** (se crea solo al primer run) añade *Required reviewers* para aprobar a mano antes de publicar, y protege la rama `main` y los tags `v*`. Prueba primero con un **dry-run** y luego etiqueta.
 
+## Privacidad de los logs (repositorio público)
+
+GitHub **enmascara los secrets pero no las variables**: en un repositorio público el log de cada ejecución muestra el valor de las variables que reciben los pasos (`UPDATES_BASE_URL`, `R2_BUCKET`, `R2_ACCOUNT_ID`, `APPLE_TEAM_ID`, `BUNDLE_ID`…) en el encabezado `env:` del paso, antes de que ningún script pueda enmascararlas. Los scripts enmascaran lo que imprimen (bucket, cuenta, identidad, Team ID), pero esos encabezados no se pueden ocultar. Si alguno de esos valores no debe ser público, defínelo como **secret** en vez de variable (el pipeline lo trata igual) o usa un repositorio privado; y borra los logs de ejecuciones antiguas con `gh api -X DELETE repos/<owner>/<repo>/actions/runs/<id>/logs`.
+
 ## Versionado
 
 - `CFBundleShortVersionString` = el tag sin la `v`. Se valida semver estricto (`v1.2.3`, `v1.2.3-beta.1`); cualquier otra cosa hace fallar el workflow antes de compilar.
