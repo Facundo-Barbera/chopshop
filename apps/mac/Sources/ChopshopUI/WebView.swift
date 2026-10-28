@@ -11,17 +11,24 @@ struct WebView: NSViewRepresentable {
         cfg.userContentController.add(context.coordinator, name: "chopshop")
         let wv = WKWebView(frame: .zero, configuration: cfg)
         wv.setValue(false, forKey: "drawsBackground")   // transparente: se ve el fondo de vidrio de SwiftUI
-        wv.isInspectable = true
+        if #available(macOS 13.3, *) { wv.isInspectable = true }
         wv.navigationDelegate = context.coordinator
         model.web = wv
-        if let dir = Bundle.main.resourceURL?.appendingPathComponent("web"),
-           FileManager.default.fileExists(atPath: dir.appendingPathComponent("index.html").path) {
-            wv.loadFileURL(dir.appendingPathComponent("index.html"), allowingReadAccessTo: dir)
-        } else if let root = model.engineRoot {
-            let dir = URL(fileURLWithPath: root + "/../mac/Resources/web")
-            wv.loadFileURL(dir.appendingPathComponent("index.html"), allowingReadAccessTo: dir)
+        if let index = Self.webIndex() {
+            wv.loadFileURL(index, allowingReadAccessTo: index.deletingLastPathComponent())
+        } else {
+            wv.loadHTMLString("<body style='font:14px -apple-system;color:#ddd;padding:2em'>No encuentro la UI web (Resources/web). Reconstruye la app con apps/mac/build.sh.</body>", baseURL: nil)
         }
         return wv
+    }
+
+    /// `web/index.html` dentro del .app; si no (swift run), `CHOPSHOP_WEB_DIR` o `Resources/web` del directorio actual.
+    static func webIndex() -> URL? {
+        var dirs: [URL] = []
+        if let d = Bundle.main.resourceURL?.appendingPathComponent("web") { dirs.append(d) }
+        if let e = ProcessInfo.processInfo.environment["CHOPSHOP_WEB_DIR"], !e.isEmpty { dirs.append(URL(fileURLWithPath: AppConfig.expand(e))) }
+        dirs.append(URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("Resources/web"))
+        return dirs.map { $0.appendingPathComponent("index.html") }.first { FileManager.default.fileExists(atPath: $0.path) }
     }
 
     func updateNSView(_ nsView: WKWebView, context: Context) {}

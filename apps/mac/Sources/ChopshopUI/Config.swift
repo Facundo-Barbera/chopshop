@@ -1,20 +1,28 @@
 import Foundation
 
-/// Claves de la sección `[app]` del config local de Chopshop (`~/.config/chopshop/config.toml`, nunca versionado;
-/// el repo solo trae `config.example.toml`). Precedencia: entorno > archivo. No es un parser TOML completo:
-/// solo lee las claves de tipo string de una sección, ignorando todo lo demás.
+/// Un agente remoto al que se conecta la app.
+struct AgentSpec: Equatable {
+    var name: String          // clave de `[app.agents.<nombre>]` ("agente" para el `agent_url` suelto)
+    var url: String           // http://100.64.0.10:3790 (sin barra final)
+    var tokenFile: String?    // ruta al archivo con el bearer del agente, nunca el token en sí
+}
+
+/// Sección `[app]` del config local de Chopshop (`~/.config/chopshop/config.toml`, nunca versionado;
+/// el repo solo trae `config.example.toml`). Precedencia: entorno > archivo > valores por defecto.
 ///
 /// - Archivo: `CHOPSHOP_CONFIG`, o `$XDG_CONFIG_HOME/chopshop/config.toml`, o `~/.config/chopshop/config.toml`.
-/// - Entorno: `CHOPSHOP_APP__ENGINE_ROOT`, `CHOPSHOP_APP__AGENT_URL`, `CHOPSHOP_APP__TOKEN_FILE`.
-/// - `token_file` es la ruta a un archivo con el bearer del agente, nunca el token en sí.
-struct AppConfig {
-    var engineRoot: String?   // carpeta apps/agent si el motor no va embebido en el .app
-    var agentURL: String?     // URL del chopshop-agent remoto (la conexión remota llega más adelante)
-    var tokenFile: String?    // archivo con el bearer del agente
+/// - Un agente: `agent_url` y `token_file` (entorno `CHOPSHOP_APP__AGENT_URL`, `CHOPSHOP_APP__TOKEN_FILE`).
+/// - Varios: `[app.agents.<nombre>]` con `url` y `token_file` (entorno `CHOPSHOP_APP__AGENTS__<NOMBRE>__URL`,
+///   donde `_` dentro del nombre equivale a `-`: `HOST_B` es `host-b`).
+/// - `refresh_seconds`: segundos entre sondeos de `GET /snapshot` (`CHOPSHOP_APP__REFRESH_SECONDS`), entre 1 y 300.
+struct AppConfig: Equatable {
+    var agents: [AgentSpec] = []
+    var refreshSeconds: Double = AppConfig.defaultRefresh
 
-    static let missingEngineMessage =
-        "No encuentro el motor de Chopshop. Define CHOPSHOP_ROOT, `engine_root` en la sección [app] de "
-        + "~/.config/chopshop/config.toml (o la ruta de CHOPSHOP_CONFIG), o usa un .app con el motor embebido (apps/mac/build.sh)."
+    static let defaultRefresh = 3.0
+    static let refreshRange = 1.0...300.0
+    /// Nombre del agente definido con `agent_url`/`token_file` directamente en `[app]`.
+    static let singleAgentName = "agente"
 
     static func expand(_ path: String) -> String { NSString(string: path).expandingTildeInPath }
 
@@ -25,82 +33,67 @@ struct AppConfig {
     }
 
     static func load(env: [String: String] = ProcessInfo.processInfo.environment, path: String? = nil) -> AppConfig {
-        var vals: [String: String] = [:]
-        if let data = FileManager.default.contents(atPath: path ?? configPath(env)) {
-            vals = parseSection("app", in: String(decoding: data, as: UTF8.self))
-        }
+        var text = ""
+        if let data = FileManager.default.contents(atPath: path ?? configPath(env)) { text = String(decoding: data, as: UTF8.self) }
+        return parse(text, env: env)
+    }
+
+    /// Lógica pura: texto TOML + entorno -> configuración.
+    static func parse(_ text: String, env: [String: String] = [:]) -> AppConfig {
+        let tables = TomlLite.parse(text)
+        let app = tables.first(where: { $0.path == ["app"] })?.values ?? [:]
         func pick(_ key: String) -> String? {
             if let e = env["CHOPSHOP_APP__" + key.uppercased()], !e.isEmpty { return e }
-            if let v = vals[key], !v.isEmpty { return v }
+            if let v = app[key], !v.isEmpty { return v }
             return nil
         }
-        return AppConfig(engineRoot: pick("engine_root").map(expand), agentURL: pick("agent_url"), tokenFile: pick("token_file").map(expand))
-    }
-
-    /// Raíz del motor (`apps/agent`): CHOPSHOP_ROOT > `engine_root` > motor embebido en el .app > nil.
-    /// El motor (python, solo stdlib) puede ir copiado dentro del .app: así la app no necesita leer volúmenes
-    /// externos (macOS pide un permiso TCC y el proceso se queda esperando).
-    func resolveEngineRoot(env: [String: String] = ProcessInfo.processInfo.environment) -> String? {
-        if let r = env["CHOPSHOP_ROOT"], !r.isEmpty { return Self.expand(r) }
-        if let r = engineRoot { return r }
-        if let res = Bundle.main.resourceURL?.appendingPathComponent("engine").path,
-           FileManager.default.fileExists(atPath: res + "/bin/chopshop") { return res }
-        return nil
-    }
-
-    // --- lector mínimo de strings TOML ---
-
-    /// Pares `clave = "valor"` (o `'literal'`) de la sección `[name]`. Ignora comentarios, otras secciones,
-    /// tablas de arreglos, valores que no son string y cadenas multilínea.
-    static func parseSection(_ name: String, in text: String) -> [String: String] {
-        var out: [String: String] = [:]
-        var inSection = false
-        var text = text
-        if text.hasPrefix("\u{FEFF}") { text.removeFirst() }
-        for raw in text.split(whereSeparator: \.isNewline) {
-            let line = raw.trimmingCharacters(in: .whitespaces)
-            if line.isEmpty || line.hasPrefix("#") { continue }
-            if line.hasPrefix("[") {
-                inSection = false
-                if line.hasPrefix("[[") { continue }
-                guard let close = line.firstIndex(of: "]") else { continue }
-                let header = line[line.index(after: line.startIndex)..<close].trimmingCharacters(in: .whitespaces)
-                inSection = header == name
-                continue
-            }
-            guard inSection, let eq = line.firstIndex(of: "=") else { continue }
-            var key = line[..<eq].trimmingCharacters(in: .whitespaces)
-            if key.count >= 2, let f = key.first, f == "\"" || f == "'", key.last == f { key = String(key.dropFirst().dropLast()) }
-            let rest = line[line.index(after: eq)...].trimmingCharacters(in: .whitespaces)
-            if let v = parseString(rest) { out[key] = v }
+        var cfg = AppConfig()
+        if let r = pick("refresh_seconds").flatMap({ Double($0) }), r.isFinite {
+            cfg.refreshSeconds = min(max(r, refreshRange.lowerBound), refreshRange.upperBound)
         }
-        return out
-    }
 
-    /// Lee un string TOML al inicio de `s` (lo que venga después de la comilla de cierre, p. ej. un comentario, se ignora).
-    static func parseString(_ s: String) -> String? {
-        guard let q = s.first, q == "\"" || q == "'" else { return nil }
-        if s.hasPrefix("\"\"\"") || s.hasPrefix("'''") { return nil }
-        let body = s.dropFirst()
-        if q == "'" {
-            guard let end = body.firstIndex(of: "'") else { return nil }
-            return String(body[body.startIndex..<end])
+        // [app.agents.<nombre>] en el orden del archivo, con los valores del entorno por encima
+        var named: [(name: String, url: String?, token: String?)] = []
+        for t in tables where t.path.count == 3 && t.path[0] == "app" && t.path[1] == "agents" {
+            named.append((t.path[2], t.values["url"], t.values["token_file"]))
         }
-        var out = ""
-        var it = body.makeIterator()
-        while let c = it.next() {
-            if c == "\"" { return out }
-            if c != "\\" { out.append(c); continue }
-            guard let n = it.next() else { return nil }
-            switch n {
-            case "n": out.append("\n")
-            case "t": out.append("\t")
-            case "r": out.append("\r")
-            case "\"": out.append("\"")
-            case "\\": out.append("\\")
-            default: out.append("\\"); out.append(n)
+        for (name, key, value) in agentEnv(env) {
+            if let i = named.firstIndex(where: { $0.name == name }) {
+                if key == "url" { named[i].url = value } else { named[i].token = value }
+            } else {
+                named.append((name, key == "url" ? value : nil, key == "token_file" ? value : nil))
             }
         }
-        return nil
+        var specs: [AgentSpec] = []
+        if let url = pick("agent_url") {
+            specs.append(AgentSpec(name: singleAgentName, url: normalizeURL(url), tokenFile: pick("token_file").map(expand)))
+        }
+        for n in named {
+            guard let url = n.url, !url.isEmpty else { continue }
+            let spec = AgentSpec(name: n.name, url: normalizeURL(url), tokenFile: n.token.flatMap { $0.isEmpty ? nil : expand($0) })
+            if !specs.contains(where: { $0.url == spec.url || $0.name == spec.name }) { specs.append(spec) }
+        }
+        cfg.agents = specs
+        return cfg
+    }
+
+    static func normalizeURL(_ s: String) -> String {
+        var u = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        while u.hasSuffix("/") { u.removeLast() }
+        return u
+    }
+
+    /// `CHOPSHOP_APP__AGENTS__HOST_B__URL=…` -> ("host-b", "url", "…"), ordenado por nombre para que sea estable.
+    static func agentEnv(_ env: [String: String]) -> [(String, String, String)] {
+        let prefix = "CHOPSHOP_APP__AGENTS__"
+        var out: [(String, String, String)] = []
+        for (k, v) in env where k.hasPrefix(prefix) && !v.isEmpty {
+            let parts = k.dropFirst(prefix.count).components(separatedBy: "__")
+            guard parts.count == 2, !parts[0].isEmpty else { continue }
+            let key = parts[1].lowercased()
+            guard key == "url" || key == "token_file" else { continue }
+            out.append((parts[0].lowercased().replacingOccurrences(of: "_", with: "-"), key, v))
+        }
+        return out.sorted { ($0.0, $0.1) < ($1.0, $1.1) }
     }
 }
