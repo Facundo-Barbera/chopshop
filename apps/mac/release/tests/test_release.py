@@ -538,6 +538,118 @@ class TestSignAndNotarize(WorkDir):
         self.assertRegex(read(zip_path + ".sha256"), r"^[0-9a-f]{64}  Chopshop-1\.0\.0\.zip\n$")
 
 
+class TestDmg(WorkDir):
+    """make-dmg.sh, sign-dmg.sh y notarize.sh sobre un DMG (hdiutil, codesign y xcrun falsos)."""
+
+    MACHO = TestSignAndNotarize.MACHO
+    make_app = TestSignAndNotarize.make_app
+    notary_env = TestSignAndNotarize.notary_env
+
+    def make_dmg(self, name="Chopshop-1.0.0.dmg"):
+        path = os.path.join(self.tmp, name)
+        spit(path, b"dmg-falso", "wb")
+        return path
+
+    def test_make_dmg_stages_app_and_applications_link_then_checksum(self):
+        app = self.make_app()
+        dmg = os.path.join(self.tmp, "dist", "Chopshop-1.0.0.dmg")
+        r = self.run_sh("make-dmg.sh", [app, dmg], env={"REQUIRE_STAPLE": "1"})
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        calls = self.calls()
+        create = next(c for c in calls if c.startswith("hdiutil create"))
+        self.assertIn("-volname Chopshop", create)
+        self.assertIn("-fs HFS+", create)
+        self.assertIn("-format UDZO", create)
+        self.assertTrue(create.endswith("Chopshop-1.0.0.dmg"))
+        self.assertIn("dmg-srcfolder Applications Chopshop.app", calls)
+        self.assertIn("dmg-applications-link /Applications", calls)
+        # la app que entra al DMG se valida (ticket grapado) antes de crear la imagen, y la imagen se verifica
+        stapler = [i for i, c in enumerate(calls) if c.startswith("xcrun stapler validate")]
+        self.assertEqual(len(stapler), 2)
+        self.assertLess(max(stapler), next(i for i, c in enumerate(calls) if c.startswith("hdiutil create")))
+        self.assertTrue(any(c.startswith("hdiutil verify") for c in calls))
+        self.assertRegex(read(dmg + ".sha256"), r"^[0-9a-f]{64}  Chopshop-1\.0\.0\.dmg\n$")
+        self.assertFalse(any(c.startswith(("codesign --force", "xcrun notarytool")) for c in calls), "make-dmg no firma ni notariza")
+        self.assertEqual([p for p in os.listdir(self.tmp) if p.startswith("tmp")], [])
+
+    def test_make_dmg_dry_run_does_not_require_staple(self):
+        r = self.run_sh("make-dmg.sh", [self.make_app(), os.path.join(self.tmp, "Chopshop-0.0.0-dryrun.dmg")])
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        self.assertFalse(any(c.startswith("xcrun stapler") for c in self.calls()))
+
+    def test_make_dmg_retries_hdiutil_and_then_gives_up(self):
+        counter = os.path.join(self.tmp, "n")
+        env = {"FAKE_HDIUTIL_FAILS": counter, "FAKE_HDIUTIL_FAIL_COUNT": "2", "DMG_RETRY_DELAY": "0"}
+        app = self.make_app()
+        ok = self.run_sh("make-dmg.sh", [app, os.path.join(self.tmp, "a.dmg")], env=env)
+        self.assertEqual(ok.returncode, 0, ok.stderr + ok.stdout)
+        os.remove(counter)
+        bad = self.run_sh("make-dmg.sh", [app, os.path.join(self.tmp, "b.dmg")], env=dict(env, FAKE_HDIUTIL_FAIL_COUNT="9"))
+        self.assertNotEqual(bad.returncode, 0)
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "b.dmg.sha256")))
+
+    def test_make_dmg_rejects_bad_arguments(self):
+        self.assertNotEqual(self.run_sh("make-dmg.sh", [self.make_app(), os.path.join(self.tmp, "x.zip")]).returncode, 0)
+        self.assertNotEqual(self.run_sh("make-dmg.sh", [os.path.join(self.tmp, "no-existe.app"), "x.dmg"]).returncode, 0)
+
+    def test_sign_dmg_uses_developer_id_timestamp_and_temp_keychain(self):
+        dmg = self.make_dmg()
+        r = self.run_sh("sign-dmg.sh", [dmg], env={"SIGN_IDENTITY": "0123456789ABCDEF", "SIGN_KEYCHAIN": "/tmp/fake.kc", "APPLE_TEAM_ID": "ABCDE12345"})
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        sign = next(c for c in self.calls() if c.startswith("codesign --force"))
+        self.assertIn("--sign 0123456789ABCDEF", sign)
+        self.assertIn("--timestamp", sign)
+        self.assertIn("--keychain /tmp/fake.kc", sign)
+        self.assertNotIn("--options", sign)
+        self.assertTrue(sign.endswith(dmg))
+        self.assertTrue(any(c.startswith("codesign --verify --strict --verbose=2") for c in self.calls()))
+        self.assertNotIn("Nombre Demo", r.stdout + r.stderr)
+
+    def test_sign_dmg_refuses_adhoc_missing_timestamp_and_wrong_team(self):
+        dmg = self.make_dmg()
+        self.assertNotEqual(self.run_sh("sign-dmg.sh", [dmg], env={"SIGN_IDENTITY": "-"}).returncode, 0)
+        self.assertNotEqual(self.run_sh("sign-dmg.sh", [dmg]).returncode, 0)
+        self.assertNotEqual(self.run_sh("sign-dmg.sh", [dmg], env={"SIGN_IDENTITY": "ABCD", "FAKE_TIMESTAMP": "0"}).returncode, 0)
+        bad = self.run_sh("sign-dmg.sh", [dmg], env={"SIGN_IDENTITY": "ABCD", "APPLE_TEAM_ID": "ABCDE12345", "FAKE_TEAM": "ZZZZZ99999"})
+        self.assertNotEqual(bad.returncode, 0)
+        self.assertIn("TeamIdentifier", bad.stderr)
+
+    def test_notarize_dmg_submits_the_dmg_staples_verifies_and_refreshes_checksum(self):
+        dmg = self.make_dmg()
+        spit(dmg + ".sha256", "viejo  Chopshop-1.0.0.dmg\n")
+        r = self.run_sh("notarize.sh", [dmg], env=self.notary_env())
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        calls = self.calls()
+        submit = next(c for c in calls if c.startswith("xcrun notarytool submit"))
+        self.assertIn(dmg, submit)
+        self.assertIn("--wait", submit)
+        self.assertFalse(any(c.startswith("ditto") for c in calls), "el DMG se envía tal cual, sin zip")
+        order = ["xcrun notarytool submit", "xcrun stapler staple", "codesign --verify --strict --verbose=2",
+                 "spctl -a -t open --context context:primary-signature -vv", "xcrun stapler validate"]
+        idx = [next(i for i, c in enumerate(calls) if c.startswith(o)) for o in order]
+        self.assertEqual(idx, sorted(idx))
+        self.assertEqual([f for f in os.listdir(self.tmp) if f.startswith("chopshop-notary")], [])
+        # el ticket grapado cambia el DMG: el .sha256 se recalcula con el contenido final
+        self.assertRegex(read(dmg + ".sha256"), r"^[0-9a-f]{64}  Chopshop-1\.0\.0\.dmg\n$")
+        self.assertNotIn("viejo", read(dmg + ".sha256"))
+        out = r.stdout + r.stderr
+        self.assertIn("origin=<oculto>", out)
+        self.assertNotIn("Nombre Demo", out)
+        for secret in self.notary_env().values():
+            self.assertNotIn(secret, out)
+
+    def test_notarize_dmg_rejected_fails_without_stapling(self):
+        dmg = self.make_dmg()
+        r = self.run_sh("notarize.sh", [dmg], env=dict(self.notary_env(), FAKE_NOTARY_STATUS="Invalid"))
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("notarytool log", r.stdout)
+        self.assertFalse(any(c.startswith("xcrun stapler") for c in self.calls()))
+        self.assertFalse(os.path.exists(dmg + ".sha256"))
+
+    def test_notarize_rejects_a_dmg_that_does_not_exist(self):
+        self.assertNotEqual(self.run_sh("notarize.sh", [os.path.join(self.tmp, "no.dmg")], env=self.notary_env()).returncode, 0)
+
+
 # ---------------------------------------------------------------------------
 class TestAssemble(WorkDir):
     """assemble-app.sh + embed-sparkle.sh con un build.sh, PlistBuddy y otool falsos."""
@@ -792,6 +904,16 @@ class TestPublishFlow(WorkDir):
         self.assertEqual([i["short"] for i in feed], ["0.0.0-dryrun"])
         self.assertTrue(feed[0]["url"].startswith("https://updates.example.com/test/123456/"))
         self.assertNotIn("test/", "\n".join(c for c in self.calls() if c.startswith("aws get")))  # no se lee producción ni nada ajeno
+
+    def test_r2_push_ignores_a_dmg_in_the_directory(self):
+        d = os.path.join(self.tmp, "feed")
+        os.makedirs(d)
+        for n, data in (("appcast.xml", "<rss/>"), ("Chopshop-1.0.0.zip", "zip"), ("Chopshop-1.0.0.dmg", "dmg")):
+            spit(os.path.join(d, n), data)
+        r = self.run_sh("r2.sh", ["push", d, "1.0.0"], env=self.env)
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        self.assertEqual(self.puts(), ["Chopshop-1.0.0.zip", "appcast.xml"])
+        self.assertFalse(os.path.exists(os.path.join(self.s3, "Chopshop-1.0.0.dmg")))
 
     def test_dry_run_requires_the_test_only_guard(self):
         env = self.dry_env()
@@ -1089,6 +1211,30 @@ class TestWorkflows(unittest.TestCase):
         self.assertIn("MACOS_CERT_P12_BASE64", json.dumps(steps["Keychain temporal con el certificado Developer ID"]["env"]))
 
     @unittest.skipUnless(yaml, "PyYAML no disponible")
+    def test_dmg_goes_to_github_release_but_never_to_the_feed(self):
+        jobs = self.load("release-mac.yml")["jobs"]
+        steps = {s.get("name", ""): s for s in jobs["build"]["steps"] + jobs["publish"]["steps"]}
+        artifact = steps["Subir el zip y el DMG como artefacto del run"]["with"]["path"]
+        self.assertIn("-%s.dmg" % "${{ needs.preflight.outputs.version }}", artifact)
+        self.assertIn(".dmg.sha256", artifact)
+        # el feed se publica solo con el zip: publish.sh recibe el zip y nada del DMG
+        publish = steps["Publicar (zips, deltas y notas primero; appcast al final)"]["run"]
+        self.assertEqual(publish.strip(), 'bash apps/mac/release/publish.sh "$RUNNER_TEMP/dl/Chopshop-${VERSION}.zip"')
+        for name in ("publish.sh", "appcast.sh", "r2.sh", "appcast.py", "rollback.sh"):
+            self.assertNotIn("dmg", read(RELEASE, name).lower(), name)
+        # GitHub Release: el DMG y su checksum acompañan al zip, tanto al crear como al reintentar
+        gh = steps["GitHub Release"]
+        self.assertEqual(gh["if"], "env.DRY_RUN != 'true'")
+        self.assertEqual(gh["run"].count('"$dmg" "$dmg.sha256"'), 2)
+        # el DMG publicado se vuelve a comprobar en `publish` (solo release real)
+        check = steps["Comprobar el zip descargado (checksum y firma)"]["run"]
+        for cmd in ('shasum -a 256 -c "Chopshop-${VERSION}.dmg.sha256"', 'codesign --verify --strict --verbose=2 "Chopshop-${VERSION}.dmg"',
+                    'spctl -a -t open --context context:primary-signature -vv "Chopshop-${VERSION}.dmg"',
+                    'xcrun stapler validate "Chopshop-${VERSION}.dmg"'):
+            self.assertIn(cmd, check)
+        self.assertLess(check.index('if [ "$DRY_RUN" != "true" ]'), check.index("spctl -a -t open"))
+
+    @unittest.skipUnless(yaml, "PyYAML no disponible")
     def test_sparkle_key_file_is_always_removed(self):
         steps = self.load("release-mac.yml")["jobs"]["publish"]["steps"]
         self.assertEqual(steps[-1].get("if"), "always()")
@@ -1140,9 +1286,21 @@ class TestWorkflows(unittest.TestCase):
             if "secrets." in json.dumps(s.get("env", {})):
                 self.assertIn("DRY_RUN != 'true'", s.get("if", ""), s.get("name"))
         runs = " ".join(s.get("run", "") for s in steps)
-        for script in ("assemble-app.sh", "sign-app.sh", "notarize.sh", "package.sh", "keychain.sh setup"):
+        for script in ("assemble-app.sh", "sign-app.sh", "notarize.sh", "package.sh", "make-dmg.sh", "sign-dmg.sh", "keychain.sh setup"):
             self.assertIn(script, runs)
         self.assertLess(runs.index("notarize.sh"), runs.index("package.sh"), "el zip final se crea DESPUÉS de grapar")
+        # DMG: app firmada -> notarizada+staple -> zip -> DMG con la app grapada -> firma del DMG -> notarización+staple del DMG
+        order = [runs.index("sign-app.sh"), runs.index("notarize.sh"), runs.index("package.sh"), runs.index("make-dmg.sh"),
+                 runs.index("sign-dmg.sh"), runs.rindex("notarize.sh")]
+        self.assertEqual(order, sorted(order))
+        self.assertEqual(len(set(order)), 6)
+        by_name = {s.get("name"): s for s in steps}
+        self.assertEqual(by_name["Crear el DMG"]["env"]["REQUIRE_STAPLE"], "${{ env.DRY_RUN == 'true' && '0' || '1' }}")
+        self.assertNotIn("if", by_name["Crear el DMG"])  # también en dry-run (sin firmar)
+        for name in ("Firmar el DMG (Developer ID)", "Notarizar, grapar y verificar el DMG"):
+            self.assertEqual(by_name[name]["if"], "env.DRY_RUN != 'true'", name)
+        self.assertIn(".dmg", by_name["Notarizar, grapar y verificar el DMG"]["run"])
+        self.assertNotIn(".zip", by_name["Notarizar, grapar y verificar el DMG"]["run"])
         # la release real siempre se firma y notariza: ningún paso de notarización/firma real es opcional salvo en dry-run
         self.assertNotIn("unsigned", json.dumps(steps).lower())
 

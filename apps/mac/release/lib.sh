@@ -69,6 +69,14 @@ version_ge() {
 # Normaliza una URL base quitando barras finales
 strip_slash() { local u="$1"; while [ "${u%/}" != "$u" ]; do u="${u%/}"; done; printf '%s' "$u"; }
 
+# Escribe <archivo>.sha256 (formato `shasum -c`, con el nombre base) e imprime el hash.
+write_sha256() {
+  local sum
+  sum="$(shasum -a 256 "$1" | awk '{print $1}')"
+  printf '%s  %s\n' "$sum" "$(basename "$1")" > "$1.sha256"
+  printf '%s\n' "$sum"
+}
+
 # Número de bytes decodificados de un base64 (para validar claves)
 b64_len() { printf '%s' "$1" | base64 --decode 2>/dev/null | wc -c | tr -d ' '; }
 
