@@ -1,14 +1,14 @@
 import { Component, createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createStore, parseTs } from "@chopshop/api";
 import { on, request, send } from "./bridge.js";
 
-const TZ = "America/Mexico_City";
 const Ctx = createContext({ fin: {} });
 
 // ---------- utilidades ----------
-const parseTs = (ts) => (ts ? new Date(ts.replace(/([+-]\d\d)(\d\d)$/, "$1:$2")) : null);
+// Las horas se muestran en la zona horaria local del Mac.
 const clock = (ts) => {
   const d = parseTs(ts);
-  return d ? d.toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: TZ }) : "";
+  return d ? d.toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit", hour12: false }) : "";
 };
 const ago = (ts, now) => {
   const d = parseTs(ts);
@@ -27,6 +27,16 @@ const EVENT_META = {
   task_done: { label: "Tarea terminada", tone: "green", icon: "✓" },
   batch_done: { label: "Lote terminado", tone: "teal", icon: "◆" },
   reaction: { label: "Reacción", tone: "violet", icon: "⚡" },
+  // eventos del agente (por hilo de T3 y por máquina)
+  thread_started: { label: "Hilo iniciado", tone: "blue", icon: "▶" },
+  thread_done: { label: "Hilo terminado", tone: "green", icon: "✓" },
+  thread_failed: { label: "Hilo falló", tone: "red", icon: "×" },
+  thread_settled: { label: "Hilo cerrado", tone: "teal", icon: "◆" },
+  t3_unreachable: { label: "T3 no responde", tone: "orange", icon: "!" },
+  machine_alert: { label: "Alerta de máquina", tone: "orange", icon: "!" },
+  lease_granted: { label: "Servidor de pruebas activo", tone: "mint", icon: "▲" },
+  lease_queued: { label: "Servidor en cola", tone: "gray", icon: "…" },
+  lease_released: { label: "Servidor liberado", tone: "gray", icon: "▼" },
 };
 
 // ---------- niveles de reacción ----------
@@ -126,7 +136,8 @@ function QuestionCard({ batch, task, q, onDone, since, queued, failed, watcher, 
     setBusy(choice);
     setMsg(null);
     try {
-      const r = await request("answer", { task: task.id, choice, request: q.request, by: by || (needsHuman(task) ? "humano" : undefined) });
+      // POST /answer al agente dueño del hilo (la app nativa lo traduce)
+      const r = await request("answer", { agent: batch.agent, thread_id: task.threadId || task.id, choice, request: q.request, by: by || (needsHuman(task) ? "humano" : undefined) });
       setMsg(r.payload);
       if (r.payload.ok) onDone && onDone();
     } catch (e) {
@@ -167,8 +178,8 @@ function QuestionCard({ batch, task, q, onDone, since, queued, failed, watcher, 
       </form>
       {queued && (
         <p className="note ok">
-          <b>En cola:</b> «{queued.choice}» · la envía <code>chopshop watch</code> en su próximo ciclo
-          {!(watcher && watcher.alive) && <span className="warn"> · ahora no hay watch corriendo</span>}
+          <b>En cola:</b> «{queued.choice}» · la envía el agente en su próximo ciclo
+          {!(watcher && watcher.alive) && <span className="warn"> · el agente no ve a T3 ahora mismo</span>}
         </p>
       )}
       {failed && !queued && <p className="note err">La última respuesta («{failed.choice}») falló: {failed.error}</p>}
@@ -278,6 +289,21 @@ function TaskDetail({ t, b, c, now }) {
   const dur = t.done ? fmtDur(secs(b.created, fin[t.id])) : "";
   const qs = c.questions.filter((x) => x.t.id === t.id);
   const appr = t.pending && t.pending.approvals;
+  const [settling, setSettling] = useState(false);
+  const [settleMsg, setSettleMsg] = useState(null);
+  const canSettle = t.done && !t.settled && !!t.threadId && !!b.agent;
+  // POST /settle: marca el hilo como cerrado en T3 (nunca lo archiva)
+  const settle = async () => {
+    setSettling(true);
+    setSettleMsg(null);
+    try {
+      const r = await request("settle", { agent: b.agent, thread_id: t.threadId });
+      setSettleMsg(r.payload);
+    } catch (e) {
+      setSettleMsg({ ok: false, message: String(e.message || e) });
+    }
+    setSettling(false);
+  };
   return (
     <div className="detail">
       <header className="detail-head">
@@ -319,8 +345,15 @@ function TaskDetail({ t, b, c, now }) {
       )}
       <div className="detail-foot">
         {t.settled && <span className="tag">settled</span>}
+        {canSettle && (
+          <button className="pill small" disabled={settling} onClick={settle} title="Marca el hilo como cerrado en T3 (no lo archiva)">
+            {settling ? <span className="spin" /> : null}
+            Cerrar hilo (settle)
+          </button>
+        )}
         {!appr && t.threadId && t.link && <button className="pill small" onClick={() => openT3(t)}>Abrir hilo en T3</button>}
       </div>
+      {settleMsg && <p className={`note ${settleMsg.ok ? "ok" : "err"}`}>{settleMsg.ok ? "Hilo cerrado." : "Error: " + settleMsg.message}</p>}
     </div>
   );
 }
@@ -668,7 +701,7 @@ function ProjectView({ snap, c, now, project }) {
   };
   return (
     <section className="view">
-      <ViewHead title={all ? "Lotes" : project} sub={all ? `${snap.batches.length} lotes · estado local de Chopshop` : `${batches.length} lotes · ${tasks.length} tareas`}>
+      <ViewHead title={all ? "Lotes" : project} sub={all ? `${snap.batches.length} lotes · lotes del orquestador y hilos de los agentes` :`${batches.length} lotes · ${tasks.length} tareas`}>
         <span className="chip tone-blue"><i className={`dot ${cnt.run ? "pulse" : ""}`} />{cnt.run} corriendo</span>
         <span className="chip tone-amber"><i className="dot" />{cnt.q} esperan</span>
         <span className="chip tone-green"><i className="dot" />{cnt.done} completadas</span>
@@ -746,9 +779,10 @@ function Events({ snap, c, now, titles }) {
               <dl className="kv top">
                 <dt>Cuándo</dt><dd>{clock(e.ts)} · {ago(e.ts, now)}</dd>
                 <dt>Evento</dt><dd>{(EVENT_META[e.event] || { label: e.event }).label}</dd>
+                {e.machine && (<><dt>Máquina</dt><dd>{e.machine}</dd></>)}
                 {dl.length > 0 && (<><dt>Webhook</dt><dd>{dl.map(([k, v]) => <span key={k} className={`tag ${v === "ok" ? "ok" : "bad"}`}>{k}: {v === "ok" ? "entregado" : v}</span>)}</dd></>)}
               </dl>
-              {t && b ? <TaskDetail key={t.id} t={t} b={b} c={c} now={now} /> : b ? <BatchSummary b={b} /> : <p className="muted">El lote ya no está en el estado local.</p>}
+              {t && b ? <TaskDetail key={t.id} t={t} b={b} c={c} now={now} /> : b ? <BatchSummary b={b} /> : <p className="muted">El lote ya no aparece en el estado de los agentes.</p>}
             </>
           )}
         </Pane>
@@ -890,7 +924,7 @@ function Chart({ series, max = 100, unit = "%", h = 150, step, empty }) {
           </>
         )}
       </div>
-      <div className="ch-x"><span>hace ~3 min</span><span>ahora</span></div>
+      <div className="ch-x"><span>antes</span><span>ahora</span></div>
     </div>
   );
 }
@@ -928,8 +962,85 @@ function alertsFor(m) {
   else if (ram >= 80) out.push({ tone: "orange", text: "RAM alta", sub: `${gb(m.ramAvailMB)} GB libres de ${gb(m.ramTotalMB)} GB` });
   if (m.diskPct >= 90) out.push({ tone: "red", text: "Disco casi lleno", sub: `${m.disk} (${m.diskPct}%)` });
   else if (m.diskPct >= 80) out.push({ tone: "orange", text: "Disco alto", sub: `${m.disk} (${m.diskPct}%)` });
-  if (m.stale) out.push({ tone: "orange", text: "Dato desactualizado", sub: "`chopshop watch` no lo refresca desde hace un rato" });
+  const i = m.info || {};
+  if (i.t3_ok === false) out.push({ tone: "orange", text: "T3 no responde", sub: "el agente no logra hablar con el servidor de T3 de esta máquina" });
+  if (i.last_sample_age > 60) out.push({ tone: "orange", text: "Muestreo atrasado", sub: `última muestra hace ${Math.round(i.last_sample_age)} s` });
+  const cap = m.leases && m.leases.capacity;
+  if (m.leases && m.leases.queued.length) out.push({ tone: "orange", text: "Servidores de prueba en cola", sub: `${m.leases.queued.length} esperando capacidad${cap && cap.max_servers != null ? ` (máx. ${cap.max_servers})` : ""}` });
   return out;
+}
+
+const mb = (v) => (v >= 1024 ? (v / 1024).toFixed(1) + " GB" : Math.round(v) + " MB");
+
+/** Tabla de consumo por app o por proyecto (CPU 100 % = un núcleo). */
+function UsageTable({ rows, cols }) {
+  const top = [...rows].sort((a, b) => b.cpu_pct - a.cpu_pct || b.rss_mb - a.rss_mb).slice(0, 8);
+  if (!top.length) return <p className="muted small">Sin datos todavía.</p>;
+  return (
+    <table className="tbl">
+      <thead><tr><th>Nombre</th><th>CPU</th><th>RAM</th>{cols.map((c) => <th key={c[0]}>{c[0]}</th>)}</tr></thead>
+      <tbody>
+        {top.map((r) => (
+          <tr key={r.name}>
+            <td className="ell">{r.name}</td>
+            <td>{Math.round(r.cpu_pct)}%</td>
+            <td>{mb(r.rss_mb)}</td>
+            {cols.map((c) => <td key={c[0]}>{c[1](r)}</td>)}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+const APP_COLS = [["Proc.", (r) => r.procs]];
+const PROJECT_COLS = [["Hilos", (r) => `${r.threads_running || 0}${r.threads_pending ? ` · ${r.threads_pending}?` : ""}`], ["Serv.", (r) => `${r.leases_active || 0}${r.leases_queued ? ` +${r.leases_queued}` : ""}`]];
+
+/** Servidores de prueba (leases) de una máquina; "Liberar" hace POST /leases/release. */
+function Leases({ m }) {
+  const [busy, setBusy] = useState(null);
+  const [msg, setMsg] = useState(null);
+  const rows = [...m.leases.active, ...m.leases.queued];
+  const cap = m.leases.capacity || {};
+  const release = async (l) => {
+    setBusy(l.id);
+    setMsg(null);
+    try {
+      const r = await request("leaseRelease", { agent: m.agent, lease_id: l.id });
+      setMsg(r.payload);
+    } catch (e) {
+      setMsg({ ok: false, message: String(e.message || e) });
+    }
+    setBusy(null);
+  };
+  return (
+    <>
+      {cap.max_servers != null && <p className="meta pad-b">{cap.used || 0} de {cap.max_servers} servidores en uso{cap.ram_avail_mb != null ? ` · ${mb(cap.ram_avail_mb)} de RAM libres` : ""}</p>}
+      {rows.length === 0 ? (
+        <PaneEmpty mark="◦" title="Sin servidores de prueba" text="Los hilos los piden por MCP (chopshop_request_test_server)." />
+      ) : (
+        <ul className="list">
+          {rows.map((l) => (
+            <li key={l.id}>
+              <div className="row static">
+                <div className="row-top">
+                  <Chip tone={l.state === "active" ? "green" : "gray"} pulse={l.state === "active"}>{l.state === "active" ? "Activo" : "En cola"}</Chip>
+                  <span className="grow" />
+                  <span className="meta">{l.kind === "port" ? "puerto" : "servidor"}{l.port ? ` · :${l.port}` : ""}</span>
+                </div>
+                <div className="row-title">{l.project}</div>
+                {l.worktree && <div className="meta ell" title={l.worktree}>{l.worktree}</div>}
+                <div className="detail-foot">
+                  <button className="pill small" disabled={busy === l.id} onClick={() => release(l)}>{busy === l.id ? <span className="spin" /> : null}Liberar</button>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      {msg && <p className={`note ${msg.ok ? "ok" : "err"}`}>{msg.ok ? "Liberado." : "Error: " + msg.message}</p>}
+    </>
+  );
 }
 
 function Machines({ metrics, snap, sel, pick }) {
@@ -942,7 +1053,7 @@ function Machines({ metrics, snap, sel, pick }) {
   const cpu = m && m.cpu.length ? m.cpu[m.cpu.length - 1] : 0, ram = m && m.ram.length ? m.ram[m.ram.length - 1] : 0;
   return (
     <section className="view">
-      <ViewHead title="Máquinas" sub="CPU ≈ carga (1 min) ÷ núcleos · RAM usada · muestras cada 3 s, historial de esta sesión">
+      <ViewHead title="Máquinas" sub="CPU, RAM y disco que reporta el agente de cada máquina · el historial de las gráficas es el de esta sesión">
         <span className="chip"><i className="dot tone-blue" />CPU</span>
         <span className="chip"><i className="dot tone-green" />RAM</span>
       </ViewHead>
@@ -975,6 +1086,10 @@ function Machines({ metrics, snap, sel, pick }) {
                 <Chart series={[{ values: m.load1, tone: "blue" }]} max={Math.max(1, m.cpus)} unit="" h={96} />
                 <h5>Hilos corriendo aquí</h5>
                 <Chart series={[{ values: m.run, tone: "orange" }]} max={4} unit="" h={80} step empty="sin hilos en las últimas muestras" />
+                <h5>Por app</h5>
+                <UsageTable rows={m.apps} cols={APP_COLS} />
+                <h5>Por proyecto</h5>
+                <UsageTable rows={m.projects} cols={PROJECT_COLS} />
               </div>
             )}
           </Pane>
@@ -990,6 +1105,7 @@ function Machines({ metrics, snap, sel, pick }) {
                 </ul>
               )}
             </Pane>
+            <Pane title="Servidores de prueba" count={m.leases.active.length + m.leases.queued.length || null} className="short"><Leases key={m.name} m={m} /></Pane>
             <Pane title="Hilos en esta máquina" count={threads.length || null} flush>
               {threads.length === 0 ? (
                 <PaneEmpty mark="◦" title="Ningún hilo activo" text={`${doneN} tareas completadas aquí en total`} />
@@ -1220,27 +1336,75 @@ class Guard extends Component {
   }
 }
 
+// ---------- estado de los agentes ----------
+/** Una línea por agente con problemas (no alcanzable, 403…); si hay datos viejos, lo dice. */
+function AgentBanner({ agents }) {
+  const bad = (agents || []).filter((a) => a.status !== "ok" || a.warning);
+  if (!bad.length) return null;
+  return (
+    <div className="banner-stack">
+      {bad.map((a) => (
+        <p key={a.name} className={`note ${a.status === "ok" ? "" : "err"} banner`}>
+          <b>{a.label}</b>: {a.status === "ok" ? a.warning : a.message}
+          {a.stale ? ` · mostrando datos de hace ${fmtDur(a.age)}` : ""}
+        </p>
+      ))}
+    </div>
+  );
+}
+
+function Connecting({ agents, configPath }) {
+  if (agents && agents.length === 0) {
+    return (
+      <>
+        <h3>Ningún agente configurado</h3>
+        <p className="muted">Crea <code>{configPath || "~/.config/chopshop/config.toml"}</code> a partir de <code>config.example.toml</code> y define en <code>[app]</code> el <code>agent_url</code> y el <code>token_file</code> de tu agente (o varios en <code>[app.agents.&lt;nombre&gt;]</code>). Después reabre la app.</p>
+      </>
+    );
+  }
+  const bad = (agents || []).filter((a) => a.status !== "ok");
+  if (bad.length) {
+    return (
+      <>
+        <h3>No pude conectar con el agente</h3>
+        {bad.map((a) => <p key={a.name} className="note err"><b>{a.label}</b>: {a.message}</p>)}
+        <p className="muted">Reintento automático en cada ciclo. Comprueba que el agente corre, que Tailscale está conectado y que <code>agent_url</code> y <code>token_file</code> son correctos.</p>
+      </>
+    );
+  }
+  return <p className="muted">Conectando con los agentes…</p>;
+}
+
 // ---------- app ----------
 export default function App() {
   const [snap, setSnap] = useState(null);
+  const [agents, setAgents] = useState(null);
+  const [configPath, setConfigPath] = useState("");
   const [view, setView] = useState("overview");
   const [project, setProject] = useState("");
   const [machine, setMachine] = useState("");
   const [metrics, setMetrics] = useState([]);
   const [now, setNow] = useState(Date.now());
   const [err, setErr] = useState(null);
+  const store = useMemo(() => createStore(), []);
 
   useEffect(() => {
     const off = on((m) => {
-      if (m.type === "state") {
-        setSnap(m.payload);
+      if (m.type === "agents") {
+        // resultados crudos por agente (ver AgentClient.swift): se combinan aquí
+        const v = store.update(m.payload.agents || []);
+        setConfigPath(m.payload.configPath || "");
+        setAgents(v.agents);
+        setMetrics(v.machines);
+        setSnap(v.hasData ? v.state : null);
         setErr(null);
+      } else if (m.type === "history") {
+        store.history.seed(m.payload.machines);
       } else if (m.type === "select") {
         setView(m.payload.view);
         setProject(m.payload.project || "");
         setMachine(m.payload.machine || "");
-      } else if (m.type === "metrics") setMetrics(m.payload.machines);
-      else if (m.type === "error") setErr(m.payload.message);
+      } else if (m.type === "error") setErr(m.payload.message);
     });
     send("ready");
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -1248,7 +1412,7 @@ export default function App() {
       off();
       clearInterval(t);
     };
-  }, []);
+  }, [store]);
 
   const c = useMemo(() => (snap ? collect(snap) : null), [snap]);
   const fin = useMemo(() => {
@@ -1272,7 +1436,8 @@ export default function App() {
     return (
       <main className="page center">
         <div className="spin big" />
-        {err ? <p className="note err">{err}</p> : <p className="muted">Leyendo estado de Chopshop…</p>}
+        {err && <p className="note err">{err}</p>}
+        <Connecting agents={agents} configPath={configPath} />
       </main>
     );
   }
@@ -1280,6 +1445,7 @@ export default function App() {
     <Ctx.Provider value={{ fin }}>
       <main className="page" key={view + ":" + project}>
         <Guard key={view + ":" + project}>
+        <AgentBanner agents={agents} />
         {err && <p className="note err banner">{err}</p>}
         {view === "overview" && <Overview snap={snap} c={c} now={now} go={go} nav={nav} titles={titles} />}
         {view === "questions" && <Questions c={c} now={now} />}
