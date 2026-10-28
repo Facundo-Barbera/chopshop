@@ -1,0 +1,20 @@
+{
+  "projectId": "p-0001",
+  "currentThreadId": null,
+  "threads": [
+    {"threadId": "t-run", "projectId": "p-0001", "title": "Implementar demo", "link": "t3://thread/t-run", "createdBy": "user",
+     "creationSource": "ui", "status": "running", "latestRunId": "run:t-run:1", "providerInstanceId": "claude", "model": "modelo-demo",
+     "runtimeMode": "full-access", "interactionMode": "default", "linkedPullRequest": null, "pullRequests": [],
+     "settled": false, "settledAt": null, "snoozed": false, "snoozedUntil": null, "parentThreadId": null,
+     "relationshipToParent": null, "itemCount": 4, "createdAt": "2026-10-28T10:00:00.000Z", "updatedAt": "2026-10-28T10:05:00.000Z"},
+    {"threadId": "t-old", "projectId": "p-0001", "title": "Hilo antiguo", "link": "t3://thread/t-old", "createdBy": "user",
+     "creationSource": "ui", "status": "completed", "latestRunId": "run:t-old:1", "providerInstanceId": "claude", "model": "modelo-demo",
+     "runtimeMode": "full-access", "interactionMode": "default", "linkedPullRequest": null,
+     "pullRequests": [{"host": "github.com", "repository": "usuario-demo/proyecto-demo", "number": 7,
+                       "url": "https://github.com/usuario-demo/proyecto-demo/pull/7", "source": "branch", "state": "open"}],
+     "settled": true, "settledAt": "2026-10-20T10:00:00.000Z", "snoozed": false, "snoozedUntil": null, "parentThreadId": null,
+     "relationshipToParent": null, "itemCount": 9, "createdAt": "2026-10-20T09:00:00.000Z", "updatedAt": "2026-10-20T10:00:00.000Z"}
+  ],
+  "nextCursor": null,
+  "total": 2
+}
