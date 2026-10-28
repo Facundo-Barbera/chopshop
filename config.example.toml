@@ -89,7 +89,8 @@ queue_ttl_seconds = 1800
 [agent.sweep]
 interval = 60
 agent_scopes = "report"                   # "report" (solo informar) o "kill" (PIDs exactos de un scope ya settled)
-grace_seconds = 120
+grace_seconds = 120                       # un hilo settled debe llevar al menos esto antes de que "kill" toque sus procesos
+agent_cgroup = ""                         # ruta del slice de agentes de T3 (vacío = app-t3code-agents.slice del usuario actual)
 
 # Webhooks: nombre -> RUTA a un archivo (0600) cuyo contenido es la URL. Nunca pongas la URL aquí.
 [agent.webhook_files]

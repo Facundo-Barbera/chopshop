@@ -47,7 +47,7 @@ DEFAULTS = {
         "ports": {"range": [41000, 45999], "per_worktree": 10},
         "capacity": {"max_servers": 4, "max_per_project": 1, "max_cpu_pct": 700, "min_ram_avail_mb": 6000,
                      "default_idle_seconds": 900, "queue_ttl_seconds": 1800},
-        "sweep": {"interval": 60, "agent_scopes": "report", "grace_seconds": 120},
+        "sweep": {"interval": 60, "agent_scopes": "report", "grace_seconds": 120, "agent_cgroup": ""},
         "webhook_files": {},           # nombre -> ruta a un archivo (0600) con la URL
         "retention": {"raw_hours": 24, "m1_days": 30, "h1_days": 365},
     },
