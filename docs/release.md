@@ -1,6 +1,6 @@
 # Release de Chopshop.app (Sparkle, Developer ID, notarización y R2)
 
-Pipeline de GitHub Actions que construye `Chopshop.app`, la firma con **Developer ID Application**, la **notariza**, la publica como zip en **Cloudflare R2** y actualiza el **appcast** de **Sparkle** para que las apps instaladas se actualicen solas (con deltas). Nada de nombres, dominios, Team IDs ni buckets está en el repo: todo sale de *secrets* y *variables* de GitHub (lista exacta más abajo). Todos los valores de esta guía son **falsos**.
+Pipeline de GitHub Actions que construye `Chopshop.app`, la firma con **Developer ID Application**, la **notariza**, la publica como zip en **Cloudflare R2** (y como **DMG** de instalación en la GitHub Release) y actualiza el **appcast** de **Sparkle** para que las apps instaladas se actualicen solas (con deltas). Nada de nombres, dominios, Team IDs ni buckets está en el repo: todo sale de *secrets* y *variables* de GitHub (lista exacta más abajo). Todos los valores de esta guía son **falsos**.
 
 > No se ejecuta nada al leer esto: los workflows solo corren al empujar un tag `vX.Y.Z` o al lanzarlos a mano. El dry-run no necesita credenciales.
 
@@ -15,7 +15,8 @@ flowchart LR
     B1["pnpm: UI"] --> B2["swift build + Sparkle (SwiftPM)<br/>assemble-app.sh"]
     B2 --> B3["keychain temporal + sign-app.sh<br/>(de dentro hacia fuera, hardened runtime)"]
     B3 --> B4["notarytool --wait + stapler + spctl"]
-    B4 --> B5["ditto: zip final"]
+    B4 --> B5["ditto: zip final (Sparkle)"]
+    B5 --> B6["hdiutil: DMG con la app grapada<br/>firma + notarytool + staple del DMG"]
   end
   B --> Q
   subgraph Q["publish (macos-15, environment release)"]
@@ -23,7 +24,7 @@ flowchart LR
     Q1["verifica zip descargado"] --> Q2["pull de R2: appcast + zips previos"]
     Q2 --> Q3["generate_appcast (deltas, notas, firma EdDSA)"]
     Q3 --> Q4["R2: zips/deltas/notas inmutables, appcast AL FINAL"]
-    Q4 --> Q5["curl público + GitHub Release"]
+    Q4 --> Q5["curl público + GitHub Release<br/>(zip + DMG)"]
   end
   Q4 --> R2[("R2 + dominio público<br/>appcast.xml + zips")]
   R2 -- "SUFeedURL" --> APP["Chopshop.app instalada<br/>(Sparkle)"]
@@ -34,14 +35,14 @@ flowchart LR
 | `.github/workflows/release-mac.yml` | tag `v*` / manual | `preflight` → `build` → `publish`. Manual = dry-run por defecto. |
 | `.github/workflows/rollback-mac.yml` | manual | Retira una versión del feed sin tocar las demás. |
 | `.github/workflows/release-tooling.yml` | PRs que tocan el pipeline | Tests, `shellcheck` y `actionlint` sin credenciales. |
-| `apps/mac/release/*.sh` | scripts | `version`, `preflight`, `keychain`, `assemble-app`, `embed-sparkle`, `sign-app`, `notarize`, `package`, `sparkle-tools`, `notes`, `appcast`, `r2`, `publish`, `rollback`. |
+| `apps/mac/release/*.sh` | scripts | `version`, `preflight`, `keychain`, `assemble-app`, `embed-sparkle`, `sign-app`, `notarize` (app y DMG), `package`, `make-dmg`, `sign-dmg`, `sparkle-tools`, `notes`, `appcast`, `r2`, `publish`, `rollback`. |
 | `apps/mac/release/appcast.py`, `notes.py` | Python (stdlib) | Validación del appcast (monotonía, firmas Ed25519), notas HTML. |
 | `apps/mac/release/sparkle.version` | pin | Versión de Sparkle y SHA-256 del tarball; debe coincidir con `Package.swift`. |
 | `apps/mac/Sources/ChopshopUI/Updater.swift` | app | `SPUStandardUpdaterController`, menú «Buscar actualizaciones…», canal beta. Desactivado sin `SUFeedURL`/`SUPublicEDKey`. |
 
 Dónde viven los secretos: **a nivel de repositorio** (no en *environments*). Así el job `preflight` (el primero) puede comprobar que existen todos y fallar con un mensaje claro *antes* de tocar keychain, red o credenciales. `preflight` solo recibe un indicador «existe / no existe» de cada secret (`secrets.X != ''`), nunca su valor; cada secret se pasa con su valor únicamente al paso que lo usa (firma y notarización en `build`, clave de Sparkle y R2 en `publish`). El job `publish` usa el environment `release` solo como **puerta de aprobación manual opcional** (Settings → Environments → `release` → *Required reviewers*); no necesita secrets propios. Como los secrets son de repositorio, protege la rama de releases y el directorio `.github/` (branch protection / CODEOWNERS): quien pueda ejecutar un workflow modificado desde una rama podría leerlos.
 
-Toda release sale **firmada con Developer ID y notarizada**; no existe un canal sin firmar. El **dry-run** (por defecto en ejecuciones manuales) omite firma Developer ID, notarización y stapling: no exige `MACOS_CERT_P12_BASE64`, `MACOS_CERT_PASSWORD` ni `SIGNING_IDENTITY` (sí todo lo demás), firma la app ad-hoc y sube **solo** a R2 bajo `test/<run_id>/` (nunca el appcast ni los zips de producción). No crea tags ni GitHub Release.
+Toda release sale **firmada con Developer ID y notarizada**; no existe un canal sin firmar. El **dry-run** (por defecto en ejecuciones manuales) omite firma Developer ID, notarización y stapling: no exige `MACOS_CERT_P12_BASE64`, `MACOS_CERT_PASSWORD` ni `SIGNING_IDENTITY` (sí todo lo demás), firma la app ad-hoc, crea el DMG **sin firmar** (solo como artefacto del run, 3 días) y sube **solo** a R2 bajo `test/<run_id>/` (nunca el appcast ni los zips de producción; el DMG no se sube a R2). No crea tags ni GitHub Release.
 
 ## Secrets y variables (lista exacta)
 
@@ -195,6 +196,7 @@ Qué comprueba el pipeline por ti (cada punto aborta el release):
 | Firma | la identidad del .p12 coincide con `SIGNING_IDENTITY` y `APPLE_TEAM_ID`; código anidado de dentro hacia fuera (XPC, `Autoupdate`, `Updater.app`, Mach-O sueltos, framework, app); `--options runtime --timestamp`; entitlements mínimos; `codesign --verify --deep --strict`; hardened runtime, sello de tiempo y `TeamIdentifier` = `APPLE_TEAM_ID` |
 | Notarización | `notarytool submit --wait`; si no es `Accepted`, imprime `notarytool log` y falla; `stapler staple`/`validate`, `spctl --assess --type execute -vv`, `codesign --verify` |
 | Empaquetado | zip final con `ditto -c -k --sequesterRsrc --keepParent` **después** de grapar; se reabre y se vuelve a verificar; SHA-256 |
+| DMG | ver [DMG de instalación](#dmg-de-instalación): se crea con la app ya grapada; `codesign --force --sign … --timestamp`; `notarytool submit --wait`; `stapler staple`; y, con salida visible en el log, `codesign --verify --strict --verbose=2`, `spctl -a -t open --context context:primary-signature -vv` y `stapler validate`. Cualquier fallo aborta el job |
 | Publicación | checksum del artefacto; firma de Apple de nuevo; `check-key` (privada↔pública); build monótono; no pisar zips; `generate_appcast`; item nuevo correcto (versión, build, canal, sistema mínimo); firma EdDSA de zip y deltas verificada con la pública y con `sign_update --verify`; feed firmado; subida en orden seguro; descarga pública del feed y del zip idénticos a lo publicado |
 
 ### Orden de subida y caché
@@ -203,7 +205,31 @@ Qué comprueba el pipeline por ti (cada punto aborta el release):
 2. `notes/<versión>.html` (`max-age=300`).
 3. **Al final** `appcast.xml` (`public, max-age=60`): ningún cliente ve un feed que apunte a archivos que aún no están.
 4. Verificación con `curl` contra `UPDATES_BASE_URL`: el feed servido coincide byte a byte con el publicado, el zip nuevo también, y todo lo que referencia el feed responde 200.
-5. GitHub Release con el zip y su `.sha256` (prerelease si es beta; borrador si lanzas el workflow a mano con `draft_release`).
+5. GitHub Release con el zip, el DMG y sus `.sha256` (prerelease si es beta; borrador si lanzas el workflow a mano con `draft_release`).
+
+### DMG de instalación
+
+Cada release real adjunta a la GitHub Release `Chopshop-<versión>.dmg` y `Chopshop-<versión>.dmg.sha256` junto al zip. Es para la **instalación manual** (arrastrar `Chopshop.app` a *Aplicaciones*); **Sparkle sigue usando solo el zip**: el appcast no cambia, no referencia el DMG, y el DMG nunca entra en la carpeta que lee `generate_appcast` ni se sube a R2 (`r2.sh push` solo sube `*.zip`, `*.delta`, notas y el feed).
+
+Orden en el job `build` (cada paso aborta el job si falla):
+
+1. Firmar la app → notarizar y grapar la app (`notarize.sh`) → zip final para Sparkle (`package.sh`), como siempre.
+2. `make-dmg.sh`: carpeta temporal con la `Chopshop.app` **ya grapada** (copiada con `ditto`, se vuelve a validar el ticket y la firma) + enlace `Applications` → `/Applications`; `hdiutil create -volname Chopshop -fs HFS+ -format UDZO`; `hdiutil verify`; `.sha256`. Solo herramientas de macOS (reintenta `hdiutil` hasta 3 veces por los «Resource busy» habituales del runner).
+3. `sign-dmg.sh`: `codesign --force --sign <identidad> --timestamp --keychain <keychain temporal>` (misma identidad Developer ID que la app: el hash SHA-1 que exporta `keychain.sh`, equivalente a `SIGNING_IDENTITY`); comprueba sello de tiempo y `TeamIdentifier` = `APPLE_TEAM_ID`. No admite firma ad-hoc.
+4. `notarize.sh <dmg>`: `xcrun notarytool submit <dmg> --wait` con la misma API key de App Store Connect (si no es `Accepted`, imprime el log de Apple y falla) → `xcrun stapler staple`.
+5. Verificación con salida visible en el log: `codesign --verify --strict --verbose=2`, `spctl -a -t open --context context:primary-signature -vv` (la línea `origin=` se oculta) y `xcrun stapler validate`.
+6. El ticket grapado modifica el DMG, así que el `.sha256` se **recalcula después de grapar**. El job `publish` vuelve a comprobar el checksum y repite las tres verificaciones antes de adjuntarlo a la GitHub Release.
+
+En **dry-run** solo se ejecuta el paso 2 (sin `REQUIRE_STAPLE`): el DMG queda sin firmar ni notarizar y viaja únicamente como artefacto del run; no se publica en ningún sitio.
+
+Comprobación manual de un DMG descargado:
+
+```sh
+shasum -a 256 -c Chopshop-1.2.3.dmg.sha256
+codesign --verify --strict --verbose=2 Chopshop-1.2.3.dmg
+spctl -a -t open --context context:primary-signature -vv Chopshop-1.2.3.dmg   # source=Notarized Developer ID
+xcrun stapler validate Chopshop-1.2.3.dmg
+```
 
 ### Zips anteriores, deltas y política de borrado
 

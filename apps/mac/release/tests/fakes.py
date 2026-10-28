@@ -106,6 +106,23 @@ else:
     shutil.copytree(args[0], args[1], symlinks=True)
 '''
 
+SHIMS["hdiutil"] = PRELUDE + '''
+args = sys.argv[1:]
+log("hdiutil", *args)
+if args[0] == "create":
+    src = args[args.index("-srcfolder") + 1]
+    log("dmg-srcfolder", *sorted(os.listdir(src)))
+    link = os.path.join(src, "Applications")
+    log("dmg-applications-link", os.readlink(link) if os.path.islink(link) else "no-es-symlink")
+    if os.environ.get("FAKE_HDIUTIL_FAILS"):
+        counter = os.environ["FAKE_HDIUTIL_FAILS"]
+        n = int(open(counter).read()) if os.path.exists(counter) else 0
+        open(counter, "w").write(str(n + 1))
+        if n < int(os.environ.get("FAKE_HDIUTIL_FAIL_COUNT", "1")):
+            sys.exit(1)
+    open(args[-1], "wb").write(b"dmg-falso")
+'''
+
 SHIMS["shasum"] = PRELUDE + '''
 import hashlib
 args = sys.argv[1:]

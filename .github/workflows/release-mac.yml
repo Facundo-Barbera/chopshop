@@ -16,8 +16,10 @@ name: Release Mac
 #  - Toda release REAL sale firmada con Developer ID y notarizada: no hay canal sin firmar y el workflow aborta si falta.
 #  - DRY-RUN (workflow_dispatch con dry_run=true, el valor por defecto): omite firma Developer ID, notarización y
 #    stapling (y no exige MACOS_CERT_P12_BASE64, MACOS_CERT_PASSWORD ni SIGNING_IDENTITY). Compila, ensambla (firma
-#    ad-hoc), zip, firma EdDSA de Sparkle, generate_appcast y sube SOLO a R2 bajo test/<run_id>/. No toca el appcast ni
-#    los zips de producción, no crea GitHub Release ni tags.
+#    ad-hoc), zip, DMG sin firmar, firma EdDSA de Sparkle, generate_appcast y sube SOLO a R2 bajo test/<run_id>/ (el
+#    DMG solo como artefacto del run). No toca el appcast ni los zips de producción, no crea GitHub Release ni tags.
+#  - El DMG (instalación manual) se firma, notariza y grapa en cada release real y va a la GitHub Release junto al zip;
+#    Sparkle sigue usando solo el zip y el appcast no lo referencia.
 #  - Acciones fijadas por SHA de commit (comentario = versión).
 on:
   push:
@@ -219,13 +221,35 @@ jobs:
           REQUIRE_STAPLE: ${{ env.DRY_RUN == 'true' && '0' || '1' }}
         run: bash apps/mac/release/package.sh "$RUNNER_TEMP/out/Chopshop.app" "$RUNNER_TEMP/dist/Chopshop-${VERSION}.zip"
 
-      - name: Subir el zip como artefacto del run
+      # DMG con la app YA firmada y grapada. En dry-run queda sin firmar (y no se sube a producción).
+      - name: Crear el DMG
+        env:
+          REQUIRE_STAPLE: ${{ env.DRY_RUN == 'true' && '0' || '1' }}
+        run: bash apps/mac/release/make-dmg.sh "$RUNNER_TEMP/out/Chopshop.app" "$RUNNER_TEMP/dist/Chopshop-${VERSION}.dmg"
+
+      - name: Firmar el DMG (Developer ID)
+        if: env.DRY_RUN != 'true'
+        env:
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        run: bash apps/mac/release/sign-dmg.sh "$RUNNER_TEMP/dist/Chopshop-${VERSION}.dmg"
+
+      - name: Notarizar, grapar y verificar el DMG
+        if: env.DRY_RUN != 'true'
+        env:
+          ASC_API_KEY_P8_BASE64: ${{ secrets.ASC_API_KEY_P8_BASE64 }}
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
+        run: bash apps/mac/release/notarize.sh "$RUNNER_TEMP/dist/Chopshop-${VERSION}.dmg"
+
+      - name: Subir el zip y el DMG como artefacto del run
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: chopshop-mac-${{ needs.preflight.outputs.version }}
           path: |
             ${{ runner.temp }}/dist/Chopshop-${{ needs.preflight.outputs.version }}.zip
             ${{ runner.temp }}/dist/Chopshop-${{ needs.preflight.outputs.version }}.zip.sha256
+            ${{ runner.temp }}/dist/Chopshop-${{ needs.preflight.outputs.version }}.dmg
+            ${{ runner.temp }}/dist/Chopshop-${{ needs.preflight.outputs.version }}.dmg.sha256
           if-no-files-found: error
           compression-level: 0
           retention-days: ${{ env.DRY_RUN == 'true' && 3 || 30 }}
@@ -277,6 +301,7 @@ jobs:
           set -euo pipefail
           cd "$RUNNER_TEMP/dl"
           shasum -a 256 -c "Chopshop-${VERSION}.zip.sha256"
+          shasum -a 256 -c "Chopshop-${VERSION}.dmg.sha256"
           check="$(mktemp -d)"
           ditto -x -k "Chopshop-${VERSION}.zip" "$check"
           codesign --verify --deep --strict --verbose=2 "$check/Chopshop.app"
@@ -287,6 +312,10 @@ jobs:
             fi
             xcrun stapler validate "$check/Chopshop.app"
             spctl --assess --type execute -vv "$check/Chopshop.app" 2>&1 | sed 's/^origin=.*/origin=<oculto>/'
+            # el DMG que se adjunta a la GitHub Release: firmado, aceptado por Gatekeeper y con el ticket grapado
+            codesign --verify --strict --verbose=2 "Chopshop-${VERSION}.dmg"
+            spctl -a -t open --context context:primary-signature -vv "Chopshop-${VERSION}.dmg" 2>&1 | sed 's/^origin=.*/origin=<oculto>/'
+            xcrun stapler validate "Chopshop-${VERSION}.dmg"
           fi
           rm -rf "$check"
 
@@ -343,13 +372,14 @@ jobs:
         run: |
           set -euo pipefail
           zip="$RUNNER_TEMP/dl/Chopshop-${VERSION}.zip"
+          dmg="$RUNNER_TEMP/dl/Chopshop-${VERSION}.dmg"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "$zip" "$zip.sha256" --clobber
+            gh release upload "$TAG" "$zip" "$zip.sha256" "$dmg" "$dmg.sha256" --clobber
           else
             flags=()
             if [ -n "$CHANNEL" ]; then flags+=(--prerelease); fi
             if [ "${DRAFT:-false}" = "true" ]; then flags+=(--draft); fi
-            gh release create "$TAG" "$zip" "$zip.sha256" --verify-tag --title "Chopshop ${VERSION}" \
+            gh release create "$TAG" "$zip" "$zip.sha256" "$dmg" "$dmg.sha256" --verify-tag --title "Chopshop ${VERSION}" \
               --notes-file "$RUNNER_TEMP/release-notes.md" ${flags[@]+"${flags[@]}"}
           fi
 
