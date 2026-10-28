@@ -22,6 +22,7 @@ struct ChopshopApp: App {
                     Button(s.title) { model.nav = .section(s) }.keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: .command)
                 }
             }
+            UpdaterCommands()  // Sparkle: «Buscar actualizaciones…» (inactivo sin SUFeedURL; ver Updater.swift)
         }
     }
 }

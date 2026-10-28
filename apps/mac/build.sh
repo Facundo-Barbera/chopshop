@@ -62,6 +62,10 @@ cat > "$APP/Contents/Info.plist" <<PL
 </dict></plist>
 PL
 
+# Sparkle (auto-actualización): el ejecutable enlaza Sparkle.framework, así que va dentro del bundle. Sin SUFeedURL en
+# el Info.plist (build local) el updater queda inactivo; las claves de release las pone release/assemble-app.sh.
+bash "$PWD/release/embed-sparkle.sh" "$APP"
+
 # Firma ad-hoc (sin cuenta de desarrollador): Gatekeeper pedirá «Abrir» la primera vez (ver docs/mac-build.md).
 codesign --force --deep --sign - "$APP"
 codesign --verify --deep --strict "$APP"
