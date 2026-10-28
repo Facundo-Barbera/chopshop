@@ -6,8 +6,8 @@
 #     (sin --new-build)  regenerar el feed con lo que haya en <dir> (rollback: la versión retirada ya no está).
 # <dir> debe contener appcast.xml previo (si existe), los zips/deltas referenciados y, para la nueva versión,
 # su zip Chopshop-<V>.zip y Chopshop-<V>.html (notas: las incrusta el feed).
-# Env: SPARKLE_BIN, SPARKLE_ED_PRIVATE_KEY (solo por stdin), SPARKLE_PUBLIC_ED_KEY, UPDATES_BASE_URL,
-#      SPARKLE_SIGNING_PUBLIC_ED_KEY (opcional: pública de la clave que FIRMA; solo difiere en el release puente de una rotación),
+# Env: SPARKLE_BIN, SPARKLE_ED_PRIVATE_KEY (solo por stdin), SPARKLE_ED_PUBLIC_KEY, UPDATES_BASE_URL,
+#      SPARKLE_ED_SIGNING_PUBLIC_KEY (opcional: pública de la clave que FIRMA; solo difiere en el release puente de una rotación),
 #      MIN_MACOS_VERSION (13.0), MAX_DELTAS (3), MAX_VERSIONS (5), DELTA_COMPRESSION (lzma),
 #      PHASED_ROLLOUT_INTERVAL (vacío = sin rollout gradual), FULL_RELEASE_NOTES_URL (opcional).
 # `sparkle:minimumSystemVersion` sale de LSMinimumSystemVersion del Info.plist de la app (= MIN_MACOS_VERSION).
@@ -27,13 +27,13 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ -d "$DIR" ] || die "uso: appcast.sh <dir> [--new-build N --version V] [--channel C]"
-require_env SPARKLE_BIN SPARKLE_ED_PRIVATE_KEY SPARKLE_PUBLIC_ED_KEY UPDATES_BASE_URL
+require_env SPARKLE_BIN SPARKLE_ED_PRIVATE_KEY SPARKLE_ED_PUBLIC_KEY UPDATES_BASE_URL
 [ -x "$SPARKLE_BIN/generate_appcast" ] || die "no encuentro generate_appcast en SPARKLE_BIN"
 BASE="$(strip_slash "$UPDATES_BASE_URL")"
 MIN="${MIN_MACOS_VERSION:-13.0}"
 # Pública de la clave con la que se firma. Normalmente es la que lleva la app (SUPublicEDKey); en el release
 # puente de una rotación la app ya lleva la nueva y se firma todavía con la vieja (ver docs/release.md).
-SIGNING_PUB="${SPARKLE_SIGNING_PUBLIC_ED_KEY:-$SPARKLE_PUBLIC_ED_KEY}"
+SIGNING_PUB="${SPARKLE_ED_SIGNING_PUBLIC_KEY:-$SPARKLE_ED_PUBLIC_KEY}"
 
 # La clave privada tiene que ser la pareja de la pública esperada; si no, ningún cliente aceptaría el update
 printf '%s\n' "$SPARKLE_ED_PRIVATE_KEY" | python3 -I "$HERE/appcast.py" check-key --public "$SIGNING_PUB"

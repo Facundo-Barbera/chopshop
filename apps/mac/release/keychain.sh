@@ -2,8 +2,8 @@
 # Keychain TEMPORAL para firmar en el runner.
 #   keychain.sh setup     importa el .p12 en un keychain nuevo y exporta SIGN_KEYCHAIN y SIGN_IDENTITY (a GITHUB_ENV)
 #   keychain.sh cleanup   restaura la lista de keychains y borra keychain y archivos temporales (idempotente, nunca falla)
-# Entrada (setup): MACOS_CERT_P12_BASE64, MACOS_CERT_PASSWORD; opcional MACOS_KEYCHAIN_PASSWORD (si falta se
-# genera una aleatoria del run) y MACOS_SIGN_IDENTITY (si hay varias identidades Developer ID).
+# Entrada (setup): MACOS_CERT_P12_BASE64, MACOS_CERT_PASSWORD, KEYCHAIN_PASSWORD (secrets) y
+# SIGNING_IDENTITY (var: nombre «Developer ID Application: Nombre (TEAMID)» o hash SHA-1) y APPLE_TEAM_ID (var).
 # Nunca imprime valores: los derivados sensibles (nombre del certificado, Team ID) se enmascaran.
 set -euo pipefail
 # shellcheck source=lib.sh
@@ -15,9 +15,8 @@ P12="$TMP/chopshop-cert.p12"
 SEARCH_LIST="$TMP/chopshop-keychain-search-list.txt"
 
 setup() {
-  require_env MACOS_CERT_P12_BASE64 MACOS_CERT_PASSWORD
-  local kc_pass="${MACOS_KEYCHAIN_PASSWORD:-}"
-  if [ -z "$kc_pass" ]; then kc_pass="$(openssl rand -hex 24)"; fi
+  require_env MACOS_CERT_P12_BASE64 MACOS_CERT_PASSWORD KEYCHAIN_PASSWORD SIGNING_IDENTITY APPLE_TEAM_ID
+  local kc_pass="$KEYCHAIN_PASSWORD"
   mask_value "$kc_pass"
   # Pase lo que pase, el .p12 en claro no se queda en disco
   trap 'rm -f "$P12"' EXIT
@@ -42,26 +41,25 @@ setup() {
   done < "$SEARCH_LIST"
   security list-keychains -d user -s "$KEYCHAIN" ${existing[@]+"${existing[@]}"}
 
-  # Identidad: hash SHA-1 (sin nombre, sin comillas); el nombre y el Team ID van enmascarados
-  local ids count identity="${MACOS_SIGN_IDENTITY:-}"
+  # Identidad: se elige la que pide SIGNING_IDENTITY (nombre o hash) y debe ser del equipo APPLE_TEAM_ID.
+  # Se exporta el hash SHA-1 (sin nombre ni comillas); el nombre y el Team ID se enmascaran por si los imprime otra herramienta.
+  local ids count identity line cn
+  mask_value "$SIGNING_IDENTITY"
+  mask_value "${SIGNING_IDENTITY#*: }"
+  mask_value "$APPLE_TEAM_ID"
   ids="$(security find-identity -v -p codesigning "$KEYCHAIN" | grep 'Developer ID Application' || true)"
-  count="$(printf '%s' "$ids" | grep -c . || true)"
-  local line cn team
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     cn="$(printf '%s' "$line" | sed -n 's/.*"\(.*\)".*/\1/p')"
     mask_value "$cn"
-    mask_value "${cn#*: }"
-    team="$(printf '%s' "$cn" | sed -n 's/.*(\([A-Z0-9]*\))$/\1/p')"
-    mask_value "$team"
   done <<< "$ids"
-  if [ -z "$identity" ]; then
-    [ "$count" -ge 1 ] || die "el .p12 no contiene una identidad 'Developer ID Application' válida"
-    [ "$count" -eq 1 ] || die "el .p12 trae $count identidades Developer ID Application; define MACOS_SIGN_IDENTITY (hash SHA-1) para elegir una"
-    identity="$(printf '%s' "$ids" | awk '{print $2}')"
-  else
-    mask_value "$identity"
-  fi
+  local match
+  match="$(printf '%s\n' "$ids" | grep -F -- "$SIGNING_IDENTITY" || true)"
+  count="$(printf '%s' "$match" | grep -c . || true)"
+  [ "$count" -ge 1 ] || die "el .p12 no contiene la identidad indicada en SIGNING_IDENTITY (ni una 'Developer ID Application' que coincida)"
+  [ "$count" -eq 1 ] || die "SIGNING_IDENTITY coincide con $count identidades; usa el nombre completo o el hash SHA-1"
+  printf '%s' "$match" | grep -F -- "($APPLE_TEAM_ID)" >/dev/null || die "la identidad elegida no pertenece al equipo APPLE_TEAM_ID"
+  identity="$(printf '%s' "$match" | awk '{print $2}')"
   set_env SIGN_KEYCHAIN "$KEYCHAIN"
   set_env SIGN_IDENTITY "$identity"
   log "keychain temporal listo (identidades Developer ID: $count)"

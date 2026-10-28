@@ -48,7 +48,6 @@ if [ "$KEEP" != true ]; then
   # shellcheck disable=SC2086
   bash "$HERE/r2.sh" retire $files
 fi
-bash "$HERE/r2.sh" purge
 bash "$HERE/r2.sh" verify "$work"
 summary "Rollback de \`$VERSION\` publicado. Quienes ya lo instalaron necesitan un release nuevo con build mayor."
 log "rollback de $VERSION completado"

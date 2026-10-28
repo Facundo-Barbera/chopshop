@@ -72,6 +72,7 @@ if "-d" in args:
     sys.stderr.write("CodeDirectory v=20500 size=1 flags=0x10000(runtime) hashes=1\\n")
     if os.environ.get("FAKE_TIMESTAMP", "1") == "1":
         sys.stderr.write("Timestamp=Oct 28, 2026 at 10:00:00\\n")
+    sys.stderr.write("TeamIdentifier=%s\\n" % os.environ.get("FAKE_TEAM", "ABCDE12345"))
 '''
 
 SHIMS["spctl"] = PRELUDE + '''
