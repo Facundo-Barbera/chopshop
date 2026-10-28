@@ -4,6 +4,8 @@
 #   r2.sh push <dir> [<version>]        sube zips/deltas (inmutables), notas y, AL FINAL, appcast.xml
 #   r2.sh push-appcast <dir>            sube solo appcast.xml
 #   r2.sh retire <nombre>...            mueve objetos a retired/ (rollback; nunca se borran)
+#   r2.sh prod-snapshot <f> | prod-assert-unchanged <f>   huella del appcast de producción antes/después (dry-run)
+#   r2.sh ls <prefijo>                  lista claves y tamaños de un prefijo
 #   r2.sh verify <dir> [<zip>]          comprueba por HTTP público que el feed publicado es el nuestro y el zip es idéntico
 # Env: R2_ACCOUNT_ID (var), R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY (secrets), R2_BUCKET, UPDATES_BASE_URL (el bucket se
 # sirve en la raíz de esa URL).
@@ -21,7 +23,14 @@ r2_env() {
   # R2 no acepta las sumas de verificación CRC por defecto de las versiones recientes del CLI
   export AWS_REQUEST_CHECKSUM_CALCULATION=when_required AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
   ENDPOINT="https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com"
-  PREFIX=""   # el bucket se usa en su raíz: UPDATES_BASE_URL apunta ahí
+  mask_value "$R2_BUCKET"
+  # Producción: raíz del bucket. Dry-run: el workflow fija R2_PREFIX=test/<run_id> (y UPDATES_BASE_URL con el mismo
+  # sufijo) y R2_TEST_ONLY=1, que prohíbe escribir/mover/leer fuera de test/ (nunca se toca el feed ni los zips reales).
+  PREFIX="$(strip_slash "${R2_PREFIX:-}")"
+  if [ -n "$PREFIX" ]; then PREFIX="$PREFIX/"; fi
+  if [ "${R2_TEST_ONLY:-0}" = 1 ]; then
+    [[ "$PREFIX" == test/?* ]] || die "R2_TEST_ONLY=1 exige R2_PREFIX=test/<id>"
+  fi
   S3="s3://$R2_BUCKET/$PREFIX"
 }
 r2() { aws --endpoint-url "$ENDPOINT" "$@"; }
@@ -47,6 +56,7 @@ remote_stat() {
 }
 
 put() { # archivo clave tipo cache-control
+  if [ "${R2_TEST_ONLY:-0}" = 1 ] && [[ "$PREFIX$2" != test/* ]]; then die "dry-run: se rechaza escribir fuera de test/ ($2)"; fi
   r2 s3 cp "$1" "$S3$2" --only-show-errors --content-type "$3" --cache-control "$4"
 }
 
@@ -122,6 +132,7 @@ cmd_push_appcast() {
 
 cmd_retire() {
   local n rc
+  if [ "${R2_TEST_ONLY:-0}" = 1 ] && [[ "$PREFIX" != test/* ]]; then die "dry-run: se rechaza mover fuera de test/"; fi
   for n in "$@"; do
     safe_name "$n" || die "nombre no permitido: $n"
     rc=0
@@ -160,9 +171,37 @@ cmd_verify() {
   log "verificación pública OK: feed y archivos accesibles en la URL de actualizaciones"
 }
 
+# Huella del feed de PRODUCCIÓN (raíz del bucket, ignora R2_PREFIX): ETag y fecha, o "ausente".
+prod_fingerprint() {
+  local out
+  if out="$(r2 s3api head-object --bucket "$R2_BUCKET" --key appcast.xml --query '[ETag,LastModified,ContentLength]' --output text 2>&1)"; then
+    printf '%s' "$out"
+  else
+    case "$out" in
+      *"Not Found"* | *404* | *NoSuchKey*) printf 'ausente' ;;
+      *) printf '::error::no se pudo consultar el appcast de producción: %s\n' "${out:0:200}" >&2; return 2 ;;
+    esac
+  fi
+}
+
+cmd_prod_snapshot() { prod_fingerprint > "${1:?uso: r2.sh prod-snapshot <archivo>}"; log "huella del appcast de producción guardada"; }
+
+cmd_prod_assert_unchanged() {
+  local now
+  now="$(prod_fingerprint)"
+  [ "$now" = "$(cat "${1:?uso: r2.sh prod-assert-unchanged <archivo>}")" ] || die "el appcast de PRODUCCIÓN cambió durante el dry-run"
+  log "el appcast de producción no se tocó"
+}
+
+# Lista las claves de un prefijo (para comprobar a mano qué subió un dry-run)
+cmd_ls() {
+  local prefix="${1:?uso: r2.sh ls <prefijo>}"
+  r2 s3api list-objects-v2 --bucket "$R2_BUCKET" --prefix "$prefix" --query 'Contents[].[Key,Size]' --output text
+}
+
 sub="${1:-}"; shift || true
 case "$sub" in
-  pull | push | push-appcast | retire) r2_env ;;
+  pull | push | push-appcast | retire | prod-snapshot | prod-assert-unchanged | ls) r2_env ;;
 esac
 case "$sub" in
   pull) cmd_pull "$@" ;;
@@ -170,5 +209,8 @@ case "$sub" in
   push-appcast) cmd_push_appcast "$@" ;;
   retire) cmd_retire "$@" ;;
   verify) cmd_verify "$@" ;;
-  *) die "uso: r2.sh <pull|push|push-appcast|retire|verify> ..." ;;
+  prod-snapshot) cmd_prod_snapshot "$@" ;;
+  prod-assert-unchanged) cmd_prod_assert_unchanged "$@" ;;
+  ls) cmd_ls "$@" ;;
+  *) die "uso: r2.sh <pull|push|push-appcast|retire|verify|prod-snapshot|prod-assert-unchanged|ls> ..." ;;
 esac
