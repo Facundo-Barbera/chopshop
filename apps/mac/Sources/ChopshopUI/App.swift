@@ -17,6 +17,10 @@ struct ChopshopApp: App {
         .defaultSize(width: 1360, height: 860)
         .windowToolbarStyle(.unified)
         .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button("Ajustes…") { model.showSettings = true }
+                    .keyboardShortcut(",", modifiers: .command)
+            }
             CommandMenu("Ir a") {
                 ForEach(Array(Section.views.enumerated()), id: \.element) { i, s in
                     Button(s.title) { model.nav = .section(s) }.keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: .command)

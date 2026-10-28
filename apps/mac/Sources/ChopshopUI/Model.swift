@@ -55,17 +55,20 @@ final class AppModel: ObservableObject {
     @Published var link: LinkState = .connecting
     @Published var lastUpdate: Date?
     @Published var lastError: String?
+    /// Hoja de ajustes (⌘,); se abre sola al arrancar si no hay ningún agente configurado.
+    @Published var showSettings = false
 
     weak var web: WKWebView?
 
-    /// Sección [app] de ~/.config/chopshop/config.toml (+ CHOPSHOP_APP__*).
-    let config = AppConfig.load()
+    /// Sección [app] de ~/.config/chopshop/config.toml (+ CHOPSHOP_APP__*). Se recarga con `reloadConfig()`.
+    private(set) var config = AppConfig.load()
     private lazy var hub = AgentHub(specs: config.agents)
     private var results: [AgentResult] = []
     private var labels: [String: String] = [:]     // agente -> último machine_id visto
     private var pollTask: Task<Void, Never>?
     private var refreshing = false
     private var started = false
+    private var generation = 0                     // sube en cada recarga: descarta rondas de sondeo de la config anterior
 
     private let args = CommandLine.arguments
     private func value(after flag: String) -> String? {
@@ -82,6 +85,14 @@ final class AppModel: ObservableObject {
             else if let sec = Section(rawValue: s) { nav = sec == .machines ? .machines : .section(sec) }
         }
         if args.contains("--capture") { Capture.watch(model: self) }
+        startPolling()
+        // Sin ningún agente configurado no hay nada que mostrar: se pide la conexión en los ajustes
+        if hub.isEmpty && !args.contains("--capture") { showSettings = true }
+    }
+
+    private func startPolling() {
+        pollTask?.cancel()
+        pollTask = nil
         guard !hub.isEmpty else { return }
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -121,8 +132,10 @@ final class AppModel: ObservableObject {
     func refresh() async {
         if refreshing || hub.isEmpty { return }
         refreshing = true
-        defer { refreshing = false }
+        let gen = generation
+        defer { if gen == generation { refreshing = false } }
         let fetched = await hub.fetchAll()
+        guard gen == generation else { return }     // la config cambió mientras tanto: este resultado ya no vale
         for r in fetched { if let m = r.machineId { labels[r.name] = m } }
         results = fetched
         let s = Summarizer.summarize(fetched, labels: labels, previous: machines)
@@ -134,6 +147,26 @@ final class AppModel: ObservableObject {
         // Con datos de algún agente no se muestra error en la barra: la UI web marca cuáles fallan.
         lastError = fetched.contains(where: { $0.isOK }) ? nil : fetched.first(where: { !$0.isOK })?.shortMessage
         pushAgents()
+    }
+
+    /// Vuelve a leer la config (tras guardar los ajustes) y reinicia el sondeo con los agentes nuevos, sin reiniciar la app.
+    func reloadConfig() {
+        generation += 1
+        refreshing = false
+        pollTask?.cancel()
+        pollTask = nil
+        config = AppConfig.load()
+        hub = AgentHub(specs: config.agents)
+        results = []
+        labels = [:]
+        machines = []
+        projects = []
+        counts = [:]
+        lastUpdate = nil
+        lastError = nil
+        link = LinkState.from([], configured: hub.clients.count)
+        startPolling()
+        pushAgents()      // sin agentes envía la lista vacía; con agentes espera a la primera ronda
     }
 
     /// Mensaje `agents`: resultados crudos por agente (la UI los combina). Sin agentes configurados va la lista vacía;

@@ -27,6 +27,9 @@ struct RootView: View {
             }
         }
         .background(WindowGlass())
+        .sheet(isPresented: $model.showSettings) {
+            SettingsView().environmentObject(model)
+        }
     }
 
     private var title: String {
@@ -164,7 +167,7 @@ struct Sidebar: View {
                     PulseDot(color: dot, live: model.link.isLive)
                     Text(model.link.label)
                         .font(.caption.weight(.medium))
-                        .help("Estado de la conexión con los agentes de Chopshop (API por Tailscale). Se configuran en la sección [app] de ~/.config/chopshop/config.toml")
+                        .help("Estado de la conexión con los agentes de Chopshop (API por Tailscale). Se configuran en Ajustes… (⌘,) o en la sección [app] de ~/.config/chopshop/config.toml")
                     Spacer()
                     Text("v0.6")
                         .font(.caption).foregroundStyle(.secondary)
