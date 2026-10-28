@@ -3,8 +3,13 @@ __pycache__/
 .chopshop/
 *.url
 *.env
+# Compilación de la app de Mac (swift build y el .app empaquetado)
+.build/
+dist/
 apps/mac/.build/
 apps/mac/build/
+apps/mac/dist/
+*.app/
 node_modules/
 pnpm-debug.log
 node_modules/

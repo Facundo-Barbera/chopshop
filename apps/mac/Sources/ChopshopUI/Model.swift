@@ -40,51 +40,10 @@ enum NavItem: Hashable {
     case machine(String)
 }
 
-enum WatcherState: Equatable {
-    case unknown, none
-    case alive(Date), stale(Date)
-    var label: String {
-        switch self {
-        case .unknown: return "…"
-        case .none: return "sin watch"
-        case .alive: return "watch activo"
-        case .stale: return "watch detenido"
-        }
-    }
-}
-
-struct ProjectInfo: Identifiable {
-    let name: String
-    let running: Int
-    let questions: Int
-    let total: Int
-    var id: String { name }
-}
-
-/// Serie de métricas de una máquina (historial en memoria; una muestra por tick de 3 s).
-struct Machine: Identifiable {
-    let name: String
-    var ok = false
-    var stale = false
-    var reason: String?
-    var os = ""
-    var role = ""
-    var cpus = 0
-    var load: [Double] = []
-    var ramTotalMB = 0, ramAvailMB = 0
-    var disk = "", diskPct = 0
-    var cpu: [Double] = []     // % ≈ load1/cpus
-    var ram: [Double] = []     // % usada
-    var load1: [Double] = []
-    var run: [Double] = []     // hilos corriendo
-    var cpuNow: Int { Int((cpu.last ?? 0).rounded()) }
-    var ramNow: Int { Int((ram.last ?? 0).rounded()) }
-    var id: String { name }
-}
-
-/// Estado de la app + puente con React. La UI solo lee el estado local de Chopshop (`chopshop snapshot`)
-/// y su única acción es `answer --queue` (deja la respuesta en el buzón local). La red hacia T3 la hace
-/// `chopshop watch` en un proceso aparte: un hijo de una app GUI se queda colgado (ver README, "Permisos de macOS").
+/// Estado de la app + puente con React. La app es un cliente puro de la API de los agentes (docs/agent-api.md):
+/// sondea `GET /snapshot` de cada agente configurado y entrega los resultados crudos a la UI web (mensaje `agents`),
+/// que los combina. Las acciones de la UI (responder, settle, leases…) se traducen a POST de la API.
+/// No ejecuta ningún proceso local ni toca T3: todo pasa por el agente.
 @MainActor
 final class AppModel: ObservableObject {
     @Published var selection: Section = .overview { didSet { if oldValue != selection { pushSelection() } } }
@@ -93,52 +52,46 @@ final class AppModel: ObservableObject {
     @Published var counts: [Section: Int] = [:]
     @Published var projects: [ProjectInfo] = []
     @Published var machines: [Machine] = []
-    @Published var busy = false
-    @Published var watcher: WatcherState = .unknown
+    @Published var link: LinkState = .connecting
     @Published var lastUpdate: Date?
     @Published var lastError: String?
 
     weak var web: WKWebView?
-    private var lastSnapshot: [String: Any]?
-    private var timer: Timer?
-    private var metricsBusy = false
-    static let historyLen = 60
-    private var ticks = 0
+
+    /// Sección [app] de ~/.config/chopshop/config.toml (+ CHOPSHOP_APP__*).
+    let config = AppConfig.load()
+    private lazy var hub = AgentHub(specs: config.agents)
+    private var results: [AgentResult] = []
+    private var labels: [String: String] = [:]     // agente -> último machine_id visto
+    private var pollTask: Task<Void, Never>?
+    private var refreshing = false
     private var started = false
 
-    // --- configuración (args: --home <dir> para otro ~/.chopshop) ---
     private let args = CommandLine.arguments
-    private var home: String? { value(after: "--home") }
     private func value(after flag: String) -> String? {
         guard let i = args.firstIndex(of: flag), i + 1 < args.count else { return nil }
         return args[i + 1]
     }
 
-    /// Sección [app] de ~/.config/chopshop/config.toml (+ CHOPSHOP_APP__*). `agentURL` y `tokenFile` quedan
-    /// expuestos para la conexión remota al agente, que llega más adelante.
-    let config = AppConfig.load()
-    var agentURL: String? { config.agentURL }
-    var tokenFile: String? { config.tokenFile }
-
-    /// Raíz del motor: CHOPSHOP_ROOT > `engine_root` del config > motor embebido en el .app > nil (error claro).
-    var engineRoot: String? { config.resolveEngineRoot() }
-
     func start() {
         guard !started else { return }
         started = true
-        if engineRoot == nil { FileHandle.standardError.write(Data((AppConfig.missingEngineMessage + "\n").utf8)) }
+        link = LinkState.from([], configured: hub.clients.count)
         if let s = value(after: "--select") {
             if s.hasPrefix("project:") { nav = .project(String(s.dropFirst(8))) }
             else if let sec = Section(rawValue: s) { nav = sec == .machines ? .machines : .section(sec) }
         }
-        timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.tickTimer() }
-        }
         if args.contains("--capture") { Capture.watch(model: self) }
-        Task { await refresh(); await refreshMetrics() }
+        guard !hub.isEmpty else { return }
+        pollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                await self.refresh()
+                let ns = UInt64(self.config.refreshSeconds * 1_000_000_000)
+                try? await Task.sleep(nanoseconds: ns)
+            }
+        }
     }
-
-    private func tickTimer() { Task { await refresh() }; Task { await refreshMetrics() } }
 
     var nav: NavItem {
         get {
@@ -162,156 +115,67 @@ final class AppModel: ObservableObject {
         push("select", ["view": selection.rawValue, "project": project ?? "", "machine": machine ?? ""])
     }
 
-    /// Lee `chopshop metrics` (sin red: lo remoto lo deja `watch` en un archivo) y acumula el historial.
-    func refreshMetrics() async {
-        if metricsBusy { return }
-        metricsBusy = true
-        defer { metricsBusy = false }
-        let (rc, out, _) = await run(["metrics"])
-        guard rc == 0, let d = out.data(using: .utf8), let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
-              let hs = o["hosts"] as? [String: [String: Any]] else { return }
-        var next: [Machine] = []
-        for name in hs.keys.sorted() {
-            let h = hs[name] ?? [:]
-            var m = machines.first(where: { $0.name == name }) ?? Machine(name: name)
-            m.ok = (h["ok"] as? Bool) == true
-            m.stale = (h["stale"] as? Bool) == true
-            m.reason = h["reason"] as? String
-            m.os = h["os"] as? String ?? m.os
-            m.role = h["role"] as? String ?? (h["purpose"] as? String ?? m.role)
-            if m.ok {
-                m.cpus = h["cpus"] as? Int ?? m.cpus
-                m.load = (h["load"] as? [Double]) ?? m.load
-                m.ramTotalMB = h["ram_mb_total"] as? Int ?? 0
-                m.ramAvailMB = h["ram_mb_avail"] as? Int ?? 0
-                m.disk = h["disk"] as? String ?? ""
-                m.diskPct = h["disk_pct"] as? Int ?? 0
-                let cpu = Double(h["cpu_pct"] as? Int ?? 0), ram = Double(h["ram_pct"] as? Int ?? 0)
-                m.cpu = Self.push(m.cpu, cpu); m.ram = Self.push(m.ram, ram); m.load1 = Self.push(m.load1, m.load.first ?? 0)
-            }
-            m.run = Self.push(m.run, Double(runningNow[name] ?? 0))
-            next.append(m)
-        }
-        machines = next
-        pushMetrics()
-    }
+    // --- sondeo ---
 
-    private static func push(_ a: [Double], _ v: Double) -> [Double] {
-        var x = a; x.append(v)
-        if x.count > historyLen { x.removeFirst(x.count - historyLen) }
-        return x
-    }
-
-    func pushMetrics() {
-        let arr: [[String: Any]] = machines.map { m in
-            ["name": m.name, "ok": m.ok, "stale": m.stale, "reason": m.reason ?? "", "os": m.os, "role": m.role, "cpus": m.cpus,
-             "load": m.load, "ramTotalMB": m.ramTotalMB, "ramAvailMB": m.ramAvailMB, "disk": m.disk, "diskPct": m.diskPct,
-             "cpu": m.cpu, "ram": m.ram, "load1": m.load1, "run": m.run]
-        }
-        push("metrics", ["machines": arr, "interval": 3])
-    }
-
-    // --- CLI ---
-    private func run(_ arguments: [String]) async -> (Int32, String, String) {
-        guard let root = engineRoot else { return (127, "", AppConfig.missingEngineMessage) }
-        let exe = root + "/bin/chopshop"
-        var env = ProcessInfo.processInfo.environment
-        if let h = home { env["CHOPSHOP_HOME"] = h }
-        env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:" + (env["PATH"] ?? "")
-        return await withCheckedContinuation { cont in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let p = Process()
-                p.executableURL = URL(fileURLWithPath: exe)
-                p.arguments = arguments
-                p.environment = env
-                let out = Pipe(), err = Pipe()
-                p.standardOutput = out
-                p.standardError = err
-                do { try p.run() } catch { cont.resume(returning: (127, "", "no pude ejecutar \(exe): \(error.localizedDescription)")); return }
-                let o = out.fileHandleForReading.readDataToEndOfFile()
-                let e = err.fileHandleForReading.readDataToEndOfFile()
-                p.waitUntilExit()
-                cont.resume(returning: (p.terminationStatus, String(decoding: o, as: UTF8.self), String(decoding: e, as: UTF8.self)))
-            }
-        }
-    }
-
-    // --- acciones ---
+    /// Una ronda: consulta a todos los agentes, actualiza la barra lateral y entrega los resultados a la UI web.
     func refresh() async {
-        let (rc, out, err) = await run(["snapshot"])
-        guard rc == 0, let data = out.data(using: .utf8), let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            lastError = err.isEmpty ? "snapshot falló (rc \(rc))" : err
-            push("error", ["message": lastError ?? ""])
-            return
-        }
-        lastError = nil
-        lastSnapshot = obj
-        lastUpdate = Date()
-        summarize(obj)
-        push("state", obj)
+        if refreshing || hub.isEmpty { return }
+        refreshing = true
+        defer { refreshing = false }
+        let fetched = await hub.fetchAll()
+        for r in fetched { if let m = r.machineId { labels[r.name] = m } }
+        results = fetched
+        let s = Summarizer.summarize(fetched, labels: labels, previous: machines)
+        machines = s.machines
+        projects = s.projects
+        counts = [.questions: s.questions, .reactions: s.reactions]
+        link = LinkState.from(fetched, configured: hub.clients.count)
+        if fetched.contains(where: { $0.isOK }) { lastUpdate = Date() }
+        // Con datos de algún agente no se muestra error en la barra: la UI web marca cuáles fallan.
+        lastError = fetched.contains(where: { $0.isOK }) ? nil : fetched.first(where: { !$0.isOK })?.shortMessage
+        pushAgents()
     }
 
-    /// Encola la respuesta (archivo local); `chopshop watch` la envía a T3 en su siguiente ciclo.
-    func answer(task: String, choice: String, request: String?, by: String? = nil) async -> [String: Any] {
-        var a = ["answer", "--queue", task, choice]
-        if let by, !by.isEmpty { a += ["--by", by] }
-        if let r = request, !r.isEmpty { a += ["--request", r] }
-        let (rc, out, err) = await run(a)
-        await refresh()
-        var res: [String: Any] = ["ok": rc == 0, "queued": rc == 0]
-        if rc == 0, let d = out.data(using: .utf8), let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] { res["id"] = o["id"] ?? "" }
-        res["message"] = String((rc == 0 ? choice : err).trimmingCharacters(in: .whitespacesAndNewlines).prefix(300))
-        res["watcher"] = watcher.label
-        return res
+    /// Mensaje `agents`: resultados crudos por agente (la UI los combina). Sin agentes configurados va la lista vacía;
+    /// antes de la primera respuesta no se envía nada (la UI muestra «conectando»).
+    func pushAgents() {
+        if results.isEmpty && !hub.isEmpty { return }
+        push("agents", ["agents": results.map { $0.bridgeObject }, "configPath": AppConfig.configPath(), "interval": config.refreshSeconds])
     }
 
-    private var runningNow: [String: Int] = [:]
+    // --- acciones (POST a la API del agente) ---
 
-    private func summarize(_ s: [String: Any]) {
-        let batches = s["batches"] as? [[String: Any]] ?? []
-        var q = 0, human = 0, running: [String: Int] = [:]
-        var pj: [String: (run: Int, q: Int, total: Int)] = [:]
-        for name in s["profiles"] as? [String] ?? [] { pj[name] = (0, 0, 0) }
-        for b in batches {
-            let host = b["host"] as? String ?? "?"
-            let proj = b["project"] as? String ?? "?"
-            var cur = pj[proj] ?? (0, 0, 0)
-            for t in b["tasks"] as? [[String: Any]] ?? [] {
-                cur.total += 1
-                if let e = t["escalation"] as? [String: Any], (e["status"] as? String) == "open" { human += 1 }
-                if let p = t["pending"] as? [String: Any] {
-                    let n = ((p["questions"] as? [Any])?.count ?? 0) + ((p["approvals"] as? Int) ?? 0)
-                    q += n; cur.q += n
-                }
-                if (t["status"] as? String) == "launched", (t["done"] as? Bool) == false { running[host, default: 0] += 1; cur.run += 1 }
-            }
-            pj[proj] = cur
+    func runAction(_ type: String, _ payload: [String: Any]) async -> [String: Any] {
+        guard let action = AgentAction.route(type: type, payload: payload) else {
+            return ActionResult(ok: false, message: "acción no válida: \(type)").bridgeObject
         }
-        runningNow = running
-        projects = pj.map { ProjectInfo(name: $0.key, running: $0.value.run, questions: $0.value.q, total: $0.value.total) }
-            .sorted { ($0.running + $0.questions > 0 ? 0 : 1, $0.name) < ($1.running + $1.questions > 0 ? 0 : 1, $1.name) }
-        let w = (s["inbox"] as? [String: Any])?["watcher"] as? [String: Any]
-        if let w, let epoch = w["epoch"] as? Double {
-            watcher = (w["alive"] as? Bool) == true ? .alive(Date(timeIntervalSince1970: epoch)) : .stale(Date(timeIntervalSince1970: epoch))
-        } else { watcher = .none }
-        counts = [.questions: q, .reactions: human, .batches: batches.count, .events: (s["events"] as? [Any])?.count ?? 0]
+        guard let client = hub.client(named: payload["agent"] as? String) else {
+            return ActionResult(ok: false, message: "no sé a qué agente enviar la acción (hay varios y no se indicó cuál)").bridgeObject
+        }
+        let r = await client.perform(action)
+        return r.bridgeObject
     }
 
     // --- puente JSON {type, payload, id} ---
     func push(_ type: String, _ payload: [String: Any], id: Int? = nil) {
         var msg: [String: Any] = ["type": type, "payload": payload]
         if let id { msg["id"] = id }
-        guard let data = try? JSONSerialization.data(withJSONObject: msg), let js = String(data: data, encoding: .utf8) else { return }
+        guard JSONSerialization.isValidJSONObject(msg), let data = try? JSONSerialization.data(withJSONObject: msg), let js = String(data: data, encoding: .utf8) else { return }
         web?.evaluateJavaScript("window.chopshop && window.chopshop.receive(\(js))", completionHandler: nil)
     }
+
+    private static let actionTypes: Set<String> = ["answer", "settle", "leaseRequest", "leaseRelease", "leaseTouch", "sweep"]
 
     func handle(_ body: [String: Any]) {
         let type = body["type"] as? String ?? ""
         let payload = body["payload"] as? [String: Any] ?? [:]
         let id = body["id"] as? Int
         switch type {
-        case "ready", "refresh":
-            Task { await refresh(); pushSelection(); pushMetrics() }
+        case "ready":
+            pushSelection()
+            pushAgents()      // sin resultados todavía no envía nada: el sondeo en curso los entrega al terminar
+        case "refresh":
+            Task { await refresh() }
         case "navigate":
             if let v = payload["view"] as? String, let s = Section(rawValue: v) {
                 let p = (payload["project"] as? String).flatMap { $0.isEmpty ? nil : $0 }
@@ -321,14 +185,12 @@ final class AppModel: ObservableObject {
                 else { nav = s == .machines ? .machines : .section(s) }
             }
         case "openLink":
-            if let u = payload["url"] as? String, let url = URL(string: u) { NSWorkspace.shared.open(url) }
-        case "answer":
-            let task = payload["task"] as? String ?? ""
-            let choice = payload["choice"] as? String ?? ""
-            let req = payload["request"] as? String
+            if let u = payload["url"] as? String, let url = URL(string: u), ["http", "https"].contains(url.scheme?.lowercased() ?? "") { NSWorkspace.shared.open(url) }
+        case _ where Self.actionTypes.contains(type):
             Task {
-                let r = await answer(task: task, choice: choice, request: req, by: payload["by"] as? String)
-                push("answerResult", r, id: id)
+                let r = await runAction(type, payload)
+                push("actionResult", r, id: id)
+                if (r["ok"] as? Bool) == true { await refresh() }
             }
         default:
             push("error", ["message": "mensaje desconocido: \(type)"])

@@ -17,12 +17,12 @@ struct RootView: View {
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button {
-                        Task { await model.refresh(); await model.refreshMetrics() }
+                        Task { await model.refresh() }
                     } label: {
                         Label("Actualizar", systemImage: "arrow.triangle.2.circlepath")
                     }
                     .keyboardShortcut("r", modifiers: .command)
-                    .help("Vuelve a leer el estado local (⌘R). El estado de T3 lo refresca `chopshop watch`.")
+                    .help("Vuelve a consultar a los agentes ahora (⌘R). Se actualiza solo cada pocos segundos.")
                 }
             }
         }
@@ -37,7 +37,7 @@ struct RootView: View {
     private var subtitle: String {
         if let e = model.lastError { return "⚠︎ " + e.prefix(60) }
         guard let d = model.lastUpdate else { return "cargando…" }
-        let f = DateFormatter(); f.dateFormat = "HH:mm:ss"; f.timeZone = TimeZone(identifier: "America/Mexico_City")
+        let f = DateFormatter(); f.dateFormat = "HH:mm:ss"
         return "actualizado " + f.string(from: d)
     }
 }
@@ -134,7 +134,7 @@ struct Sidebar: View {
                 }
             }
             .padding(.vertical, 6)
-            .selectionDisabled()
+            .noSelection()
 
             ForEach(Section.views) { s in
                 Label(s.title, systemImage: s.symbol)
@@ -144,29 +144,30 @@ struct Sidebar: View {
 
             SwiftUI.Section(header: header("Proyectos")) {
                 if model.projects.isEmpty {
-                    Text("sin proyectos").font(.callout).foregroundStyle(.secondary).selectionDisabled()
+                    Text("sin proyectos").font(.callout).foregroundStyle(.secondary).noSelection()
                 }
                 ForEach(model.projects) { p in ProjectRow(p: p).tag(NavItem.project(p.name)) }
             }
 
             SwiftUI.Section(header: header("Máquinas")) {
+                if model.machines.isEmpty {
+                    Text("sin máquinas").font(.callout).foregroundStyle(.secondary).noSelection()
+                }
                 ForEach(model.machines) { m in MachineRow(m: m).tag(NavItem.machine(m.name)) }
             }
         }
         .listStyle(.sidebar)
         .safeAreaInset(edge: .bottom) {
-            GlassEffectContainer(spacing: 8) {
+            StatusCapsule {
                 HStack(spacing: 8) {
-                    PulseDot(color: dot, live: model.lastError == nil && isAlive)
-                    Text(model.lastError == nil ? model.watcher.label : "error")
+                    PulseDot(color: dot, live: model.link.isLive)
+                    Text(model.link.label)
                         .font(.caption.weight(.medium))
-                        .help("`chopshop watch` es el proceso que consulta a T3 y envía las respuestas en cola")
+                        .help("Estado de la conexión con los agentes de Chopshop (API por Tailscale). Se configuran en la sección [app] de ~/.config/chopshop/config.toml")
                     Spacer()
-                    Text("v0.5")
+                    Text("v0.6")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                .padding(.horizontal, 14).padding(.vertical, 9)
-                .glassEffect(.regular, in: .capsule)
             }
             .padding(12)
         }
@@ -177,13 +178,12 @@ extension Sidebar {
     func header(_ t: String) -> some View {
         Text(t.uppercased()).font(.caption2.weight(.semibold)).tracking(0.8).foregroundStyle(.primary.opacity(0.6))
     }
-    var isAlive: Bool { if case .alive = model.watcher { return true }; return false }
     var dot: Color {
-        if model.lastError != nil { return .red }
-        switch model.watcher {
-        case .alive: return .green
-        case .stale: return .orange
-        default: return .gray
+        switch model.link {
+        case .ok: return .green
+        case .partial, .unconfigured: return .orange
+        case .down: return .red
+        case .connecting: return .gray
         }
     }
 }
@@ -269,7 +269,6 @@ struct MachineRow: View {
             if m.ok {
                 metric("CPU", m.cpu, "\(m.cpuNow)%", hot ? .orange : .primary)
                 metric("RAM", m.ram, "\(m.ramNow)%", .primary)
-                if m.stale { Text("dato de hace un rato").font(.caption2).foregroundStyle(.orange) }
             } else {
                 Text("sin datos").font(.caption).foregroundStyle(.secondary)
                     .help(m.reason ?? "")
@@ -284,5 +283,44 @@ struct MachineRow: View {
             Spark(values: v, color: c.opacity(0.85)).frame(height: 14)
             Text(t).font(.caption2.monospacedDigit().weight(.medium)).frame(width: 34, alignment: .trailing)
         }
+    }
+}
+
+extension LinkState {
+    /// Con al menos un agente respondiendo, el punto de estado late.
+    var isLive: Bool {
+        switch self {
+        case .ok, .partial: return true
+        default: return false
+        }
+    }
+}
+
+// MARK: - Compatibilidad con macOS 13+
+
+extension View {
+    /// `selectionDisabled` existe desde macOS 14; en macOS 13 la fila queda seleccionable y no pasa nada más.
+    @ViewBuilder func noSelection() -> some View {
+        if #available(macOS 14.0, *) { self.selectionDisabled() } else { self }
+    }
+}
+
+/// Píldora de estado: vidrio líquido en macOS 26+ (compilando con el SDK de Xcode 26) y material translúcido en el resto.
+struct StatusCapsule<Content: View>: View {
+    private let content: Content
+
+    init(@ViewBuilder content: () -> Content) { self.content = content() }
+
+    var body: some View {
+        let inner = content.padding(.horizontal, 14).padding(.vertical, 9)
+        #if compiler(>=6.2)
+        if #available(macOS 26.0, *) {
+            GlassEffectContainer(spacing: 8) { inner.glassEffect(.regular, in: .capsule) }
+        } else {
+            inner.background(.ultraThinMaterial, in: Capsule())
+        }
+        #else
+        inner.background(.ultraThinMaterial, in: Capsule())
+        #endif
     }
 }
