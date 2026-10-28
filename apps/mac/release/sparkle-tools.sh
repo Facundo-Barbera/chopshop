@@ -8,7 +8,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 # shellcheck source=sparkle.version
 source "${SPARKLE_VERSION_FILE:-$RELEASE_SCRIPTS/sparkle.version}"  # SPARKLE_VERSION_FILE: solo para pruebas
 
-[ "${1:-}" = install ] && [ -n "${2:-}" ] || die "uso: sparkle-tools.sh install <dir>"
+if [ "${1:-}" != install ] || [ -z "${2:-}" ]; then die "uso: sparkle-tools.sh install <dir>"; fi
 DEST="$2"
 mkdir -p "$DEST"
 TARBALL="$DEST/Sparkle-$SPARKLE_VERSION.tar.xz"

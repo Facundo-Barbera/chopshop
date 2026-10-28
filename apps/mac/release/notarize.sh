@@ -10,7 +10,7 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
 APP="${1:-}"; ZIP="${2:-}"
-[ -d "$APP/Contents" ] && [ -n "$ZIP" ] || die "uso: notarize.sh <Chopshop.app> <zip_para_enviar>"
+if [ ! -d "$APP/Contents" ] || [ -z "$ZIP" ]; then die "uso: notarize.sh <Chopshop.app> <zip_para_enviar>"; fi
 require_env ASC_API_KEY_P8_BASE64 ASC_API_KEY_ID ASC_API_ISSUER_ID
 TMP="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
 KEY="$TMP/chopshop-notary-$$.p8"

@@ -7,7 +7,7 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
 APP="${1:-}"; ZIP="${2:-}"
-[ -d "$APP/Contents" ] && [ -n "$ZIP" ] || die "uso: package.sh <Chopshop.app> <zip_salida>"
+if [ ! -d "$APP/Contents" ] || [ -z "$ZIP" ]; then die "uso: package.sh <Chopshop.app> <zip_salida>"; fi
 mkdir -p "$(dirname "$ZIP")"
 rm -f "$ZIP"
 ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
