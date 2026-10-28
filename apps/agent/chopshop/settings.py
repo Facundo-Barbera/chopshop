@@ -33,10 +33,18 @@ DEFAULTS = {
     },
     "agent": {
         "machine_id": "",              # vacío = hostname
-        "bind": "auto",                # "auto" = IP de Tailscale (nunca 0.0.0.0)
+        "bind": "127.0.0.1",           # IP de escucha: "auto" = IP de Tailscale, o una IP concreta (nunca 0.0.0.0 / ::)
         "port": 3790,
-        "owner_login": "",             # identidad Tailscale con permiso total, p. ej. "usuario@" (vacío = solo origen local)
-        "allowed_logins": [],
+        "auth": "tailscale+token",     # "tailscale+token" | "token" | "none-local" (ver docs/agent-service.md)
+        "trust_local": True,           # aceptar el origen local (MCP/CLI) sin identidad ni bearer
+        "local_listener": True,        # si bind no es loopback, escuchar además en 127.0.0.1:<port> para MCP/CLI locales
+        "tailscale_bin": "tailscale",  # CLI de Tailscale (whois / ip)
+        "owner_login": "",             # login Tailscale completo con permiso total (vacío = solo origen local)
+        "allowed_logins": [],          # logins con acceso de solo lectura
+        "allow_request_cmd": False,    # permitir que POST /leases/request traiga su propio `cmd` (por defecto solo el de la config)
+        "t3_enabled": True,            # vigilar T3 (false = máquina solo sensor)
+        "import_legacy": True,         # al arrancar, importar <home>/events.jsonl del motor viejo si existe
+        "service": {"read_write_paths": []},   # rutas extra de escritura para la unidad systemd (ProtectSystem=strict)
         "token_file": "~/.chopshop/agent/token",
         "db_path": "~/.chopshop/agent/agent.db",
         "sample_interval": 10,
@@ -50,7 +58,7 @@ DEFAULTS = {
                      "default_idle_seconds": 900, "queue_ttl_seconds": 1800},
         "sweep": {"interval": 60, "agent_scopes": "report", "grace_seconds": 120, "agent_cgroup": ""},
         "webhook_files": {},           # nombre -> ruta a un archivo (0600) con la URL
-        "retention": {"raw_hours": 24, "m1_days": 30, "h1_days": 365},
+        "retention": {"raw_hours": 24, "m1_days": 30, "h1_days": 365, "events_days": 90},
     },
 }
 

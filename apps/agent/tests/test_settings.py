@@ -178,8 +178,9 @@ class TestExampleConfig(unittest.TestCase):
 
 
 class TestRepoHasNoPersonalData(unittest.TestCase):
-    """Recorre agente, UI, paquetes, docs y ejemplos: nada de rutas de usuario, IPs reales, correos ni URLs de webhook."""
-    AREAS = ("apps/agent", "apps/ui", "apps/mac", "packages", "docs", "examples", "tools")
+    """Recorre agente, UI, app Mac, paquetes, docs, ejemplos, herramientas, unidades systemd y scripts (más README y config de ejemplo): nada de rutas de usuario, IPs reales, correos ni URLs de webhook."""
+    AREAS = ("apps/agent", "apps/ui", "apps/mac", "packages", "docs", "examples", "tools", "systemd", "scripts")
+    FILES = ("README.md", "config.example.toml")
     SKIP_DIRS = {"node_modules", "__pycache__", ".turbo", ".git", "dist"}
     SELF = os.path.abspath(__file__)
 
@@ -189,6 +190,7 @@ class TestRepoHasNoPersonalData(unittest.TestCase):
             for dirpath, dirs, names in os.walk(os.path.join(ROOT, area)):
                 dirs[:] = [d for d in dirs if d not in self.SKIP_DIRS]
                 files += [os.path.join(dirpath, n) for n in names if os.path.join(dirpath, n) != self.SELF]
+        files += [os.path.join(ROOT, n) for n in self.FILES if os.path.isfile(os.path.join(ROOT, n))]
         if not files:
             self.skipTest("fuera del monorepo")
         bad = []

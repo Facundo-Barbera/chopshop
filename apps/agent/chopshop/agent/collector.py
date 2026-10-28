@@ -577,9 +577,11 @@ class Collector(object):
 
     def latest(self):
         """Última muestra en memoria; tras un reinicio, la última guardada en la DB; vacía si no hay ninguna."""
-        with self._lock:
-            if self._latest is not None:
-                return self._latest
+        # Sin `self._lock`: Resources llama aquí con `db.tx()` tomado y `sample_once` toma `_lock` y luego `db.tx()`
+        # (inversión de orden = interbloqueo). Leer la referencia es atómico y `_latest` se reemplaza entera, no se muta.
+        snap = self._latest
+        if snap is not None:
+            return snap
         snap = self._latest_from_db()
         return snap if snap is not None else {"machine": {}, "apps": [], "projects": []}
 
