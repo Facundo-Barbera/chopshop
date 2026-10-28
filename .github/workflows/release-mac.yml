@@ -1,0 +1,323 @@
+name: Release Mac
+
+# Publica Chopshop.app firmada (Developer ID), notarizada y con auto-actualización (Sparkle) en Cloudflare R2.
+# Guía completa, lista de secrets/variables y rollback: docs/release.md
+#
+#   git tag v1.2.3 && git push origin v1.2.3        # release real (v1.2.3-beta.1 -> canal beta)
+#   Actions -> Release Mac -> Run workflow           # dry-run por defecto: build + firma ad-hoc, sin credenciales
+#
+# Seguridad:
+#  - Solo se dispara por tag o a mano; NO hay pull_request ni pull_request_target (los forks no ven secretos).
+#  - Una release real exige un tag vX.Y.Z alcanzable desde la rama de releases (RELEASE_BRANCH, por defecto main).
+#  - Los secretos viven en environments y solo en los jobs que los usan: release-signing (certificado y
+#    notarización) y release (clave de Sparkle y R2; ahí se puede exigir aprobación manual).
+#  - Acciones fijadas por SHA de commit (comentario = versión).
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry-run: compila y firma ad-hoc; no notariza ni publica. Desmarca solo ejecutando desde un tag vX.Y.Z"
+        type: boolean
+        default: true
+      draft_release:
+        description: "Crear la GitHub Release como borrador"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-mac-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      dry_run: ${{ steps.mode.outputs.dry_run }}
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.short_version }}
+      build_number: ${{ steps.version.outputs.build_number }}
+      channel: ${{ steps.version.outputs.channel }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Modo (release real o dry-run)
+        id: mode
+        env:
+          EVENT: ${{ github.event_name }}
+          DRY_INPUT: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "push" ]; then dry=false; else dry="$DRY_INPUT"; fi
+          echo "dry_run=$dry" >> "$GITHUB_OUTPUT"
+          echo "Modo: dry_run=$dry"
+
+      # Ancestría y no igualdad: se puede etiquetar un commit antiguo de la rama, pero no una rama sin revisar.
+      - name: El tag debe estar en la rama de releases
+        if: steps.mode.outputs.dry_run != 'true'
+        env:
+          RELEASE_BRANCH: ${{ vars.RELEASE_BRANCH || 'main' }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "$RELEASE_BRANCH"
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/$RELEASE_BRANCH"; then
+            echo "::error::${GITHUB_REF_NAME} (${GITHUB_SHA}) no es ancestro de origin/${RELEASE_BRANCH}: las releases salen de esa rama."
+            exit 1
+          fi
+
+      - name: Versión, canal y número de build
+        id: version
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          DRY_RUN: ${{ steps.mode.outputs.dry_run }}
+        run: |
+          set -euo pipefail
+          flag=()
+          if [ "$DRY_RUN" = "true" ]; then flag=(--dry-run); fi
+          bash apps/mac/release/version.sh --ref-type "$REF_TYPE" --ref-name "$REF_NAME" ${flag[@]+"${flag[@]}"}
+
+      - name: Variables requeridas
+        env:
+          PREFLIGHT_MODE: ${{ steps.mode.outputs.dry_run == 'true' && 'dryrun' || 'release' }}
+          BUNDLE_ID: ${{ vars.BUNDLE_ID }}
+          SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
+          SPARKLE_FEED_URL: ${{ vars.SPARKLE_FEED_URL }}
+          UPDATES_BASE_URL: ${{ vars.UPDATES_BASE_URL }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+          MIN_MACOS_VERSION: ${{ vars.MIN_MACOS_VERSION }}
+          SPARKLE_CHECK_INTERVAL: ${{ vars.SPARKLE_CHECK_INTERVAL }}
+          MAX_DELTAS: ${{ vars.MAX_DELTAS }}
+          MAX_VERSIONS: ${{ vars.MAX_VERSIONS }}
+          PHASED_ROLLOUT_INTERVAL: ${{ vars.PHASED_ROLLOUT_INTERVAL }}
+        run: bash apps/mac/release/preflight.sh vars
+
+  build:
+    name: Build, firma y notarización
+    needs: preflight
+    # runner fijado (no *-latest): las builds de release deben ser reproducibles entre ejecuciones
+    runs-on: macos-15
+    timeout-minutes: 75
+    # El dry-run usa un environment sin secretos ni reglas; la release real, el de firma
+    environment: ${{ needs.preflight.outputs.dry_run == 'true' && 'release-dryrun' || 'release-signing' }}
+    env:
+      DRY_RUN: ${{ needs.preflight.outputs.dry_run }}
+      VERSION: ${{ needs.preflight.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Seleccionar Xcode
+        env:
+          XCODE_VERSION: ${{ vars.XCODE_VERSION }}
+        run: |
+          set -euo pipefail
+          if [ -n "${XCODE_VERSION:-}" ]; then
+            dir="/Applications/Xcode_${XCODE_VERSION}.app"
+            if [ ! -d "$dir" ]; then echo "::error::Xcode ${XCODE_VERSION} no existe en el runner (se busca /Applications/Xcode_<versión>.app)"; exit 1; fi
+            sudo xcode-select -s "$dir/Contents/Developer"
+          fi
+          xcodebuild -version
+          swift --version
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          run_install: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      - name: Construir la UI (pnpm)
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          pnpm --filter @chopshop/ui run build
+          test -f apps/mac/Resources/web/index.html
+          test -f apps/mac/Resources/web/app.js
+
+      - name: Secrets de firma y notarización
+        if: env.DRY_RUN != 'true'
+        env:
+          PREFLIGHT_MODE: release
+          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: bash apps/mac/release/preflight.sh sign
+
+      - name: Keychain temporal con el certificado Developer ID
+        if: env.DRY_RUN != 'true'
+        env:
+          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+        run: bash apps/mac/release/keychain.sh setup
+
+      - name: Ensamblar Chopshop.app (con Sparkle)
+        env:
+          SHORT_VERSION: ${{ needs.preflight.outputs.version }}
+          BUILD_NUMBER: ${{ needs.preflight.outputs.build_number }}
+          RELEASE_MODE: ${{ env.DRY_RUN == 'true' && 'dryrun' || 'release' }}
+          BUNDLE_ID: ${{ vars.BUNDLE_ID || 'com.example.chopshop' }}
+          MIN_MACOS_VERSION: ${{ vars.MIN_MACOS_VERSION || '13.0' }}
+          SPARKLE_FEED_URL: ${{ vars.SPARKLE_FEED_URL }}
+          SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
+          SPARKLE_AUTO_UPDATE: ${{ vars.SPARKLE_AUTO_UPDATE || 'false' }}
+          SPARKLE_CHECK_INTERVAL: ${{ vars.SPARKLE_CHECK_INTERVAL || '86400' }}
+          UNIVERSAL: ${{ vars.UNIVERSAL_BINARY || '1' }}
+          APP_OUT: ${{ runner.temp }}/out/Chopshop.app
+        run: bash apps/mac/release/assemble-app.sh
+
+      - name: Firmar (hardened runtime, de dentro hacia fuera)
+        env:
+          # En dry-run no hay certificado: firma ad-hoc ("-"). En release, SIGN_IDENTITY lo exportó keychain.sh.
+          SIGN_IDENTITY: ${{ env.DRY_RUN == 'true' && '-' || env.SIGN_IDENTITY }}
+        run: bash apps/mac/release/sign-app.sh "$RUNNER_TEMP/out/Chopshop.app"
+
+      - name: Notarizar, grapar y verificar
+        if: env.DRY_RUN != 'true'
+        env:
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: bash apps/mac/release/notarize.sh "$RUNNER_TEMP/out/Chopshop.app" "$RUNNER_TEMP/notarize-submit.zip"
+
+      # El zip FINAL se crea DESPUÉS de grapar el ticket
+      - name: Zip final y checksum
+        id: pack
+        env:
+          REQUIRE_STAPLE: ${{ env.DRY_RUN == 'true' && '0' || '1' }}
+        run: bash apps/mac/release/package.sh "$RUNNER_TEMP/out/Chopshop.app" "$RUNNER_TEMP/dist/Chopshop-${VERSION}.zip"
+
+      - name: Subir el zip como artefacto del run
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: chopshop-mac-${{ needs.preflight.outputs.version }}
+          path: |
+            ${{ runner.temp }}/dist/Chopshop-${{ needs.preflight.outputs.version }}.zip
+            ${{ runner.temp }}/dist/Chopshop-${{ needs.preflight.outputs.version }}.zip.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: ${{ env.DRY_RUN == 'true' && 3 || 30 }}
+
+      # Siempre, falle o no el job: borra keychain y credenciales temporales
+      - name: Limpiar keychain y credenciales
+        if: always()
+        run: bash apps/mac/release/keychain.sh cleanup
+
+  publish:
+    name: Publicar en R2 y GitHub Release
+    needs: [preflight, build]
+    if: needs.preflight.outputs.dry_run != 'true'
+    runs-on: macos-15
+    timeout-minutes: 45
+    # Aquí se puede exigir aprobación manual (Settings -> Environments -> release -> Required reviewers)
+    environment: release
+    permissions:
+      contents: write # crear la GitHub Release
+    # Un solo publicador a la vez (compartido con rollback-mac): dos releases no pisan el appcast
+    concurrency:
+      group: mac-updates-feed
+      cancel-in-progress: false
+    env:
+      TAG: ${{ needs.preflight.outputs.tag }}
+      VERSION: ${{ needs.preflight.outputs.version }}
+      BUILD_NUMBER: ${{ needs.preflight.outputs.build_number }}
+      CHANNEL: ${{ needs.preflight.outputs.channel }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true # notas: el mensaje del tag anotado y el tag anterior
+          persist-credentials: false
+
+      - name: Secrets de publicación
+        env:
+          PREFLIGHT_MODE: release
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+          UPDATES_BASE_URL: ${{ vars.UPDATES_BASE_URL }}
+          SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
+        run: bash apps/mac/release/preflight.sh publish
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: chopshop-mac-${{ needs.preflight.outputs.version }}
+          path: ${{ runner.temp }}/dl
+
+      - name: Comprobar el zip descargado (checksum y firma de Apple)
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/dl"
+          shasum -a 256 -c "Chopshop-${VERSION}.zip.sha256"
+          check="$(mktemp -d)"
+          ditto -x -k "Chopshop-${VERSION}.zip" "$check"
+          codesign --verify --deep --strict --verbose=2 "$check/Chopshop.app"
+          xcrun stapler validate "$check/Chopshop.app"
+          spctl --assess --type execute -vv "$check/Chopshop.app" 2>&1 | sed 's/^origin=.*/origin=<oculto>/'
+          rm -rf "$check"
+
+      - name: Instalar herramientas de Sparkle (versión y checksum fijados)
+        run: bash apps/mac/release/sparkle-tools.sh install "$RUNNER_TEMP/sparkle"
+
+      - name: Asegurar aws CLI
+        run: |
+          set -euo pipefail
+          if ! command -v aws >/dev/null 2>&1; then brew install awscli; fi
+          aws --version
+
+      - name: Publicar (zips, deltas y notas primero; appcast al final)
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+          R2_PREFIX: ${{ vars.R2_PREFIX }}
+          UPDATES_BASE_URL: ${{ vars.UPDATES_BASE_URL }}
+          SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
+          SPARKLE_SIGNING_PUBLIC_ED_KEY: ${{ vars.SPARKLE_SIGNING_PUBLIC_ED_KEY }}
+          MIN_MACOS_VERSION: ${{ vars.MIN_MACOS_VERSION || '13.0' }}
+          MAX_DELTAS: ${{ vars.MAX_DELTAS || '3' }}
+          MAX_VERSIONS: ${{ vars.MAX_VERSIONS || '5' }}
+          DELTA_COMPRESSION: ${{ vars.DELTA_COMPRESSION || 'lzma' }}
+          PHASED_ROLLOUT_INTERVAL: ${{ vars.PHASED_ROLLOUT_INTERVAL }}
+          FULL_RELEASE_NOTES_URL: ${{ vars.FULL_RELEASE_NOTES_URL }}
+          NOTES_MD_OUT: ${{ runner.temp }}/release-notes.md
+        run: bash apps/mac/release/publish.sh "$RUNNER_TEMP/dl/Chopshop-${VERSION}.zip"
+
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRAFT: ${{ inputs.draft_release }}
+        run: |
+          set -euo pipefail
+          zip="$RUNNER_TEMP/dl/Chopshop-${VERSION}.zip"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$zip" "$zip.sha256" --clobber
+          else
+            flags=()
+            if [ -n "$CHANNEL" ]; then flags+=(--prerelease); fi
+            if [ "${DRAFT:-false}" = "true" ]; then flags+=(--draft); fi
+            gh release create "$TAG" "$zip" "$zip.sha256" --verify-tag --title "Chopshop ${VERSION}" \
+              --notes-file "$RUNNER_TEMP/release-notes.md" ${flags[@]+"${flags[@]}"}
+          fi

@@ -179,9 +179,9 @@ class TestExampleConfig(unittest.TestCase):
 
 class TestRepoHasNoPersonalData(unittest.TestCase):
     """Recorre agente, UI, app Mac, paquetes, docs, ejemplos, herramientas, unidades systemd y scripts (más README y config de ejemplo): nada de rutas de usuario, IPs reales, correos ni URLs de webhook."""
-    AREAS = ("apps/agent", "apps/ui", "apps/mac", "packages", "docs", "examples", "tools", "systemd", "scripts")
+    AREAS = ("apps/agent", "apps/ui", "apps/mac", "packages", "docs", "examples", "tools", "systemd", "scripts", ".github")
     FILES = ("README.md", "config.example.toml")
-    SKIP_DIRS = {"node_modules", "__pycache__", ".turbo", ".git", "dist"}
+    SKIP_DIRS = {"node_modules", "__pycache__", ".turbo", ".git", "dist", ".build"}
     SELF = os.path.abspath(__file__)
 
     def test_scan(self):

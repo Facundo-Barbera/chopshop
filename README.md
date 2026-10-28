@@ -187,6 +187,8 @@ pnpm app              # construye la UI y apps/mac/dist/Chopshop.app (firma ad-h
 
 Guía completa (requisitos, token, primera apertura y solución de problemas): [`docs/mac-build.md`](docs/mac-build.md).
 
+Release firmada, notarizada y con auto-actualización (Sparkle + Cloudflare R2): [`docs/release.md`](docs/release.md).
+
 ### Conexión con los agentes
 
 La app lee la sección `[app]` de `~/.config/chopshop/config.toml` (plantilla: [`config.example.toml`](config.example.toml)):

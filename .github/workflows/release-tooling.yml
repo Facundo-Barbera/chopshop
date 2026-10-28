@@ -1,0 +1,54 @@
+name: Release tooling
+
+# Valida el pipeline de release SIN credenciales: tests de los scripts, shellcheck y actionlint.
+# No construye ni publica nada (eso es release-mac.yml).
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/**"
+      - "apps/mac/release/**"
+      - "apps/mac/Package.swift"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/**"
+      - "apps/mac/release/**"
+      - "apps/mac/Package.swift"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-tooling-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: PyYAML (para validar la estructura de los workflows)
+        run: sudo apt-get install -y --no-install-recommends python3-yaml
+
+      - name: Tests de los scripts de release
+        run: python3 -m unittest discover -s apps/mac/release/tests -v
+
+      - name: shellcheck
+        run: shellcheck -x -P SCRIPTDIR -s bash apps/mac/release/*.sh
+
+      - name: actionlint (versión y checksum fijados)
+        env:
+          ACTIONLINT_VERSION: "1.7.12"
+          ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+        run: |
+          set -euo pipefail
+          dir="$(mktemp -d)"
+          curl --fail --silent --show-error --location --retry 3 --output "$dir/al.tar.gz" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  $dir/al.tar.gz" | sha256sum -c -
+          tar -xzf "$dir/al.tar.gz" -C "$dir" actionlint
+          "$dir/actionlint" .github/workflows/*.yml
