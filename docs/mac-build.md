@@ -33,7 +33,7 @@ Variables opcionales de `build.sh`: `CHOPSHOP_APP=/otra/ruta/Chopshop.app` (sali
 
 ## Configurar la conexión
 
-La app lee `~/.config/chopshop/config.toml` (o la ruta de `CHOPSHOP_CONFIG`; con `XDG_CONFIG_HOME` definido, `$XDG_CONFIG_HOME/chopshop/config.toml`). Parte de la plantilla del repo:
+La app lee `~/.config/chopshop/config.toml` (o la ruta de `CHOPSHOP_CONFIG`; con `XDG_CONFIG_HOME` definido, `$XDG_CONFIG_HOME/chopshop/config.toml`). También puedes configurar un agente desde la propia app: **Ajustes… (⌘,)**, que se abre sola si no hay ninguno configurado, pide `agent_url` y `token_file` (ruta, nunca el token), escribe solo esas dos claves de `[app]` (conserva el resto del archivo y los comentarios, permisos 600) y recarga los agentes sin reiniciar. Para editarlo a mano, parte de la plantilla del repo:
 
 ```sh
 mkdir -p ~/.config/chopshop
