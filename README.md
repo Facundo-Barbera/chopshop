@@ -227,7 +227,7 @@ Para regenerarlas con datos de ejemplo, ver [`docs/screenshots.md`](docs/screens
 
 ## Agente headless por máquina
 
-`apps/agent/chopshop/agent` es el servicio (v0.6, en desarrollo) que corre sin interfaz en cada máquina: mide CPU/RAM/disco por app y proyecto, guarda el historial en SQLite, vigila los hilos de T3 y expone una API HTTP por Tailscale. La app pasa a ser un cliente puro. Diseño en [`docs/agent-architecture.md`](docs/agent-architecture.md) y contrato en [`docs/agent-api.md`](docs/agent-api.md). Su configuración vive en la sección `[agent]` del `config.toml`.
+`apps/agent/chopshop/agent` es el servicio (v0.6, en desarrollo) que corre sin interfaz en cada máquina: mide CPU/RAM/disco por app y proyecto, guarda el historial en SQLite, vigila los hilos de T3 y expone una API HTTP por Tailscale. La app pasa a ser un cliente puro. Diseño en [`docs/agent-architecture.md`](docs/agent-architecture.md) contrato en [`docs/agent-api.md`](docs/agent-api.md) e instalación como servicio `systemd --user` en [`docs/agent-service.md`](docs/agent-service.md). Su configuración vive en la sección `[agent]` del `config.toml`.
 
 ## Tests
 
