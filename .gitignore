@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.chopshop/
+*.url
+*.env
+apps/mac/.build/
+apps/mac/build/
+node_modules/
+pnpm-debug.log
+node_modules/
+.turbo/
+
+# Config local con datos reales: nunca al repo (la plantilla es config.example.toml)
+config.toml

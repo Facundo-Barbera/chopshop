@@ -1,0 +1,30 @@
+# Bugs FALSOS del repo dummy (solo texto; nadie toca código). Los campos opcionales simulan situaciones del grafo:
+#   needs: el bug exige otro arreglado antes (el triage lo convierte en dependencia)
+#   hint: split -> el bug es enorme y el hilo debe dividirlo en 2 hijos
+#   ask / options -> el hilo debe preguntar antes de decidir (despierta al nivel bot o humano según las reglas del perfil)
+goal: resuelve todos los bugs del dummy
+bugs:
+  - id: BUG-1
+    title: El subtotal del carrito pierde un centavo al redondear
+    text: "Con 3 artículos de 0.335 el subtotal sale 1.00 en vez de 1.01."
+  - id: BUG-2
+    title: El login tarda más de 30 s con usuarios sin correo
+    text: "La búsqueda por correo vacío recorre toda la tabla."
+  - id: BUG-3
+    title: El reporte CSV rompe con acentos
+    text: "Requiere que BUG-1 esté arreglado primero, porque reutiliza su función de formato de números."
+    needs: BUG-1
+  - id: BUG-4
+    title: Migrar todo el esquema de pedidos a la v2
+    text: "Es enorme: toca 14 tablas y 3 servicios; no cabe en un solo paso."
+    hint: split
+  - id: BUG-5
+    title: La caché de precios devuelve datos viejos
+    text: "Hay dos formas de arreglarlo y hace falta criterio."
+    ask: "Which approach should we take for the stale price cache?"
+    options: [Keep it simple, Rewrite with a cache layer]
+  - id: BUG-6
+    title: La rama old-feature quedó rota y estorba en main
+    text: "La limpieza sería irreversible."
+    ask: "May I force-push to main and delete the remote branch old-feature?"
+    options: [Yes push and delete, No do nothing]

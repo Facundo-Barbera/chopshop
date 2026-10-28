@@ -1,0 +1,17 @@
+{
+  "name": "@chopshop/ui",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "build": "esbuild src/main.jsx --bundle --minify --format=iife --jsx=automatic --target=safari18 --outfile=../mac/Resources/web/app.js && cp src/index.html src/app.css ../mac/Resources/web/",
+    "check": "node --check src/bridge.js"
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "@chopshop/api": "workspace:*"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.0"
+  }
+}

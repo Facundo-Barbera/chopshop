@@ -1,0 +1,15 @@
+{
+  "name": "chopshop",
+  "private": true,
+  "version": "0.6.0",
+  "packageManager": "pnpm@12.16.1",
+  "scripts": {
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "check": "turbo run check",
+    "app": "turbo run app"
+  },
+  "devDependencies": {
+    "turbo": "^2.11.10"
+  }
+}

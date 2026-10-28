@@ -1,0 +1,10 @@
+{
+  "name": "@chopshop/agent",
+  "private": true,
+  "version": "0.6.0",
+  "description": "Servicio Python (solo stdlib): CLI, motor y chopshop-agent. Los scripts de turbo envuelven python3.",
+  "scripts": {
+    "test": "python3 -m unittest discover -s tests",
+    "check": "python3 -m compileall -q chopshop tools"
+  }
+}

@@ -1,0 +1,288 @@
+import SwiftUI
+
+struct RootView: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        NavigationSplitView {
+            Sidebar()
+                .navigationSplitViewColumnWidth(min: 220, ideal: 248, max: 300)
+        } detail: {
+            ZStack {
+                GlassBackdrop()
+                WebView()
+            }
+            .navigationTitle(title)
+            .navigationSubtitle(subtitle)
+            .toolbar {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button {
+                        Task { await model.refresh(); await model.refreshMetrics() }
+                    } label: {
+                        Label("Actualizar", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    .keyboardShortcut("r", modifiers: .command)
+                    .help("Vuelve a leer el estado local (⌘R). El estado de T3 lo refresca `chopshop watch`.")
+                }
+            }
+        }
+        .background(WindowGlass())
+    }
+
+    private var title: String {
+        if model.selection == .project, let p = model.project { return p }
+        return model.selection == .overview ? "Chopshop" : model.selection.title
+    }
+
+    private var subtitle: String {
+        if let e = model.lastError { return "⚠︎ " + e.prefix(60) }
+        guard let d = model.lastUpdate else { return "cargando…" }
+        let f = DateFormatter(); f.dateFormat = "HH:mm:ss"; f.timeZone = TimeZone(identifier: "America/Mexico_City")
+        return "actualizado " + f.string(from: d)
+    }
+}
+
+/// Hace que la ventana deje pasar el escritorio (vidrio de verdad); el relleno lo pone `GlassBackdrop`.
+struct WindowGlass: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let v = NSView()
+        DispatchQueue.main.async {
+            guard let w = v.window else { return }
+            w.isOpaque = false
+            w.backgroundColor = .clear
+        }
+        return v
+    }
+    func updateNSView(_ v: NSView, context: Context) {}
+}
+
+/// Fondo neutro: grafito translúcido sobre material del sistema. Sin color propio; el acento vive en los controles.
+struct GlassBackdrop: View {
+    var body: some View {
+        ZStack {
+            VisualEffect(material: .underWindowBackground)
+            LinearGradient(colors: [Color(white: 0.17).opacity(0.72), Color(white: 0.09).opacity(0.80)], startPoint: .top, endPoint: .bottom)
+            RadialGradient(colors: [Color.white.opacity(0.07), .clear], center: .topLeading, startRadius: 0, endRadius: 620)
+        }
+        .ignoresSafeArea()
+    }
+}
+
+struct VisualEffect: NSViewRepresentable {
+    let material: NSVisualEffectView.Material
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let v = NSVisualEffectView()
+        v.material = material
+        v.blendingMode = .behindWindow
+        v.state = .active
+        return v
+    }
+    func updateNSView(_ v: NSVisualEffectView, context: Context) { v.material = material }
+}
+
+// MARK: - Logo
+
+/// «Bloque cortado»: un cuadrado de grafito partido en dos mitades desplazadas por un tajo en diagonal.
+struct ChopLogo: View {
+    var size: CGFloat = 30
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: size * 0.26, style: .continuous)
+                .fill(LinearGradient(colors: [Color(white: 0.34), Color(white: 0.13)], startPoint: .top, endPoint: .bottom))
+            RoundedRectangle(cornerRadius: size * 0.26, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.22), lineWidth: 0.8)
+            ChopMark().fill(Color.white.opacity(0.94)).padding(size * 0.2)
+        }
+        .frame(width: size, height: size)
+        .shadow(color: .black.opacity(0.35), radius: size * 0.12, y: size * 0.05)
+    }
+}
+
+struct ChopMark: Shape {
+    func path(in r: CGRect) -> Path {
+        let w = r.width, h = r.height, x = r.minX, y = r.minY
+        let gap = w * 0.09
+        var p = Path()
+        // mitad superior-izquierda
+        p.move(to: CGPoint(x: x, y: y + h * 0.05))
+        p.addLine(to: CGPoint(x: x + w * 0.62 - gap, y: y + h * 0.05))
+        p.addLine(to: CGPoint(x: x + w * 0.30 - gap, y: y + h * 0.95))
+        p.addLine(to: CGPoint(x: x, y: y + h * 0.95))
+        p.closeSubpath()
+        // mitad inferior-derecha, desplazada
+        p.move(to: CGPoint(x: x + w * 0.72 + gap, y: y + h * 0.05))
+        p.addLine(to: CGPoint(x: x + w, y: y + h * 0.05))
+        p.addLine(to: CGPoint(x: x + w, y: y + h * 0.95))
+        p.addLine(to: CGPoint(x: x + w * 0.40 + gap, y: y + h * 0.95))
+        p.closeSubpath()
+        return p
+    }
+}
+
+// MARK: - Sidebar
+
+struct Sidebar: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        List(selection: Binding<NavItem?>(get: { model.nav }, set: { if let n = $0 { model.nav = n } })) {
+            HStack(spacing: 10) {
+                ChopLogo(size: 32)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("Chopshop").font(.headline)
+                    Text("taller de hilos").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .padding(.vertical, 6)
+            .selectionDisabled()
+
+            ForEach(Section.views) { s in
+                Label(s.title, systemImage: s.symbol)
+                    .badge(s == .questions || s == .reactions ? (model.counts[s] ?? 0) : 0)
+                    .tag(NavItem.section(s))
+            }
+
+            SwiftUI.Section(header: header("Proyectos")) {
+                if model.projects.isEmpty {
+                    Text("sin proyectos").font(.callout).foregroundStyle(.secondary).selectionDisabled()
+                }
+                ForEach(model.projects) { p in ProjectRow(p: p).tag(NavItem.project(p.name)) }
+            }
+
+            SwiftUI.Section(header: header("Máquinas")) {
+                ForEach(model.machines) { m in MachineRow(m: m).tag(NavItem.machine(m.name)) }
+            }
+        }
+        .listStyle(.sidebar)
+        .safeAreaInset(edge: .bottom) {
+            GlassEffectContainer(spacing: 8) {
+                HStack(spacing: 8) {
+                    PulseDot(color: dot, live: model.lastError == nil && isAlive)
+                    Text(model.lastError == nil ? model.watcher.label : "error")
+                        .font(.caption.weight(.medium))
+                        .help("`chopshop watch` es el proceso que consulta a T3 y envía las respuestas en cola")
+                    Spacer()
+                    Text("v0.5")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 14).padding(.vertical, 9)
+                .glassEffect(.regular, in: .capsule)
+            }
+            .padding(12)
+        }
+    }
+}
+
+extension Sidebar {
+    func header(_ t: String) -> some View {
+        Text(t.uppercased()).font(.caption2.weight(.semibold)).tracking(0.8).foregroundStyle(.primary.opacity(0.6))
+    }
+    var isAlive: Bool { if case .alive = model.watcher { return true }; return false }
+    var dot: Color {
+        if model.lastError != nil { return .red }
+        switch model.watcher {
+        case .alive: return .green
+        case .stale: return .orange
+        default: return .gray
+        }
+    }
+}
+
+struct PulseDot: View {
+    var color: Color
+    var live: Bool
+    @State private var on = false
+    var body: some View {
+        ZStack {
+            if live {
+                Circle().fill(color.opacity(0.45)).frame(width: 8, height: 8)
+                    .scaleEffect(on ? 2.4 : 1).opacity(on ? 0 : 0.8)
+                    .animation(.easeOut(duration: 1.6).repeatForever(autoreverses: false), value: on)
+            }
+            Circle().fill(color).frame(width: 8, height: 8)
+        }
+        .frame(width: 14, height: 14)
+        .onAppear { on = true }
+    }
+}
+
+struct ProjectRow: View {
+    let p: ProjectInfo
+    var body: some View {
+        HStack(spacing: 8) {
+            if p.running > 0 { PulseDot(color: .green, live: true) }
+            else if p.questions > 0 { Circle().fill(.orange).frame(width: 7, height: 7).frame(width: 14) }
+            else { Circle().fill(.secondary.opacity(0.5)).frame(width: 6, height: 6).frame(width: 14) }
+            Text(p.name).font(.callout).lineLimit(1)
+            Spacer(minLength: 4)
+            if p.running + p.questions > 0 {
+                Text("\(p.running + p.questions)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 1)
+    }
+}
+
+struct Spark: View {
+    var values: [Double]
+    var color: Color
+    var fill = true
+    var body: some View {
+        Canvas { ctx, size in
+            guard values.count > 1 else { return }
+            let hi = max(100, values.max() ?? 100), lo = 0.0
+            let step = size.width / CGFloat(max(1, AppModel.historyLen - 1))
+            let x0 = size.width - step * CGFloat(values.count - 1)
+            func pt(_ i: Int) -> CGPoint {
+                CGPoint(x: x0 + step * CGFloat(i), y: size.height - CGFloat((values[i] - lo) / (hi - lo)) * (size.height - 2) - 1)
+            }
+            var line = Path()
+            line.move(to: pt(0))
+            for i in 1..<values.count { line.addLine(to: pt(i)) }
+            if fill {
+                var area = line
+                area.addLine(to: CGPoint(x: pt(values.count - 1).x, y: size.height))
+                area.addLine(to: CGPoint(x: pt(0).x, y: size.height))
+                area.closeSubpath()
+                ctx.fill(area, with: .linearGradient(Gradient(colors: [color.opacity(0.35), color.opacity(0)]), startPoint: .zero, endPoint: CGPoint(x: 0, y: size.height)))
+            }
+            ctx.stroke(line, with: .color(color), style: StrokeStyle(lineWidth: 1.3, lineJoin: .round))
+            let e = pt(values.count - 1)
+            ctx.fill(Path(ellipseIn: CGRect(x: e.x - 2, y: e.y - 2, width: 4, height: 4)), with: .color(color))
+        }
+    }
+}
+
+struct MachineRow: View {
+    let m: Machine
+    private var hot: Bool { m.cpuNow >= 100 }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: m.os == "Darwin" ? "macmini" : "server.rack").foregroundStyle(.secondary)
+                Text(m.name).font(.callout).lineLimit(1)
+                Spacer(minLength: 4)
+                if m.ok {
+                    Text("\(m.cpus) núcleos").font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            if m.ok {
+                metric("CPU", m.cpu, "\(m.cpuNow)%", hot ? .orange : .primary)
+                metric("RAM", m.ram, "\(m.ramNow)%", .primary)
+                if m.stale { Text("dato de hace un rato").font(.caption2).foregroundStyle(.orange) }
+            } else {
+                Text("sin datos").font(.caption).foregroundStyle(.secondary)
+                    .help(m.reason ?? "")
+            }
+        }
+        .padding(.vertical, 3)
+    }
+
+    func metric(_ l: String, _ v: [Double], _ t: String, _ c: Color) -> some View {
+        HStack(spacing: 6) {
+            Text(l).font(.caption2).foregroundStyle(.secondary).frame(width: 26, alignment: .leading)
+            Spark(values: v, color: c.opacity(0.85)).frame(height: 14)
+            Text(t).font(.caption2.monospacedDigit().weight(.medium)).frame(width: 34, alignment: .trailing)
+        }
+    }
+}

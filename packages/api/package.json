@@ -1,0 +1,13 @@
+{
+  "name": "@chopshop/api",
+  "private": true,
+  "version": "0.6.0",
+  "description": "Cliente JS de la API de chopshop-agent y tipos compartidos (api_version 1).",
+  "type": "module",
+  "main": "src/index.js",
+  "types": "src/types.d.ts",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "check": "node --check src/index.js"
+  }
+}

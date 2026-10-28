@@ -1,0 +1,4 @@
+#!/bin/sh
+# Wrapper: corre el paquete sin instalar nada (solo stdlib de python3).
+HERE="$(cd "$(dirname "$0")/.." && pwd)"
+PYTHONPATH="$HERE${PYTHONPATH:+:$PYTHONPATH}" exec /usr/bin/python3 -m chopshop "$@"

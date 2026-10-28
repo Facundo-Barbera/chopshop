@@ -1,0 +1,35 @@
+import SwiftUI
+import AppKit
+
+@main
+struct ChopshopApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
+    @StateObject private var model = AppModel()
+
+    var body: some Scene {
+        WindowGroup("Chopshop") {
+            RootView()
+                .environmentObject(model)
+                .frame(minWidth: 1080, minHeight: 680)
+                .preferredColorScheme(.dark)
+                .onAppear { model.start() }
+        }
+        .defaultSize(width: 1360, height: 860)
+        .windowToolbarStyle(.unified)
+        .commands {
+            CommandMenu("Ir a") {
+                ForEach(Array(Section.views.enumerated()), id: \.element) { i, s in
+                    Button(s.title) { model.nav = .section(s) }.keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: .command)
+                }
+            }
+        }
+    }
+}
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+}

@@ -1,0 +1,102 @@
+# Chopshop: configuración local de ejemplo (TODOS los datos son FALSOS).
+#
+# Cópiala a ~/.config/chopshop/config.toml (o apunta a otra con la variable CHOPSHOP_CONFIG) y edítala.
+# Ese archivo es local y NO se versiona: aquí van tus hosts, IPs, usuarios y proyectos reales.
+# Las URLs de webhook NUNCA van en este archivo: solo rutas a archivos (permisos 0600) que contienen la URL.
+#
+# Precedencia (menor a mayor): valores por defecto genéricos < este archivo < variables de entorno.
+# Variable de entorno: CHOPSHOP_<SECCION>__<CLAVE>, p. ej. CHOPSHOP_AGENT__PORT=3791
+# o CHOPSHOP_HOSTS__HOST_B__CAP=6 (doble guion bajo separa niveles; el guion de un nombre se escribe "_").
+# Listas en el entorno: JSON, p. ej. CHOPSHOP_AGENT__ALLOWED_LOGINS='["otro@"]'.
+
+[general]
+home = "~/.chopshop"          # estado local: perfiles, lotes, eventos (CHOPSHOP_HOME tiene prioridad)
+default_host = "host-a"       # host de T3 por defecto de los perfiles (debe existir en [hosts.*])
+overflow_host = "host-b"      # donde se desbordan los lotes más grandes que el tope del host (vacío = no hay)
+fleet_bin = ""                # ruta del CLI `fleet` si algún host usa transporte "fleet" (vacío = buscar en PATH)
+
+# Hosts de T3. Si defines al menos uno, REEMPLAZAN al host genérico "local" (no se mezclan).
+[hosts.host-a]
+transport = "local"           # "local": corre el helper t3mcp.mjs en esta misma máquina
+cap = 2                       # máximo de hilos en paralelo
+purpose = "dev"
+node = "node"
+t3_bin = "~/.t3/bin/t3"
+helper = "~/.local/share/fleet/t3mcp.mjs"
+access = "approval-required"
+
+[hosts.host-b]
+transport = "fleet"           # "fleet": `fleet t3mcp <host> ...` (requiere el CLI fleet)
+cap = 4
+purpose = "tests-only"        # solo tests: sin dev servers ni deploys
+
+# La app de macOS (cliente puro del agente).
+[app]
+engine_root = ""                          # carpeta apps/agent si no va embebido (CHOPSHOP_ROOT tiene prioridad)
+agent_url = "http://100.64.0.10:3790"     # URL del chopshop-agent remoto (IP de Tailscale + puerto del agente)
+token_file = "~/.chopshop/agent/token"    # archivo con el bearer del agente (nunca el token en sí)
+
+# El agente (chopshop-agent), uno por máquina.
+[agent]
+machine_id = "host-b"                     # vacío = nombre de host de la máquina
+bind = "auto"                             # "auto" = IP de Tailscale (nunca 0.0.0.0); o una IP concreta, p. ej. "100.64.0.10"
+port = 3790
+owner_login = "usuario@"                  # identidad Tailscale con permiso total (vacío = solo origen local)
+allowed_logins = ["invitado@"]            # identidades con acceso de solo lectura
+token_file = "~/.chopshop/agent/token"    # bearer para clientes sin identidad Tailscale (0600)
+db_path = "~/.chopshop/agent/agent.db"
+sample_interval = 10                      # segundos entre muestras de métricas
+t3_poll_interval = 5                      # segundos entre sondeos de T3
+projects_root = "~/projects"              # <projects_root>/<proyecto>
+worktrees_root = "~/.t3/worktrees"        # <worktrees_root>/<proyecto>/<worktree>
+
+# Cómo hablar con el servidor T3 de ESTA máquina.
+[agent.t3]
+node = "node"
+helper = "~/.local/share/fleet/t3mcp.mjs"
+t3_bin = "~/.local/bin/t3"
+access = "full-access"
+
+# Proyectos conocidos por el agente: nombre -> raíz, id de T3 y servidor de pruebas (opcional).
+[agent.projects.proyecto-demo]
+root = "~/projects/proyecto-demo"
+worktrees = "~/.t3/worktrees/proyecto-demo"
+t3_project_id = "00000000-0000-0000-0000-000000000000"
+
+[agent.projects.proyecto-demo.test_server]
+cmd = "pnpm dev"
+cwd = "."
+port_env = "PORT"                         # variable de entorno por la que se pasa el puerto asignado
+idle_seconds = 900
+cpu_quota = "200%"
+mem_max = "2G"
+
+# Puertos asignados a los worktrees (bloques deterministas de `per_worktree` puertos dentro del rango).
+[agent.ports]
+range = [41000, 45999]
+per_worktree = 10
+
+# Cola por capacidad de servidores de prueba.
+[agent.capacity]
+max_servers = 4                           # simultáneos en la máquina
+max_per_project = 1
+max_cpu_pct = 700                         # suma de CPU% (100 = 1 núcleo) permitida antes de encolar
+min_ram_avail_mb = 6000
+default_idle_seconds = 900
+queue_ttl_seconds = 1800
+
+# Barrido de procesos huérfanos.
+[agent.sweep]
+interval = 60
+agent_scopes = "report"                   # "report" (solo informar) o "kill" (PIDs exactos de un scope ya settled)
+grace_seconds = 120
+
+# Webhooks: nombre -> RUTA a un archivo (0600) cuyo contenido es la URL. Nunca pongas la URL aquí.
+[agent.webhook_files]
+bot = "~/.config/chopshop/webhooks/bot.url"
+
+# Retención del historial de métricas.
+[agent.retention]
+raw_hours = 24
+m1_days = 30
+h1_days = 365
