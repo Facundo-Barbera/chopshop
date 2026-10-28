@@ -3,7 +3,7 @@
 
 Toma el bundle estático de la UI (apps/mac/Resources/web), genera un HTML en un directorio
 temporal que emula el puente nativo (window.webkit.messageHandlers.chopshop) alimentándolo con
-el fixture, y lo captura con Chromium headless vía file:// (playwright, solo como librería).
+el fixture (lo que devolverían los agentes en GET /snapshot), y lo captura con Chromium headless vía file:// (playwright, solo como librería).
 
     python3 tools/screenshots/shoot.py [--out assets] [--only overview,graph] [--build]
 
@@ -53,8 +53,8 @@ window.webkit = {messageHandlers: {chopshop: {postMessage: function (m) {
     var sel = {view: parts[0] || "overview"};
     if (parts[0] === "project") sel.project = parts[1] || "";
     if (parts[0] === "machines") sel.machine = parts[1] || "";
-    window.chopshop.receive({type: "state", payload: f.state});
-    window.chopshop.receive({type: "metrics", payload: {machines: f.metrics}});
+    window.chopshop.receive({type: "agents", payload: {agents: f.agents, configPath: "", interval: 3}});
+    window.chopshop.receive({type: "history", payload: {machines: f.history}});
     window.chopshop.receive({type: "select", payload: sel});
   }, 0);
 }}}};
@@ -72,14 +72,13 @@ def series(spec, phase, lo=0.0, hi=100.0, integer=False):
 
 
 def machines(fx):
-    out = []
-    for n, (name, m) in enumerate(fx["metrics"].items()):
+    """Historial de métricas por máquina (lo que la app acumula sondeo a sondeo), desde los parámetros del fixture."""
+    out = {}
+    for n, (name, m) in enumerate(fx["history"].items()):
         cpu = series(m["cpu"], n)
-        row = {k: v for k, v in m.items() if k not in ("cpu", "ram", "run")}
-        row.update(name=name, cpu=cpu, ram=series(m["ram"], n + 1),
-                   load1=[round(c / 100.0 * m["cpus"], 2) for c in cpu],
-                   run=series(m["run"], n + 2, 0, 4, integer=True))
-        out.append(row)
+        out[name] = {"cpu": cpu, "ram": series(m["ram"], n + 1),
+                     "load1": [round(c / 100.0 * m["cpus"], 2) for c in cpu],
+                     "run": series(m["run"], n + 2, 0, 4, integer=True)}
     return out
 
 
@@ -87,7 +86,7 @@ def build_page(tmp, fx):
     for f in ("app.js", "app.css"):
         shutil.copy(os.path.join(WEB, f), os.path.join(tmp, f))
     html = open(os.path.join(WEB, "index.html"), encoding="utf-8").read()
-    payload = {"state": fx["state"], "metrics": machines(fx)}
+    payload = {"agents": fx["agents"], "history": machines(fx)}
     html = html.replace("<title>", BACKDROP + "<title>", 1)
     html = html.replace('<script src="app.js">', STUB % json.dumps(payload, ensure_ascii=False) + '\n<script src="app.js">', 1)
     path = os.path.join(tmp, "index.html")

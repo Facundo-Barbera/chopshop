@@ -30,11 +30,17 @@ transport = "fleet"           # "fleet": `fleet t3mcp <host> ...` (requiere el C
 cap = 4
 purpose = "tests-only"        # solo tests: sin dev servers ni deploys
 
-# La app de macOS (cliente puro del agente).
+# La app de macOS: cliente puro de la API del agente (no ejecuta nada local). Ver docs/mac-build.md.
 [app]
-engine_root = ""                          # carpeta apps/agent si no va embebido (CHOPSHOP_ROOT tiene prioridad)
-agent_url = "http://100.64.0.10:3790"     # URL del chopshop-agent remoto (IP de Tailscale + puerto del agente)
-token_file = "~/.chopshop/agent/token"    # archivo con el bearer del agente (nunca el token en sí)
+agent_url = "http://100.64.0.10:3790"     # URL del chopshop-agent (IP de Tailscale + puerto del agente)
+token_file = "~/.chopshop/agent/token"    # copia local del archivo de token del agente (0600); nunca el token en sí
+refresh_seconds = 3                       # segundos entre sondeos de /snapshot (1-300)
+
+# Más máquinas (opcional): una tabla por agente; la app combina todas en una sola vista.
+# Env: CHOPSHOP_APP__AGENTS__HOST_B__URL, CHOPSHOP_APP__AGENTS__HOST_B__TOKEN_FILE
+[app.agents.host-b]
+url = "http://100.64.0.11:3790"
+token_file = "~/.chopshop/agent/host-b.token"
 
 # El agente (chopshop-agent), uno por máquina.
 [agent]
