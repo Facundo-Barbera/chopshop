@@ -1460,3 +1460,6 @@ export default function App() {
     </Ctx.Provider>
   );
 }
+
+// Para las pruebas de renderizado (apps/ui/test): las vistas se dibujan en Node sin DOM.
+export { collect, Overview, Questions, ProjectView, Machines, Reactions, Graph, Events, AgentBanner, Connecting };

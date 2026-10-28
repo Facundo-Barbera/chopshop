@@ -179,7 +179,7 @@ class TestExampleConfig(unittest.TestCase):
 
 class TestRepoHasNoPersonalData(unittest.TestCase):
     """Recorre agente, UI, paquetes, docs y ejemplos: nada de rutas de usuario, IPs reales, correos ni URLs de webhook."""
-    AREAS = ("apps/agent", "apps/ui", "packages", "docs", "examples")
+    AREAS = ("apps/agent", "apps/ui", "apps/mac", "packages", "docs", "examples", "tools")
     SKIP_DIRS = {"node_modules", "__pycache__", ".turbo", ".git", "dist"}
     SELF = os.path.abspath(__file__)
 

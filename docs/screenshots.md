@@ -17,8 +17,8 @@ Las capturas del repo muestran **solo datos de ejemplo**: hosts `host-a`/`host-b
 
 `tools/screenshots/` no levanta ningún servidor ni abre la app:
 
-- `fixture.json`: snapshot ficticio (mismo formato que `chopshop snapshot`) más los parámetros de las métricas de las máquinas y la hora fija de la captura.
-- `shoot.py`: toma el bundle estático de la UI (`apps/mac/Resources/web`), genera en un directorio temporal un HTML que emula el puente nativo de `WKWebView` (`window.webkit.messageHandlers.chopshop`, ver `apps/ui/src/bridge.js`) y le entrega el fixture (`state`, `metrics`, `select`), y lo captura con Chromium headless desde `file://`. Congela el reloj (`page.clock`) para que los «hace N min» sean estables.
+- `fixture.json`: lo que devolverían dos agentes ficticios en `GET /snapshot` (forma de [`agent-api.md`](agent-api.md): `host-a` con el orquestador y `host-b` solo sensor), los parámetros del historial de métricas y la hora fija de la captura. También lo usan las pruebas de renderizado de la UI (`apps/ui/test`, `pnpm test`).
+- `shoot.py`: toma el bundle estático de la UI (`apps/mac/Resources/web`), genera en un directorio temporal un HTML que emula el puente nativo de `WKWebView` (`window.webkit.messageHandlers.chopshop`, ver `apps/ui/src/bridge.js`) y le entrega el fixture (`agents`, `history`, `select`: los mismos mensajes que envía la app nativa), y lo captura con Chromium headless desde `file://`. Congela el reloj (`page.clock`) para que los «hace N min» sean estables.
 
 ```sh
 pip install playwright && playwright install chromium   # una vez; hace falta alguna fuente del sistema

@@ -225,7 +225,7 @@ final class AgentClient {
             case 401: return ActionResult(ok: false, message: "el agente rechazó el token (401): revisa token_file")
             case 403:
                 let hint = spec.tokenFile == nil ? " (no hay token_file configurado)" : ""
-                return ActionResult(ok: false, message: "acceso denegado (403): las acciones exigen identidad Tailscale del dueño o el token del agente" + hint)
+                return ActionResult(ok: false, message: "acceso denegado (403): las acciones exigen identidad Tailscale autorizada y el token del agente" + hint)
             default: return ActionResult(ok: false, message: Self.agentError(json, code))
             }
         }

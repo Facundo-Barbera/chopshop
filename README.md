@@ -18,7 +18,7 @@ Capa delgada entre tus bots y T3 Code. Un bot (o una persona) manda instruccione
 | `apps/agent/` | Servicio Python (solo stdlib): CLI `bin/chopshop`, motor, `chopshop/agent` (servicio headless por máquina), `tests/`, `tools/` |
 | `apps/mac/` | `Chopshop.app` (SwiftUI + WKWebView): `Package.swift`, `Sources/`, `Resources/web` (bundle React), `build.sh`, `shot.sh` |
 | `apps/ui/` | React de la app (esbuild); genera `apps/mac/Resources/web` |
-| `packages/api/` | Cliente JS de la API del agente y tipos compartidos |
+| `packages/api/` | Cliente JS de la API del agente, tipos compartidos y la combinación de snapshots de varias máquinas que usa la UI |
 | `docs/` | Arquitectura y contrato de la API del agente |
 | `examples/` | Ejemplos (p. ej. lista de bugs de demostración) |
 | `assets/` | Capturas de pantalla |
@@ -33,7 +33,7 @@ Requisitos:
 - Python 3.9 o superior (el motor usa solo la biblioteca estándar; hay un parser de YAML mínimo en `apps/agent/chopshop/miniyaml.py`).
 - Node.js y [pnpm](https://pnpm.io) (para la UI, los tests del monorepo y las tareas de turbo).
 - Un servidor de T3 Code accesible desde la máquina donde corre Chopshop.
-- Solo para la app: macOS 26+ y Swift 6 (Xcode o Command Line Tools).
+- Solo para la app de Mac: macOS 13+ y Xcode (o las Command Line Tools, con Swift 6). Ver [`docs/mac-build.md`](docs/mac-build.md).
 
 ```sh
 git clone <url-del-repo> chopshop && cd chopshop
@@ -53,7 +53,7 @@ Todo lo específico de tu entorno (hosts, rutas, IPs, proyectos, identidades) vi
 
 - La ruta se puede cambiar con `CHOPSHOP_CONFIG=/ruta/a/otro.toml`; si defines `XDG_CONFIG_HOME` se usa `$XDG_CONFIG_HOME/chopshop/config.toml`.
 - El repo solo incluye [`config.example.toml`](config.example.toml), con datos **falsos** (`host-a`, `host-b`, `100.64.0.10`, `usuario@`, `proyecto-demo`...). Cópialo y adáptalo; no lo subas con datos reales.
-- Secciones: `[general]` (estado local, host por defecto, host de desborde), `[hosts.<nombre>]` (transporte, tope de hilos, finalidad), `[app]` (la app de Mac: `engine_root`, `agent_url`, `token_file`) y `[agent]` (el servicio headless por máquina).
+- Secciones: `[general]` (estado local, host por defecto, host de desborde), `[hosts.<nombre>]` (transporte, tope de hilos, finalidad), `[app]` (la app de Mac: `agent_url`, `token_file`, `refresh_seconds` y `[app.agents.<nombre>]` para varias máquinas) y `[agent]` (el servicio headless por máquina).
 - Precedencia: valores por defecto genéricos < `config.toml` < variables de entorno.
 
 ### Variables de entorno
@@ -74,7 +74,7 @@ Además:
 | `CHOPSHOP_CONFIG` | Ruta del `config.toml` |
 | `CHOPSHOP_HOME` | Directorio de estado local (por defecto `~/.chopshop`) |
 | `CHOPSHOP_FLEET` | Binario del CLI `fleet`, si algún host usa ese transporte |
-| `CHOPSHOP_ROOT` | Solo la app de Mac: carpeta `apps/agent` del motor (ver abajo) |
+| `CHOPSHOP_APP__AGENT_URL`, `CHOPSHOP_APP__TOKEN_FILE` | Solo la app de Mac: agente al que se conecta (ver abajo) |
 
 ### Webhooks y secretos
 
@@ -176,43 +176,45 @@ graph:
 
 ## App de macOS
 
-`apps/mac`: ejecutable SwiftPM `ChopshopUI` (SwiftUI, macOS 26) con `NavigationSplitView`, `glassEffect`, fondo `MeshGradient` y un `WKWebView` transparente que carga la app React (`apps/ui`). Vistas: **Resumen**, **Preguntas** (responder), **Actividad**, **Reacciones**, **Grafo**, **Lotes**, **Máquinas** y una vista por proyecto. Los permisos (approvals) son de solo lectura: se aprueban en T3.
+`apps/mac`: ejecutable SwiftPM `ChopshopUI` (SwiftUI, macOS 13+; vidrio líquido en macOS 26) con `NavigationSplitView` y un `WKWebView` transparente que carga la app React (`apps/ui`). Es un **cliente puro de la API del agente** ([`docs/agent-api.md`](docs/agent-api.md)): no ejecuta Python ni habla con T3, y se empaqueta como un único `Chopshop.app`. Vistas: **Resumen**, **Preguntas** (responder), **Actividad**, **Reacciones**, **Grafo**, **Lotes**, **Máquinas** (CPU/RAM/disco por app y proyecto, servidores de prueba) y una vista por proyecto. Los permisos (approvals) son de solo lectura: se aprueban en T3.
 
 ### Build
 
-Requiere macOS y Swift:
-
 ```sh
-pnpm app              # = bash apps/mac/build.sh
-REBUILD_WEB=1 pnpm app    # fuerza reconstruir el bundle React
+pnpm install
+pnpm app              # construye la UI y apps/mac/dist/Chopshop.app (firma ad-hoc, sin Python)
 ```
 
-`build.sh` construye React (`apps/ui` → `apps/mac/Resources/web`), compila el shell SwiftUI y genera `~/Applications/Chopshop.app` (o la ruta de `CHOPSHOP_APP`) con firma ad-hoc y el motor Python embebido en `Contents/Resources/engine`. El `.app` no lleva datos personales: toda la configuración se lee en ejecución del config local.
+Guía completa (requisitos, token, primera apertura y solución de problemas): [`docs/mac-build.md`](docs/mac-build.md).
 
-Argumentos de la app: `--home DIR` (otro directorio de estado), `--select overview|questions|batches|events|project:<nombre>`, `--capture`.
+### Conexión con los agentes
 
-### Dónde encuentra el motor
+La app lee la sección `[app]` de `~/.config/chopshop/config.toml` (plantilla: [`config.example.toml`](config.example.toml)):
 
-La app resuelve la raíz del motor (`apps/agent`) en este orden:
+```toml
+[app]
+agent_url = "http://100.64.0.10:3790"
+token_file = "~/.chopshop/agent/token"   # ruta a un archivo con el token, nunca el token
+refresh_seconds = 3
 
-1. variable `CHOPSHOP_ROOT`;
-2. `engine_root` de la sección `[app]` de `config.toml` (o `CHOPSHOP_APP__ENGINE_ROOT`);
-3. el motor embebido en el `.app` (`Contents/Resources/engine`);
-4. si no hay ninguno, muestra un error claro en la UI y por stderr.
+[app.agents.host-b]                      # opcional: más máquinas, combinadas en una sola vista
+url = "http://100.64.0.11:3790"
+token_file = "~/.chopshop/agent/host-b.token"
+```
 
-`agent_url` y `token_file` de `[app]` (también `CHOPSHOP_APP__AGENT_URL` y `CHOPSHOP_APP__TOKEN_FILE`) se leen y quedan disponibles para la conexión remota al agente. `token_file` es la ruta a un archivo con el token, nunca el token.
+Entorno (tiene prioridad): `CHOPSHOP_APP__AGENT_URL`, `CHOPSHOP_APP__TOKEN_FILE`, `CHOPSHOP_APP__REFRESH_SECONDS`, `CHOPSHOP_APP__AGENTS__HOST_B__URL`, `CHOPSHOP_APP__AGENTS__HOST_B__TOKEN_FILE`. Si un agente no responde (red caída, 401/403), la UI lo muestra («agente no alcanzable», «acceso denegado») y conserva los últimos datos marcados como viejos; nunca se cierra por eso.
 
 ### Cómo funciona
 
-- Puente JSON `{type, payload, id?}`. JS→Swift (`window.webkit.messageHandlers.chopshop.postMessage`): `ready`, `refresh`, `navigate`, `openLink`, `answer`. Swift→JS (`window.chopshop.receive`): `state`, `select`, `metrics`, `error`, `answerResult`.
-- La app solo corre `chopshop snapshot` y `chopshop metrics` (cada 3 s, sin red) y `chopshop answer --queue` (escribe en el buzón local). **`chopshop watch` es quien habla con T3**: envía el buzón, hace poll y late en `watch.json`; la barra lateral muestra «watch activo / detenido / sin watch».
-- Monitor de máquinas: CPU% ≈ `load1 / núcleos × 100` (puede pasar de 100: saturación), RAM% = 1 − disponible/total, carga y disco. Las máquinas remotas se leen con `chopshop metrics --collect` (o automáticamente dentro de `watch`) y se guardan en un archivo local; la app solo lee ese archivo.
+- Cada `refresh_seconds` la app consulta `GET /snapshot` de cada agente (URLSession, con `Authorization: Bearer <token>` leído del archivo en cada petición; el token no se imprime ni se guarda) y entrega los resultados crudos a la UI web, que los combina por `machine_id` (`packages/api/src/view.js`).
+- Puente JSON `{type, payload, id?}`. JS→Swift (`window.webkit.messageHandlers.chopshop.postMessage`): `ready`, `refresh`, `navigate`, `openLink` y las acciones `answer`, `settle`, `leaseRequest`, `leaseRelease`, `leaseTouch`, `sweep` (cada una un `POST` de la API al agente indicado en `agent`). Swift→JS (`window.chopshop.receive`): `agents`, `select`, `error`, `actionResult`.
+- Pruebas: la lógica pura de Swift (config, cliente con transporte falso, resumen) está en `apps/mac/Tests` (`swift test`, requiere Xcode); la combinación de snapshots y el cliente JS, en `packages/api/test` (`pnpm test`).
+- Argumentos de la app: `--select overview|questions|batches|events|project:<nombre>`, `--capture`.
 
 ### Permisos de macOS
 
-- Una app GUI lanzada con `open` no puede leer volúmenes externos sin el permiso TCC correspondiente (el proceso se queda esperando): por eso el motor va embebido en el `.app`.
 - `screencapture` por ssh falla (sin permiso de Screen Recording): la app captura su propia ventana con `--capture` y `apps/mac/shot.sh <salida.png> <sección>` (protocolo: archivo `/tmp/chopshop-shot.req` con `<sección> <ruta>`, opcional `/tmp/chopshop-shot.js`).
-- Los procesos hijos de una app GUI pueden quedarse colgados al hablar con el servidor de T3 en una IP no loopback (heredan los permisos de red de la app y nadie pulsa el aviso). Por eso la red queda fuera de la app: buzón + `watch`.
+- La app solo hace peticiones HTTP a las URLs de tu `config.toml`; no lanza procesos hijos. Si macOS pregunta por «Red local», acéptalo.
 
 ### Capturas
 

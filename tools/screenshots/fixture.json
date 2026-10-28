@@ -1,123 +1,1084 @@
 {
-  "_comment": "Estado FICTICIO para las capturas. Hosts host-a/host-b, proyectos proyecto-demo/app-ejemplo, URLs reservadas (.example/.test). Nada de aquí es real.",
-  "now": "2026-01-15T10:30:00-0600",
-  "state": {
+ "_comment": "Estado FICTICIO para las capturas: lo que devolvería GET /snapshot de dos agentes (host-a con orquestador, host-b solo sensor). Hosts host-a/host-b, proyectos proyecto-demo/app-ejemplo, URLs reservadas (.example/.test). Nada de aquí es real.",
+ "now": "2026-01-15T10:30:00-0600",
+ "agents": [
+  {
+   "name": "host-a",
+   "status": "ok",
+   "snapshot": {
+    "api_version": 1,
+    "machine_id": "host-a",
+    "ts": 1768494600.0,
     "generated": "2026-01-15T10:30:00-0600",
-    "home": "~/.chopshop",
-    "hosts": {
-      "host-a": {"cap": 4, "purpose": "máquina principal de ejemplo", "transport": "ssh"},
-      "host-b": {"cap": 2, "purpose": "máquina secundaria de ejemplo", "transport": "ssh"}
+    "machine": {
+     "cpus": 8,
+     "load": [
+      2.1,
+      1.8,
+      1.5
+     ],
+     "cpu_pct": 30,
+     "ram_total_mb": 32768,
+     "ram_avail_mb": 19500,
+     "ram_pct": 40,
+     "swap_used_mb": 0,
+     "disk_used_gb": 502,
+     "disk_total_gb": 912,
+     "disk_pct": 55,
+     "os": "Linux",
+     "uptime": 864000
     },
-    "profiles": ["proyecto-demo", "app-ejemplo"],
-    "subscriptions": {},
-    "inbox": {"pending": [], "results": [], "watcher": {"alive": true}},
-    "batches": [
-      {
-        "id": "b-0006", "project": "app-ejemplo", "host": "host-b", "max_parallel": 2, "created": "2026-01-15T10:05:00-0600", "notes": [], "graph": "g-0001",
-        "tasks": [
-          {"id": "t-0006-1", "title": "BUG-1: el botón Guardar no responde tras editar el perfil", "status": "launched", "t3status": "completed", "done": true, "settled": true, "link": "[hilo](https://t3.example.test/thread/aaa111)", "threadId": "aaa111", "result": "Se restauró el manejador de clic al recargar el formulario.", "prompt": "Corrige el BUG-1 del proyecto de ejemplo."},
-          {"id": "t-0006-2", "title": "BUG-2: la lista de pedidos pagina mal", "status": "launched", "t3status": "completed", "done": true, "settled": true, "link": "[hilo](https://t3.example.test/thread/aaa112)", "threadId": "aaa112", "result": "La paginación usaba índice base 1; ahora es base 0.", "prompt": "Corrige el BUG-2."},
-          {"id": "t-0006-3", "title": "BUG-3: la exportación CSV pierde acentos", "status": "launched", "t3status": "running", "done": false, "link": "[hilo](https://t3.example.test/thread/aaa113)", "threadId": "aaa113", "level": "auto", "prompt": "Corrige el BUG-3 (depende de BUG-1)."},
-          {"id": "t-0006-4", "title": "BUG-4.1: validar el formato de fecha", "status": "launched", "t3status": "running", "done": false, "link": "[hilo](https://t3.example.test/thread/aaa114)", "threadId": "aaa114", "prompt": "Primera mitad de BUG-4."}
-        ]
-      },
-      {
-        "id": "b-0005", "project": "app-ejemplo", "host": "host-b", "max_parallel": 2, "created": "2026-01-15T09:50:00-0600", "notes": [],
-        "tasks": [
-          {"id": "t-0005-1", "title": "Actualizar las dependencias de desarrollo", "status": "launched", "t3status": "completed", "done": true, "settled": true, "level": "auto", "link": "[hilo](https://t3.example.test/thread/bbb201)", "threadId": "bbb201", "result": "Dependencias actualizadas; la suite de pruebas sigue en verde.", "prompt": "Actualiza las dependencias de desarrollo.",
-           "reactions": [
-             {"on": "task_stalled", "action": "retry_once", "level": "auto", "ts": "2026-01-15T10:02:00-0600", "note": "hilo sin progreso durante 10 min"},
-             {"on": "task_done", "action": "settle", "level": "auto", "ts": "2026-01-15T10:14:00-0600"}
-           ]},
-          {"id": "t-0005-2", "title": "Renombrar el módulo de configuración", "status": "launched", "t3status": "completed", "done": true, "settled": true, "level": "bot", "link": "[hilo](https://t3.example.test/thread/bbb202)", "threadId": "bbb202", "result": "Módulo renombrado y referencias actualizadas.", "prompt": "Renombra el módulo de configuración.",
-           "answered": [{"summary": "¿Mantener la API pública sin cambios?", "choice": "Sí, mantenerla", "ts": "2026-01-15T10:09:00-0600", "by": "bot-demo"}],
-           "bot_wait": {"notify": "bot-demo", "done": true, "by": "bot-demo", "choice": "Sí, mantenerla"},
-           "reactions": [
-             {"on": "pending_question", "action": "despertar a bot-demo", "level": "bot", "ts": "2026-01-15T10:08:00-0600"},
-             {"on": "task_done", "action": "settle", "level": "auto", "ts": "2026-01-15T10:16:00-0600"}
-           ]},
-          {"id": "t-0005-3", "title": "Limpiar ramas antiguas del repositorio", "status": "launched", "t3status": "running", "done": false, "level": "human", "link": "[hilo](https://t3.example.test/thread/bbb203)", "threadId": "bbb203", "prompt": "Limpia las ramas antiguas.",
-           "pending": {"questions": [{"request": "r-h1", "summary": "¿Hacemos force-push a la rama main?", "options": ["Sí, hacerlo", "No, no hacer nada"]}], "approvals": 0},
-           "escalation": {"status": "open", "request": "r-h1", "notify": "persona-demo", "reason": "acción destructiva", "summary": "¿Hacemos force-push a la rama main?", "since": "2026-01-15T10:24:00-0600"},
-           "reactions": [{"on": "pending_question", "action": "escalar a persona-demo", "level": "human", "ts": "2026-01-15T10:24:00-0600", "note": "acción destructiva: force-push"}]}
-        ]
-      },
-      {
-        "id": "b-0004", "project": "proyecto-demo", "host": "host-a", "max_parallel": 4, "created": "2026-01-15T10:12:00-0600", "notes": ["tope del host: 4"],
-        "tasks": [
-          {"id": "t-0004-1", "title": "Corregir el redondeo en el total del carrito", "status": "launched", "t3status": "running", "done": false, "link": "[hilo](https://t3.example.test/thread/ccc301)", "threadId": "ccc301", "prompt": "Corrige el redondeo en el total del carrito."},
-          {"id": "t-0004-2", "title": "Añadir pruebas para el validador de correo", "status": "launched", "t3status": "running", "done": false, "link": "[hilo](https://t3.example.test/thread/ccc302)", "threadId": "ccc302", "prompt": "Añade pruebas unitarias para el validador de correo.",
-           "pending": {"questions": [{"request": "r-q1", "summary": "¿Qué formato de fecha usamos en los informes?", "options": ["ISO 8601", "DD/MM/AAAA", "Dejar el actual"]}], "approvals": 0}},
-          {"id": "t-0004-3", "title": "Migrar el script de despliegue a la nueva plantilla", "status": "launched", "t3status": "running", "done": false, "link": "[hilo](https://t3.example.test/thread/ccc303)", "threadId": "ccc303", "prompt": "Migra el script de despliegue.",
-           "pending": {"questions": [], "approvals": 2}},
-          {"id": "t-0004-4", "title": "Documentar los endpoints de la API", "status": "queued", "t3status": null, "done": false, "prompt": "Documenta los endpoints."}
-        ]
-      },
-      {
-        "id": "b-0003", "project": "app-ejemplo", "host": "host-b", "max_parallel": 2, "created": "2026-01-15T09:20:00-0600", "notes": [],
-        "tasks": [
-          {"id": "t-0003-1", "title": "Revisar el estilo de los mensajes de error", "status": "launched", "t3status": "completed", "done": true, "settled": true, "link": "[hilo](https://t3.example.test/thread/ddd401)", "threadId": "ddd401", "prompt": "Revisa el estilo de los mensajes de error.",
-           "answered": [{"summary": "¿Tono formal o cercano en los mensajes?", "choice": "Cercano", "ts": "2026-01-15T09:31:00-0600", "by": "humano"}],
-           "result": "Se unificaron los mensajes con tono cercano.\n\n```diff\n--- a/app/messages.py\n+++ b/app/messages.py\n@@ -3,4 +3,4 @@\n-ERR_LOGIN = \"Credenciales inválidas.\"\n+ERR_LOGIN = \"No pudimos iniciar tu sesión; revisa tus datos.\"\n-ERR_SAVE = \"Fallo al guardar.\"\n+ERR_SAVE = \"No se pudo guardar; inténtalo otra vez.\"\n```"},
-          {"id": "t-0003-2", "title": "Agregar índice a la tabla de pedidos", "status": "launched", "t3status": "completed", "done": true, "settled": true, "link": "[hilo](https://t3.example.test/thread/ddd402)", "threadId": "ddd402", "prompt": "Agrega un índice.", "result": "Índice creado sobre (cliente_id, fecha)."},
-          {"id": "t-0003-3", "title": "Eliminar código muerto del módulo de reportes", "status": "launched", "t3status": "failed", "done": true, "link": "[hilo](https://t3.example.test/thread/ddd403)", "threadId": "ddd403", "prompt": "Elimina el código muerto.", "last_error": "El hilo terminó con las pruebas en rojo."}
-        ]
-      },
-      {
-        "id": "b-0002", "project": "proyecto-demo", "host": "host-a", "max_parallel": 4, "created": "2026-01-15T08:45:00-0600", "notes": [],
-        "tasks": [
-          {"id": "t-0002-1", "title": "Añadir caché a la consulta de catálogo", "status": "launched", "t3status": "completed", "done": true, "settled": true, "link": "[hilo](https://t3.example.test/thread/eee501)", "threadId": "eee501", "prompt": "Añade caché.", "result": "Caché en memoria con expiración de 5 min."},
-          {"id": "t-0002-2", "title": "Traducir los textos de la pantalla de ajustes", "status": "launched", "t3status": "completed", "done": true, "settled": true, "link": "[hilo](https://t3.example.test/thread/eee502)", "threadId": "eee502", "prompt": "Traduce los textos.", "result": "Textos traducidos al español."}
-        ]
-      }
+    "apps": [
+     {
+      "name": "node",
+      "cpu_pct": 64.0,
+      "rss_mb": 2100.0,
+      "procs": 14,
+      "cgroups": [
+       "app-t3code-agents.slice"
+      ]
+     },
+     {
+      "name": "claude",
+      "cpu_pct": 38.0,
+      "rss_mb": 1450.0,
+      "procs": 3,
+      "cgroups": [
+       "app-t3code-agents.slice"
+      ]
+     },
+     {
+      "name": "python",
+      "cpu_pct": 12.0,
+      "rss_mb": 380.0,
+      "procs": 4,
+      "cgroups": []
+     },
+     {
+      "name": "git",
+      "cpu_pct": 2.0,
+      "rss_mb": 60.0,
+      "procs": 2,
+      "cgroups": []
+     }
     ],
+    "projects": [
+     {
+      "name": "proyecto-demo",
+      "cpu_pct": 88.0,
+      "rss_mb": 2600.0,
+      "procs": 18,
+      "threads_running": 1,
+      "threads_pending": 0,
+      "leases_active": 1,
+      "leases_queued": 1
+     }
+    ],
+    "threads": [
+     {
+      "thread_id": "sss703",
+      "project": "proyecto-demo",
+      "title": "Revisar la configuración del linter",
+      "status": "running",
+      "settled": false,
+      "pending": [],
+      "worktree": "~/.t3/worktrees/proyecto-demo/lint",
+      "updated": 1768494510.0
+     }
+    ],
+    "pending_questions": [],
+    "leases": {
+     "active": [
+      {
+       "id": "L-0001",
+       "kind": "test_server",
+       "project": "proyecto-demo",
+       "worktree": "~/.t3/worktrees/proyecto-demo/lint",
+       "state": "active",
+       "port": 41020,
+       "requested": 1768494000.0,
+       "started": 1768494010.0,
+       "last_used": 1768494570.0
+      }
+     ],
+     "queued": [
+      {
+       "id": "L-0002",
+       "kind": "test_server",
+       "project": "proyecto-demo",
+       "worktree": "~/.t3/worktrees/proyecto-demo/docs",
+       "state": "queued",
+       "requested": 1768494480.0
+      }
+     ],
+     "capacity": {
+      "max_servers": 4,
+      "used": 1,
+      "cpu_pct_used": 88,
+      "ram_avail_mb": 19500
+     }
+    },
     "events": [
-      {"ts": "2026-01-15T10:24:00-0600", "event": "reaction", "project": "app-ejemplo", "batch": "b-0005", "task": "t-0005-3", "summary": "escalada a persona-demo: acción destructiva", "delivery": {"webhook-demo": "ok"}},
-      {"ts": "2026-01-15T10:24:00-0600", "event": "pending_question", "project": "app-ejemplo", "batch": "b-0005", "task": "t-0005-3", "summary": "¿Hacemos force-push a la rama main?", "delivery": {"webhook-demo": "ok"}},
-      {"ts": "2026-01-15T10:22:00-0600", "event": "pending_approval", "project": "proyecto-demo", "batch": "b-0004", "task": "t-0004-3", "summary": "2 permisos pendientes", "delivery": {"webhook-demo": "ok"}},
-      {"ts": "2026-01-15T10:20:00-0600", "event": "pending_question", "project": "proyecto-demo", "batch": "b-0004", "task": "t-0004-2", "summary": "¿Qué formato de fecha usamos en los informes?", "delivery": {"webhook-demo": "ok"}},
-      {"ts": "2026-01-15T10:18:00-0600", "event": "task_done", "project": "app-ejemplo", "batch": "b-0006", "task": "t-0006-2", "status": "completed", "summary": "La paginación usaba índice base 1; ahora es base 0.", "delivery": {"webhook-demo": "ok"}},
-      {"ts": "2026-01-15T10:16:00-0600", "event": "task_done", "project": "app-ejemplo", "batch": "b-0005", "task": "t-0005-2", "status": "completed", "summary": "Módulo renombrado y referencias actualizadas.", "delivery": {"webhook-demo": "ok"}},
-      {"ts": "2026-01-15T10:14:00-0600", "event": "task_done", "project": "app-ejemplo", "batch": "b-0005", "task": "t-0005-1", "status": "completed", "summary": "Dependencias actualizadas; la suite de pruebas sigue en verde.", "delivery": {"webhook-demo": "ok"}},
-      {"ts": "2026-01-15T10:12:00-0600", "event": "task_done", "project": "app-ejemplo", "batch": "b-0006", "task": "t-0006-1", "status": "completed", "summary": "Se restauró el manejador de clic al recargar el formulario.", "delivery": {"webhook-demo": "ok"}},
-      {"ts": "2026-01-15T09:58:00-0600", "event": "task_done", "project": "app-ejemplo", "batch": "b-0003", "task": "t-0003-3", "status": "failed", "summary": "El hilo terminó con las pruebas en rojo.", "delivery": {"webhook-demo": "falló"}},
-      {"ts": "2026-01-15T09:45:00-0600", "event": "batch_done", "project": "app-ejemplo", "batch": "b-0003", "summary": "2 de 3 tareas completadas", "delivery": {"webhook-demo": "ok"}},
-      {"ts": "2026-01-15T09:31:00-0600", "event": "task_done", "project": "app-ejemplo", "batch": "b-0003", "task": "t-0003-1", "status": "completed", "summary": "Se unificaron los mensajes con tono cercano.", "delivery": {"webhook-demo": "ok"}},
-      {"ts": "2026-01-15T09:10:00-0600", "event": "batch_done", "project": "proyecto-demo", "batch": "b-0002", "summary": "2 de 2 tareas completadas", "delivery": {"webhook-demo": "ok"}}
-    ],
-    "graphs": [
-      {
-        "id": "g-0001", "project": "app-ejemplo", "batch": "b-0006", "goal": "Corregir los bugs de la lista de pendientes de app-ejemplo", "status": "running",
-        "created": "2026-01-15T10:05:00-0600", "finished": null, "summary": null, "threads": 4,
-        "limits": {"thread_budget": 12, "max_depth": 3, "done": "ratio", "min_ratio": 0.8, "throttle_cpu": 70, "stop_cpu": 90, "stop_ram": 90},
-        "throttle": {"mode": "pleno", "cpu": 34, "ram": 52, "allowed": 2, "cap": 2},
-        "nodes": [
-          {"id": "n-0", "parent": null, "title": "Corregir los bugs de la lista", "kind": "root", "depth": 0, "deps": [], "label": "R", "status": "running", "task": null, "result": null, "reason": null, "ask": null, "prompt": ""},
-          {"id": "n-1", "parent": "n-0", "title": "El botón Guardar no responde tras editar el perfil", "kind": "bug", "depth": 1, "deps": [], "label": "BUG-1", "status": "done", "task": "t-0006-1", "result": "Se restauró el manejador de clic al recargar el formulario.", "reason": null, "ask": null, "prompt": "Corrige el BUG-1.",
-           "task_state": {"id": "t-0006-1", "t3status": "completed", "done": true, "link": "[hilo](https://t3.example.test/thread/aaa111)", "level": null, "pending": false, "escalation": null, "bot_wait": false, "retries": 0}},
-          {"id": "n-2", "parent": "n-0", "title": "La lista de pedidos pagina mal", "kind": "bug", "depth": 1, "deps": [], "label": "BUG-2", "status": "done", "task": "t-0006-2", "result": "La paginación usaba índice base 1; ahora es base 0.", "reason": null, "ask": null, "prompt": "Corrige el BUG-2.",
-           "task_state": {"id": "t-0006-2", "t3status": "completed", "done": true, "link": "[hilo](https://t3.example.test/thread/aaa112)", "level": null, "pending": false, "escalation": null, "bot_wait": false, "retries": 0}},
-          {"id": "n-3", "parent": "n-0", "title": "La exportación CSV pierde acentos", "kind": "bug", "depth": 1, "deps": ["n-1"], "label": "BUG-3", "status": "running", "task": "t-0006-3", "result": null, "reason": "esperó a BUG-1", "ask": null, "prompt": "Corrige el BUG-3 (depende de BUG-1).",
-           "task_state": {"id": "t-0006-3", "t3status": "running", "done": false, "link": "[hilo](https://t3.example.test/thread/aaa113)", "level": "auto", "pending": false, "escalation": null, "bot_wait": false, "retries": 0}},
-          {"id": "n-4", "parent": "n-0", "title": "El formato de fecha rompe el filtro de pedidos", "kind": "bug", "depth": 1, "deps": [], "label": "BUG-4", "status": "expanding", "task": null, "result": null, "reason": "se dividió en 2 hijos", "ask": null, "prompt": ""},
-          {"id": "n-41", "parent": "n-4", "title": "Validar el formato de fecha", "kind": "child", "depth": 2, "deps": [], "label": "BUG-4.1", "status": "running", "task": "t-0006-4", "result": null, "reason": null, "ask": null, "prompt": "Primera mitad de BUG-4.",
-           "task_state": {"id": "t-0006-4", "t3status": "running", "done": false, "link": "[hilo](https://t3.example.test/thread/aaa114)", "level": null, "pending": false, "escalation": null, "bot_wait": false, "retries": 0}},
-          {"id": "n-42", "parent": "n-4", "title": "Actualizar las pruebas del filtro", "kind": "child", "depth": 2, "deps": ["n-41"], "label": "BUG-4.2", "status": "pending", "task": null, "result": null, "reason": null, "ask": null, "prompt": ""},
-          {"id": "n-5", "parent": "n-0", "title": "Limpiar ramas antiguas del repositorio", "kind": "bug", "depth": 1, "deps": [], "label": "BUG-5", "status": "running", "task": "t-0005-3", "result": null, "reason": null, "ask": "¿Hacemos force-push a la rama main?", "prompt": "Limpia las ramas antiguas.",
-           "task_state": {"id": "t-0005-3", "t3status": "running", "done": false, "link": "[hilo](https://t3.example.test/thread/bbb203)", "level": "human", "pending": true, "escalation": "open", "bot_wait": false, "retries": 0}}
-        ],
-        "log": [
-          {"ts": "2026-01-15T10:05:00-0600", "kind": "start", "msg": "grafo g-0001 creado con 5 nodos"},
-          {"ts": "2026-01-15T10:06:00-0600", "kind": "launch", "msg": "BUG-1 y BUG-2 lanzados"},
-          {"ts": "2026-01-15T10:12:00-0600", "kind": "done", "msg": "BUG-1 listo; BUG-3 desbloqueado"},
-          {"ts": "2026-01-15T10:15:00-0600", "kind": "expand", "msg": "BUG-4 se dividió en BUG-4.1 y BUG-4.2"},
-          {"ts": "2026-01-15T10:24:00-0600", "kind": "escalate", "msg": "BUG-5 escalado a persona-demo (acción destructiva)"}
-        ]
+     {
+      "seq": 11,
+      "ts": 1768494555.0,
+      "machine_id": "host-a",
+      "event": "thread_started",
+      "project": "proyecto-demo",
+      "body": {
+       "thread_id": "sss703",
+       "title": "Revisar la configuración del linter"
       }
-    ]
+     },
+     {
+      "seq": 10,
+      "ts": 1768494300.0,
+      "machine_id": "host-a",
+      "event": "lease_granted",
+      "project": "proyecto-demo",
+      "body": {
+       "lease_id": "L-0001",
+       "port": 41020
+      }
+     }
+    ],
+    "subscriptions": {
+     "webhook-demo": {
+      "project": "*",
+      "events": []
+     }
+    },
+    "orchestrator": {
+     "hosts": {
+      "host-a": {
+       "cap": 4,
+       "purpose": "máquina principal de ejemplo",
+       "transport": "ssh"
+      },
+      "host-b": {
+       "cap": 2,
+       "purpose": "máquina secundaria de ejemplo",
+       "transport": "ssh"
+      }
+     },
+     "profiles": [
+      "proyecto-demo",
+      "app-ejemplo"
+     ],
+     "subscriptions": {},
+     "inbox": {
+      "pending": [],
+      "results": [],
+      "watcher": {
+       "alive": true
+      }
+     },
+     "batches": [
+      {
+       "id": "b-0006",
+       "project": "app-ejemplo",
+       "host": "host-b",
+       "max_parallel": 2,
+       "created": "2026-01-15T10:05:00-0600",
+       "notes": [],
+       "graph": "g-0001",
+       "tasks": [
+        {
+         "id": "t-0006-1",
+         "title": "BUG-1: el botón Guardar no responde tras editar el perfil",
+         "status": "launched",
+         "t3status": "completed",
+         "done": true,
+         "settled": true,
+         "link": "[hilo](https://t3.example.test/thread/aaa111)",
+         "threadId": "aaa111",
+         "result": "Se restauró el manejador de clic al recargar el formulario.",
+         "prompt": "Corrige el BUG-1 del proyecto de ejemplo."
+        },
+        {
+         "id": "t-0006-2",
+         "title": "BUG-2: la lista de pedidos pagina mal",
+         "status": "launched",
+         "t3status": "completed",
+         "done": true,
+         "settled": true,
+         "link": "[hilo](https://t3.example.test/thread/aaa112)",
+         "threadId": "aaa112",
+         "result": "La paginación usaba índice base 1; ahora es base 0.",
+         "prompt": "Corrige el BUG-2."
+        },
+        {
+         "id": "t-0006-3",
+         "title": "BUG-3: la exportación CSV pierde acentos",
+         "status": "launched",
+         "t3status": "running",
+         "done": false,
+         "link": "[hilo](https://t3.example.test/thread/aaa113)",
+         "threadId": "aaa113",
+         "level": "auto",
+         "prompt": "Corrige el BUG-3 (depende de BUG-1)."
+        },
+        {
+         "id": "t-0006-4",
+         "title": "BUG-4.1: validar el formato de fecha",
+         "status": "launched",
+         "t3status": "running",
+         "done": false,
+         "link": "[hilo](https://t3.example.test/thread/aaa114)",
+         "threadId": "aaa114",
+         "prompt": "Primera mitad de BUG-4."
+        }
+       ]
+      },
+      {
+       "id": "b-0005",
+       "project": "app-ejemplo",
+       "host": "host-b",
+       "max_parallel": 2,
+       "created": "2026-01-15T09:50:00-0600",
+       "notes": [],
+       "tasks": [
+        {
+         "id": "t-0005-1",
+         "title": "Actualizar las dependencias de desarrollo",
+         "status": "launched",
+         "t3status": "completed",
+         "done": true,
+         "settled": true,
+         "level": "auto",
+         "link": "[hilo](https://t3.example.test/thread/bbb201)",
+         "threadId": "bbb201",
+         "result": "Dependencias actualizadas; la suite de pruebas sigue en verde.",
+         "prompt": "Actualiza las dependencias de desarrollo.",
+         "reactions": [
+          {
+           "on": "task_stalled",
+           "action": "retry_once",
+           "level": "auto",
+           "ts": "2026-01-15T10:02:00-0600",
+           "note": "hilo sin progreso durante 10 min"
+          },
+          {
+           "on": "task_done",
+           "action": "settle",
+           "level": "auto",
+           "ts": "2026-01-15T10:14:00-0600"
+          }
+         ]
+        },
+        {
+         "id": "t-0005-2",
+         "title": "Renombrar el módulo de configuración",
+         "status": "launched",
+         "t3status": "completed",
+         "done": true,
+         "settled": true,
+         "level": "bot",
+         "link": "[hilo](https://t3.example.test/thread/bbb202)",
+         "threadId": "bbb202",
+         "result": "Módulo renombrado y referencias actualizadas.",
+         "prompt": "Renombra el módulo de configuración.",
+         "answered": [
+          {
+           "summary": "¿Mantener la API pública sin cambios?",
+           "choice": "Sí, mantenerla",
+           "ts": "2026-01-15T10:09:00-0600",
+           "by": "bot-demo"
+          }
+         ],
+         "bot_wait": {
+          "notify": "bot-demo",
+          "done": true,
+          "by": "bot-demo",
+          "choice": "Sí, mantenerla"
+         },
+         "reactions": [
+          {
+           "on": "pending_question",
+           "action": "despertar a bot-demo",
+           "level": "bot",
+           "ts": "2026-01-15T10:08:00-0600"
+          },
+          {
+           "on": "task_done",
+           "action": "settle",
+           "level": "auto",
+           "ts": "2026-01-15T10:16:00-0600"
+          }
+         ]
+        },
+        {
+         "id": "t-0005-3",
+         "title": "Limpiar ramas antiguas del repositorio",
+         "status": "launched",
+         "t3status": "running",
+         "done": false,
+         "level": "human",
+         "link": "[hilo](https://t3.example.test/thread/bbb203)",
+         "threadId": "bbb203",
+         "prompt": "Limpia las ramas antiguas.",
+         "pending": {
+          "questions": [
+           {
+            "request": "r-h1",
+            "summary": "¿Hacemos force-push a la rama main?",
+            "options": [
+             "Sí, hacerlo",
+             "No, no hacer nada"
+            ]
+           }
+          ],
+          "approvals": 0
+         },
+         "escalation": {
+          "status": "open",
+          "request": "r-h1",
+          "notify": "persona-demo",
+          "reason": "acción destructiva",
+          "summary": "¿Hacemos force-push a la rama main?",
+          "since": "2026-01-15T10:24:00-0600"
+         },
+         "reactions": [
+          {
+           "on": "pending_question",
+           "action": "escalar a persona-demo",
+           "level": "human",
+           "ts": "2026-01-15T10:24:00-0600",
+           "note": "acción destructiva: force-push"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "id": "b-0004",
+       "project": "proyecto-demo",
+       "host": "host-a",
+       "max_parallel": 4,
+       "created": "2026-01-15T10:12:00-0600",
+       "notes": [
+        "tope del host: 4"
+       ],
+       "tasks": [
+        {
+         "id": "t-0004-1",
+         "title": "Corregir el redondeo en el total del carrito",
+         "status": "launched",
+         "t3status": "running",
+         "done": false,
+         "link": "[hilo](https://t3.example.test/thread/ccc301)",
+         "threadId": "ccc301",
+         "prompt": "Corrige el redondeo en el total del carrito."
+        },
+        {
+         "id": "t-0004-2",
+         "title": "Añadir pruebas para el validador de correo",
+         "status": "launched",
+         "t3status": "running",
+         "done": false,
+         "link": "[hilo](https://t3.example.test/thread/ccc302)",
+         "threadId": "ccc302",
+         "prompt": "Añade pruebas unitarias para el validador de correo.",
+         "pending": {
+          "questions": [
+           {
+            "request": "r-q1",
+            "summary": "¿Qué formato de fecha usamos en los informes?",
+            "options": [
+             "ISO 8601",
+             "DD/MM/AAAA",
+             "Dejar el actual"
+            ]
+           }
+          ],
+          "approvals": 0
+         }
+        },
+        {
+         "id": "t-0004-3",
+         "title": "Migrar el script de despliegue a la nueva plantilla",
+         "status": "launched",
+         "t3status": "running",
+         "done": false,
+         "link": "[hilo](https://t3.example.test/thread/ccc303)",
+         "threadId": "ccc303",
+         "prompt": "Migra el script de despliegue.",
+         "pending": {
+          "questions": [],
+          "approvals": 2
+         }
+        },
+        {
+         "id": "t-0004-4",
+         "title": "Documentar los endpoints de la API",
+         "status": "queued",
+         "t3status": null,
+         "done": false,
+         "prompt": "Documenta los endpoints."
+        }
+       ]
+      },
+      {
+       "id": "b-0003",
+       "project": "app-ejemplo",
+       "host": "host-b",
+       "max_parallel": 2,
+       "created": "2026-01-15T09:20:00-0600",
+       "notes": [],
+       "tasks": [
+        {
+         "id": "t-0003-1",
+         "title": "Revisar el estilo de los mensajes de error",
+         "status": "launched",
+         "t3status": "completed",
+         "done": true,
+         "settled": true,
+         "link": "[hilo](https://t3.example.test/thread/ddd401)",
+         "threadId": "ddd401",
+         "prompt": "Revisa el estilo de los mensajes de error.",
+         "answered": [
+          {
+           "summary": "¿Tono formal o cercano en los mensajes?",
+           "choice": "Cercano",
+           "ts": "2026-01-15T09:31:00-0600",
+           "by": "humano"
+          }
+         ],
+         "result": "Se unificaron los mensajes con tono cercano.\n\n```diff\n--- a/app/messages.py\n+++ b/app/messages.py\n@@ -3,4 +3,4 @@\n-ERR_LOGIN = \"Credenciales inválidas.\"\n+ERR_LOGIN = \"No pudimos iniciar tu sesión; revisa tus datos.\"\n-ERR_SAVE = \"Fallo al guardar.\"\n+ERR_SAVE = \"No se pudo guardar; inténtalo otra vez.\"\n```"
+        },
+        {
+         "id": "t-0003-2",
+         "title": "Agregar índice a la tabla de pedidos",
+         "status": "launched",
+         "t3status": "completed",
+         "done": true,
+         "settled": true,
+         "link": "[hilo](https://t3.example.test/thread/ddd402)",
+         "threadId": "ddd402",
+         "prompt": "Agrega un índice.",
+         "result": "Índice creado sobre (cliente_id, fecha)."
+        },
+        {
+         "id": "t-0003-3",
+         "title": "Eliminar código muerto del módulo de reportes",
+         "status": "launched",
+         "t3status": "failed",
+         "done": true,
+         "link": "[hilo](https://t3.example.test/thread/ddd403)",
+         "threadId": "ddd403",
+         "prompt": "Elimina el código muerto.",
+         "last_error": "El hilo terminó con las pruebas en rojo."
+        }
+       ]
+      },
+      {
+       "id": "b-0002",
+       "project": "proyecto-demo",
+       "host": "host-a",
+       "max_parallel": 4,
+       "created": "2026-01-15T08:45:00-0600",
+       "notes": [],
+       "tasks": [
+        {
+         "id": "t-0002-1",
+         "title": "Añadir caché a la consulta de catálogo",
+         "status": "launched",
+         "t3status": "completed",
+         "done": true,
+         "settled": true,
+         "link": "[hilo](https://t3.example.test/thread/eee501)",
+         "threadId": "eee501",
+         "prompt": "Añade caché.",
+         "result": "Caché en memoria con expiración de 5 min."
+        },
+        {
+         "id": "t-0002-2",
+         "title": "Traducir los textos de la pantalla de ajustes",
+         "status": "launched",
+         "t3status": "completed",
+         "done": true,
+         "settled": true,
+         "link": "[hilo](https://t3.example.test/thread/eee502)",
+         "threadId": "eee502",
+         "prompt": "Traduce los textos.",
+         "result": "Textos traducidos al español."
+        }
+       ]
+      }
+     ],
+     "events": [
+      {
+       "ts": "2026-01-15T10:24:00-0600",
+       "event": "reaction",
+       "project": "app-ejemplo",
+       "batch": "b-0005",
+       "task": "t-0005-3",
+       "summary": "escalada a persona-demo: acción destructiva",
+       "delivery": {
+        "webhook-demo": "ok"
+       }
+      },
+      {
+       "ts": "2026-01-15T10:24:00-0600",
+       "event": "pending_question",
+       "project": "app-ejemplo",
+       "batch": "b-0005",
+       "task": "t-0005-3",
+       "summary": "¿Hacemos force-push a la rama main?",
+       "delivery": {
+        "webhook-demo": "ok"
+       }
+      },
+      {
+       "ts": "2026-01-15T10:22:00-0600",
+       "event": "pending_approval",
+       "project": "proyecto-demo",
+       "batch": "b-0004",
+       "task": "t-0004-3",
+       "summary": "2 permisos pendientes",
+       "delivery": {
+        "webhook-demo": "ok"
+       }
+      },
+      {
+       "ts": "2026-01-15T10:20:00-0600",
+       "event": "pending_question",
+       "project": "proyecto-demo",
+       "batch": "b-0004",
+       "task": "t-0004-2",
+       "summary": "¿Qué formato de fecha usamos en los informes?",
+       "delivery": {
+        "webhook-demo": "ok"
+       }
+      },
+      {
+       "ts": "2026-01-15T10:18:00-0600",
+       "event": "task_done",
+       "project": "app-ejemplo",
+       "batch": "b-0006",
+       "task": "t-0006-2",
+       "status": "completed",
+       "summary": "La paginación usaba índice base 1; ahora es base 0.",
+       "delivery": {
+        "webhook-demo": "ok"
+       }
+      },
+      {
+       "ts": "2026-01-15T10:16:00-0600",
+       "event": "task_done",
+       "project": "app-ejemplo",
+       "batch": "b-0005",
+       "task": "t-0005-2",
+       "status": "completed",
+       "summary": "Módulo renombrado y referencias actualizadas.",
+       "delivery": {
+        "webhook-demo": "ok"
+       }
+      },
+      {
+       "ts": "2026-01-15T10:14:00-0600",
+       "event": "task_done",
+       "project": "app-ejemplo",
+       "batch": "b-0005",
+       "task": "t-0005-1",
+       "status": "completed",
+       "summary": "Dependencias actualizadas; la suite de pruebas sigue en verde.",
+       "delivery": {
+        "webhook-demo": "ok"
+       }
+      },
+      {
+       "ts": "2026-01-15T10:12:00-0600",
+       "event": "task_done",
+       "project": "app-ejemplo",
+       "batch": "b-0006",
+       "task": "t-0006-1",
+       "status": "completed",
+       "summary": "Se restauró el manejador de clic al recargar el formulario.",
+       "delivery": {
+        "webhook-demo": "ok"
+       }
+      },
+      {
+       "ts": "2026-01-15T09:58:00-0600",
+       "event": "task_done",
+       "project": "app-ejemplo",
+       "batch": "b-0003",
+       "task": "t-0003-3",
+       "status": "failed",
+       "summary": "El hilo terminó con las pruebas en rojo.",
+       "delivery": {
+        "webhook-demo": "falló"
+       }
+      },
+      {
+       "ts": "2026-01-15T09:45:00-0600",
+       "event": "batch_done",
+       "project": "app-ejemplo",
+       "batch": "b-0003",
+       "summary": "2 de 3 tareas completadas",
+       "delivery": {
+        "webhook-demo": "ok"
+       }
+      },
+      {
+       "ts": "2026-01-15T09:31:00-0600",
+       "event": "task_done",
+       "project": "app-ejemplo",
+       "batch": "b-0003",
+       "task": "t-0003-1",
+       "status": "completed",
+       "summary": "Se unificaron los mensajes con tono cercano.",
+       "delivery": {
+        "webhook-demo": "ok"
+       }
+      },
+      {
+       "ts": "2026-01-15T09:10:00-0600",
+       "event": "batch_done",
+       "project": "proyecto-demo",
+       "batch": "b-0002",
+       "summary": "2 de 2 tareas completadas",
+       "delivery": {
+        "webhook-demo": "ok"
+       }
+      }
+     ],
+     "graphs": [
+      {
+       "id": "g-0001",
+       "project": "app-ejemplo",
+       "batch": "b-0006",
+       "goal": "Corregir los bugs de la lista de pendientes de app-ejemplo",
+       "status": "running",
+       "created": "2026-01-15T10:05:00-0600",
+       "finished": null,
+       "summary": null,
+       "threads": 4,
+       "limits": {
+        "thread_budget": 12,
+        "max_depth": 3,
+        "done": "ratio",
+        "min_ratio": 0.8,
+        "throttle_cpu": 70,
+        "stop_cpu": 90,
+        "stop_ram": 90
+       },
+       "throttle": {
+        "mode": "pleno",
+        "cpu": 34,
+        "ram": 52,
+        "allowed": 2,
+        "cap": 2
+       },
+       "nodes": [
+        {
+         "id": "n-0",
+         "parent": null,
+         "title": "Corregir los bugs de la lista",
+         "kind": "root",
+         "depth": 0,
+         "deps": [],
+         "label": "R",
+         "status": "running",
+         "task": null,
+         "result": null,
+         "reason": null,
+         "ask": null,
+         "prompt": ""
+        },
+        {
+         "id": "n-1",
+         "parent": "n-0",
+         "title": "El botón Guardar no responde tras editar el perfil",
+         "kind": "bug",
+         "depth": 1,
+         "deps": [],
+         "label": "BUG-1",
+         "status": "done",
+         "task": "t-0006-1",
+         "result": "Se restauró el manejador de clic al recargar el formulario.",
+         "reason": null,
+         "ask": null,
+         "prompt": "Corrige el BUG-1.",
+         "task_state": {
+          "id": "t-0006-1",
+          "t3status": "completed",
+          "done": true,
+          "link": "[hilo](https://t3.example.test/thread/aaa111)",
+          "level": null,
+          "pending": false,
+          "escalation": null,
+          "bot_wait": false,
+          "retries": 0
+         }
+        },
+        {
+         "id": "n-2",
+         "parent": "n-0",
+         "title": "La lista de pedidos pagina mal",
+         "kind": "bug",
+         "depth": 1,
+         "deps": [],
+         "label": "BUG-2",
+         "status": "done",
+         "task": "t-0006-2",
+         "result": "La paginación usaba índice base 1; ahora es base 0.",
+         "reason": null,
+         "ask": null,
+         "prompt": "Corrige el BUG-2.",
+         "task_state": {
+          "id": "t-0006-2",
+          "t3status": "completed",
+          "done": true,
+          "link": "[hilo](https://t3.example.test/thread/aaa112)",
+          "level": null,
+          "pending": false,
+          "escalation": null,
+          "bot_wait": false,
+          "retries": 0
+         }
+        },
+        {
+         "id": "n-3",
+         "parent": "n-0",
+         "title": "La exportación CSV pierde acentos",
+         "kind": "bug",
+         "depth": 1,
+         "deps": [
+          "n-1"
+         ],
+         "label": "BUG-3",
+         "status": "running",
+         "task": "t-0006-3",
+         "result": null,
+         "reason": "esperó a BUG-1",
+         "ask": null,
+         "prompt": "Corrige el BUG-3 (depende de BUG-1).",
+         "task_state": {
+          "id": "t-0006-3",
+          "t3status": "running",
+          "done": false,
+          "link": "[hilo](https://t3.example.test/thread/aaa113)",
+          "level": "auto",
+          "pending": false,
+          "escalation": null,
+          "bot_wait": false,
+          "retries": 0
+         }
+        },
+        {
+         "id": "n-4",
+         "parent": "n-0",
+         "title": "El formato de fecha rompe el filtro de pedidos",
+         "kind": "bug",
+         "depth": 1,
+         "deps": [],
+         "label": "BUG-4",
+         "status": "expanding",
+         "task": null,
+         "result": null,
+         "reason": "se dividió en 2 hijos",
+         "ask": null,
+         "prompt": ""
+        },
+        {
+         "id": "n-41",
+         "parent": "n-4",
+         "title": "Validar el formato de fecha",
+         "kind": "child",
+         "depth": 2,
+         "deps": [],
+         "label": "BUG-4.1",
+         "status": "running",
+         "task": "t-0006-4",
+         "result": null,
+         "reason": null,
+         "ask": null,
+         "prompt": "Primera mitad de BUG-4.",
+         "task_state": {
+          "id": "t-0006-4",
+          "t3status": "running",
+          "done": false,
+          "link": "[hilo](https://t3.example.test/thread/aaa114)",
+          "level": null,
+          "pending": false,
+          "escalation": null,
+          "bot_wait": false,
+          "retries": 0
+         }
+        },
+        {
+         "id": "n-42",
+         "parent": "n-4",
+         "title": "Actualizar las pruebas del filtro",
+         "kind": "child",
+         "depth": 2,
+         "deps": [
+          "n-41"
+         ],
+         "label": "BUG-4.2",
+         "status": "pending",
+         "task": null,
+         "result": null,
+         "reason": null,
+         "ask": null,
+         "prompt": ""
+        },
+        {
+         "id": "n-5",
+         "parent": "n-0",
+         "title": "Limpiar ramas antiguas del repositorio",
+         "kind": "bug",
+         "depth": 1,
+         "deps": [],
+         "label": "BUG-5",
+         "status": "running",
+         "task": "t-0005-3",
+         "result": null,
+         "reason": null,
+         "ask": "¿Hacemos force-push a la rama main?",
+         "prompt": "Limpia las ramas antiguas.",
+         "task_state": {
+          "id": "t-0005-3",
+          "t3status": "running",
+          "done": false,
+          "link": "[hilo](https://t3.example.test/thread/bbb203)",
+          "level": "human",
+          "pending": true,
+          "escalation": "open",
+          "bot_wait": false,
+          "retries": 0
+         }
+        }
+       ],
+       "log": [
+        {
+         "ts": "2026-01-15T10:05:00-0600",
+         "kind": "start",
+         "msg": "grafo g-0001 creado con 5 nodos"
+        },
+        {
+         "ts": "2026-01-15T10:06:00-0600",
+         "kind": "launch",
+         "msg": "BUG-1 y BUG-2 lanzados"
+        },
+        {
+         "ts": "2026-01-15T10:12:00-0600",
+         "kind": "done",
+         "msg": "BUG-1 listo; BUG-3 desbloqueado"
+        },
+        {
+         "ts": "2026-01-15T10:15:00-0600",
+         "kind": "expand",
+         "msg": "BUG-4 se dividió en BUG-4.1 y BUG-4.2"
+        },
+        {
+         "ts": "2026-01-15T10:24:00-0600",
+         "kind": "escalate",
+         "msg": "BUG-5 escalado a persona-demo (acción destructiva)"
+        }
+       ]
+      }
+     ]
+    },
+    "agent": {
+     "version": "0.6.0",
+     "uptime": 864000,
+     "t3_ok": true,
+     "last_sample_age": 4.1,
+     "last_poll_age": 2.3
+    }
+   }
   },
-  "metrics": {
-    "host-a": {"ok": true, "stale": false, "cpus": 8, "os": "Linux", "role": "principal", "ramTotalMB": 32768, "ramAvailMB": 19500, "disk": "412 GB libres", "diskPct": 55, "load": [2.1, 1.8, 1.5], "cpu": {"base": 30, "amp": 14}, "ram": {"base": 40, "amp": 5}, "run": {"base": 2, "amp": 1}},
-    "host-b": {"ok": true, "stale": false, "cpus": 4, "os": "macOS", "role": "secundaria", "ramTotalMB": 16384, "ramAvailMB": 2900, "disk": "62 GB libres", "diskPct": 86, "load": [3.4, 3.1, 2.6], "cpu": {"base": 78, "amp": 14}, "ram": {"base": 82, "amp": 4}, "run": {"base": 2, "amp": 1}}
+  {
+   "name": "host-b",
+   "status": "ok",
+   "snapshot": {
+    "api_version": 1,
+    "machine_id": "host-b",
+    "ts": 1768494600.0,
+    "generated": "2026-01-15T10:30:00-0600",
+    "machine": {
+     "cpus": 4,
+     "load": [
+      3.4,
+      3.1,
+      2.6
+     ],
+     "cpu_pct": 78,
+     "ram_total_mb": 16384,
+     "ram_avail_mb": 2900,
+     "ram_pct": 82,
+     "swap_used_mb": 0,
+     "disk_used_gb": 388,
+     "disk_total_gb": 450,
+     "disk_pct": 86,
+     "os": "Darwin",
+     "uptime": 864000
+    },
+    "apps": [
+     {
+      "name": "chrome",
+      "cpu_pct": 95.0,
+      "rss_mb": 3900.0,
+      "procs": 28,
+      "cgroups": []
+     },
+     {
+      "name": "node",
+      "cpu_pct": 70.0,
+      "rss_mb": 1800.0,
+      "procs": 9,
+      "cgroups": []
+     },
+     {
+      "name": "vitest",
+      "cpu_pct": 41.0,
+      "rss_mb": 900.0,
+      "procs": 4,
+      "cgroups": []
+     }
+    ],
+    "projects": [
+     {
+      "name": "app-ejemplo",
+      "cpu_pct": 205.0,
+      "rss_mb": 6600.0,
+      "procs": 41,
+      "threads_running": 2,
+      "threads_pending": 1,
+      "leases_active": 0,
+      "leases_queued": 0
+     }
+    ],
+    "threads": [
+     {
+      "thread_id": "sss701",
+      "project": "app-ejemplo",
+      "title": "Migrar los estilos al nuevo sistema de diseño",
+      "status": "waiting",
+      "settled": false,
+      "pending": [
+       {}
+      ],
+      "worktree": "~/.t3/worktrees/app-ejemplo/estilos",
+      "updated": 1768494360.0
+     },
+     {
+      "thread_id": "sss702",
+      "project": "app-ejemplo",
+      "title": "Añadir pruebas al módulo de pedidos",
+      "status": "completed",
+      "settled": false,
+      "pending": [],
+      "worktree": "~/.t3/worktrees/app-ejemplo/pedidos",
+      "updated": 1768492800.0
+     }
+    ],
+    "pending_questions": [
+     {
+      "thread_id": "sss701",
+      "project": "app-ejemplo",
+      "request_id": "r-s1",
+      "questions": [
+       {
+        "request": "r-s1",
+        "summary": "¿Conservamos los nombres de las variables CSS actuales?",
+        "options": [
+         "Sí, conservarlos",
+         "No, renombrarlas"
+        ]
+       }
+      ]
+     }
+    ],
+    "leases": {
+     "active": [],
+     "queued": [],
+     "capacity": {
+      "max_servers": 2,
+      "used": 0,
+      "cpu_pct_used": 78,
+      "ram_avail_mb": 2900
+     }
+    },
+    "events": [
+     {
+      "seq": 7,
+      "ts": 1768494360.0,
+      "machine_id": "host-b",
+      "event": "pending_question",
+      "project": "app-ejemplo",
+      "body": {
+       "thread_id": "sss701",
+       "summary": "¿Conservamos los nombres de las variables CSS actuales?"
+      }
+     },
+     {
+      "seq": 6,
+      "ts": 1768492800.0,
+      "machine_id": "host-b",
+      "event": "thread_done",
+      "project": "app-ejemplo",
+      "body": {
+       "thread_id": "sss702",
+       "status": "completed"
+      }
+     }
+    ],
+    "subscriptions": {},
+    "orchestrator": null,
+    "agent": {
+     "version": "0.6.0",
+     "uptime": 432000,
+     "t3_ok": true,
+     "last_sample_age": 6.0,
+     "last_poll_age": 3.1
+    }
+   }
   }
+ ],
+ "history": {
+  "host-a": {
+   "cpu": {
+    "base": 30,
+    "amp": 14
+   },
+   "ram": {
+    "base": 40,
+    "amp": 5
+   },
+   "run": {
+    "base": 2,
+    "amp": 1
+   },
+   "load": [
+    2.1,
+    1.8,
+    1.5
+   ],
+   "cpus": 8
+  },
+  "host-b": {
+   "cpu": {
+    "base": 78,
+    "amp": 14
+   },
+   "ram": {
+    "base": 82,
+    "amp": 4
+   },
+   "run": {
+    "base": 2,
+    "amp": 1
+   },
+   "load": [
+    3.4,
+    3.1,
+    2.6
+   ],
+   "cpus": 4
+  }
+ }
 }

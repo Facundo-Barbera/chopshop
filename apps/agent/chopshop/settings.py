@@ -5,7 +5,7 @@ Orden de precedencia (de menor a mayor): valores por defecto genéricos < config
 - Entorno: `CHOPSHOP_<SECCION>__<CLAVE>[__<SUBCLAVE>]` (doble guion bajo separa niveles; el guion `-` de un nombre se escribe `_`).
   Ejemplos: `CHOPSHOP_AGENT__PORT=3791`, `CHOPSHOP_GENERAL__OVERFLOW_HOST=host-b`, `CHOPSHOP_HOSTS__HOST_B__CAP=6`.
   Valores: entero/decimal/true/false, `[json, ...]` para listas, o texto.
-- Atajos históricos: `CHOPSHOP_HOME` (directorio de estado), `CHOPSHOP_FLEET` (binario fleet), `CHOPSHOP_ROOT` (solo la app Mac).
+- Atajos históricos: `CHOPSHOP_HOME` (directorio de estado), `CHOPSHOP_FLEET` (binario fleet).
 Las URLs de webhook nunca van aquí: solo rutas a archivos que las contienen."""
 import copy
 import json
@@ -26,9 +26,10 @@ DEFAULTS = {
                   "t3_bin": "~/.t3/bin/t3", "helper": "~/.local/share/fleet/t3mcp.mjs", "access": "approval-required"},
     },
     "app": {                           # la app de macOS
-        "engine_root": "",             # carpeta apps/agent si no va embebido (CHOPSHOP_ROOT tiene prioridad)
         "agent_url": "",               # URL del chopshop-agent remoto (p. ej. http://<ip-tailscale>:3790)
         "token_file": "",              # archivo con el bearer del agente (nunca el token en sí)
+        "refresh_seconds": 3,          # segundos entre sondeos de /snapshot (1-300)
+        "agents": {},                  # varias máquinas: [app.agents.<nombre>] con url y token_file
     },
     "agent": {
         "machine_id": "",              # vacío = hostname

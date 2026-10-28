@@ -35,6 +35,7 @@ struct RootView: View {
     }
 
     private var subtitle: String {
+        if model.link == .unconfigured { return "⚠︎ sin agente configurado" }
         if let e = model.lastError { return "⚠︎ " + e.prefix(60) }
         guard let d = model.lastUpdate else { return "cargando…" }
         let f = DateFormatter(); f.dateFormat = "HH:mm:ss"
@@ -231,7 +232,7 @@ struct Spark: View {
         Canvas { ctx, size in
             guard values.count > 1 else { return }
             let hi = max(100, values.max() ?? 100), lo = 0.0
-            let step = size.width / CGFloat(max(1, AppModel.historyLen - 1))
+            let step = size.width / CGFloat(max(1, Summarizer.historyLen - 1))
             let x0 = size.width - step * CGFloat(values.count - 1)
             func pt(_ i: Int) -> CGPoint {
                 CGPoint(x: x0 + step * CGFloat(i), y: size.height - CGFloat((values[i] - lo) / (hi - lo)) * (size.height - 2) - 1)
