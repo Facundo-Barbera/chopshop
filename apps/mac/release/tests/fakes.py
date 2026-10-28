@@ -98,8 +98,11 @@ log("ditto", *args)
 if "-x" in args:
     dest = args[-1]
     os.makedirs(os.path.join(dest, "Chopshop.app", "Contents"), exist_ok=True)
-else:
+elif "-c" in args:
     open(args[-1], "wb").write(b"zip-falso")
+else:
+    import shutil
+    shutil.copytree(args[0], args[1], symlinks=True)
 '''
 
 SHIMS["shasum"] = PRELUDE + '''
@@ -115,9 +118,44 @@ for f in args[2:]:
 '''
 
 SHIMS["PlistBuddy"] = PRELUDE + '''
-log("PlistBuddy", *sys.argv[1:])
-if "Print :CFBundleExecutable" in sys.argv[2]:
-    print("Chopshop")
+import json, shlex
+args = sys.argv[1:]
+cmd, path = args[1], args[2]
+log("PlistBuddy", cmd)
+data = json.load(open(path)) if os.path.exists(path) else {}
+op, _, rest = cmd.partition(" ")
+if op == "Print":
+    key = rest.lstrip(":")
+    if key not in data:
+        sys.exit(1)
+    v = data[key]
+    print(("true" if v else "false") if isinstance(v, bool) else v)
+    sys.exit(0)
+if op == "Delete":
+    key = rest.lstrip(":")
+    if key not in data:
+        sys.exit(1)
+    del data[key]
+elif op == "Add":
+    parts = shlex.split(rest)
+    key, typ, val = parts[0].lstrip(":"), parts[1], parts[2]
+    data[key] = (val == "true") if typ == "bool" else int(val) if typ == "integer" else val
+json.dump(data, open(path, "w"))
+'''
+
+SHIMS["otool"] = PRELUDE + '''
+args = sys.argv[1:]
+if args[0] == "-L":
+    print(args[1] + ":")
+    print("\\t@rpath/Sparkle.framework/Versions/B/Sparkle (compatibility version 1.6.0, current version 2.10.1)")
+else:
+    print("Load command 9\\n      cmd LC_BUILD_VERSION\\n  cmdsize 32\\n platform 1\\n    minos %s\\n      sdk 26.0\\n   ntools 1" % os.environ.get("FAKE_MINOS", "13.0"))
+    if os.environ.get("FAKE_RPATH") == "1":
+        print("Load command 20\\n          cmd LC_RPATH\\n         path @executable_path/../Frameworks (offset 12)")
+'''
+
+SHIMS["install_name_tool"] = PRELUDE + '''
+log("install_name_tool", *sys.argv[1:])
 '''
 
 SHIMS["aws"] = PRELUDE + '''
@@ -194,6 +232,9 @@ if "--verify" in args:
     f, sig = args[-2], args[-1]
     ok = m.ed25519_verify(pub, open(f, "rb").read(), base64.b64decode(sig))
     sys.exit(0 if ok else 1)
+if args[-1].endswith(".xml"):
+    with open(args[-1], "a") as fh:
+        fh.write("<!-- sparkle-signatures:\\nedSignature: re-firmado\\n-->\\n")
 '''
 
 SHIMS["generate_appcast"] = PRELUDE + '''
@@ -219,7 +260,7 @@ feed = os.path.join(d, "appcast.xml")
 existing = m.load_items(feed) if os.path.exists(feed) else []
 items = []
 for it in existing:
-    if os.path.exists(os.path.join(d, m.basename_of(it["url"]))):
+    if os.path.exists(os.path.join(d, m.basename_of(it["url"]))) or os.environ.get("FAKE_KEEP_STALE_ITEM"):
         items.append(it)
 have = {i["short"] for i in items}
 for name in sorted(os.listdir(d)):
@@ -229,6 +270,10 @@ for name in sorted(os.listdir(d)):
             items.append({"build": new_build, "short": short, "channel": channel, "url": prefix + name, "min_system": min_sys, "phased": phased})
 def xml_item(i):
     name = m.basename_of(i["url"])
+    if not os.path.exists(os.path.join(d, name)):
+        return ("<item><title>%s</title><sparkle:version>%s</sparkle:version><sparkle:shortVersionString>%s</sparkle:shortVersionString>"
+                '<sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion><enclosure url="%s" length="1" sparkle:edSignature="x"/></item>'
+                % (i["short"], i["build"], i["short"], i["url"]))
     data = open(os.path.join(d, name), "rb").read()
     sig = base64.b64encode(fk.ed25519_sign(seed, data)).decode()
     extra = ("<sparkle:channel>%s</sparkle:channel>" % i["channel"]) if i.get("channel") else ""

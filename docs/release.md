@@ -73,7 +73,7 @@ Los **secrets** van en el *environment* indicado (Settings → Environments → 
 |---|---|---|---|---|
 | `BUNDLE_ID` | var | `CFBundleIdentifier`. Una release real se niega a salir con `com.example.*` | Lo eliges (DNS inverso) | `org.example.chopshop` |
 | `SPARKLE_PUBLIC_ED_KEY` | var | Clave **pública** EdDSA → `SUPublicEDKey` del Info.plist. Vacía = el pipeline falla | Salida de `generate_keys` | `AbCdEfGhIjKlMnOpQrStUvWxYz0123456789ABCDEFg=` |
-| `SPARKLE_FEED_URL` | var | URL pública del `appcast.xml` → `SUFeedURL` (https) | `<UPDATES_BASE_URL>/appcast.xml` | `https://updates.example.com/appcast.xml` |
+| `SPARKLE_FEED_URL` | var | URL pública del `appcast.xml` → `SUFeedURL` (https). **Debe ser exactamente** `UPDATES_BASE_URL` + `/appcast.xml`: `generate_appcast` nombra el feed según esta URL y el pipeline lo publica y verifica ahí | `<UPDATES_BASE_URL>/appcast.xml` | `https://updates.example.com/appcast.xml` |
 | `UPDATES_BASE_URL` | var | URL pública base de R2 (dominio propio del bucket, https, sin barra final). Prefijo de las URLs de descarga | Dominio personalizado del bucket | `https://updates.example.com` |
 | `R2_BUCKET` | var | Nombre del bucket de R2 | Al crearlo | `bucket-de-ejemplo` |
 

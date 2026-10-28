@@ -12,6 +12,7 @@ Subcomandos:
   verify ...               valida el appcast generado (urls, firmas, versión nueva, sistema mínimo, canal)
   find --appcast F --version V   versión (corta) -> build y archivos asociados (zip y deltas)
   remove-item --appcast F --version V   quita un item del feed (el re-firmado lo hace sign_update)
+  prune --appcast F --dir D --version V   quita el item y los deltas huérfanos (rollback de emergencia; re-firmar después)
 
 Nunca imprime claves ni firmas completas. La clave privada solo se lee de stdin.
 """
@@ -334,6 +335,34 @@ def cmd_get_sig(a):
     return 1
 
 
+def cmd_prune(a):
+    """Rollback de emergencia: quita el item de la versión y los deltas cuyo archivo ya no está en --dir."""
+    ET.register_namespace("sparkle", NS)
+    ET.register_namespace("dc", "http://purl.org/dc/elements/1.1/")
+    tree = ET.parse(a.appcast)
+    channel = tree.getroot().find("channel")
+    removed_items = removed_deltas = 0
+    for it in list(channel.findall("item")):
+        enc = it.find("enclosure")
+        short = it.findtext(SP + "shortVersionString") or (enc.get(SP + "shortVersionString") if enc is not None else "")
+        if short == a.version:
+            channel.remove(it)
+            removed_items += 1
+            continue
+        deltas = it.find(SP + "deltas")
+        if deltas is None:
+            continue
+        for d in list(deltas.findall("enclosure")):
+            if not os.path.exists(os.path.join(a.dir, basename_of(d.get("url") or ""))):
+                deltas.remove(d)
+                removed_deltas += 1
+        if not deltas.findall("enclosure"):
+            it.remove(deltas)
+    tree.write(a.appcast, encoding="utf-8", xml_declaration=True)
+    print("items retirados: %d, deltas huérfanos retirados: %d" % (removed_items, removed_deltas))
+    return 0
+
+
 def cmd_list_files(a):
     seen = []
     for i in load_items(a.appcast):
@@ -423,6 +452,11 @@ def main(argv=None):
     p.add_argument("--appcast", required=True)
     p.add_argument("--version", required=True)
     p.set_defaults(fn=cmd_find)
+    p = sub.add_parser("prune")
+    p.add_argument("--appcast", required=True)
+    p.add_argument("--dir", required=True)
+    p.add_argument("--version", required=True)
+    p.set_defaults(fn=cmd_prune)
     p = sub.add_parser("remove-item")
     p.add_argument("--appcast", required=True)
     p.add_argument("--version", required=True)
