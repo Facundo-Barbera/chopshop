@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "chopshop": {
+      "command": "chopshop",
+      "args": ["mcp"],
+      "env": {
+        "CHOPSHOP_AGENT_URL": "http://127.0.0.1:3790"
+      }
+    }
+  }
+}
