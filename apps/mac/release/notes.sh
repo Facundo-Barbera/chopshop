@@ -38,4 +38,4 @@ fi
 
 python3 "$HERE/notes.py" html < "$MD" > "$OUT/$BASE.html"
 python3 "$HERE/notes.py" html --page --title "Chopshop $VERSION" < "$MD" > "$OUT/notes/$VERSION.html"
-log "notas de $TAG generadas desde: $source_used"
+log "notas de ${TAG:-$VERSION} generadas desde: $source_used"
