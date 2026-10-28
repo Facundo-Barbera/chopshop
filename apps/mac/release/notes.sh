@@ -10,7 +10,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HERE/lib.sh"
 
 TAG="${1:-}"; OUT="${2:-}"; BASE="${3:-}"
-[ -n "$OUT" ] && [ -n "$BASE" ] || die "uso: notes.sh <tag> <dir_salida> <nombre_base>  (tag vacío = dry-run, con NOTES_VERSION)"
+if [ -z "$OUT" ] || [ -z "$BASE" ]; then die "uso: notes.sh <tag> <dir_salida> <nombre_base>  (tag vacío = dry-run, con NOTES_VERSION)"; fi
 VERSION="${TAG#v}"
 if [ -z "$TAG" ]; then VERSION="${NOTES_VERSION:?dry-run sin tag: falta NOTES_VERSION}"; fi
 mkdir -p "$OUT/notes"
@@ -23,7 +23,7 @@ if [ -z "$TAG" ]; then
 elif [ "$(git cat-file -t "refs/tags/$TAG" 2>/dev/null || true)" = "tag" ]; then
   # %(contents) de un tag anotado = su mensaje; se quita la firma PGP si la hubiera
   git tag -l --format='%(contents)' "$TAG" | sed '/^-----BEGIN PGP SIGNATURE-----$/,$d' > "$MD"
-  [ -s "$MD" ] && grep -q '[^[:space:]]' "$MD" && source_used="mensaje del tag" || : > "$MD"
+  if [ -s "$MD" ] && grep -q '[^[:space:]]' "$MD"; then source_used="mensaje del tag"; else : > "$MD"; fi
 fi
 if [ -z "$source_used" ] && [ -f "$REPO_ROOT/CHANGELOG.md" ]; then
   python3 "$HERE/notes.py" changelog --file "$REPO_ROOT/CHANGELOG.md" --version "$VERSION" > "$MD"

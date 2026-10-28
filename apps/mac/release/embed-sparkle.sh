@@ -22,10 +22,10 @@ if [ -z "$SRC" ]; then
   SRC="$(find "$MAC_DIR/.build" -maxdepth 8 -type d -path '*Sparkle.xcframework/macos-*/Sparkle.framework' 2>/dev/null | head -n 1)"
 fi
 if [ -z "$SRC" ]; then
-  bin_path="$(cd "$MAC_DIR" && swift build -c release --show-bin-path 2>/dev/null || true)"
+  bin_path="$( (cd "$MAC_DIR" && swift build -c release --show-bin-path 2>/dev/null) || true)"
   if [ -n "$bin_path" ] && [ -d "$bin_path/Sparkle.framework" ]; then SRC="$bin_path/Sparkle.framework"; fi
 fi
-[ -n "$SRC" ] && [ -d "$SRC" ] || die "no encuentro Sparkle.framework (¿falló la resolución de SwiftPM?)"
+if [ -z "$SRC" ] || [ ! -d "$SRC" ]; then die "no encuentro Sparkle.framework (¿falló la resolución de SwiftPM?)"; fi
 
 FRAMEWORKS="$APP/Contents/Frameworks"
 mkdir -p "$FRAMEWORKS"
