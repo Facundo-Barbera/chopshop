@@ -175,10 +175,33 @@ class TestPreflight(WorkDir):
         env["PREFLIGHT_MODE"] = "dryrun"
         self.assertEqual(self.run_sh("preflight.sh", ["release"], env=env).returncode, 0)
 
-    def test_dry_run_never_fails_on_missing(self):
-        r = self.run_sh("preflight.sh", ["release"], env={"PREFLIGHT_MODE": "dryrun"})
-        self.assertEqual(r.returncode, 0)
-        self.assertIn("SPARKLE_ED_PRIVATE_KEY", r.stderr)  # avisa, no falla
+    NO_CERT = ("MACOS_CERT_P12_BASE64", "MACOS_CERT_PASSWORD", "SIGNING_IDENTITY")
+
+    def test_dry_run_does_not_require_certificate_password_or_identity(self):
+        env = {k: v for k, v in self.good(PREFLIGHT_MODE="dryrun").items() if k not in self.NO_CERT}
+        r = self.run_sh("preflight.sh", ["release"], env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_dry_run_still_requires_everything_else_with_the_usual_message(self):
+        env = {k: v for k, v in self.good(PREFLIGHT_MODE="dryrun").items() if k not in self.NO_CERT + ("ASC_API_KEY_ID", "R2_BUCKET", "SPARKLE_ED_PRIVATE_KEY")}
+        r = self.run_sh("preflight.sh", ["release"], env=env)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("Faltan 3 secret(s)/variable(s)", r.stderr)
+        for name in ("ASC_API_KEY_ID", "R2_BUCKET", "SPARKLE_ED_PRIVATE_KEY"):
+            self.assertIn(name, r.stderr)
+        for name in self.NO_CERT:
+            self.assertNotIn(name, r.stderr)
+
+    def test_real_run_requires_certificate_password_and_identity(self):
+        env = {k: v for k, v in self.good().items() if k not in self.NO_CERT}
+        r = self.run_sh("preflight.sh", ["release"], env=env)
+        self.assertEqual(r.returncode, 1)
+        for name in self.NO_CERT:
+            self.assertIn(name, r.stderr)
+
+    def test_dry_run_ignores_a_placeholder_identity(self):
+        env = self.good(PREFLIGHT_MODE="dryrun", SIGNING_IDENTITY="pendiente")
+        self.assertEqual(self.run_sh("preflight.sh", ["release"], env=env).returncode, 0)
 
 
 # ---------------------------------------------------------------------------
@@ -681,11 +704,14 @@ class TestPublishFlow(WorkDir):
         self.assertIn("max-age=60", by_key["appcast.xml"])
         self.assertNotIn("immutable", by_key["appcast.xml"])
         gen = next(c for c in self.calls() if c.startswith("generate_appcast"))
-        for flag in ("--ed-key-file -", "--download-url-prefix https://updates.example.com/", "--maximum-deltas 3",
+        for flag in ("--ed-key-file %s/chopshop-sparkle-key-" % self.tmp, "--download-url-prefix https://updates.example.com/", "--maximum-deltas 3",
                      "--delta-compression lzma", "--versions 202610010000", "--embed-release-notes"):
             self.assertIn(flag, gen)
         self.assertNotIn(fakes.SECRET_B64, "\n".join(self.calls()))
-        self.assertTrue(any(c.startswith("sign_update --verify --ed-key-file -") for c in self.calls()))
+        self.assertTrue(any(c.startswith("sign_update --verify --ed-key-file ") for c in self.calls()))
+        self.assertTrue(any(c.startswith("sign_update --ed-key-file ") and " -p " in c for c in self.calls()))  # firma propia == firma del feed
+        self.assertIn("key-file-mode 0o600", self.calls())
+        self.assertEqual([f for f in os.listdir(self.tmp) if f.startswith("chopshop-sparkle-key")], [], "la clave temporal debe borrarse")
         out = r.stdout + r.stderr
         for secret in ("secreto-r2-ficticio", fakes.SECRET_B64):
             self.assertNotIn(secret, out)
@@ -744,6 +770,62 @@ class TestPublishFlow(WorkDir):
         self.assertNotEqual(r.returncode, 0)
         self.assertEqual(slurp(os.path.join(self.s3, "appcast.xml")), before, "no se debe pisar el feed ante un error de credenciales")
 
+    def dry_env(self, run_id="123456"):
+        e = dict(self.env, DRY_RUN="true", R2_PREFIX="test/" + run_id, R2_TEST_ONLY="1", UPDATES_BASE_URL="https://updates.example.com/test/" + run_id)
+        return e
+
+    def dry_publish(self, env, version="0.0.0-dryrun", build="202610281200"):
+        zip_path = os.path.join(self.tmp, "Chopshop-%s.zip" % version)
+        spit(zip_path, "contenido-dry", "w")
+        return self.run_sh("publish.sh", [zip_path], env=dict(env, VERSION=version, BUILD_NUMBER=build, CHANNEL=""), cwd=self.repo)
+
+    def test_dry_run_publishes_only_under_test_prefix_and_without_a_tag(self):
+        # producción previa: un appcast y un zip en la raíz que NO deben tocarse
+        spit(os.path.join(self.s3, "appcast.xml"), "feed-de-produccion", "w")
+        spit(os.path.join(self.s3, "Chopshop-1.0.0.zip"), "zip-prod", "w")
+        r = self.dry_publish(self.dry_env())
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        self.assertEqual(self.puts(), ["test/123456/Chopshop-0.0.0-dryrun.zip", "test/123456/notes/0.0.0-dryrun.html", "test/123456/appcast.xml"])
+        self.assertEqual(slurp(os.path.join(self.s3, "appcast.xml")), "feed-de-produccion")
+        self.assertEqual(slurp(os.path.join(self.s3, "Chopshop-1.0.0.zip")), "zip-prod")
+        feed = appcast.load_items(os.path.join(self.s3, "test", "123456", "appcast.xml"))
+        self.assertEqual([i["short"] for i in feed], ["0.0.0-dryrun"])
+        self.assertTrue(feed[0]["url"].startswith("https://updates.example.com/test/123456/"))
+        self.assertNotIn("test/", "\n".join(c for c in self.calls() if c.startswith("aws get")))  # no se lee producción ni nada ajeno
+
+    def test_dry_run_requires_the_test_only_guard(self):
+        env = self.dry_env()
+        env.pop("R2_TEST_ONLY")
+        self.assertNotEqual(self.dry_publish(env).returncode, 0)
+        r = self.dry_publish(dict(self.dry_env(), R2_PREFIX=""))
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(self.puts(), [])
+
+    def test_test_only_guard_blocks_writes_outside_test(self):
+        d = os.path.join(self.tmp, "work")
+        os.makedirs(d)
+        spit(os.path.join(d, "appcast.xml"), "x", "w")
+        r = self.run_sh("r2.sh", ["push-appcast", d], env=dict(self.env, R2_TEST_ONLY="1", R2_PREFIX="otro/"))
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("test/", r.stderr)
+        self.assertEqual(self.puts(), [])
+
+    def test_production_fingerprint_detects_changes(self):
+        fp = os.path.join(self.tmp, "fp")
+        env = self.dry_env()
+        self.assertEqual(self.run_sh("r2.sh", ["prod-snapshot", fp], env=env).returncode, 0)  # sin appcast: "ausente"
+        self.assertEqual(self.run_sh("r2.sh", ["prod-assert-unchanged", fp], env=env).returncode, 0)
+        spit(os.path.join(self.s3, "appcast.xml"), "alguien escribió producción", "w")
+        r = self.run_sh("r2.sh", ["prod-assert-unchanged", fp], env=env)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("PRODUCCIÓN", r.stderr)
+
+    def test_ls_lists_test_objects(self):
+        self.assertEqual(self.dry_publish(self.dry_env("777")).returncode, 0)
+        r = self.run_sh("r2.sh", ["ls", "test/777/"], env=self.dry_env("777"))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("test/777/appcast.xml", r.stdout)
+
     def test_rollback_dry_run_and_real(self):
         self.assertEqual(self.release("1.0.0", "202610010000").returncode, 0)
         self.assertEqual(self.release("1.1.0", "202610020000").returncode, 0)
@@ -771,7 +853,7 @@ class TestPublishFlow(WorkDir):
         self.assertIn("poda manual", r.stdout)
         self.assertEqual([i["short"] for i in appcast.load_items(os.path.join(self.s3, "appcast.xml"))], ["1.0.0"])
         self.assertIn("sparkle-signatures", slurp(os.path.join(self.s3, "appcast.xml")))  # re-firmado con sign_update
-        self.assertTrue(any(c.startswith("sign_update --ed-key-file -") and c.endswith("appcast.xml") for c in self.calls()))
+        self.assertTrue(any(c.startswith("sign_update --ed-key-file ") and c.endswith("appcast.xml") for c in self.calls()))
 
     def test_rollback_of_only_version_is_refused(self):
         self.assertEqual(self.release("1.0.0", "202610010000").returncode, 0)
@@ -950,7 +1032,7 @@ class TestWorkflows(unittest.TestCase):
 
     def test_old_names_are_gone_everywhere(self):
         old = ["MACOS_KEYCHAIN_PASSWORD", "MACOS_SIGN_IDENTITY", "APPLE_API_KEY", "APPLE_API_ISSUER", "SPARKLE_PUBLIC_ED_KEY", "SPARKLE_FEED_URL",
-               "CLOUDFLARE_", "R2_PREFIX", "SPARKLE_SIGNING_PUBLIC", "release-signing", "release-dryrun", "vars.MIN_MACOS_VERSION"]
+               "CLOUDFLARE_", "SPARKLE_SIGNING_PUBLIC", "release-signing", "release-dryrun", "vars.MIN_MACOS_VERSION"]
         for p in TestRepoHygiene.tracked(None):
             text = read(p)
             for o in old:
@@ -980,7 +1062,39 @@ class TestWorkflows(unittest.TestCase):
         self.assertIs(jobs["publish"]["concurrency"]["cancel-in-progress"], False)
         self.assertEqual(jobs["publish"]["concurrency"]["group"], "mac-updates-feed")
         self.assertEqual(jobs["publish"]["needs"], ["preflight", "build"])
-        self.assertIn("dry_run != 'true'", jobs["publish"]["if"])
+        self.assertNotIn("if", jobs["publish"])  # corre también en dry-run (sube solo a test/)
+
+    @unittest.skipUnless(yaml, "PyYAML no disponible")
+    def test_dry_run_never_signs_notarizes_releases_or_touches_production(self):
+        jobs = self.load("release-mac.yml")["jobs"]
+        pub_env = jobs["publish"]["env"]
+        self.assertEqual(pub_env["R2_PREFIX"], "${{ needs.preflight.outputs.dry_run == 'true' && format('test/{0}', github.run_id) || '' }}")
+        self.assertEqual(pub_env["R2_TEST_ONLY"], "${{ needs.preflight.outputs.dry_run == 'true' && '1' || '0' }}")
+        steps = {s.get("name", ""): s for s in jobs["build"]["steps"] + jobs["publish"]["steps"]}
+        for name in ("Keychain temporal con el certificado Developer ID", "Notarizar, grapar y verificar", "GitHub Release"):
+            self.assertEqual(steps[name]["if"], "env.DRY_RUN != 'true'", name)
+        publish = steps["Publicar (zips, deltas y notas primero; appcast al final)"]
+        self.assertIn("format('/test/{0}', github.run_id)", publish["env"]["UPDATES_BASE_URL"])
+        self.assertEqual(steps["Huella del appcast de producción (antes)"]["if"], "env.DRY_RUN == 'true'")
+        self.assertIn("prod-assert-unchanged", steps["Comprobar el objeto de prueba y que producción no se tocó"]["run"])
+        sign = steps["Firmar (hardened runtime, de dentro hacia fuera)"]
+        self.assertIn("'-'", sign["env"]["SIGN_IDENTITY"])
+        self.assertIn("RELEASE_MODE", sign["env"])
+        # los pasos de dry-run nunca crean tags ni releases
+        code = "\n".join(l for l in read(WORKFLOWS, "release-mac.yml").splitlines() if not l.lstrip().startswith("#"))
+        self.assertNotIn("git tag", code)
+        self.assertNotIn("git push", code)
+        # la release real aborta si falta la firma Developer ID
+        self.assertIn("no se publica una release sin firma", steps["Comprobar el zip descargado (checksum y firma)"]["run"])
+        self.assertIn("MACOS_CERT_P12_BASE64", json.dumps(steps["Keychain temporal con el certificado Developer ID"]["env"]))
+
+    @unittest.skipUnless(yaml, "PyYAML no disponible")
+    def test_sparkle_key_file_is_always_removed(self):
+        steps = self.load("release-mac.yml")["jobs"]["publish"]["steps"]
+        self.assertEqual(steps[-1].get("if"), "always()")
+        self.assertIn("chopshop-sparkle-key-", steps[-1]["run"])
+        self.assertIn("trap", read(RELEASE, "appcast.sh"))
+        self.assertIn("chmod 600", read(RELEASE, "appcast.sh"))
 
     @unittest.skipUnless(yaml, "PyYAML no disponible")
     def test_preflight_fails_first_before_keychain_or_network(self):

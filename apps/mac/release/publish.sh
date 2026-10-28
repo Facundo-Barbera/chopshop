@@ -12,7 +12,15 @@ source "$HERE/lib.sh"
 
 ZIP="${1:-}"
 [ -f "$ZIP" ] || die "uso: publish.sh <Chopshop-VERSION.zip>"
-require_env TAG VERSION BUILD_NUMBER
+require_env VERSION BUILD_NUMBER
+# En dry-run no hay tag (se lanza desde una rama) y todo va bajo test/<run_id> (R2_PREFIX, R2_TEST_ONLY=1)
+if [ "${DRY_RUN:-false}" = true ]; then
+  [ "${R2_TEST_ONLY:-0}" = 1 ] || die "dry-run exige R2_TEST_ONLY=1 y R2_PREFIX=test/<id>"
+  TAG=""
+  export NOTES_VERSION="$VERSION"
+else
+  require_env TAG
+fi
 NAME="Chopshop-$VERSION.zip"
 [ "$(basename "$ZIP")" = "$NAME" ] || die "el zip debe llamarse $NAME"
 
@@ -29,7 +37,7 @@ case "$status" in
 esac
 
 cp "$ZIP" "$work/$NAME"
-bash "$HERE/notes.sh" "$TAG" "$work" "Chopshop-$VERSION"
+bash "$HERE/notes.sh" "${TAG:-}" "$work" "Chopshop-$VERSION"
 if [ -n "${NOTES_MD_OUT:-}" ]; then cp "$work/notes/$VERSION.md" "$NOTES_MD_OUT"; fi
 bash "$HERE/appcast.sh" "$work" --new-build "$BUILD_NUMBER" --version "$VERSION" --channel "${CHANNEL:-}"
 bash "$HERE/r2.sh" push "$work" "$VERSION"

@@ -10,13 +10,17 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HERE/lib.sh"
 
 TAG="${1:-}"; OUT="${2:-}"; BASE="${3:-}"
-[ -n "$TAG" ] && [ -n "$OUT" ] && [ -n "$BASE" ] || die "uso: notes.sh <tag> <dir_salida> <nombre_base>"
+[ -n "$OUT" ] && [ -n "$BASE" ] || die "uso: notes.sh <tag> <dir_salida> <nombre_base>  (tag vacío = dry-run, con NOTES_VERSION)"
 VERSION="${TAG#v}"
+if [ -z "$TAG" ]; then VERSION="${NOTES_VERSION:?dry-run sin tag: falta NOTES_VERSION}"; fi
 mkdir -p "$OUT/notes"
 MD="$OUT/notes/$VERSION.md"
 
 source_used=""
-if [ "$(git cat-file -t "refs/tags/$TAG" 2>/dev/null || true)" = "tag" ]; then
+if [ -z "$TAG" ]; then
+  printf '## Prueba (dry-run)\n- Build de CI sin firma Developer ID ni notarización; no es una release.\n' > "$MD"
+  source_used="dry-run (sin tag)"
+elif [ "$(git cat-file -t "refs/tags/$TAG" 2>/dev/null || true)" = "tag" ]; then
   # %(contents) de un tag anotado = su mensaje; se quita la firma PGP si la hubiera
   git tag -l --format='%(contents)' "$TAG" | sed '/^-----BEGIN PGP SIGNATURE-----$/,$d' > "$MD"
   [ -s "$MD" ] && grep -q '[^[:space:]]' "$MD" && source_used="mensaje del tag" || : > "$MD"

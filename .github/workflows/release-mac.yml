@@ -13,7 +13,11 @@ name: Release Mac
 #    tocar keychain o red). Los secrets solo se pasan como valor a los pasos que los usan; `preflight` recibe
 #    únicamente un indicador "existe/no existe". El job `publish` usa el environment `release` (aprobación manual
 #    opcional; no necesita secrets propios).
-#  - Toda release sale firmada con Developer ID y notarizada: no hay canal sin firmar.
+#  - Toda release REAL sale firmada con Developer ID y notarizada: no hay canal sin firmar y el workflow aborta si falta.
+#  - DRY-RUN (workflow_dispatch con dry_run=true, el valor por defecto): omite firma Developer ID, notarización y
+#    stapling (y no exige MACOS_CERT_P12_BASE64, MACOS_CERT_PASSWORD ni SIGNING_IDENTITY). Compila, ensambla (firma
+#    ad-hoc), zip, firma EdDSA de Sparkle, generate_appcast y sube SOLO a R2 bajo test/<run_id>/. No toca el appcast ni
+#    los zips de producción, no crea GitHub Release ni tags.
 #  - Acciones fijadas por SHA de commit (comentario = versión).
 on:
   push:
@@ -21,7 +25,7 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: "Dry-run: compila y firma ad-hoc; no notariza ni publica. Desmarca solo ejecutando desde un tag vX.Y.Z"
+        description: "Dry-run: firma ad-hoc, sin notarizar; sube solo a R2 bajo test/<run_id>/ y no crea release. Desmarca solo ejecutando desde un tag vX.Y.Z"
         type: boolean
         default: true
       draft_release:
@@ -186,7 +190,8 @@ jobs:
           BUILD_NUMBER: ${{ needs.preflight.outputs.build_number }}
           RELEASE_MODE: ${{ env.DRY_RUN == 'true' && 'dryrun' || 'release' }}
           BUNDLE_ID: ${{ vars.BUNDLE_ID || 'com.example.chopshop' }}
-          UPDATES_BASE_URL: ${{ vars.UPDATES_BASE_URL }}
+          # En dry-run la app apunta al feed de PRUEBA (test/<run_id>), no al de producción
+          UPDATES_BASE_URL: ${{ vars.UPDATES_BASE_URL }}${{ env.DRY_RUN == 'true' && format('/test/{0}', github.run_id) || '' }}
           SPARKLE_ED_PUBLIC_KEY: ${{ vars.SPARKLE_ED_PUBLIC_KEY }}
           APP_OUT: ${{ runner.temp }}/out/Chopshop.app
         run: bash apps/mac/release/assemble-app.sh
@@ -195,6 +200,7 @@ jobs:
         env:
           # En dry-run no hay certificado: firma ad-hoc ("-"). En release, SIGN_IDENTITY (hash) lo exportó keychain.sh.
           SIGN_IDENTITY: ${{ env.DRY_RUN == 'true' && '-' || env.SIGN_IDENTITY }}
+          RELEASE_MODE: ${{ env.DRY_RUN == 'true' && 'dryrun' || 'release' }} # en release, sign-app.sh rechaza la firma ad-hoc
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
         run: bash apps/mac/release/sign-app.sh "$RUNNER_TEMP/out/Chopshop.app"
 
@@ -230,24 +236,27 @@ jobs:
         run: bash apps/mac/release/keychain.sh cleanup
 
   publish:
-    name: Publicar en R2 y GitHub Release
+    name: Publicar en R2 (test/ en dry-run) y GitHub Release
     needs: [preflight, build]
-    if: needs.preflight.outputs.dry_run != 'true'
     runs-on: macos-15
     timeout-minutes: 45
     # Aprobación manual opcional (Settings -> Environments -> release -> Required reviewers). Sin secrets propios.
     environment: release
     permissions:
-      contents: write # crear la GitHub Release
+      contents: write # crear la GitHub Release (solo en release real)
     # Un solo publicador a la vez (compartido con rollback-mac): dos releases no pisan el appcast
     concurrency:
       group: mac-updates-feed
       cancel-in-progress: false
     env:
+      DRY_RUN: ${{ needs.preflight.outputs.dry_run }}
       TAG: ${{ needs.preflight.outputs.tag }}
       VERSION: ${{ needs.preflight.outputs.version }}
       BUILD_NUMBER: ${{ needs.preflight.outputs.build_number }}
       CHANNEL: ${{ needs.preflight.outputs.channel }}
+      # Dry-run: todo bajo test/<run_id> y con la salvaguarda R2_TEST_ONLY (r2.sh se niega a escribir fuera de test/)
+      R2_PREFIX: ${{ needs.preflight.outputs.dry_run == 'true' && format('test/{0}', github.run_id) || '' }}
+      R2_TEST_ONLY: ${{ needs.preflight.outputs.dry_run == 'true' && '1' || '0' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -260,7 +269,10 @@ jobs:
           name: chopshop-mac-${{ needs.preflight.outputs.version }}
           path: ${{ runner.temp }}/dl
 
-      - name: Comprobar el zip descargado (checksum y firma de Apple)
+      # Release real: sin firma Developer ID + notarización el workflow ABORTA aquí; nunca se publica algo sin firmar.
+      - name: Comprobar el zip descargado (checksum y firma)
+        env:
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP/dl"
@@ -268,8 +280,14 @@ jobs:
           check="$(mktemp -d)"
           ditto -x -k "Chopshop-${VERSION}.zip" "$check"
           codesign --verify --deep --strict --verbose=2 "$check/Chopshop.app"
-          xcrun stapler validate "$check/Chopshop.app"
-          spctl --assess --type execute -vv "$check/Chopshop.app" 2>&1 | sed 's/^origin=.*/origin=<oculto>/'
+          if [ "$DRY_RUN" != "true" ]; then
+            if ! codesign -d --verbose=2 "$check/Chopshop.app" 2>&1 | grep -x "TeamIdentifier=${APPLE_TEAM_ID}" >/dev/null; then
+              echo "::error::la app no está firmada con Developer ID del equipo APPLE_TEAM_ID: no se publica una release sin firma"
+              exit 1
+            fi
+            xcrun stapler validate "$check/Chopshop.app"
+            spctl --assess --type execute -vv "$check/Chopshop.app" 2>&1 | sed 's/^origin=.*/origin=<oculto>/'
+          fi
           rm -rf "$check"
 
       - name: Instalar herramientas de Sparkle (versión y checksum fijados)
@@ -281,6 +299,15 @@ jobs:
           if ! command -v aws >/dev/null 2>&1; then brew install awscli; fi
           aws --version
 
+      - name: Huella del appcast de producción (antes)
+        if: env.DRY_RUN == 'true'
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+        run: bash apps/mac/release/r2.sh prod-snapshot "$RUNNER_TEMP/prod-appcast.before"
+
       - name: Publicar (zips, deltas y notas primero; appcast al final)
         env:
           SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
@@ -288,12 +315,28 @@ jobs:
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
           R2_BUCKET: ${{ vars.R2_BUCKET }}
-          UPDATES_BASE_URL: ${{ vars.UPDATES_BASE_URL }}
+          UPDATES_BASE_URL: ${{ vars.UPDATES_BASE_URL }}${{ needs.preflight.outputs.dry_run == 'true' && format('/test/{0}', github.run_id) || '' }}
           SPARKLE_ED_PUBLIC_KEY: ${{ vars.SPARKLE_ED_PUBLIC_KEY }}
           NOTES_MD_OUT: ${{ runner.temp }}/release-notes.md
         run: bash apps/mac/release/publish.sh "$RUNNER_TEMP/dl/Chopshop-${VERSION}.zip"
 
+      - name: Comprobar el objeto de prueba y que producción no se tocó
+        if: env.DRY_RUN == 'true'
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+        run: |
+          set -euo pipefail
+          echo "Objetos bajo test/${GITHUB_RUN_ID}/:"
+          bash apps/mac/release/r2.sh ls "test/${GITHUB_RUN_ID}/" | tee "$RUNNER_TEMP/test-objects.txt"
+          grep -q "test/${GITHUB_RUN_ID}/appcast.xml" "$RUNNER_TEMP/test-objects.txt"
+          grep -q "test/${GITHUB_RUN_ID}/Chopshop-${VERSION}.zip" "$RUNNER_TEMP/test-objects.txt"
+          bash apps/mac/release/r2.sh prod-assert-unchanged "$RUNNER_TEMP/prod-appcast.before"
+
       - name: GitHub Release
+        if: env.DRY_RUN != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           DRAFT: ${{ inputs.draft_release }}
@@ -309,3 +352,8 @@ jobs:
             gh release create "$TAG" "$zip" "$zip.sha256" --verify-tag --title "Chopshop ${VERSION}" \
               --notes-file "$RUNNER_TEMP/release-notes.md" ${flags[@]+"${flags[@]}"}
           fi
+
+      # Siempre: la clave de Sparkle solo existe como archivo temporal 0600 dentro de appcast.sh; si algo la dejó, se borra
+      - name: Borrar claves temporales
+        if: always()
+        run: rm -f "$RUNNER_TEMP"/chopshop-sparkle-key-* "$RUNNER_TEMP"/chopshop-notary-*

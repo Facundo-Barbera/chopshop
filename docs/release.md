@@ -41,7 +41,7 @@ flowchart LR
 
 Dónde viven los secretos: **a nivel de repositorio** (no en *environments*). Así el job `preflight` (el primero) puede comprobar que existen todos y fallar con un mensaje claro *antes* de tocar keychain, red o credenciales. `preflight` solo recibe un indicador «existe / no existe» de cada secret (`secrets.X != ''`), nunca su valor; cada secret se pasa con su valor únicamente al paso que lo usa (firma y notarización en `build`, clave de Sparkle y R2 en `publish`). El job `publish` usa el environment `release` solo como **puerta de aprobación manual opcional** (Settings → Environments → `release` → *Required reviewers*); no necesita secrets propios. Como los secrets son de repositorio, protege la rama de releases y el directorio `.github/` (branch protection / CODEOWNERS): quien pueda ejecutar un workflow modificado desde una rama podría leerlos.
 
-Toda release sale **firmada con Developer ID y notarizada**; no existe un canal sin firmar. El dry-run solo compila y firma ad-hoc para probar el pipeline y **no publica nada**.
+Toda release sale **firmada con Developer ID y notarizada**; no existe un canal sin firmar. El **dry-run** (por defecto en ejecuciones manuales) omite firma Developer ID, notarización y stapling: no exige `MACOS_CERT_P12_BASE64`, `MACOS_CERT_PASSWORD` ni `SIGNING_IDENTITY` (sí todo lo demás), firma la app ad-hoc y sube **solo** a R2 bajo `test/<run_id>/` (nunca el appcast ni los zips de producción). No crea tags ni GitHub Release.
 
 ## Secrets y variables (lista exacta)
 
@@ -171,7 +171,7 @@ Recomendado: en **Settings → Environments → `release`** (se crea solo al pri
 
 ## Procedimiento de release
 
-1. **Dry-run** (recomendado la primera vez y tras cambiar el pipeline): *Actions → Release Mac → Run workflow* con `dry_run` marcado. Construye la UI, compila con Sparkle, ensambla y firma **ad-hoc**, valida el Info.plist y el orden de firma y deja el zip como artefacto 3 días. No notariza ni publica, y no usa secretos.
+1. **Dry-run** (recomendado la primera vez y tras cambiar el pipeline): `gh workflow run release-mac.yml --ref main -f dry_run=true` (o *Actions → Release Mac → Run workflow*). Construye la UI, compila el Swift con Sparkle, ensambla y firma **ad-hoc**, genera el zip, lo firma con la clave EdDSA de Sparkle (`sign_update`, comparado con la firma que escribe `generate_appcast`), genera un appcast de prueba y lo sube a `test/<run_id>/` (la app de prueba apunta a ese feed). Al final lista los objetos subidos y comprueba que el `appcast.xml` de producción tiene exactamente la misma huella (ETag/fecha) que antes. La clave privada de Sparkle solo existe como archivo temporal `0600` que se borra siempre (`trap` y paso `always()`).
 2. **Tag y push** desde la rama de releases (`RELEASE_BRANCH`):
    ```sh
    git tag -a v1.2.3 --cleanup=verbatim -m "## Novedades

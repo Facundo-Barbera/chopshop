@@ -15,6 +15,8 @@ APP="${1:-}"
 [ -d "$APP/Contents" ] || die "uso: sign-app.sh <Chopshop.app>"
 IDENTITY="${SIGN_IDENTITY:-}"
 [ -n "$IDENTITY" ] || die "falta SIGN_IDENTITY (usa '-' para firma ad-hoc)"
+# Una release real jamás sale con firma ad-hoc: RELEASE_MODE=release exige una identidad Developer ID
+if [ "${RELEASE_MODE:-}" = release ] && [ "$IDENTITY" = "-" ]; then die "RELEASE_MODE=release no admite firma ad-hoc"; fi
 ENTITLEMENTS="${ENTITLEMENTS:-$RELEASE_SCRIPTS/Chopshop.entitlements}"
 [ -f "$ENTITLEMENTS" ] || die "no existe el archivo de entitlements"
 PLISTBUDDY="${PLISTBUDDY:-/usr/libexec/PlistBuddy}"

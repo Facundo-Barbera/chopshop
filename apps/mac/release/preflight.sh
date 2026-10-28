@@ -4,7 +4,9 @@
 #   PREFLIGHT_MODE=release (por defecto) | dryrun
 # Se ejecuta en el primer job del workflow, antes de tocar keychain, red o credenciales. Los secrets llegan
 # como indicador, no como valor: el workflow pasa `'set'` si el secret existe y vacío si no (`secrets.X != ''`),
-# de modo que este job nunca ve su contenido. En dryrun no falla: avisa de lo que faltaría para una release real.
+# de modo que este job nunca ve su contenido.
+# En dryrun (sin firma Developer ID, sin notarización ni release) NO se exigen MACOS_CERT_P12_BASE64, MACOS_CERT_PASSWORD
+# ni SIGNING_IDENTITY; todo lo demás sí (la notarización, Sparkle y R2 también se prueban allí o se necesitarán después).
 set -euo pipefail
 # shellcheck source=lib.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
@@ -53,6 +55,9 @@ problems=()
 missing_lines=()
 for spec in "${SPEC[@]}"; do
   IFS='|' read -r name kind desc <<< "$spec"
+  if [ "$MODE" = dryrun ]; then
+    case "$name" in MACOS_CERT_P12_BASE64 | MACOS_CERT_PASSWORD | SIGNING_IDENTITY) continue ;; esac
+  fi
   if [ -z "${!name:-}" ]; then
     problems+=("$name ($kind)")
     missing_lines+=("| \`$name\` | $kind | $desc |")
@@ -73,10 +78,10 @@ fi
 if [ -n "${R2_ACCOUNT_ID:-}" ] && ! [[ "$R2_ACCOUNT_ID" =~ ^[0-9a-fA-F]{32}$ ]]; then
   bad_format+=("R2_ACCOUNT_ID debe ser el Account ID de Cloudflare (32 caracteres hexadecimales)")
 fi
-if [ -n "${SIGNING_IDENTITY:-}" ] && ! [[ "$SIGNING_IDENTITY" =~ ^(Developer\ ID\ Application:\ .+|[0-9A-Fa-f]{40})$ ]]; then
+if [ "$MODE" = release ] && [ -n "${SIGNING_IDENTITY:-}" ] && ! [[ "$SIGNING_IDENTITY" =~ ^(Developer\ ID\ Application:\ .+|[0-9A-Fa-f]{40})$ ]]; then
   bad_format+=("SIGNING_IDENTITY debe ser «Developer ID Application: Nombre (TEAMID)» o el hash SHA-1 de la identidad")
 fi
-if [ -n "${SIGNING_IDENTITY:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ] && [[ "$SIGNING_IDENTITY" == Developer* ]] && [[ "$SIGNING_IDENTITY" != *"($APPLE_TEAM_ID)" ]]; then
+if [ "$MODE" = release ] && [ -n "${SIGNING_IDENTITY:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ] && [[ "$SIGNING_IDENTITY" == Developer* ]] && [[ "$SIGNING_IDENTITY" != *"($APPLE_TEAM_ID)" ]]; then
   bad_format+=("SIGNING_IDENTITY no termina en (APPLE_TEAM_ID): identidad y Team ID no corresponden")
 fi
 if [ -n "${BUNDLE_ID:-}" ]; then
@@ -90,12 +95,6 @@ fi
 total=$(( ${#problems[@]} + ${#bad_format[@]} ))
 if [ "$total" -eq 0 ]; then
   log "preflight[$SCOPE]: todo definido"
-  exit 0
-fi
-
-if [ "$MODE" = dryrun ]; then
-  [ "${#problems[@]}" -eq 0 ] || warn "dry-run: para una release real faltarían: ${problems[*]}"
-  for m in ${bad_format[@]+"${bad_format[@]}"}; do warn "dry-run: $m"; done
   exit 0
 fi
 

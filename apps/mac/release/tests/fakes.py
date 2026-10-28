@@ -170,7 +170,21 @@ def key_of(uri):
     return rest.split("/", 1)[1] if "/" in rest else ""
 def opt(name):
     return args[args.index(name) + 1] if name in args else ""
-if args[0] == "s3api" and args[1] == "head-object":
+if args[0] == "s3api" and args[1] == "list-objects-v2":
+    pre = opt("--prefix")
+    for d, _dirs, names in os.walk(store):
+        for n in sorted(names):
+            key = os.path.relpath(os.path.join(d, n), store)
+            if key.startswith(pre):
+                print("%s\\t%d" % (key, os.path.getsize(os.path.join(d, n))))
+elif args[0] == "s3api" and args[1] == "head-object" and "ETag" in opt("--query"):
+    p = os.path.join(store, opt("--key"))
+    if not os.path.isfile(p):
+        sys.stderr.write("An error occurred (404) when calling the HeadObject operation: Not Found\\n")
+        sys.exit(254)
+    import hashlib
+    print("%s\\t%s\\t%d" % (hashlib.md5(open(p, "rb").read()).hexdigest(), os.path.getmtime(p), os.path.getsize(p)))
+elif args[0] == "s3api" and args[1] == "head-object":
     if os.environ.get("FAKE_AWS_AUTH_FAIL"):
         sys.stderr.write("An error occurred (403) when calling the HeadObject operation: Forbidden\\n")
         sys.exit(254)
@@ -220,20 +234,25 @@ if "--output" in args and args[args.index("--output") + 1] != "/dev/null":
 '''
 
 SHIMS["sign_update"] = PRELUDE + '''
-sys.path.insert(0, os.environ["RELEASE_DIR"])
-import importlib.util
-spec = importlib.util.spec_from_file_location("appcast_mod", os.path.join(os.environ["RELEASE_DIR"], "appcast.py"))
-m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
-import base64
+spec = __import__("importlib.util").util.spec_from_file_location("appcast_mod", os.path.join(os.environ["RELEASE_DIR"], "appcast.py"))
+m = __import__("importlib.util").util.module_from_spec(spec); spec.loader.exec_module(m)
+spec2 = __import__("importlib.util").util.spec_from_file_location("fakes_mod", os.path.join(os.environ["RELEASE_DIR"], "tests", "fakes.py"))
+fk = __import__("importlib.util").util.module_from_spec(spec2); spec2.loader.exec_module(fk)
+import base64, stat
 args = sys.argv[1:]
 log("sign_update", *args)
-secret = sys.stdin.readline().strip()
+keyfile = args[args.index("--ed-key-file") + 1]
+assert keyfile != "-" and os.path.isfile(keyfile), "la clave debe venir de un archivo"
+log("key-file-mode", oct(stat.S_IMODE(os.stat(keyfile).st_mode)))
+secret = open(keyfile).read().strip()
 pub = m.public_from_sparkle_secret(secret)
 if "--verify" in args:
     f, sig = args[-2], args[-1]
     ok = m.ed25519_verify(pub, open(f, "rb").read(), base64.b64decode(sig))
     sys.exit(0 if ok else 1)
-if args[-1].endswith(".xml"):
+if "-p" in args:
+    print(base64.b64encode(fk.ed25519_sign(base64.b64decode(secret), open(args[-1], "rb").read())).decode())
+elif args[-1].endswith(".xml"):
     with open(args[-1], "a") as fh:
         fh.write("<!-- sparkle-signatures:\\nedSignature: re-firmado\\n-->\\n")
 '''
@@ -246,7 +265,11 @@ spec2 = importlib.util.spec_from_file_location("fakes_mod", os.path.join(os.envi
 fk = importlib.util.module_from_spec(spec2); spec2.loader.exec_module(fk)
 args = sys.argv[1:]
 log("generate_appcast", *args)
-secret = sys.stdin.readline().strip()
+keyfile = args[args.index("--ed-key-file") + 1]
+assert keyfile != "-" and os.path.isfile(keyfile), "la clave debe venir de un archivo"
+import stat
+log("key-file-mode", oct(stat.S_IMODE(os.stat(keyfile).st_mode)))
+secret = open(keyfile).read().strip()
 assert secret not in " ".join(args), "la clave privada no puede ir en argv"
 seed = base64.b64decode(secret)
 d = args[-1]
