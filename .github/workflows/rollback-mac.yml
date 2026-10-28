@@ -29,21 +29,43 @@ concurrency:
   group: rollback-mac
   cancel-in-progress: false
 
+env:
+  MIN_MACOS_VERSION: "13.0"
+  RELEASE_BRANCH: main # única rama desde la que se lanza el rollback
+  MAX_DELTAS: "3"
+  MAX_VERSIONS: "5"
+  DELTA_COMPRESSION: lzma
+
 jobs:
   guard:
-    name: Solo desde la rama de releases
+    name: Preflight (rama y secrets/vars)
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Comprobar la rama
-        env:
-          RELEASE_BRANCH: ${{ vars.RELEASE_BRANCH || 'main' }}
         run: |
           set -euo pipefail
           if [ "$GITHUB_REF" != "refs/heads/$RELEASE_BRANCH" ]; then
             echo "::error::El rollback ejecuta los scripts de la rama elegida: lánzalo desde ${RELEASE_BRANCH} (ref actual: ${GITHUB_REF})."
             exit 1
           fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Antes de tocar red o credenciales: lista TODO lo que falte (solo nombres). Los secrets entran como indicador.
+      - name: Secrets y variables requeridos
+        env:
+          PREFLIGHT_MODE: release
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY != '' && 'set' || '' }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID != '' && 'set' || '' }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY != '' && 'set' || '' }}
+          SPARKLE_ED_PUBLIC_KEY: ${{ vars.SPARKLE_ED_PUBLIC_KEY }}
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+          UPDATES_BASE_URL: ${{ vars.UPDATES_BASE_URL }}
+        run: bash apps/mac/release/preflight.sh rollback
 
   rollback:
     name: Retirar versión del feed
@@ -60,18 +82,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Secrets de publicación
-        env:
-          PREFLIGHT_MODE: release
-          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          R2_BUCKET: ${{ vars.R2_BUCKET }}
-          UPDATES_BASE_URL: ${{ vars.UPDATES_BASE_URL }}
-          SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
-        run: bash apps/mac/release/preflight.sh publish
-
       - name: Instalar herramientas de Sparkle (versión y checksum fijados)
         run: bash apps/mac/release/sparkle-tools.sh install "$RUNNER_TEMP/sparkle"
 
@@ -87,18 +97,10 @@ jobs:
           ROLLBACK_DRY_RUN: ${{ inputs.dry_run }}
           KEEP_FILES: ${{ inputs.keep_files }}
           SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID }}
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
           R2_BUCKET: ${{ vars.R2_BUCKET }}
-          R2_PREFIX: ${{ vars.R2_PREFIX }}
           UPDATES_BASE_URL: ${{ vars.UPDATES_BASE_URL }}
-          SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
-          SPARKLE_SIGNING_PUBLIC_ED_KEY: ${{ vars.SPARKLE_SIGNING_PUBLIC_ED_KEY }}
-          MIN_MACOS_VERSION: ${{ vars.MIN_MACOS_VERSION || '13.0' }}
-          MAX_DELTAS: ${{ vars.MAX_DELTAS || '3' }}
-          MAX_VERSIONS: ${{ vars.MAX_VERSIONS || '5' }}
-          DELTA_COMPRESSION: ${{ vars.DELTA_COMPRESSION || 'lzma' }}
+          SPARKLE_ED_PUBLIC_KEY: ${{ vars.SPARKLE_ED_PUBLIC_KEY }}
         run: bash apps/mac/release/rollback.sh "$VERSION_TO_RETIRE"

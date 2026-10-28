@@ -9,8 +9,11 @@ name: Release Mac
 # Seguridad:
 #  - Solo se dispara por tag o a mano; NO hay pull_request ni pull_request_target (los forks no ven secretos).
 #  - Una release real exige un tag vX.Y.Z alcanzable desde la rama de releases (RELEASE_BRANCH, por defecto main).
-#  - Los secretos viven en environments y solo en los jobs que los usan: release-signing (certificado y
-#    notarización) y release (clave de Sparkle y R2; ahí se puede exigir aprobación manual).
+#  - Secrets y variables a nivel de REPOSITORIO (así el job `preflight` ve cuáles faltan y falla el primero, antes de
+#    tocar keychain o red). Los secrets solo se pasan como valor a los pasos que los usan; `preflight` recibe
+#    únicamente un indicador "existe/no existe". El job `publish` usa el environment `release` (aprobación manual
+#    opcional; no necesita secrets propios).
+#  - Toda release sale firmada con Developer ID y notarizada: no hay canal sin firmar.
 #  - Acciones fijadas por SHA de commit (comentario = versión).
 on:
   push:
@@ -25,6 +28,10 @@ on:
         description: "Crear la GitHub Release como borrador"
         type: boolean
         default: false
+      min_macos_version:
+        description: "macOS mínimo declarado (LSMinimumSystemVersion y sparkle:minimumSystemVersion)"
+        type: string
+        default: "13.0"
 
 permissions:
   contents: read
@@ -32,6 +39,20 @@ permissions:
 concurrency:
   group: release-mac-${{ github.ref }}
   cancel-in-progress: false
+
+# Valores por defecto del pipeline (sin secretos). Se editan aquí, no son variables de GitHub.
+env:
+  MIN_MACOS_VERSION: ${{ inputs.min_macos_version || '13.0' }}
+  RELEASE_BRANCH: main # rama a la que debe pertenecer el tag
+  UNIVERSAL: "1" # arm64 + x86_64 (0 = solo arm64)
+  SPARKLE_AUTO_UPDATE: "false" # SUAutomaticallyUpdate
+  SPARKLE_CHECK_INTERVAL: "86400" # SUScheduledCheckInterval (segundos, >= 3600)
+  MAX_DELTAS: "3"
+  MAX_VERSIONS: "5" # versiones que conserva el feed (los zips nunca se borran)
+  DELTA_COMPRESSION: lzma
+  PHASED_ROLLOUT_INTERVAL: "" # segundos entre tandas del rollout gradual (solo canal estable); vacío = sin rollout
+  FULL_RELEASE_NOTES_URL: ""
+  XCODE_VERSION: "" # vacío = Xcode por defecto del runner; p. ej. 16.4 fija /Applications/Xcode_16.4.app
 
 jobs:
   preflight:
@@ -61,11 +82,32 @@ jobs:
           echo "dry_run=$dry" >> "$GITHUB_OUTPUT"
           echo "Modo: dry_run=$dry"
 
+      # PRIMERA comprobación: lista TODOS los secrets/vars que falten (solo nombres). Los secrets se pasan como
+      # indicador (`set` o vacío): este job nunca recibe su valor.
+      - name: Secrets y variables requeridos
+        env:
+          PREFLIGHT_MODE: ${{ steps.mode.outputs.dry_run == 'true' && 'dryrun' || 'release' }}
+          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 != '' && 'set' || '' }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD != '' && 'set' || '' }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD != '' && 'set' || '' }}
+          ASC_API_KEY_P8_BASE64: ${{ secrets.ASC_API_KEY_P8_BASE64 != '' && 'set' || '' }}
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID != '' && 'set' || '' }}
+          ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID != '' && 'set' || '' }}
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY != '' && 'set' || '' }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID != '' && 'set' || '' }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY != '' && 'set' || '' }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          BUNDLE_ID: ${{ vars.BUNDLE_ID }}
+          SIGNING_IDENTITY: ${{ vars.SIGNING_IDENTITY }}
+          SPARKLE_ED_PUBLIC_KEY: ${{ vars.SPARKLE_ED_PUBLIC_KEY }}
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+          UPDATES_BASE_URL: ${{ vars.UPDATES_BASE_URL }}
+        run: bash apps/mac/release/preflight.sh release
+
       # Ancestría y no igualdad: se puede etiquetar un commit antiguo de la rama, pero no una rama sin revisar.
       - name: El tag debe estar en la rama de releases
         if: steps.mode.outputs.dry_run != 'true'
-        env:
-          RELEASE_BRANCH: ${{ vars.RELEASE_BRANCH || 'main' }}
         run: |
           set -euo pipefail
           git fetch --no-tags origin "$RELEASE_BRANCH"
@@ -86,29 +128,12 @@ jobs:
           if [ "$DRY_RUN" = "true" ]; then flag=(--dry-run); fi
           bash apps/mac/release/version.sh --ref-type "$REF_TYPE" --ref-name "$REF_NAME" ${flag[@]+"${flag[@]}"}
 
-      - name: Variables requeridas
-        env:
-          PREFLIGHT_MODE: ${{ steps.mode.outputs.dry_run == 'true' && 'dryrun' || 'release' }}
-          BUNDLE_ID: ${{ vars.BUNDLE_ID }}
-          SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
-          SPARKLE_FEED_URL: ${{ vars.SPARKLE_FEED_URL }}
-          UPDATES_BASE_URL: ${{ vars.UPDATES_BASE_URL }}
-          R2_BUCKET: ${{ vars.R2_BUCKET }}
-          MIN_MACOS_VERSION: ${{ vars.MIN_MACOS_VERSION }}
-          SPARKLE_CHECK_INTERVAL: ${{ vars.SPARKLE_CHECK_INTERVAL }}
-          MAX_DELTAS: ${{ vars.MAX_DELTAS }}
-          MAX_VERSIONS: ${{ vars.MAX_VERSIONS }}
-          PHASED_ROLLOUT_INTERVAL: ${{ vars.PHASED_ROLLOUT_INTERVAL }}
-        run: bash apps/mac/release/preflight.sh vars
-
   build:
     name: Build, firma y notarización
     needs: preflight
     # runner fijado (no *-latest): las builds de release deben ser reproducibles entre ejecuciones
     runs-on: macos-15
     timeout-minutes: 75
-    # El dry-run usa un environment sin secretos ni reglas; la release real, el de firma
-    environment: ${{ needs.preflight.outputs.dry_run == 'true' && 'release-dryrun' || 'release-signing' }}
     env:
       DRY_RUN: ${{ needs.preflight.outputs.dry_run }}
       VERSION: ${{ needs.preflight.outputs.version }}
@@ -118,8 +143,6 @@ jobs:
           persist-credentials: false
 
       - name: Seleccionar Xcode
-        env:
-          XCODE_VERSION: ${{ vars.XCODE_VERSION }}
         run: |
           set -euo pipefail
           if [ -n "${XCODE_VERSION:-}" ]; then
@@ -147,24 +170,14 @@ jobs:
           test -f apps/mac/Resources/web/index.html
           test -f apps/mac/Resources/web/app.js
 
-      - name: Secrets de firma y notarización
-        if: env.DRY_RUN != 'true'
-        env:
-          PREFLIGHT_MODE: release
-          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
-          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
-          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
-          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-        run: bash apps/mac/release/preflight.sh sign
-
       - name: Keychain temporal con el certificado Developer ID
         if: env.DRY_RUN != 'true'
         env:
           MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
           MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
-          MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
-          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          SIGNING_IDENTITY: ${{ vars.SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
         run: bash apps/mac/release/keychain.sh setup
 
       - name: Ensamblar Chopshop.app (con Sparkle)
@@ -173,27 +186,24 @@ jobs:
           BUILD_NUMBER: ${{ needs.preflight.outputs.build_number }}
           RELEASE_MODE: ${{ env.DRY_RUN == 'true' && 'dryrun' || 'release' }}
           BUNDLE_ID: ${{ vars.BUNDLE_ID || 'com.example.chopshop' }}
-          MIN_MACOS_VERSION: ${{ vars.MIN_MACOS_VERSION || '13.0' }}
-          SPARKLE_FEED_URL: ${{ vars.SPARKLE_FEED_URL }}
-          SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
-          SPARKLE_AUTO_UPDATE: ${{ vars.SPARKLE_AUTO_UPDATE || 'false' }}
-          SPARKLE_CHECK_INTERVAL: ${{ vars.SPARKLE_CHECK_INTERVAL || '86400' }}
-          UNIVERSAL: ${{ vars.UNIVERSAL_BINARY || '1' }}
+          UPDATES_BASE_URL: ${{ vars.UPDATES_BASE_URL }}
+          SPARKLE_ED_PUBLIC_KEY: ${{ vars.SPARKLE_ED_PUBLIC_KEY }}
           APP_OUT: ${{ runner.temp }}/out/Chopshop.app
         run: bash apps/mac/release/assemble-app.sh
 
       - name: Firmar (hardened runtime, de dentro hacia fuera)
         env:
-          # En dry-run no hay certificado: firma ad-hoc ("-"). En release, SIGN_IDENTITY lo exportó keychain.sh.
+          # En dry-run no hay certificado: firma ad-hoc ("-"). En release, SIGN_IDENTITY (hash) lo exportó keychain.sh.
           SIGN_IDENTITY: ${{ env.DRY_RUN == 'true' && '-' || env.SIGN_IDENTITY }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
         run: bash apps/mac/release/sign-app.sh "$RUNNER_TEMP/out/Chopshop.app"
 
       - name: Notarizar, grapar y verificar
         if: env.DRY_RUN != 'true'
         env:
-          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
-          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          ASC_API_KEY_P8_BASE64: ${{ secrets.ASC_API_KEY_P8_BASE64 }}
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
         run: bash apps/mac/release/notarize.sh "$RUNNER_TEMP/out/Chopshop.app" "$RUNNER_TEMP/notarize-submit.zip"
 
       # El zip FINAL se crea DESPUÉS de grapar el ticket
@@ -225,7 +235,7 @@ jobs:
     if: needs.preflight.outputs.dry_run != 'true'
     runs-on: macos-15
     timeout-minutes: 45
-    # Aquí se puede exigir aprobación manual (Settings -> Environments -> release -> Required reviewers)
+    # Aprobación manual opcional (Settings -> Environments -> release -> Required reviewers). Sin secrets propios.
     environment: release
     permissions:
       contents: write # crear la GitHub Release
@@ -244,18 +254,6 @@ jobs:
           fetch-depth: 0
           fetch-tags: true # notas: el mensaje del tag anotado y el tag anterior
           persist-credentials: false
-
-      - name: Secrets de publicación
-        env:
-          PREFLIGHT_MODE: release
-          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          R2_BUCKET: ${{ vars.R2_BUCKET }}
-          UPDATES_BASE_URL: ${{ vars.UPDATES_BASE_URL }}
-          SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
-        run: bash apps/mac/release/preflight.sh publish
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -286,22 +284,12 @@ jobs:
       - name: Publicar (zips, deltas y notas primero; appcast al final)
         env:
           SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID }}
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
           R2_BUCKET: ${{ vars.R2_BUCKET }}
-          R2_PREFIX: ${{ vars.R2_PREFIX }}
           UPDATES_BASE_URL: ${{ vars.UPDATES_BASE_URL }}
-          SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
-          SPARKLE_SIGNING_PUBLIC_ED_KEY: ${{ vars.SPARKLE_SIGNING_PUBLIC_ED_KEY }}
-          MIN_MACOS_VERSION: ${{ vars.MIN_MACOS_VERSION || '13.0' }}
-          MAX_DELTAS: ${{ vars.MAX_DELTAS || '3' }}
-          MAX_VERSIONS: ${{ vars.MAX_VERSIONS || '5' }}
-          DELTA_COMPRESSION: ${{ vars.DELTA_COMPRESSION || 'lzma' }}
-          PHASED_ROLLOUT_INTERVAL: ${{ vars.PHASED_ROLLOUT_INTERVAL }}
-          FULL_RELEASE_NOTES_URL: ${{ vars.FULL_RELEASE_NOTES_URL }}
+          SPARKLE_ED_PUBLIC_KEY: ${{ vars.SPARKLE_ED_PUBLIC_KEY }}
           NOTES_MD_OUT: ${{ runner.temp }}/release-notes.md
         run: bash apps/mac/release/publish.sh "$RUNNER_TEMP/dl/Chopshop-${VERSION}.zip"
 
