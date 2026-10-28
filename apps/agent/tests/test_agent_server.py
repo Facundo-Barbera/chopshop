@@ -407,6 +407,9 @@ class TestRoutes(ServerBase):
     def test_logs_have_no_token_or_query(self):
         self.get("/events?after=0", headers={"Authorization": "Bearer " + TOKEN})
         self.post("/settle", {"thread_id": "t-1"}, headers={"Authorization": "Bearer " + TOKEN})
+        end = time.monotonic() + 3                                 # el acceso se registra tras enviar la respuesta
+        while not any("POST /settle -> 200" in l for l in self.logs) and time.monotonic() < end:
+            time.sleep(0.02)
         text = "\n".join(self.logs)
         self.assertNotIn(TOKEN, text)
         self.assertNotIn("after=0", text)
