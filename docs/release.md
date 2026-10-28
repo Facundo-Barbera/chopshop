@@ -8,9 +8,9 @@ Pipeline de GitHub Actions que construye `Chopshop.app`, la firma con **Develope
 
 ```mermaid
 flowchart LR
-  T["git tag vX.Y.Z"] --> P["preflight (ubuntu)<br/>tag semver, rama, vars, build number"]
+  T["git tag vX.Y.Z"] --> P["preflight (ubuntu)<br/>TODOS los secrets/vars, tag semver, rama, build number"]
   P --> B
-  subgraph B["build (macos-15, environment release-signing)"]
+  subgraph B["build (macos-15)"]
     direction TB
     B1["pnpm: UI"] --> B2["swift build + Sparkle (SwiftPM)<br/>assemble-app.sh"]
     B2 --> B3["keychain temporal + sign-app.sh<br/>(de dentro hacia fuera, hardened runtime)"]
@@ -23,7 +23,7 @@ flowchart LR
     Q1["verifica zip descargado"] --> Q2["pull de R2: appcast + zips previos"]
     Q2 --> Q3["generate_appcast (deltas, notas, firma EdDSA)"]
     Q3 --> Q4["R2: zips/deltas/notas inmutables, appcast AL FINAL"]
-    Q4 --> Q5["curl público + purga opcional + GitHub Release"]
+    Q4 --> Q5["curl público + GitHub Release"]
   end
   Q4 --> R2[("R2 + dominio público<br/>appcast.xml + zips")]
   R2 -- "SUFeedURL" --> APP["Chopshop.app instalada<br/>(Sparkle)"]
@@ -39,62 +39,57 @@ flowchart LR
 | `apps/mac/release/sparkle.version` | pin | Versión de Sparkle y SHA-256 del tarball; debe coincidir con `Package.swift`. |
 | `apps/mac/Sources/ChopshopUI/Updater.swift` | app | `SPUStandardUpdaterController`, menú «Buscar actualizaciones…», canal beta. Desactivado sin `SUFeedURL`/`SUPublicEDKey`. |
 
-Por qué dos *environments* con secretos: el job `build` solo ve lo necesario para firmar y notarizar (`release-signing`); el job `publish` solo ve la clave de Sparkle y R2 (`release`), y es ahí donde puedes exigir **aprobación manual**. El dry-run usa `release-dryrun`, un environment vacío y sin reglas: aunque lo lances desde una rama, no toca ningún secreto.
+Dónde viven los secretos: **a nivel de repositorio** (no en *environments*). Así el job `preflight` (el primero) puede comprobar que existen todos y fallar con un mensaje claro *antes* de tocar keychain, red o credenciales. `preflight` solo recibe un indicador «existe / no existe» de cada secret (`secrets.X != ''`), nunca su valor; cada secret se pasa con su valor únicamente al paso que lo usa (firma y notarización en `build`, clave de Sparkle y R2 en `publish`). El job `publish` usa el environment `release` solo como **puerta de aprobación manual opcional** (Settings → Environments → `release` → *Required reviewers*); no necesita secrets propios. Como los secrets son de repositorio, protege la rama de releases y el directorio `.github/` (branch protection / CODEOWNERS): quien pueda ejecutar un workflow modificado desde una rama podría leerlos.
+
+Toda release sale **firmada con Developer ID y notarizada**; no existe un canal sin firmar. El dry-run solo compila y firma ad-hoc para probar el pipeline y **no publica nada**.
 
 ## Secrets y variables (lista exacta)
 
-Los **secrets** van en el *environment* indicado (Settings → Environments → *nombre* → Environment secrets; un secret a nivel de repositorio también sirve, pero pierdes el aislamiento). Las **variables** van a nivel de **repositorio** (Settings → Secrets and variables → Actions → Variables) porque el job `preflight` también las lee. Para crear los environments basta ejecutar el workflow una vez: GitHub los crea al vuelo; después añade ahí los secrets y las reglas.
+Todos son de **repositorio** (Settings → Secrets and variables → Actions). Nombres definitivos; no hay alias antiguos.
 
-### Secrets del environment `release-signing` (job `build`)
+### Secrets (9)
 
 | Nombre | Tipo | Para qué | Cómo obtenerlo | Ejemplo falso |
 |---|---|---|---|---|
 | `MACOS_CERT_P12_BASE64` | secret | Certificado Developer ID Application con su clave privada (.p12) en base64 | [Certificado Developer ID](#1-certificado-developer-id-application-p12) | `MIIKsQIBAzCC…` (base64 largo) |
 | `MACOS_CERT_PASSWORD` | secret | Contraseña con la que exportaste el .p12 | La eliges al exportar | `contraseña-de-ejemplo` |
-| `MACOS_KEYCHAIN_PASSWORD` | secret, opcional | Contraseña del keychain temporal. Si falta, se genera una aleatoria por ejecución (recomendado) | Cualquier cadena larga, o nada | `k3ychain-ejemplo` |
-| `MACOS_SIGN_IDENTITY` | secret, opcional | Hash SHA-1 de la identidad a usar si el .p12 trae varias Developer ID | `security find-identity -v -p codesigning` | `0123456789ABCDEF0123456789ABCDEF01234567` |
-| `APPLE_API_KEY_P8_BASE64` | secret | Clave de la API de App Store Connect (.p8) en base64, para `notarytool` | [API key de notarización](#2-api-key-de-notarización-p8) | `LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0t…` |
-| `APPLE_API_KEY_ID` | secret | Key ID de esa API key | Misma pantalla de App Store Connect | `ABC123DEFG` |
-| `APPLE_API_ISSUER` | secret | Issuer ID del equipo | Misma pantalla de App Store Connect | `00000000-0000-0000-0000-000000000000` |
-
-### Secrets del environment `release` (job `publish`, rollback)
-
-| Nombre | Tipo | Para qué | Cómo obtenerlo | Ejemplo falso |
-|---|---|---|---|---|
+| `KEYCHAIN_PASSWORD` | secret | Contraseña del keychain temporal que se crea en el runner | Cualquier cadena larga y aleatoria (`openssl rand -hex 24`) | `k3ychain-ejemplo` |
+| `ASC_API_KEY_P8_BASE64` | secret | Clave de la API de App Store Connect (.p8) en base64, para `notarytool` | [API key de notarización](#2-api-key-de-notarización-p8) | `LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0t…` |
+| `ASC_API_KEY_ID` | secret | Key ID de esa API key | Misma pantalla de App Store Connect | `ABC123DEFG` |
+| `ASC_API_ISSUER_ID` | secret | Issuer ID del equipo | Misma pantalla de App Store Connect | `00000000-0000-0000-0000-000000000000` |
 | `SPARKLE_ED_PRIVATE_KEY` | secret | Clave privada EdDSA de Sparkle (firma zips, deltas y el feed). Solo viaja por stdin, nunca a disco ni a logs | [Claves de Sparkle](#3-claves-de-sparkle-eddsa) | `Zm9vYmFyLWNsYXZlLWRlLWVqZW1wbG8=` |
-| `R2_ACCOUNT_ID` | secret | Account ID de Cloudflare (forma el endpoint S3 de R2) | [Bucket R2](#4-bucket-r2-token-s3-y-dominio-público) | `0123456789abcdef0123456789abcdef` |
-| `R2_ACCESS_KEY_ID` | secret | Access Key ID del token S3 de R2 | idem | `a1b2c3d4e5f60718293a4b5c6d7e8f90` |
+| `R2_ACCESS_KEY_ID` | secret | Access Key ID del token S3 de R2 | [Bucket R2](#4-bucket-r2-token-s3-y-dominio-público) | `a1b2c3d4e5f60718293a4b5c6d7e8f90` |
 | `R2_SECRET_ACCESS_KEY` | secret | Secret Access Key del token S3 de R2 | idem | `0f1e2d3c…` (64 hex) |
-| `CLOUDFLARE_API_TOKEN` | secret, opcional | Token de API con permiso *Cache Purge* para purgar el `appcast.xml` del caché de Cloudflare. Solo se usa si también hay `CLOUDFLARE_ZONE_ID` | Cloudflare → My Profile → API Tokens | `cf-token-de-ejemplo` |
 
-### Variables de repositorio obligatorias (release real)
+### Variables (7)
 
 | Nombre | Tipo | Para qué | Cómo obtenerlo | Ejemplo falso |
 |---|---|---|---|---|
+| `APPLE_TEAM_ID` | var | Team ID de Apple Developer. Se comprueba contra la identidad de firma y contra el `TeamIdentifier` de la app firmada | developer.apple.com → Membership details | `ABCDE12345` |
 | `BUNDLE_ID` | var | `CFBundleIdentifier`. Una release real se niega a salir con `com.example.*` | Lo eliges (DNS inverso) | `org.example.chopshop` |
-| `SPARKLE_PUBLIC_ED_KEY` | var | Clave **pública** EdDSA → `SUPublicEDKey` del Info.plist. Vacía = el pipeline falla | Salida de `generate_keys` | `AbCdEfGhIjKlMnOpQrStUvWxYz0123456789ABCDEFg=` |
-| `SPARKLE_FEED_URL` | var | URL pública del `appcast.xml` → `SUFeedURL` (https). **Debe ser exactamente** `UPDATES_BASE_URL` + `/appcast.xml`: `generate_appcast` nombra el feed según esta URL y el pipeline lo publica y verifica ahí | `<UPDATES_BASE_URL>/appcast.xml` | `https://updates.example.com/appcast.xml` |
-| `UPDATES_BASE_URL` | var | URL pública base de R2 (dominio propio del bucket, https, sin barra final). Prefijo de las URLs de descarga | Dominio personalizado del bucket | `https://updates.example.com` |
+| `SIGNING_IDENTITY` | var | Identidad de firma: nombre completo del certificado (o su hash SHA-1). Debe terminar en `(APPLE_TEAM_ID)` y existir en el .p12 | `security find-identity -v -p codesigning` | `Developer ID Application: Nombre Demo (ABCDE12345)` |
+| `SPARKLE_ED_PUBLIC_KEY` | var | Clave **pública** EdDSA → `SUPublicEDKey` del Info.plist. Vacía = el pipeline falla | Salida de `generate_keys` | `AbCdEfGhIjKlMnOpQrStUvWxYz0123456789ABCDEFg=` |
+| `R2_ACCOUNT_ID` | var | Account ID de Cloudflare (forma el endpoint S3 de R2) | Panel de R2 | `0123456789abcdef0123456789abcdef` |
 | `R2_BUCKET` | var | Nombre del bucket de R2 | Al crearlo | `bucket-de-ejemplo` |
+| `UPDATES_BASE_URL` | var | URL pública base de R2 (dominio propio del bucket, https, sin barra final). Los zips se descargan de ahí y la URL del feed (`SUFeedURL`) se **deriva**: `<UPDATES_BASE_URL>/appcast.xml` | Dominio personalizado del bucket | `https://updates.example.com` |
 
-### Variables de repositorio opcionales
+### Valores por defecto (no son variables de GitHub)
 
-| Nombre | Valor por defecto | Para qué | Ejemplo falso |
-|---|---|---|---|
-| `MIN_MACOS_VERSION` | `13.0` | `LSMinimumSystemVersion` y `sparkle:minimumSystemVersion`. El build falla si el binario exige un macOS más nuevo (`platforms` de `Package.swift`) | `13.0` |
-| `SPARKLE_AUTO_UPDATE` | `false` | `SUAutomaticallyUpdate`: instalar sin preguntar. El usuario puede cambiarlo en las preferencias de Sparkle | `false` |
-| `SPARKLE_CHECK_INTERVAL` | `86400` | `SUScheduledCheckInterval` en segundos (mínimo 3600). Con `SUEnableAutomaticChecks` activo | `86400` |
-| `MAX_DELTAS` | `3` | Deltas que se generan hacia cada versión nueva (`--maximum-deltas`) | `3` |
-| `MAX_VERSIONS` | `5` | Versiones que se conservan en el feed (`--maximum-versions`); los zips **nunca** se borran | `5` |
-| `DELTA_COMPRESSION` | `lzma` | `--delta-compression` (`lzma`, `lzfse`, `lz4`) | `lzma` |
-| `PHASED_ROLLOUT_INTERVAL` | vacío (sin rollout gradual) | Segundos entre tandas del rollout gradual (`sparkle:phasedRolloutInterval`); solo canal estable | `86400` |
-| `FULL_RELEASE_NOTES_URL` | vacío | Enlace a las notas completas (`--full-release-notes-url`) | `https://updates.example.com/notes/` |
-| `R2_PREFIX` | vacío | Subruta dentro del bucket; **debe** coincidir con la ruta de `UPDATES_BASE_URL` | `mac` |
-| `CLOUDFLARE_ZONE_ID` | vacío | Zona del dominio público, para la purga de caché (junto con `CLOUDFLARE_API_TOKEN`) | `0123456789abcdef0123456789abcdef` |
-| `SPARKLE_SIGNING_PUBLIC_ED_KEY` | = `SPARKLE_PUBLIC_ED_KEY` | Pública de la clave que **firma** cuando difiere de la que lleva la app: solo en el release puente de una [rotación](#rotación-de-claves) | `AbCdEfGhIjKlMnOpQrStUvWxYz0123456789ABCDEFg=` |
-| `RELEASE_BRANCH` | `main` | Rama a la que debe pertenecer el tag, y única desde la que se lanza el rollback | `main` |
-| `XCODE_VERSION` | vacío (Xcode por defecto del runner) | Fuerza `/Applications/Xcode_<versión>.app` | `16.4` |
-| `UNIVERSAL_BINARY` | `1` | `UNIVERSAL=1` en `build.sh`: arm64 + x86_64. `0` = solo arm64 | `1` |
+Viven en el bloque `env:` de `release-mac.yml` y se cambian editando el archivo:
+
+| Nombre | Por defecto | Para qué |
+|---|---|---|
+| `MIN_MACOS_VERSION` | `13.0` | `LSMinimumSystemVersion` y `sparkle:minimumSystemVersion`. En ejecuciones manuales es el input `min_macos_version`. El build falla si el binario exige un macOS más nuevo (`platforms` de `Package.swift`) |
+| `RELEASE_BRANCH` | `main` | Rama a la que debe pertenecer el tag, y única desde la que se lanza el rollback |
+| `UNIVERSAL` | `1` | arm64 + x86_64 (`0` = solo arm64) |
+| `SPARKLE_AUTO_UPDATE` | `false` | `SUAutomaticallyUpdate`: instalar sin preguntar (el usuario puede cambiarlo) |
+| `SPARKLE_CHECK_INTERVAL` | `86400` | `SUScheduledCheckInterval` en segundos (mínimo 3600) |
+| `MAX_DELTAS` / `MAX_VERSIONS` / `DELTA_COMPRESSION` | `3` / `5` / `lzma` | Deltas hacia cada versión nueva, versiones que conserva el feed (los zips **nunca** se borran) y compresión |
+| `PHASED_ROLLOUT_INTERVAL` | vacío | Segundos entre tandas de rollout gradual (`sparkle:phasedRolloutInterval`), solo canal estable |
+| `FULL_RELEASE_NOTES_URL` | vacío | Enlace a las notas completas (`--full-release-notes-url`) |
+| `XCODE_VERSION` | vacío | Fuerza `/Applications/Xcode_<versión>.app`; vacío = el del runner |
+
+**Si falta algo, el workflow falla en el primer job.** El paso «Secrets y variables requeridos» lista de una vez **todos** los nombres que faltan (solo nombres, nunca valores), los repite como tabla en el resumen del job y valida el formato de las variables (Team ID de 10 caracteres, identidad coherente con el Team ID, clave pública de 32 bytes, URL https, `BUNDLE_ID` no genérico). No se ha tocado keychain, red ni credenciales todavía.
 
 ## Puesta en marcha (una vez)
 
@@ -107,8 +102,9 @@ Requiere una cuenta del Apple Developer Program (el *Account Holder* puede crear
 3. En Acceso a Llaveros (categoría *Mis certificados*), selecciona **Developer ID Application: Nombre Demo (ABCDE12345)** (con su clave privada) → clic derecho → **Exportar…** → formato `.p12` con una contraseña (`MACOS_CERT_PASSWORD`).
 4. A base64 y al secret, sin dejar rastro en el historial del shell:
    ```sh
-   base64 -i certificado.p12 | gh secret set MACOS_CERT_P12_BASE64 --env release-signing
-   gh secret set MACOS_CERT_PASSWORD --env release-signing   # pega la contraseña cuando la pida
+   base64 -i certificado.p12 | gh secret set MACOS_CERT_P12_BASE64
+   gh secret set MACOS_CERT_PASSWORD   # pega la contraseña cuando la pida
+   gh secret set KEYCHAIN_PASSWORD < <(openssl rand -hex 24)   # contraseña del keychain temporal
    rm -P certificado.p12                                     # y guarda una copia cifrada en tu gestor de contraseñas
    ```
 
@@ -117,9 +113,9 @@ Requiere una cuenta del Apple Developer Program (el *Account Holder* puede crear
 1. <https://appstoreconnect.apple.com/access/integrations/api> → pestaña **Team Keys** → **Generar clave API** (acceso *Developer* basta para notarizar).
 2. Descarga `AuthKey_<KEYID>.p8` (**solo se puede descargar una vez**). En esa misma página están el **Key ID** y el **Issuer ID**.
 3. ```sh
-   base64 -i AuthKey_ABC123DEFG.p8 | gh secret set APPLE_API_KEY_P8_BASE64 --env release-signing
-   gh secret set APPLE_API_KEY_ID --env release-signing
-   gh secret set APPLE_API_ISSUER --env release-signing
+   base64 -i AuthKey_ABC123DEFG.p8 | gh secret set ASC_API_KEY_P8_BASE64
+   gh secret set ASC_API_KEY_ID
+   gh secret set ASC_API_ISSUER_ID
    ```
 
 ### 3. Claves de Sparkle (EdDSA)
@@ -134,36 +130,38 @@ tar -xf Sparkle-2.10.1.tar.xz ./bin
 ./bin/generate_keys                      # crea el par en TU llavero (cuenta «ed25519») e imprime la clave PÚBLICA
 ./bin/generate_keys -p                   # vuelve a imprimir la pública cuando la necesites
 ./bin/generate_keys -x sparkle_private   # exporta la PRIVADA a un archivo (generate_keys -x)
-gh secret set SPARKLE_ED_PRIVATE_KEY --env release < sparkle_private
+gh secret set SPARKLE_ED_PRIVATE_KEY < sparkle_private
 rm -P sparkle_private
-gh variable set SPARKLE_PUBLIC_ED_KEY --body 'AbCdEfGhIjKlMnOpQrStUvWxYz0123456789ABCDEFg='   # la pública que imprimió generate_keys
+gh variable set SPARKLE_ED_PUBLIC_KEY --body 'AbCdEfGhIjKlMnOpQrStUvWxYz0123456789ABCDEFg='   # la pública que imprimió generate_keys
 ```
 
-- La **pública** va en la variable `SPARKLE_PUBLIC_ED_KEY` y se inyecta en `SUPublicEDKey`; la **privada** solo existe como secret y se pasa a `generate_appcast`/`sign_update` por stdin (`--ed-key-file -`).
+- La **pública** va en la variable `SPARKLE_ED_PUBLIC_KEY` y se inyecta en `SUPublicEDKey`; la **privada** solo existe como secret y se pasa a `generate_appcast`/`sign_update` por stdin (`--ed-key-file -`).
 - Guarda **una copia de la privada en un gestor de contraseñas**. Si se pierde, las apps ya instaladas no podrán verificar actualizaciones nuevas (ver [rotación](#rotación-de-claves)).
 - El pipeline comprueba que privada y pública son pareja antes de firmar (Ed25519 propio, independiente de las herramientas de Sparkle) y que la firma de cada zip verifica con la pública (`sign_update --verify` y un verificador propio).
 
 ### 4. Bucket R2, token S3 y dominio público
 
 1. Cloudflare → **R2 Object Storage** → **Create bucket** (p. ej. `bucket-de-ejemplo`) → variable `R2_BUCKET`.
-2. En el bucket → **Settings → Custom Domains → Connect Domain** → `updates.example.com` (un dominio de tu zona Cloudflare). Esa URL (`https://updates.example.com`) es `UPDATES_BASE_URL`, y `SPARKLE_FEED_URL` es `https://updates.example.com/appcast.xml`. No uses el subdominio `r2.dev` para producción (limitado y sin caché de Cloudflare). Si publicas bajo una subruta (`R2_PREFIX=mac`), la URL base debe incluirla (`https://updates.example.com/mac`).
+2. En el bucket → **Settings → Custom Domains → Connect Domain** → `updates.example.com` (un dominio de tu zona Cloudflare). Esa URL (`https://updates.example.com`) es `UPDATES_BASE_URL`; el feed (`SUFeedURL`) se deriva solo: `https://updates.example.com/appcast.xml`. El bucket se usa en su raíz. No uses el subdominio `r2.dev` para producción (limitado y sin caché de Cloudflare).
 3. R2 → **Manage R2 API Tokens → Create API token** → permiso **Object Read & Write** limitado a ese bucket. Cloudflare muestra **Access Key ID** y **Secret Access Key** *una sola vez* → `R2_ACCESS_KEY_ID` y `R2_SECRET_ACCESS_KEY`. El **Account ID** está en el panel de R2 → `R2_ACCOUNT_ID`.
-4. (Opcional) purga de caché: crea un token de API con permiso **Zone → Cache Purge** sobre esa zona (`CLOUDFLARE_API_TOKEN`) y guarda el ID de zona en `CLOUDFLARE_ZONE_ID`. Sin ellos no pasa nada: el `appcast.xml` se publica con `Cache-Control: public, max-age=60`, y los zips/deltas con `public, max-age=31536000, immutable`.
+4. Caché: el `appcast.xml` se publica con `Cache-Control: public, max-age=60` y los zips/deltas con `public, max-age=31536000, immutable`; no hace falta purgar nada.
 
 ### 5. GitHub
 
 ```sh
 gh variable set BUNDLE_ID --body org.example.chopshop
-gh variable set SPARKLE_FEED_URL --body https://updates.example.com/appcast.xml
+gh variable set APPLE_TEAM_ID --body ABCDE12345
+gh variable set SIGNING_IDENTITY --body 'Developer ID Application: Nombre Demo (ABCDE12345)'
+gh variable set SPARKLE_ED_PUBLIC_KEY --body 'AbCdEfGhIjKlMnOpQrStUvWxYz0123456789ABCDEFg='
+gh variable set R2_ACCOUNT_ID --body 0123456789abcdef0123456789abcdef
 gh variable set UPDATES_BASE_URL --body https://updates.example.com
 gh variable set R2_BUCKET --body bucket-de-ejemplo
-# secrets de R2 en el environment `release` (cada `gh secret set` pide el valor por stdin)
-gh secret set R2_ACCOUNT_ID --env release
-gh secret set R2_ACCESS_KEY_ID --env release
-gh secret set R2_SECRET_ACCESS_KEY --env release
+# secrets de R2 (cada `gh secret set` pide el valor por stdin)
+gh secret set R2_ACCESS_KEY_ID
+gh secret set R2_SECRET_ACCESS_KEY
 ```
 
-Recomendado: en **Settings → Environments** pon al environment `release` *Required reviewers* (aprobación manual antes de publicar) y restringe `release` y `release-signing` a *Deployment tags* `v*`. No pongas reglas de aprobación en `release-signing` ni en `release-dryrun`.
+Recomendado: en **Settings → Environments → `release`** (se crea solo al primer run) añade *Required reviewers* para aprobar a mano antes de publicar, y protege la rama `main` y los tags `v*`. Prueba primero con un **dry-run** y luego etiqueta.
 
 ## Versionado
 
@@ -188,9 +186,9 @@ Qué comprueba el pipeline por ti (cada punto aborta el release):
 
 | Paso | Comprobación |
 |---|---|
-| Preflight | tag semver; tag alcanzable desde `RELEASE_BRANCH`; vars presentes y con formato válido (https, clave pública = 32 bytes, `BUNDLE_ID` no genérico); secrets presentes (solo nombres faltantes, nunca valores) |
+| Preflight | tag semver; tag alcanzable desde `RELEASE_BRANCH`; **todos** los secrets y vars presentes (se listan los que faltan, solo nombres) y con formato válido (https, clave pública = 32 bytes, Team ID de 10 caracteres, `SIGNING_IDENTITY` coherente con `APPLE_TEAM_ID`, `BUNDLE_ID` no genérico); todo ello antes de tocar keychain o red |
 | Ensamblado | `Info.plist` con bundle id, versiones, `LSMinimumSystemVersion`, `SUFeedURL`, `SUPublicEDKey`, `SURequireSignedFeed`; el binario enlaza `Sparkle.framework` y tiene el rpath; su `minos` ≤ `MIN_MACOS_VERSION`; versión de Sparkle = `sparkle.version` |
-| Firma | código anidado de dentro hacia fuera (XPC, `Autoupdate`, `Updater.app`, Mach-O sueltos, framework, app); `--options runtime --timestamp`; entitlements mínimos; `codesign --verify --deep --strict`; hardened runtime y sello de tiempo presentes |
+| Firma | la identidad del .p12 coincide con `SIGNING_IDENTITY` y `APPLE_TEAM_ID`; código anidado de dentro hacia fuera (XPC, `Autoupdate`, `Updater.app`, Mach-O sueltos, framework, app); `--options runtime --timestamp`; entitlements mínimos; `codesign --verify --deep --strict`; hardened runtime, sello de tiempo y `TeamIdentifier` = `APPLE_TEAM_ID` |
 | Notarización | `notarytool submit --wait`; si no es `Accepted`, imprime `notarytool log` y falla; `stapler staple`/`validate`, `spctl --assess --type execute -vv`, `codesign --verify` |
 | Empaquetado | zip final con `ditto -c -k --sequesterRsrc --keepParent` **después** de grapar; se reabre y se vuelve a verificar; SHA-256 |
 | Publicación | checksum del artefacto; firma de Apple de nuevo; `check-key` (privada↔pública); build monótono; no pisar zips; `generate_appcast`; item nuevo correcto (versión, build, canal, sistema mínimo); firma EdDSA de zip y deltas verificada con la pública y con `sign_update --verify`; feed firmado; subida en orden seguro; descarga pública del feed y del zip idénticos a lo publicado |
@@ -201,8 +199,7 @@ Qué comprueba el pipeline por ti (cada punto aborta el release):
 2. `notes/<versión>.html` (`max-age=300`).
 3. **Al final** `appcast.xml` (`public, max-age=60`): ningún cliente ve un feed que apunte a archivos que aún no están.
 4. Verificación con `curl` contra `UPDATES_BASE_URL`: el feed servido coincide byte a byte con el publicado, el zip nuevo también, y todo lo que referencia el feed responde 200.
-5. Purga de caché solo si están `CLOUDFLARE_API_TOKEN` y `CLOUDFLARE_ZONE_ID`.
-6. GitHub Release con el zip y su `.sha256` (prerelease si es beta; borrador si lanzas el workflow a mano con `draft_release`).
+5. GitHub Release con el zip y su `.sha256` (prerelease si es beta; borrador si lanzas el workflow a mano con `draft_release`).
 
 ### Zips anteriores, deltas y política de borrado
 
@@ -218,7 +215,7 @@ Qué comprueba el pipeline por ti (cada punto aborta el release):
 1. `generate_appcast` regenera el feed **sin** esa versión (las demás versiones y sus firmas se conservan; los deltas hacia/desde ella desaparecen) y el mismo script lo valida.
 2. Se publica solo el `appcast.xml`.
 3. Después se mueven el zip y los deltas de esa versión a `retired/` (`keep_files` lo omite).
-4. Purga opcional de caché y verificación pública.
+4. Verificación pública.
 
 Comparte el grupo de concurrencia `mac-updates-feed` con la publicación: un release y un rollback nunca escriben el feed a la vez. Se niega a dejar el feed vacío.
 
@@ -238,16 +235,16 @@ Para **reponer** una versión retirada: mueve a mano los objetos desde `retired/
 
 | Credencial | Qué hacer |
 |---|---|
-| API key de notarización, token S3 de R2, `CLOUDFLARE_API_TOKEN` | Crear la nueva, actualizar el secret y revocar la vieja. Sin impacto en las apps instaladas. |
+| API key de notarización (`ASC_*`), token S3 de R2 (`R2_*`) | Crear la nueva, actualizar el secret y revocar la vieja. Sin impacto en las apps instaladas. |
 | Certificado Developer ID (caduca a los 5 años) | Crear uno nuevo **del mismo equipo** (mismo Team ID) y sustituir `MACOS_CERT_P12_BASE64`/`MACOS_CERT_PASSWORD`. Sparkle comprueba que la firma de código de la versión nueva coincida con la instalada; con el mismo Team ID no hay problema. Cambiar de equipo rompe esa comprobación: las apps instaladas tendrían que reinstalarse a mano. |
 | **Clave EdDSA de Sparkle** | **Limitación de Sparkle:** cada app instalada solo conoce la `SUPublicEDKey` con la que se construyó y verifica con ella. Una actualización firmada solo con una clave nueva la rechazan las apps antiguas. Procedimiento recomendado (consulta la sección de rotación de claves de la documentación de Sparkle y pruébalo antes con una beta): ver abajo. Si pierdes la privada **sin** haber rotado antes, no hay recuperación: los usuarios deben descargar e instalar a mano una versión con la clave nueva. |
 
 Procedimiento de rotación de la clave EdDSA (con el mismo certificado Developer ID):
 
 1. Genera la clave nueva (`generate_keys --account nueva`, `-x`) y guarda la privada vieja.
-2. **Release puente**: construye con `SPARKLE_PUBLIC_ED_KEY` = pública **nueva** (la app lleva la nueva) pero firma todavía con la **vieja**: deja `SPARKLE_ED_PRIVATE_KEY` = privada vieja y define `SPARKLE_SIGNING_PUBLIC_ED_KEY` = pública **vieja** (así la guarda «privada↔pública» comprueba contra la que realmente firma). Las apps antiguas lo aceptan; las que lo instalen ya conocen la nueva.
+2. **Release puente**: construye con `SPARKLE_ED_PUBLIC_KEY` = pública **nueva** (la app lleva la nueva) pero firma todavía con la **vieja**: deja `SPARKLE_ED_PRIVATE_KEY` = privada vieja y añade **temporalmente** al `env:` del paso «Publicar» de `release-mac.yml` la variable de entorno `SPARKLE_ED_SIGNING_PUBLIC_KEY` = pública **vieja** (así la guarda «privada↔pública» comprueba contra la que realmente firma; no es una variable de GitHub). Las apps antiguas lo aceptan; las que lo instalen ya conocen la nueva.
 3. Espera a que la mayoría haya actualizado (el menú de Sparkle y tus métricas de descarga te lo dirán).
-4. Cambia `SPARKLE_ED_PRIVATE_KEY` por la privada nueva y borra `SPARKLE_SIGNING_PUBLIC_ED_KEY`. Los siguientes releases se firman con la nueva; el feed también (`SURequireSignedFeed`), por lo que quien siga con una versión anterior al puente no podrá verificarlo y deberá reinstalar a mano.
+4. Cambia `SPARKLE_ED_PRIVATE_KEY` por la privada nueva y quita esa línea del workflow. Los siguientes releases se firman con la nueva; el feed también (`SURequireSignedFeed`), por lo que quien siga con una versión anterior al puente no podrá verificarlo y deberá reinstalar a mano.
 
 ## Pruebas locales (sin credenciales)
 
@@ -270,14 +267,14 @@ bash apps/mac/release/assemble-app.sh && SIGN_IDENTITY=- bash apps/mac/release/s
 
 | Síntoma | Causa y arreglo |
 |---|---|
-| `preflight` falla con «Faltan N valor(es)» | El resumen del job lista los nombres (sin valores). Defínelos (secrets en el environment correcto; variables a nivel de repositorio). |
-| `el binario exige macOS 26.0 … MIN_MACOS_VERSION=13.0` | `platforms` de `Package.swift` es más nuevo que lo que prometes. Baja el deployment target o define `MIN_MACOS_VERSION` con el valor real. |
+| `preflight` falla con «Faltan N valor(es)» | Es el primer job y el resumen lista de una vez todos los nombres que faltan (sin valores). Defínelos como secrets y variables de **repositorio**. |
+| `el binario exige macOS 26.0 … MIN_MACOS_VERSION=13.0` | `platforms` de `Package.swift` es más nuevo que lo que prometes. Baja el deployment target, o pasa el valor real en el input `min_macos_version` / cambia `MIN_MACOS_VERSION` en el `env:` del workflow. |
 | Notarización `Invalid` | El log (impreso por el pipeline) dice qué binario falla: normalmente código anidado sin firmar, sin hardened runtime o sin sello de tiempo. `sign-app.sh` firma todo el código anidado; si añades binarios nuevos aparecerán en el log. |
 | `el .p12 no contiene una identidad 'Developer ID Application'` | Exportaste el certificado sin su clave privada, o es de otro tipo (*Apple Development*). Reexporta desde *Mis certificados*. |
-| `la clave privada … no corresponde a SPARKLE_PUBLIC_ED_KEY` | Secret y variable son de pares distintos. Compara `generate_keys -p` con la variable. |
+| `la clave privada … no corresponde a SPARKLE_ED_PUBLIC_KEY` | Secret y variable son de pares distintos. Compara `generate_keys -p` con la variable. |
 | `no es mayor que el máximo publicado` | Hay un release más nuevo en el feed (o se encolaron dos). Etiqueta de nuevo. |
 | `403` o `Access Denied` al hablar con R2 | Token sin permiso de escritura en ese bucket, o `R2_ACCOUNT_ID` incorrecto. El pipeline **no** lo interpreta como «primera publicación»: aborta sin tocar el feed. |
-| El feed servido no coincide con el publicado | Dominio o `R2_PREFIX` mal configurados, o caché de Cloudflare: añade `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ZONE_ID`. |
+| El feed servido no coincide con el publicado | `UPDATES_BASE_URL` no apunta a la raíz del bucket, o el dominio sirve una caché antigua (el feed caduca en 60 s: reintenta). |
 | La app no ofrece actualizaciones | Un build local no trae `SUFeedURL`/`SUPublicEDKey` (updater desactivado a propósito). En una release: `SUScheduledCheckInterval`, o «Buscar actualizaciones…» a mano; revisa que el item del feed tenga `minimumSystemVersion` ≤ tu macOS. |
 
 ## Pendiente conocido
