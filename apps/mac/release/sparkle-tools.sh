@@ -6,7 +6,7 @@ set -euo pipefail
 # shellcheck source=lib.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 # shellcheck source=sparkle.version
-source "$RELEASE_SCRIPTS/sparkle.version"
+source "${SPARKLE_VERSION_FILE:-$RELEASE_SCRIPTS/sparkle.version}"  # SPARKLE_VERSION_FILE: solo para pruebas
 
 [ "${1:-}" = install ] && [ -n "${2:-}" ] || die "uso: sparkle-tools.sh install <dir>"
 DEST="$2"
@@ -22,7 +22,7 @@ if [ "$actual" != "$SPARKLE_SHA256" ]; then
   rm -f "$TARBALL"
   die "SHA-256 de Sparkle $SPARKLE_VERSION no coincide con el fijado en sparkle.version (esperado $SPARKLE_SHA256, obtenido $actual)"
 fi
-tar -xf "$TARBALL" -C "$DEST" ./bin ./Sparkle.framework
+tar -xf "$TARBALL" -C "$DEST"
 for t in generate_appcast sign_update; do
   [ -x "$DEST/bin/$t" ] || die "falta $t en el tarball de Sparkle"
 done

@@ -6,7 +6,8 @@
 # Entrada (env): SHORT_VERSION, BUILD_NUMBER (obligatorias); BUNDLE_ID (com.example.chopshop),
 #   MIN_MACOS_VERSION (13.0), SPARKLE_FEED_URL, SPARKLE_PUBLIC_ED_KEY, SPARKLE_AUTO_UPDATE (false),
 #   SPARKLE_CHECK_INTERVAL (86400), APP_OUT (apps/mac/build/release/Chopshop.app),
-#   RELEASE_MODE=release|dryrun (en release faltar el feed o la clave pública es un error).
+#   RELEASE_MODE=release|dryrun (en release faltar el feed o la clave pública es un error),
+#   BUILD_SCRIPT (solo para pruebas: sustituye a apps/mac/build.sh).
 set -euo pipefail
 # shellcheck source=lib.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
@@ -32,15 +33,20 @@ if [ -n "$PUBKEY" ] && [ "$(b64_len "$PUBKEY")" != 32 ]; then die "SPARKLE_PUBLI
 # 1) UI (pnpm) + Swift + motor + Info.plist base: lo hace build.sh con la ruta de salida parametrizada
 log "build.sh -> $OUT"
 rm -rf "$OUT"
-CHOPSHOP_APP="$OUT" bash "$MAC_DIR/build.sh"
+CHOPSHOP_APP="$OUT" bash "${BUILD_SCRIPT:-$MAC_DIR/build.sh}"
 [ -f "$OUT/Contents/Info.plist" ] || die "build.sh no generó $OUT"
 PLIST="$OUT/Contents/Info.plist"
 
 plist_put() { # clave tipo valor
   local key="$1" type="$2" value="$3"
   case "$value" in *\"* | *$'\n'*) die "valor inválido para $key" ;; esac
+  if [ "$type" != string ] && ! [[ "$value" =~ ^(true|false|[0-9]+)$ ]]; then die "valor inválido para $key"; fi
   "$PLISTBUDDY" -c "Delete :$key" "$PLIST" >/dev/null 2>&1 || true
-  "$PLISTBUDDY" -c "Add :$key $type \"$value\"" "$PLIST"
+  if [ "$type" = string ]; then
+    "$PLISTBUDDY" -c "Add :$key string \"$value\"" "$PLIST"
+  else
+    "$PLISTBUDDY" -c "Add :$key $type $value" "$PLIST"
+  fi
 }
 plist_del() { "$PLISTBUDDY" -c "Delete :$1" "$PLIST" >/dev/null 2>&1 || true; }
 plist_get() { "$PLISTBUDDY" -c "Print :$1" "$PLIST" 2>/dev/null || true; }

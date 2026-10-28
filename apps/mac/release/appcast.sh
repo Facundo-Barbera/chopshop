@@ -38,7 +38,7 @@ SIGNING_PUB="${SPARKLE_SIGNING_PUBLIC_ED_KEY:-$SPARKLE_PUBLIC_ED_KEY}"
 # La clave privada tiene que ser la pareja de la pública esperada; si no, ningún cliente aceptaría el update
 printf '%s\n' "$SPARKLE_ED_PRIVATE_KEY" | python3 -I "$HERE/appcast.py" check-key --public "$SIGNING_PUB"
 
-args=(--ed-key-file - --download-url-prefix "$BASE/" --maximum-versions "${MAX_VERSIONS:-5}"
+args=(--ed-key-file - -o "$DIR/appcast.xml" --download-url-prefix "$BASE/" --maximum-versions "${MAX_VERSIONS:-5}"
   --maximum-deltas "${MAX_DELTAS:-3}" --delta-compression "${DELTA_COMPRESSION:-lzma}" --embed-release-notes)
 if [ -n "$NEW_BUILD" ]; then
   args+=(--versions "$NEW_BUILD")
@@ -59,12 +59,13 @@ verify_args=(--dir "$DIR" --base-url "$BASE" --min-system "$MIN" --public "$SIGN
 if [ -n "$NEW_BUILD" ]; then verify_args+=(--version "$VERSION" --build "$NEW_BUILD" --channel "$CHANNEL"); fi
 if [ -n "${ABSENT_VERSION:-}" ]; then verify_args+=(--absent "$ABSENT_VERSION"); fi
 if ! python3 -I "$HERE/appcast.py" verify "${verify_args[@]}"; then
-  # Rollback: si generate_appcast conservó el item retirado, se quita a mano y se re-firma el feed con sign_update
-  if [ -n "${ABSENT_VERSION:-}" ] && grep -q "<sparkle:shortVersionString>$ABSENT_VERSION<" "$DIR/appcast.xml"; then
-    log "el item $ABSENT_VERSION seguía en el feed: se retira a mano y se re-firma"
-    python3 -I "$HERE/appcast.py" remove-item --appcast "$DIR/appcast.xml" --version "$ABSENT_VERSION"
+  # Rollback: si generate_appcast dejó el item retirado o deltas hacia archivos que ya no están (no limpia los
+  # <sparkle:deltas> de items existentes), se podan a mano y el feed se vuelve a firmar con sign_update
+  if [ -n "${ABSENT_VERSION:-}" ]; then
+    log "poda manual del feed (item $ABSENT_VERSION y deltas huérfanos) y re-firma"
+    python3 -I "$HERE/appcast.py" prune --appcast "$DIR/appcast.xml" --dir "$DIR" --version "$ABSENT_VERSION"
     printf '%s\n' "$SPARKLE_ED_PRIVATE_KEY" | (cd "$work" && "$SPARKLE_BIN/sign_update" --ed-key-file - "$DIR/appcast.xml")
-    python3 -I "$HERE/appcast.py" verify "${verify_args[@]}"
+    python3 -I "$HERE/appcast.py" verify "${verify_args[@]}" || die "el appcast podado no pasa la validación"
   else
     die "el appcast generado no pasa la validación"
   fi

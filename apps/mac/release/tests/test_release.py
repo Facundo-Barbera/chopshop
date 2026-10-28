@@ -136,6 +136,14 @@ class TestPreflight(WorkDir):
         bad = dict(self.GOOD_VARS, UPDATES_BASE_URL="http://updates.example.com")
         self.assertEqual(self.run_sh("preflight.sh", ["vars"], env=bad).returncode, 1)
 
+    def test_feed_url_must_be_base_url_plus_appcast(self):
+        for feed in ("https://updates.example.com/feed.xml", "https://other.example.com/appcast.xml"):
+            r = self.run_sh("preflight.sh", ["vars"], env=dict(self.GOOD_VARS, SPARKLE_FEED_URL=feed))
+            self.assertEqual(r.returncode, 1, feed)
+            self.assertIn("UPDATES_BASE_URL + /appcast.xml", r.stderr)
+        ok = dict(self.GOOD_VARS, UPDATES_BASE_URL="https://updates.example.com/")
+        self.assertEqual(self.run_sh("preflight.sh", ["vars"], env=ok).returncode, 0)
+
     def test_empty_public_key_fails_release(self):
         env = dict(self.GOOD_VARS, SPARKLE_PUBLIC_ED_KEY="")
         r = self.run_sh("preflight.sh", ["vars"], env=env)
@@ -384,7 +392,7 @@ class TestSignAndNotarize(WorkDir):
             spit(p, self.MACHO, "wb")
         os.makedirs(os.path.join(app, "Contents/Resources"), exist_ok=True)
         spit(os.path.join(app, "Contents/Resources/script.py"), "#!/usr/bin/env python3\n", "w")
-        spit(os.path.join(app, "Contents/Info.plist"), "x", "w")
+        spit(os.path.join(app, "Contents/Info.plist"), '{"CFBundleExecutable": "Chopshop"}')
         os.symlink("B", os.path.join(app, "Contents/Frameworks/Sparkle.framework/Versions/Current"))
         return app
 
@@ -464,6 +472,131 @@ class TestSignAndNotarize(WorkDir):
         self.assertEqual(len(ditto), 1)
         self.assertTrue(any(c.startswith("xcrun stapler validate") for c in self.calls()))
         self.assertRegex(read(zip_path + ".sha256"), r"^[0-9a-f]{64}  Chopshop-1\.0\.0\.zip\n$")
+
+
+# ---------------------------------------------------------------------------
+class TestAssemble(WorkDir):
+    """assemble-app.sh + embed-sparkle.sh con un build.sh, PlistBuddy y otool falsos."""
+
+    def setUp(self):
+        super().setUp()
+        self.build = os.path.join(self.tmp, "fake-build.sh")
+        spit(self.build, "set -euo pipefail\n"
+             "mkdir -p \"$CHOPSHOP_APP/Contents/MacOS\" \"$CHOPSHOP_APP/Contents/Resources\"\n"
+             "echo '{\"CFBundleExecutable\": \"Chopshop\", \"CFBundleIdentifier\": \"local.chopshop.ui\", \"NSAppTransportSecurity\": 1}' > \"$CHOPSHOP_APP/Contents/Info.plist\"\n"
+             "echo bin > \"$CHOPSHOP_APP/Contents/MacOS/Chopshop\"\n")
+        self.fw = os.path.join(self.tmp, "Sparkle.framework")
+        os.makedirs(os.path.join(self.fw, "Resources"))
+        spit(os.path.join(self.fw, "Resources", "Info.plist"), '{"CFBundleShortVersionString": "2.10.1"}')
+        self.out = os.path.join(self.tmp, "out", "Chopshop.app")
+        self.env = {"BUILD_SCRIPT": self.build, "SPARKLE_FRAMEWORK_SRC": self.fw, "APP_OUT": self.out, "SHORT_VERSION": "1.2.3",
+                    "BUILD_NUMBER": "202610281200", "BUNDLE_ID": "org.example.chopshop", "MIN_MACOS_VERSION": "13.0",
+                    "SPARKLE_FEED_URL": "https://updates.example.com/appcast.xml", "SPARKLE_PUBLIC_ED_KEY": fakes.PUBLIC_B64,
+                    "RELEASE_MODE": "release"}
+
+    def plist(self):
+        return json.loads(slurp(os.path.join(self.out, "Contents", "Info.plist")))
+
+    def test_release_injects_versions_and_sparkle_keys_and_embeds_framework(self):
+        r = self.run_sh("assemble-app.sh", env=self.env)
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        p = self.plist()
+        self.assertEqual((p["CFBundleIdentifier"], p["CFBundleShortVersionString"], p["CFBundleVersion"], p["LSMinimumSystemVersion"]),
+                         ("org.example.chopshop", "1.2.3", "202610281200", "13.0"))
+        self.assertEqual((p["SUFeedURL"], p["SUPublicEDKey"]), (self.env["SPARKLE_FEED_URL"], fakes.PUBLIC_B64))
+        self.assertIs(p["SUEnableAutomaticChecks"], True)
+        self.assertIs(p["SUAutomaticallyUpdate"], False)
+        self.assertEqual(p["SUScheduledCheckInterval"], 86400)
+        self.assertIs(p["SURequireSignedFeed"], True)
+        self.assertIs(p["SUVerifyUpdateBeforeExtraction"], True)
+        self.assertEqual(p["NSAppTransportSecurity"], 1)  # lo que ponga build.sh se conserva
+        self.assertTrue(os.path.isdir(os.path.join(self.out, "Contents", "Frameworks", "Sparkle.framework")))
+        self.assertTrue(any(c.startswith("install_name_tool -add_rpath @executable_path/../Frameworks") for c in self.calls()))
+
+    def test_configurable_auto_update_and_interval(self):
+        r = self.run_sh("assemble-app.sh", env=dict(self.env, SPARKLE_AUTO_UPDATE="true", SPARKLE_CHECK_INTERVAL="3600"))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual((self.plist()["SUAutomaticallyUpdate"], self.plist()["SUScheduledCheckInterval"]), (True, 3600))
+        self.assertNotEqual(self.run_sh("assemble-app.sh", env=dict(self.env, SPARKLE_AUTO_UPDATE="quizas")).returncode, 0)
+
+    def test_existing_rpath_is_not_added_twice(self):
+        r = self.run_sh("assemble-app.sh", env=dict(self.env, FAKE_RPATH="1"))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse(any(c.startswith("install_name_tool") for c in self.calls()))
+
+    def test_release_without_feed_or_public_key_fails(self):
+        for missing in ("SPARKLE_FEED_URL", "SPARKLE_PUBLIC_ED_KEY"):
+            env = dict(self.env, **{missing: ""})
+            r = self.run_sh("assemble-app.sh", env=env)
+            self.assertNotEqual(r.returncode, 0, missing)
+            self.assertIn(missing, r.stderr)
+
+    def test_dry_run_without_sparkle_vars_builds_with_updater_disabled(self):
+        env = dict(self.env, RELEASE_MODE="dryrun", SPARKLE_FEED_URL="", SPARKLE_PUBLIC_ED_KEY="")
+        r = self.run_sh("assemble-app.sh", env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse([k for k in self.plist() if k.startswith("SU")])
+        self.assertIn("updater desactivado", r.stderr)
+
+    def test_invalid_public_key_rejected(self):
+        r = self.run_sh("assemble-app.sh", env=dict(self.env, SPARKLE_PUBLIC_ED_KEY="AAAA"))
+        self.assertNotEqual(r.returncode, 0)
+
+    def test_binary_newer_than_declared_minimum_fails(self):
+        r = self.run_sh("assemble-app.sh", env=dict(self.env, FAKE_MINOS="26.0"))
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("MIN_MACOS_VERSION", r.stderr)
+        self.assertEqual(self.run_sh("assemble-app.sh", env=dict(self.env, FAKE_MINOS="26.0", MIN_MACOS_VERSION="26.0")).returncode, 0)
+
+    def test_sparkle_framework_version_must_match_pin(self):
+        spit(os.path.join(self.fw, "Resources", "Info.plist"), '{"CFBundleShortVersionString": "2.0.0"}')
+        r = self.run_sh("assemble-app.sh", env=self.env)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("sparkle.version", r.stderr)
+
+
+# ---------------------------------------------------------------------------
+class TestSparkleTools(WorkDir):
+    def make_tarball(self, version, with_tools=True):
+        import io
+        import tarfile
+        site = os.path.join(self.tmp, "site", "sparkle-project", "Sparkle", "releases", "download", version)
+        os.makedirs(site)
+        path = os.path.join(site, "Sparkle-%s.tar.xz" % version)
+        with tarfile.open(path, "w:xz") as tf:
+            for name in (("bin/generate_appcast", "bin/sign_update") if with_tools else ("bin/otra",)):
+                data = b"#!/bin/sh\n"
+                info = tarfile.TarInfo("./" + name)
+                info.size, info.mode = len(data), 0o755
+                tf.addfile(info, io.BytesIO(data))
+            info = tarfile.TarInfo("./Sparkle.framework/Resources/Info.plist")
+            info.size = 2
+            tf.addfile(info, io.BytesIO(b"{}"))
+        import hashlib
+        return hashlib.sha256(slurp(path, "rb")).hexdigest()
+
+    def run_install(self, sha, version="9.9.9"):
+        pin = os.path.join(self.tmp, "pin")
+        spit(pin, "SPARKLE_VERSION=%s\nSPARKLE_SHA256=%s\n" % (version, sha))
+        env = {"SPARKLE_VERSION_FILE": pin, "FAKE_S3_DIR": os.path.join(self.tmp, "site")}
+        return self.run_sh("sparkle-tools.sh", ["install", os.path.join(self.tmp, "tools")], env=env)
+
+    def test_verified_download_is_installed(self):
+        sha = self.make_tarball("9.9.9")
+        r = self.run_install(sha)
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        self.assertTrue(os.access(os.path.join(self.tmp, "tools", "bin", "generate_appcast"), os.X_OK))
+
+    def test_checksum_mismatch_aborts_and_discards_the_download(self):
+        self.make_tarball("9.9.9")
+        r = self.run_install("0" * 64)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("no coincide", r.stderr)
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "tools", "Sparkle-9.9.9.tar.xz")))
+
+    def test_tarball_without_tools_is_rejected(self):
+        sha = self.make_tarball("9.9.9", with_tools=False)
+        self.assertNotEqual(self.run_install(sha).returncode, 0)
 
 
 # ---------------------------------------------------------------------------
@@ -589,6 +722,16 @@ class TestPublishFlow(WorkDir):
         self.assertEqual([i["short"] for i in appcast.load_items(os.path.join(self.s3, "appcast.xml"))], ["1.0.0"])
         self.assertTrue(os.path.exists(os.path.join(self.s3, "retired", "Chopshop-1.1.0.zip")))
         self.assertTrue(os.path.exists(os.path.join(self.s3, "Chopshop-1.0.0.zip")), "las demás versiones no se tocan")
+
+    def test_rollback_prunes_manually_when_generate_appcast_keeps_the_item(self):
+        self.assertEqual(self.release("1.0.0", "202610010000").returncode, 0)
+        self.assertEqual(self.release("1.1.0", "202610020000").returncode, 0)
+        r = self.run_sh("rollback.sh", ["1.1.0"], env=dict(self.env, ROLLBACK_DRY_RUN="false", FAKE_KEEP_STALE_ITEM="1"))
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        self.assertIn("poda manual", r.stdout)
+        self.assertEqual([i["short"] for i in appcast.load_items(os.path.join(self.s3, "appcast.xml"))], ["1.0.0"])
+        self.assertIn("sparkle-signatures", slurp(os.path.join(self.s3, "appcast.xml")))  # re-firmado con sign_update
+        self.assertTrue(any(c.startswith("sign_update --ed-key-file -") and c.endswith("appcast.xml") for c in self.calls()))
 
     def test_rollback_of_only_version_is_refused(self):
         self.assertEqual(self.release("1.0.0", "202610010000").returncode, 0)

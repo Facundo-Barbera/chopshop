@@ -58,6 +58,9 @@ bad_format=()
 check_https() { local n="$1" v="${!1:-}"; if [ -n "$v" ] && ! [[ "$v" =~ ^https://[^[:space:]?#]+$ ]]; then bad_format+=("$n debe ser una URL https:// sin query ni fragmento"); fi; return 0; }
 check_https SPARKLE_FEED_URL
 check_https UPDATES_BASE_URL
+if [ -n "${SPARKLE_FEED_URL:-}" ] && [ -n "${UPDATES_BASE_URL:-}" ] && [ "$SPARKLE_FEED_URL" != "$(strip_slash "$UPDATES_BASE_URL")/appcast.xml" ]; then
+  bad_format+=("SPARKLE_FEED_URL debe ser UPDATES_BASE_URL + /appcast.xml (generate_appcast nombra el feed según SUFeedURL y el pipeline lo publica y verifica ahí)")
+fi
 if [ -n "${SPARKLE_PUBLIC_ED_KEY:-}" ] && [ "$(b64_len "$SPARKLE_PUBLIC_ED_KEY")" != 32 ]; then
   bad_format+=("SPARKLE_PUBLIC_ED_KEY debe ser base64 de 32 bytes (salida de generate_keys)")
 fi
