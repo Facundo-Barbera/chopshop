@@ -31,6 +31,8 @@ def cmd_profile(a):
         return 0
     prof = profile.load(a.project)
     errs = profile.validate(prof)
+    if a.action == "check":
+        errs += profile.validate_building(prof["project"])
     if a.action == "show":
         print(json.dumps({k: v for k, v in prof.items() if not k.startswith("_")}, indent=2, ensure_ascii=False))
     for k in prof["_unknown"]:

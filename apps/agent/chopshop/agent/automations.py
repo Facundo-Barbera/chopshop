@@ -57,7 +57,9 @@ NEEDS = (None, "human", "bot", "approval")
 WHERE_ROOTS = ("type", "project", "severity", "needs", "subject", "body")
 WHERE_OPS = ("in", "not", "regex")
 # Espacios de nombres de tipos del agente (§2.2): se pueden escuchar pero no emitir desde un script.
-RESERVED = ("task", "question", "approval", "batch", "graph", "node", "reaction", "machine", "github", "automation", "agent")
+RESERVED = ("task", "question", "approval", "batch", "graph", "node", "reaction", "machine", "github", "automation", "agent",
+            "desk", "office", "forge", "listener")
+RESERVED_EMITTABLE = ("forge.dispatch",)   # tipos del agente que un script sí puede emitir (anuncia un workflow_dispatch)
 RESERVED_ENV = ("PATH", "CHOPSHOP_EVENT_FILE", "CHOPSHOP_PROJECT", "CHOPSHOP_AUTOMATION")
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _ENVNAME = re.compile(r"^[A-Z_][A-Z0-9_]{0,63}$")
@@ -272,7 +274,7 @@ def _item_errs(a, i, names, emitted):
         for e in em:
             if not isinstance(e, str) or not _TYPE.match(e):
                 errs.append("%s.emits: tipo inválido %r (p. ej. triage.result)" % (at, e))
-            elif e.split(".")[0] in RESERVED:
+            elif e.split(".")[0] in RESERVED and e not in RESERVED_EMITTABLE:
                 errs.append("%s.emits: %s es un tipo del agente; usa un espacio propio (p. ej. %s.result)" % (at, e, name))
     if "enabled" in a and not isinstance(a["enabled"], bool):
         errs.append("%s.enabled debe ser true o false" % at)
@@ -283,38 +285,43 @@ def _item_errs(a, i, names, emitted):
     if not trs:
         errs.append("%s.on: falta al menos un disparador (type, schedule o manual)" % at)
     for j, t in enumerate(trs):
-        tat = "%s.on[%d]" % (at, j)
-        if not isinstance(t, dict):
-            errs.append("%s: se esperaba un mapa o un tipo" % tat)
-            continue
-        errs += ["%s.%s desconocido (%s)" % (tat, k, ", ".join(TRIGGER_KEYS)) for k in t if k not in TRIGGER_KEYS]
-        ty = t.get("type")
-        if not isinstance(ty, str) or not ty:
-            errs.append("%s.type falta" % tat)
-        elif ty == "schedule":
-            if ("every" in t) == ("cron" in t):
-                errs.append("%s: schedule necesita every o cron (uno solo)" % tat)
-            elif "every" in t:
-                ev = parse_every(t["every"])
-                if ev is None or ev < MIN_EVERY:
-                    errs.append("%s.every inválido (p. ej. 6h, 30m; mínimo %ds)" % (tat, MIN_EVERY))
-            else:
-                try:
-                    parse_cron(t["cron"])
-                except AutomationError as e:
-                    errs.append("%s.%s" % (tat, e))
-            if "where" in t:
-                errs.append("%s: where solo aplica a disparadores por tipo de evento" % tat)
-        elif ty == "manual":
-            errs += ["%s.%s no aplica a manual" % (tat, k) for k in ("where", "every", "cron") if k in t]
+        errs += trigger_errs(t, "%s.on[%d]" % (at, j), emitted)
+    return errs
+
+
+def trigger_errs(t, tat, emitted=()):
+    """Problemas de un disparador ya normalizado (mapa con `type`); lo reutiliza `wake:` de los roles permanentes."""
+    if not isinstance(t, dict):
+        return ["%s: se esperaba un mapa o un tipo" % tat]
+    errs = []
+    errs += ["%s.%s desconocido (%s)" % (tat, k, ", ".join(TRIGGER_KEYS)) for k in t if k not in TRIGGER_KEYS]
+    ty = t.get("type")
+    if not isinstance(ty, str) or not ty:
+        errs.append("%s.type falta" % tat)
+    elif ty == "schedule":
+        if ("every" in t) == ("cron" in t):
+            errs.append("%s: schedule necesita every o cron (uno solo)" % tat)
+        elif "every" in t:
+            ev = parse_every(t["every"])
+            if ev is None or ev < MIN_EVERY:
+                errs.append("%s.every inválido (p. ej. 6h, 30m; mínimo %ds)" % (tat, MIN_EVERY))
         else:
-            if not _GLOB.match(ty):
-                errs.append("%s.type inválido %r (tipo de sobre o glob, p. ej. github.issue.*)" % (tat, ty))
-            elif not _known_type(ty, emitted):
-                errs.append("%s.type desconocido %r (%s o un tipo de emits)" % (tat, ty, ", ".join(RESERVED)))
-            errs += ["%s.%s solo aplica a schedule" % (tat, k) for k in ("every", "cron") if k in t]
-            if "where" in t:
-                errs += _where_errs(t["where"], tat + ".where")
+            try:
+                parse_cron(t["cron"])
+            except AutomationError as e:
+                errs.append("%s.%s" % (tat, e))
+        if "where" in t:
+            errs.append("%s: where solo aplica a disparadores por tipo de evento" % tat)
+    elif ty == "manual":
+        errs += ["%s.%s no aplica a manual" % (tat, k) for k in ("where", "every", "cron") if k in t]
+    else:
+        if not _GLOB.match(ty):
+            errs.append("%s.type inválido %r (tipo de sobre o glob, p. ej. github.issue.*)" % (tat, ty))
+        elif not _known_type(ty, emitted):
+            errs.append("%s.type desconocido %r (%s o un tipo de emits)" % (tat, ty, ", ".join(RESERVED)))
+        errs += ["%s.%s solo aplica a schedule" % (tat, k) for k in ("every", "cron") if k in t]
+        if "where" in t:
+            errs += _where_errs(t["where"], tat + ".where")
     return errs
 
 

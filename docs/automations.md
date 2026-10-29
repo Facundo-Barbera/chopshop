@@ -34,7 +34,8 @@ automations:
 
 `chopshop profile check <proyecto>` y `chopshop automation check` validan el bloque: `run` debe ser una lista argv
 (un texto con shell se rechaza), `emits` no puede usar los espacios de nombres del agente (`task`, `question`,
-`approval`, `batch`, `graph`, `node`, `reaction`, `machine`, `github`, `automation`, `agent`), `timeout` en rango,
+`approval`, `batch`, `graph`, `node`, `reaction`, `machine`, `github`, `automation`, `agent`, `desk`, `office`, `forge`,
+`listener`; la única excepción es `forge.dispatch`, que anuncia un `workflow_dispatch` para atribuir su run), `timeout` en rango,
 `where` bien formado y disparadores conocidos (los tipos deben pertenecer a un espacio del agente o a algún `emits`
 del perfil). `automation check` además mira la carpeta, el `cwd`, que el ejecutable exista en el PATH mínimo y los
 secretos.

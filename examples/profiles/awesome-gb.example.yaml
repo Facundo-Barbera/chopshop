@@ -1,0 +1,32 @@
+# Ejemplo de perfil con oficina y rack (docs/plans/office-redesign.md). Los marcadores <...> se sustituyen en el perfil
+# local ~/.chopshop/profiles/awesome-gb.yaml (sin versionar): slugs de repos y logins reales nunca van al repo.
+project: awesome-gb
+repo: <org>/<repo-principal>
+office:
+  company: Awesome GB
+  half_life: 30m
+  floors:
+    - name: Producto
+      rooms:
+        - {role: triage, desks: 1, permanent: true}
+        - {role: backend, desks: 4}
+        - {role: frontend, desks: 3}
+    - name: Docs
+      rooms:
+        - {role: docs, desks: 2}
+  roles:
+    triage:
+      prompt_file: roles/triage.md
+      wake:
+        - {type: schedule, cron: "30 8 * * 1-5"}
+        - {type: github.issue.opened, where: {body.labels: {not: triaged}}}
+        - desk.note
+    backend:
+      match: {title: "^\\[be\\]", branch: "^be/"}
+rack:
+  repos:
+    - {provider: github, repo: "<org>/<repo-principal>", kind: main}
+    - {provider: github, repo: "<org>/<engine-cx>", kind: docs, label: Engine CX}
+  actors:
+    "<login-grok-facundo>": {kind: bot, label: Grok · Facundo}
+    "<login-grok-juan-manuel>": {kind: bot, label: Grok · Juan Manuel}
