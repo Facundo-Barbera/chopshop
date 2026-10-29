@@ -16,6 +16,7 @@ from chopshop.agent import db, envelope, events, pairing, projection, server, st
 from test_agent_server import TOKEN, ServerBase  # noqa: E402
 
 FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "events", "ui-fixture.jsonl")   # dorado del bus
+STATE_GOLDEN = FIXTURE[:-len(".jsonl")] + ".state.json"   # fold(dorado) que usa la app Mac para probar su reductor Swift
 
 
 def load_fixture():
@@ -149,6 +150,17 @@ class TestProjection(unittest.TestCase):
         self.assertEqual(cs["counts"]["waiting_bot"], 1)
         self.assertEqual(bx["counts"]["running"], 1)
         self.assertEqual([e["seq"] for e in st["recent"]], [e["seq"] for e in reversed(self.envs)][:projection.RECENT])
+
+    def test_fold_matches_golden_state(self):
+        """fold(ui-fixture.jsonl) es estable y coincide con ui-fixture.state.json (CHOPSHOP_UPDATE_GOLDEN=1 lo regenera)."""
+        st = projection.fold(self.envs, "contabo-dev")
+        self.assertEqual(st, projection.fold(load_fixture(), "contabo-dev"))
+        text = json.dumps(st, sort_keys=True, indent=2, ensure_ascii=False) + "\n"
+        if os.environ.get("CHOPSHOP_UPDATE_GOLDEN") == "1":
+            with open(STATE_GOLDEN, "w", encoding="utf-8") as f:
+                f.write(text)
+        with open(STATE_GOLDEN, encoding="utf-8") as f:
+            self.assertEqual(f.read(), text)
 
     def test_attention_open_and_close(self):
         by_seq = {e["seq"]: i for i, e in enumerate(self.envs)}
