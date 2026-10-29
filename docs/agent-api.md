@@ -273,8 +273,8 @@ pisos; ninguna ruta crea ni ejecuta scripts.
 
 Un departamento `permanent: true` cuyo rol declara `office.roles.<rol>.wake` despierta con los disparadores de las
 automatizaciones: `schedule` (`cron`/`every`, hora local de la box) y `type` + `where` sobre los sobres del bus (p. ej.
-`github.issue.opened` del polling de GitHub). El disparador `desk.note` lo declara el perfil pero lo atiende la bandeja de notas
-(otra rama); aquí se ignora. El hilo `roles` del agente (solo si `[agent.roles] enabled = true`; apagado por defecto porque
+`github.issue.opened` del polling de GitHub) y `desk.note` (una nota en ese escritorio lo despierta si está libre; si está
+ocupado la nota espera en la bandeja). Las notas vivas del escritorio entran en el prompt del despertar y se consumen al lanzarlo. El hilo `roles` del agente (solo si `[agent.roles] enabled = true`; apagado por defecto porque
 **lanza hilos de T3**) lee el bus con cursor propio (`meta` `roles_cursor`) y, al despertar:
 
 1. elige el primer escritorio permanente del rol sin despertar vivo (**una sola instancia viva por escritorio**); si todos están
@@ -283,11 +283,16 @@ automatizaciones: `schedule` (`cron`/`every`, hora local de la box) y `type` + `
 2. crea un lote de una tarea en el motor (`engine.create_batch`, tarea con `role`, `desk`, `wake`) con el prompt del rol
    (`prompt_file` dentro de `~/.chopshop/automations/<proyecto>/`), el disparador y la herencia del despertar anterior (hilo,
    resumen final, rama, worktree, PRs); el hilo `engine` lo lanza en T3;
-3. cuando la tarea tiene `threadId` sienta el hilo en el escritorio: `desk.assigned {reason: wake, inheritance}` (por defecto;
-   `assign_fn` es inyectable para la oficina de escritorios); cuando la tarea termina, cierra el despertar (`desk_wakes`).
+3. cuando la tarea tiene `threadId` la oficina (`office.assign(..., reason="wake")`) sienta el hilo en el escritorio:
+   `desk.assigned {reason: wake, inheritance, notes_pending}` (se reintenta hasta 15 min si la oficina aún no vio su `task.state`); cuando la tarea termina, cierra el despertar (`desk_wakes`).
 
 Topes: `max_wakes_per_hour` por escritorio (6); `cause.depth >= 3` no despierta; los sobres `desk.*`/`office.*` no cuentan como
 disparador por tipo.
+Notas (`agent/notes.py`, tabla `desk_notes`): el escritorio debe estar declarado en el perfil local de su proyecto (si no, 404);
+`from` es obligatorio salvo que la identidad lo aporte (login, dispositivo u origen); el texto admite saltos de línea y tabuladores
+(400 si supera 2 KB). Como mucho 50 notas vivas por escritorio (al pasarse caducan las más viejas). `pending` cuenta las notas sin
+consumir y sin caducar. Las consume el hilo que despierta en el escritorio (`notes.consume` + `notes.prompt_block` para su
+prompt); el mantenimiento borra las consumidas o caducadas con más de 7 días.
 
 ## Suscripciones (webhooks v2)
 

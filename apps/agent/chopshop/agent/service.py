@@ -24,7 +24,7 @@ import time
 
 from .. import engine as engine_mod, events as legacy_events, graph, home, settings, state
 from . import __version__, automations as automations_mod, collector as collector_mod, config, db, envelope, events, github, \
-    halflife, office as office_mod, pairing, roles as roles_mod, server, t3watch
+    halflife, notes, office as office_mod, pairing, roles as roles_mod, server, t3watch
 
 log = logging.getLogger("chopshop.agent")
 
@@ -469,6 +469,7 @@ class AgentService:
         n = prune_events(self.conn, days, self.clock())
         if n:
             log.info("retención: %d eventos con más de %s días borrados", n, days)
+        notes.prune(self.conn, self.clock())
         with db.tx():
             self.conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
         return n
