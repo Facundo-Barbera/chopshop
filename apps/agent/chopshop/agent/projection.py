@@ -15,7 +15,7 @@ import threading
 
 from . import db, events
 
-API_VERSION = 2
+API_VERSION = 3
 RECENT = 50
 PAGE = 1000
 _RUNNING = ("running", "preparing")
@@ -45,14 +45,14 @@ def min_seq(conn):
 
 def empty(machine=None):
     return {"api_version": API_VERSION, "machine": machine, "head_seq": 0, "ts": None, "machine_health": None,
-            "projects": [], "recent": []}
+            "projects": [], "lobby": [], "recent": []}
 
 
 def _project(state, name):
     for p in state["projects"]:
         if p["name"] == name:
             return p
-    p = {"name": name, "counts": {}, "batches": [], "tasks": [], "graphs": [], "attention": []}
+    p = {"name": name, "counts": {}, "batches": [], "tasks": [], "graphs": [], "attention": [], "office": None}
     state["projects"].append(p)
     state["projects"].sort(key=lambda x: x["name"])
     return p
@@ -140,6 +140,8 @@ def _apply(state, env):
             g["nodes"] = list(g.get("nodes") or [])
             if node.get("id") is not None:
                 _upsert(g["nodes"], "id", node["id"], dict(next((n for n in g["nodes"] if n.get("id") == node["id"]), {}), **node))
+        if typ == "task.state" or typ in OFFICE_TYPES:
+            _apply_office(state, p, typ, env, body)
         key = _subject_key(env) if typ not in NO_ATTENTION else None
         if key is not None:
             old = next((a for a in p["attention"] if a["key"] == key), None)
@@ -154,6 +156,105 @@ def _apply(state, env):
         _counts(p)
     state["recent"] = [env] + state["recent"][:RECENT - 1]
     return state
+
+
+# ---------------------------------------------------------------- oficina y vestíbulo (api_version 3)
+
+OFFICE_TYPES = ("office.changed", "desk.assigned", "desk.released", "desk.waiting", "desk.note")
+ACTIVE_PHASES = ("queued", "preparing", "running", "waiting")
+OCCUPANT_FIELDS = ("title", "phase", "attention", "ended_at", "touched_at")
+DEFAULT_HALF_LIFE = 1800.0
+LINEAGE = 5
+
+
+def _desks(office):
+    for f in (office or {}).get("floors") or []:
+        for r in f.get("rooms") or []:
+            for d in r.get("desks") or []:
+                yield d
+
+
+def _find_desk(p, did):
+    return next((d for d in _desks(p.get("office")) if d.get("id") == did), None)
+
+
+def _task(p, tid):
+    return next((t for t in p["tasks"] if t.get("id") == tid or t.get("thread_id") == tid), None)
+
+
+def _lobby_item(state, p, tid, base, ts):
+    office = p.get("office") or {}
+    item = {"thread_id": tid, "project": p["name"], "company": office.get("company"), "title": None, "phase": "running",
+            "attention": None, "waiting_role": None, "since": ts, "ended_at": None, "touched_at": None,
+            "half_life_s": office.get("half_life_s") or DEFAULT_HALF_LIFE}
+    old = next((x for x in state["lobby"] if x["thread_id"] == tid), None)
+    if old:
+        item.update(old)
+    item.update({k: base[k] for k in OCCUPANT_FIELDS if k in base})
+    state["lobby"] = [x for x in state["lobby"] if x["thread_id"] != tid] + [item]
+    state["lobby"].sort(key=lambda x: (x.get("company") or "", x.get("project") or "", x.get("since") or ""))
+    return item
+
+
+def _apply_office(state, p, typ, env, body):
+    """Regla `apply` de docs/agent-api.md («api_version 3»): `office`, ocupantes, linaje, notas y `lobby`."""
+    ts = env.get("ts")
+    if typ == "office.changed":
+        old = {d["id"]: d for d in _desks(p.get("office")) if d.get("id")}
+        floors = copy.deepcopy(body.get("floors") or [])
+        for d in _desks({"floors": floors}):
+            prev = old.get(d.get("id")) or {}
+            d["occupant"] = prev.get("occupant")
+            d["lineage"] = prev.get("lineage") or []
+            d["notes_pending"] = prev.get("notes_pending") or 0
+        p["office"] = {"company": body.get("company"), "half_life_s": body.get("half_life_s") or DEFAULT_HALF_LIFE,
+                       "floors": floors}
+        return
+    tid = body.get("thread_id")
+    if typ == "task.state":
+        tid = tid or (env.get("subject") or {}).get("id")
+        seat = next((d for d in _desks(p.get("office")) if (d.get("occupant") or {}).get("thread_id") == tid), None)
+        if seat is not None:
+            seat["occupant"].update({k: body[k] for k in OCCUPANT_FIELDS if k in body})
+        elif any(x["thread_id"] == tid for x in state["lobby"]):
+            _lobby_item(state, p, tid, body, ts)
+        elif body.get("role") is None and body.get("phase") in ACTIVE_PHASES:
+            _lobby_item(state, p, tid, body, ts)
+        return
+    if typ == "desk.assigned":
+        d = _find_desk(p, body.get("desk"))
+        if d is None:
+            return
+        for other in _desks(p.get("office")):
+            if other is not d and (other.get("occupant") or {}).get("thread_id") == tid:
+                other["occupant"] = None                  # traslado: sin linaje
+        t = _task(p, tid) or {}
+        d["occupant"] = {"thread_id": tid, "title": t.get("title") or body.get("title"), "role": body.get("role"),
+                         "phase": t.get("phase") or "running", "attention": t.get("attention"),
+                         "since": body.get("since") or ts, "ended_at": t.get("ended_at"), "touched_at": t.get("touched_at"),
+                         "half_life_s": (p.get("office") or {}).get("half_life_s") or DEFAULT_HALF_LIFE,
+                         "inheritance": body.get("inheritance")}
+        if body.get("notes_pending") is not None:
+            d["notes_pending"] = body["notes_pending"]
+        state["lobby"] = [x for x in state["lobby"] if x["thread_id"] != tid]
+    elif typ == "desk.released":
+        if body.get("desk") is None:
+            state["lobby"] = [x for x in state["lobby"] if x["thread_id"] != tid]
+            return
+        d = _find_desk(p, body.get("desk"))
+        occ = (d or {}).get("occupant") or {}
+        if d is not None and occ.get("thread_id") == tid:
+            d["lineage"] = ([{"thread_id": tid, "since": occ.get("since"), "until": ts, "reason": body.get("reason")}]
+                            + list(d.get("lineage") or []))[:LINEAGE]
+            d["occupant"] = None
+    elif typ == "desk.waiting":
+        t = _task(p, tid) or {}
+        base = {k: t[k] for k in OCCUPANT_FIELDS if k in t} or {k: body[k] for k in ("title", "phase") if body.get(k)}
+        _lobby_item(state, p, tid, base, ts)["waiting_role"] = body.get("role")
+    elif typ == "desk.note":
+        d = _find_desk(p, body.get("desk"))
+        if d is not None:
+            d["notes_pending"] = body["pending"] if isinstance(body.get("pending"), int) else (d.get("notes_pending") or 0) + 1
 
 
 def apply(state, env):
@@ -186,6 +287,7 @@ def filter_project(st, project):
     out = dict(st)
     out["projects"] = [p for p in st["projects"] if p["name"] == project]
     out["recent"] = [e for e in st["recent"] if e.get("project") == project]
+    out["lobby"] = [x for x in st.get("lobby") or [] if x.get("project") == project]
     return out
 
 
