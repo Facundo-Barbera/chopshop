@@ -3,16 +3,18 @@ import WebKit
 import ChopshopNative
 
 enum Section: String, CaseIterable, Identifiable {
-    case overview, questions, events, reactions, graph, batches, machines, project, machineRoom
+    case city, overview, questions, events, reactions, graph, batches, machines, project, machineRoom
     var id: String { rawValue }
     /// Vistas fijas de la barra lateral (el proyecto y las máquinas tienen su propia sección).
     static var views: [Section] {
         var v: [Section] = [.overview, .questions, .events, .reactions, .graph, .batches]
+        if #available(macOS 26.0, *) { v.insert(.city, at: 0) }       // la flota como ciudad (vista nativa): edificios → pisos
         if #available(macOS 26.0, *) { v.append(.machineRoom) }      // vista nativa (no existe en la UI web)
         return v
     }
     var title: String {
         switch self {
+        case .city: return "Ciudad"
         case .overview: return "Resumen"
         case .questions: return "Preguntas"
         case .events: return "Actividad"
@@ -26,6 +28,7 @@ enum Section: String, CaseIterable, Identifiable {
     }
     var symbol: String {
         switch self {
+        case .city: return "building.2"
         case .overview: return "square.grid.2x2"
         case .questions: return "questionmark.bubble"
         case .events: return "waveform.path.ecg"
@@ -212,12 +215,17 @@ final class AppModel: ObservableObject {
         value(after: "--demo-fixture") ?? ProcessInfo.processInfo.environment["CHOPSHOP_DEMO_FIXTURE"].flatMap { $0.isEmpty ? nil : $0 }
     }
 
+    /// `--demo-speed <x>` (o `CHOPSHOP_DEMO_SPEED`): aceleración del modo demo (20 por defecto; 0 = todo de golpe, sin esperas).
+    private var demoSpeed: Double {
+        (value(after: "--demo-speed") ?? ProcessInfo.processInfo.environment["CHOPSHOP_DEMO_SPEED"]).flatMap(Double.init) ?? 20
+    }
+
     /// Abre el stream del agente principal si hay URL y credencial (si no, `live.status` = `.noCredential` y se pide emparejar).
     func startLive() {
         guard #available(macOS 26.0, *) else { return }
         live.onUnauthorized = { [weak self] in self?.pairingRevision += 1 }
         if let path = demoFixture {
-            if let fs = try? FixtureStream(contentsOf: URL(fileURLWithPath: AppConfig.expand(path)), speed: 20) { live.connect(fs) }
+            if let fs = try? FixtureStream(contentsOf: URL(fileURLWithPath: AppConfig.expand(path)), speed: demoSpeed) { live.connect(fs) }
             return
         }
         guard let url = primary?.spec.baseURL else { live.reset(); return }

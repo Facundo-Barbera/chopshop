@@ -19,6 +19,19 @@ enum Capture {
         try? FileManager.default.removeItem(atPath: requestPath)
         let parts = txt.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: " ", maxSplits: 1).map(String.init)
         guard parts.count == 2 else { return }
+        // al frente: con Stage Manager, una ventana de fondo se captura como miniatura
+        NSApp.activate(ignoringOtherApps: true)
+        mainWindow?.makeKeyAndOrderFront(nil)
+        if parts[0].hasPrefix("click:") {
+            // `click:<x>,<y> <salida.png>`: clic en esos puntos de la ventana (origen arriba a la izquierda) y captura tras el zoom
+            let xy = parts[0].dropFirst(6).split(separator: ",").compactMap { Double($0) }
+            if xy.count == 2 { click(x: xy[0], y: xy[1]) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) {
+                let ok = snap(to: parts[1])
+                try? (ok ? "ok" : "fail").write(toFile: parts[1] + ".done", atomically: true, encoding: .utf8)
+            }
+            return
+        }
         if parts[0].hasPrefix("project:") { model.nav = .project(String(parts[0].dropFirst(8))) }
         else if parts[0].hasPrefix("machine:") { model.nav = .machine(String(parts[0].dropFirst(8))) }
         else if let s = Section(rawValue: parts[0]) { model.nav = s == .machines ? .machines : .section(s) }
@@ -36,8 +49,22 @@ enum Capture {
         }
     }
 
+    private static var mainWindow: NSWindow? { NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }) }
+
+    /// Clic dentro del proceso (sin permiso de Accesibilidad): mouseDown/mouseUp entregados a la ventana principal.
+    static func click(x: Double, y: Double) {
+        guard let win = mainWindow else { return }
+        let p = NSPoint(x: x, y: win.frame.height - y)
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            if let e = NSEvent.mouseEvent(with: type, location: p, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                          windowNumber: win.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1) {
+                win.sendEvent(e)
+            }
+        }
+    }
+
     static func snap(to path: String) -> Bool {
-        guard let win = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }) else { return false }
+        guard let win = mainWindow else { return false }
         typealias Fn = @convention(c) (CGRect, UInt32, UInt32, UInt32) -> Unmanaged<CGImage>?
         guard let sym = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "CGWindowListCreateImage") else { return false }
         let fn = unsafeBitCast(sym, to: Fn.self)
