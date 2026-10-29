@@ -26,7 +26,7 @@ public struct CityLights: Equatable, Sendable {
     /// Retraso máximo por id de hilo.
     public static let maxDelay = 0.35
 
-    /// proyecto → hilo → ventana
+    /// piso (`CityFloor.id`: el proyecto en los pisos clásicos) → hilo → ventana
     public private(set) var lights: [String: [String: Light]] = [:]
     var tints: [String: Tint] = [:]
     public var slots: Int
@@ -61,8 +61,8 @@ public struct CityLights: Equatable, Sendable {
     public mutating func observe(_ m: CityModel, at t: Double) {
         var seen = Set<String>()
         for f in m.floors {
-            seen.insert(f.project)
-            var ls = lights[f.project] ?? [:]
+            seen.insert(f.id)
+            var ls = lights[f.id] ?? [:]
             // apagados del todo: liberan su ventana
             ls = ls.filter { $0.value.offAt.map { t < $0 + Self.ramp + Self.maxDelay } ?? true }
             let alive = Set(f.activeThreads)
@@ -77,17 +77,17 @@ public struct CityLights: Equatable, Sendable {
                     continue
                 }
                 let used = Set(ls.values.map(\.slot))
-                guard let slot = Self.slotOrder(project: f.project, slots: slots).first(where: { !used.contains($0) }) else { continue }
+                guard let slot = Self.slotOrder(project: f.id, slots: slots).first(where: { !used.contains($0) }) else { continue }
                 ls[id] = Light(slot: slot, onAt: t, offAt: nil)
             }
-            lights[f.project] = ls
+            lights[f.id] = ls
 
-            if var tn = tints[f.project] {
+            if var tn = tints[f.id] {
                 if tn.status != f.status { tn = Tint(status: f.status, since: t, previous: tn.status) }
-                tints[f.project] = tn
+                tints[f.id] = tn
             } else {
                 // primer vistazo: el estado que traiga, sin rampa desde neutro salvo que sea un cambio posterior
-                tints[f.project] = Tint(status: f.status, since: -1e9, previous: f.status)
+                tints[f.id] = Tint(status: f.status, since: -1e9, previous: f.status)
             }
         }
         for k in lights.keys where !seen.contains(k) { lights[k] = nil; tints[k] = nil }

@@ -50,6 +50,12 @@ struct IsoDesk: Identifiable {
     var since = 99.0                        // segundos desde el último cambio de estado
     var floorZ = Iso.slabH                  // altura del suelo de su sala (sube con la sala)
     var entryX = 0.0                        // por dónde entra el muñeco (x del muro de la sala)
+    // Oficina por escritorios (v3, OfficeScene.swift); en el modo por rangos quedan en su valor por defecto.
+    var person = true                       // hay muñeco (un escritorio libre no lo tiene)
+    var fade = HalfLife.Curve.solid         // semivida del ocupante
+    var retired = false                     // escritorio retirado: gris y vacío
+    var sleeping = false                    // escritorio permanente sin ocupante: lámpara encendida
+    var standing = false                    // vestíbulo: el muñeco sin escritorio
     var id: String { node.id }
     var deskX: Double { cx - Iso.deskW / 2 }
     var deskY: Double { cy - 20 }
@@ -77,6 +83,9 @@ struct IsoRoom {
     var doors: [Double] = []                // y de los cables que entran por el muro x-min
     var needs = false, stuck = false
     var count = 0
+    var title: String? = nil                // nombre del departamento (v3); nil = "RANGO n"
+    var lobby = false                       // vestíbulo (v3)
+    var label: String { title ?? "RANGO \(index + 1)" }
 }
 
 @available(macOS 26.0, *)
@@ -117,6 +126,8 @@ struct IsoScene {
     var byID: [String: Int] = [:]
     let data: GraphScene
     var minU = 0.0, maxU = 1.0, minV = 0.0, maxV = 1.0
+    /// Con hover/selección se apagan los escritorios fuera del camino del grafo (en la oficina por escritorios, no).
+    var focusFades = true
 
     func desk(_ id: String) -> IsoDesk? { byID[id].map { desks[$0] } }
 
