@@ -29,7 +29,8 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import API_VERSION, __version__, collector as collector_mod, db, envelope, events, halflife, layout, notes as notes_mod, office as office_mod, pairing as pairing_mod, projection, stream, t3watch, webhooks
+from . import API_VERSION, __version__, collector as collector_mod, db, envelope, events, halflife, layout, notes as notes_mod, office as office_mod, pairing as pairing_mod, projection, stream, \
+    structure as structure_mod, t3watch, webhooks
 
 log = logging.getLogger("chopshop.agent")
 
@@ -49,9 +50,9 @@ PUBLIC = {("GET", "/health"), ("POST", "/pair")}       # sin credencial (pero s�
 class ApiError(Exception):
     """Error de la API con su código HTTP; el mensaje llega al cliente."""
 
-    def __init__(self, status, message):
+    def __init__(self, status, message, extra=None):
         super().__init__(message)
-        self.status, self.message = status, message
+        self.status, self.message, self.extra = status, message, extra     # extra: campos añadidos a la respuesta
 
 
 # ---------------------------------------------------------------- autenticación
@@ -211,8 +212,8 @@ class Authenticator:
 
     @staticmethod
     def check_json(method, headers, has_body):
-        """Escrituras (POST, o DELETE con cuerpo): `Content-Type: application/json` o ApiError(403)."""
-        if method != "GET" and (method == "POST" or has_body):
+        """Escrituras (POST/PUT, o DELETE con cuerpo): `Content-Type: application/json` o ApiError(403)."""
+        if method != "GET" and (method in ("POST", "PUT") or has_body):
             ctype = (headers.get("Content-Type") or "").split(";")[0].strip().lower()
             if ctype != "application/json":
                 raise ApiError(403, "las escrituras exigen Content-Type: application/json")
@@ -366,6 +367,10 @@ class AgentApp:
                 if method == "POST":
                     return "desk_assign", {"desk_id": head}
                 raise ApiError(405, "método no permitido")
+        if path.startswith("/office/") and len(path) > len("/office/"):
+            if method in ("GET", "PUT"):
+                return ("office_put" if method == "PUT" else "office_get"), {"project": urllib.parse.unquote(path[len("/office/"):])}
+            raise ApiError(405, "método no permitido")
         if any(p == path for (_m, p) in self.ROUTES):
             raise ApiError(405, "método no permitido")
         raise ApiError(404, "ruta desconocida")
@@ -632,6 +637,38 @@ class AgentApp:
             raise ApiError(404, "suscripción desconocida")
         return {"ok": True, "name": name}
 
+    # -- estructura de la oficina (bots; docs/agent-api.md «api_version 3»)
+    def r_office_get(self, ident, q, body, project):
+        try:
+            return structure_mod.read(self.conn, project)
+        except structure_mod.StructureError as e:
+            raise ApiError(e.status, e.message, {"problems": e.problems} if e.problems else None)
+
+    def r_office_put(self, ident, q, body, project):
+        by = _text(body, "by", True, 64)
+        base = _text(body, "base_rev", False, 64)
+        react = body.get("reactivate") or []
+        if not isinstance(react, list) or not all(isinstance(x, str) for x in react):
+            raise ApiError(400, "reactivate debe ser una lista de ids de escritorio")
+        if "office" not in body:
+            raise ApiError(400, "office es obligatorio")
+        if self.office is not None and layout.parse_desk_id(project + "/0/x/0"):  # nombre sin `/` (si no, 400 de structure)
+            self.office.sync_project(project)               # la oficina conoce la estructura previa (no-op si ya estaba al día)
+        try:
+            res = structure_mod.apply(self.conn, project, body.get("office"), body.get("rack"), by, base, react)
+        except structure_mod.StructureError as e:
+            raise ApiError(e.status, e.message, {"problems": e.problems} if e.problems else None)
+        seq = None
+        if res["changed"] and self.office is not None:   # la oficina sincroniza su tabla `desks` y emite `office.changed {by}`
+            env = self.office.sync_project(project, by=by)
+            seq = (env or {}).get("seq")
+        elif res["changed"] and self.emit_fn:
+            seq = self.emit_fn("office.changed", project, structure_mod.changed_body(res))
+        log.info("oficina de %s %s por %s (%s)", project, "reescrita" if res["changed"] else "sin cambios", by,
+                 ident.login or ident.via)
+        return {"ok": True, "project": project, "rev": res["rev"], "changed": res["changed"], "seq": seq,
+                "office": res["structure"], "diff": res["diff"]}
+
 
 def _thread(r):
     extra = db.jload(r.get("extra"), {}) or {}
@@ -749,7 +786,7 @@ class Handler(BaseHTTPRequestHandler):
                 who = ident.login or ident.via
                 if ident.device:
                     who += " dispositivo %s" % ident.device
-                if method not in ("GET", "POST", "DELETE"):
+                if method not in ("GET", "POST", "DELETE", "PUT"):
                     raise ApiError(405, "método no permitido")
                 app.match(method, path)                      # 404/405 antes que la comprobación del Content-Type
                 app.auth.check_json(method, self.headers, bool(raw))
@@ -763,7 +800,7 @@ class Handler(BaseHTTPRequestHandler):
             except ApiError as e:
                 self.close_connection = True
                 hdrs = {"WWW-Authenticate": 'Bearer realm="chopshop-agent"'} if e.status == 401 else None
-                status = self._reply(e.status, {"error": e.message}, hdrs)
+                status = self._reply(e.status, dict(e.extra or {}, error=e.message), hdrs)
             except Exception:  # noqa: BLE001 - nunca filtrar detalles internos al cliente
                 log.exception("error interno en %s %s", method, path)
                 status = self._reply(500, {"error": "error interno"})

@@ -131,7 +131,14 @@ class Office:
             self._loaded = self.clock()
             return changed
 
-    def _sync(self, prof):
+    def sync_project(self, project, by="profile"):
+        """Resincroniza un proyecto tras reescribir su perfil (`PUT /office`): `office.changed {by}` si cambió. -> sobre o None."""
+        with self._lock:
+            prof = next((p for p in self.profiles_fn() if p.get("project") == project), None)
+            return self._sync(prof, by=by) if prof else None
+
+    def _sync(self, prof, by="profile"):
+        """Sincroniza la tabla `desks` de un perfil. Devuelve el sobre `office.changed` emitido o None."""
         project, now = prof["project"], self.clock()
         self.half_life[project] = layout.half_life_s(prof)
         self.company[project] = layout.company(prof)
@@ -158,13 +165,13 @@ class Office:
         last = self._meta(STRUCT + project)
         last_seq, last_struct = (last.split(" ", 1) + [""])[:2] if last else ("0", "")
         stale = int(last_seq or 0) < self._min_seq()
-        emitted = False
+        emitted = None
         if db.jdump(struct) != last_struct or stale:
-            body = dict(struct, project=project, by="profile",
+            body = dict(struct, project=project, by=by,
                         diff={"added": added, "retired": retired, "reactivated": reactivated})
             env = self._emit("office.changed", project, body)
             self._set_meta(STRUCT + project, "%s %s" % (env.get("seq") if env else 0, db.jdump(struct)))
-            emitted = True
+            emitted = env or {"seq": None}
         for did in retired:
             occ = self._occupant(did)
             if occ:
