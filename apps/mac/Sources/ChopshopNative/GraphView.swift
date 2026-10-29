@@ -1,4 +1,8 @@
 import SwiftUI
+import os
+
+/// Intervalos para Instruments (os_signpost): un "GraphDraw" por fotograma, un evento "GraphDrag" por movimiento del ratón.
+let graphSignposter = OSSignposter(subsystem: "local.chopshop.ui", category: "Graph")
 
 /// Telón de fondo del grafo: casi negro en oscuro, gris muy claro en claro. Sin color.
 @available(macOS 26.0, *)
@@ -59,6 +63,7 @@ public struct GraphView: View {
             }
             .gesture(DragGesture(minimumDistance: 5)
                 .onChanged { v in
+                    graphSignposter.emitEvent("GraphDrag")
                     if !box.dragging { box.dragging = true; box.dragStartYaw = box.userYaw; box.dragStartPitch = box.userPitch }
                     box.userYaw = min(0.75, max(-0.75, box.dragStartYaw + v.translation.width * 0.004))
                     box.userPitch = min(0.4, max(-0.3, box.dragStartPitch - v.translation.height * 0.003))
@@ -130,6 +135,8 @@ struct GraphRenderer {
 
     func draw(_ ctx: inout GraphicsContext, size: CGSize) {
         guard !scene.cards.isEmpty else { return }
+        let sp = graphSignposter.beginInterval("GraphDraw", id: graphSignposter.makeSignpostID())
+        defer { graphSignposter.endInterval("GraphDraw", sp) }
         // --- cámara: base + arrastre + paralaje + deriva lenta
         if live {
             box.hoverYaw += (box.targetHoverYaw - box.hoverYaw) * 0.08
