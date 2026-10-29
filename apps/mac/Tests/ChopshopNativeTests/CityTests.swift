@@ -13,6 +13,9 @@ final class CityTests: XCTestCase {
         return LiveState.fold(envs.filter { SnapshotMapper.date($0.ts)!.timeIntervalSince(t0) <= t + 1e-3 })
     }
 
+    /// Hora del fixture en `t` (para `ThreadVisibility`: con la del reloj, los hilos parados del fixture se ocultarían).
+    func cityNow(_ t: Double) throws -> Date { SnapshotMapper.date(try cityEnvelopes()[0].ts)!.addingTimeInterval(t) }
+
     // MARK: Fixture
 
     func testCityFixtureFolds() throws {
@@ -24,13 +27,13 @@ final class CityTests: XCTestCase {
         let s = LiveState.fold(envs)
         XCTAssertEqual(s.headSeq, envs.last?.seq)
         XCTAssertEqual(s.projects.map(\.name), ["bixku-utilities", "chopshop", "life", "nuskills", "orchestrator", "ozom-gv", "ozom-trade"])
-        let m = CityModel.build(s)
+        let m = CityModel.build(s, now: try cityNow(99))
         XCTAssertEqual(m.threadCount, 29)
         XCTAssertEqual(m.runningCount, 28, "BUG-6 espera respuesta")
         XCTAssertEqual(m.needsYouCount, 1)
         XCTAssertEqual(m.stuckCount, 1)
         // y la oficina de nuskills sale del mismo estado
-        let snap = SnapshotMapper.snapshot(s)
+        let snap = SnapshotMapper.snapshot(s, now: try cityNow(99))
         XCTAssertEqual(snap.graph(for: "nuskills")?.nodes.count, 9)
     }
 
@@ -107,6 +110,35 @@ final class CityTests: XCTestCase {
         let m = CityModel.build(LiveState.fold(envs))
         XCTAssertEqual(m.buildings.map(\.company), ["Personal", "iAware", "Bixku"])
         XCTAssertEqual(m.floor("chopshop")?.activeThreads, ["mcp:c41"])
+    }
+
+    /// Las ventanas y los escritorios salen de la MISMA regla (`ThreadVisibility`): asentados fuera, parados viejos fuera,
+    /// lo que corre o te espera dentro.
+    func testSettledAndIdleThreadsHaveNoWindowNorDesk() {
+        var s = LiveState(machine: "m")
+        let old = "2026-10-29T10:00:00.000Z", fresh = "2026-10-29T17:50:00.000Z"
+        func task(_ seq: Int, _ id: String, _ ts: String, _ body: JSONValue.Object, needs: String? = nil) {
+            var b = body; b["title"] = .string(id)
+            s.apply(Envelope(seq: seq, ts: ts, project: "chopshop", type: "task.state", needs: needs,
+                             subject: .init(kind: "task", id: id, title: id), body: b))
+        }
+        task(1, "run-old", old, ["phase": "running"])
+        task(2, "wait-old", old, ["phase": "waiting"])
+        task(3, "wait-fresh", fresh, ["phase": "waiting"])
+        task(4, "ask-old", old, ["phase": "waiting", "attention": "ask"], needs: "human")
+        task(5, "settled", fresh, ["phase": "waiting", "settled": true])
+        task(6, "done-fresh", fresh, ["phase": "done"])
+        task(7, "done-old", old, ["phase": "done"])
+        let now = SnapshotMapper.date("2026-10-29T18:00:00.000Z")!
+        let f = CityModel.build(s, now: now).floor("chopshop")
+        XCTAssertEqual(f?.activeThreads, ["ask-old", "run-old", "wait-fresh"])
+        XCTAssertEqual(f?.running, 1)
+        XCTAssertEqual(f?.status, .needsYou)
+        let desks = SnapshotMapper.snapshot(s, now: now).graph(for: "chopshop")?.nodes.compactMap(\.task) ?? []
+        XCTAssertEqual(Set(desks), ["ask-old", "run-old", "wait-fresh", "done-fresh"], "en la oficina, además, lo terminado hace poco")
+        // con el umbral sin cumplir, todo lo no asentado vuelve
+        let early = SnapshotMapper.date("2026-10-29T10:30:00.000Z")!
+        XCTAssertEqual(CityModel.build(s, now: early).floor("chopshop")?.activeThreads, ["ask-old", "run-old", "wait-fresh", "wait-old"])
     }
 
     // MARK: Ventanas
@@ -316,7 +348,7 @@ final class CityTests: XCTestCase {
 
     func testOfficeFramingIsTheOfficeCamera() throws {
         guard #available(macOS 26.0, *) else { throw XCTSkip("IsoScene requiere macOS 26") }
-        let snap = SnapshotMapper.snapshot(try cityState(until: 99))
+        let snap = SnapshotMapper.snapshot(try cityState(until: 99), now: try cityNow(99))
         let g = snap.graph(for: "nuskills")!
         let tasks = Dictionary(snap.tasks(of: "nuskills").map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let sc = IsoScene(graph: g, tasks: tasks)

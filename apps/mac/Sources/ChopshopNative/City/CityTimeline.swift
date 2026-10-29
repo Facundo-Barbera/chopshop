@@ -55,7 +55,7 @@ public struct CityTimeline: Sendable {
         var steps: [Step] = []
         var st = LiveState(machine: envelopes.lazy.compactMap(\.machine).first)
         var lights = CityLights()
-        let empty = CityModel.build(st, directory: directory)
+        let empty = CityModel.build(st, directory: directory, now: t0)
         lights.observe(empty, at: 0)
         steps.append(Step(time: -Double.infinity, state: st, model: empty, lights: lights))
         var i = 0
@@ -66,7 +66,9 @@ public struct CityTimeline: Sendable {
             while j < envelopes.count, (secs(envelopes[j]) ?? time) == time {
                 st.apply(envelopes[j]); j += 1
             }
-            let m = CityModel.build(st, directory: directory)
+            // la hora del fixture (t0 + time), no la del reloj: mismos sobres → misma ciudad
+            let now: Date = t0.addingTimeInterval(time.isFinite ? time : 0)
+            let m = CityModel.build(st, directory: directory, now: now)
             lights.observe(m, at: time)
             steps.append(Step(time: time, state: st, model: m, lights: lights))
             i = j

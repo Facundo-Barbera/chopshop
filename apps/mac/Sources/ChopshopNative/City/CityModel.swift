@@ -61,7 +61,7 @@ public struct CityFloor: Hashable, Sendable, Identifiable {
     /// 0 = planta baja
     public var level: Int
     public var status: CityFloorStatus
-    /// Hilos vivos (corriendo, preparándose o esperando algo): una ventana por hilo. Ordenados.
+    /// Hilos vivos (corriendo, preparándose o esperando algo) que pinta `ThreadVisibility`: una ventana por hilo. Ordenados.
     public var activeThreads: [String]
     public var running: Int
     public var needsYou: Int
@@ -145,10 +145,12 @@ public struct CityModel: Equatable, Sendable {
     private static let running: Set<String> = ["running", "preparing"]
     private static let finished: Set<String> = ["done", "settled", "failed", "skipped"]
 
-    /// Hilos vivos de un proyecto (sin terminar: corriendo, preparándose o esperando).
-    public static func activeThreads(_ p: LiveState.Project) -> [String] {
+    /// Hilos vivos de un proyecto (sin terminar: corriendo, preparándose o esperando) que se pintan en `now`
+    /// (`ThreadVisibility`: la misma regla que los escritorios de la oficina).
+    public static func activeThreads(_ p: LiveState.Project, now: Date) -> [String] {
         p.tasks.compactMap { t -> String? in
             guard let id = t["id"]?.string, let ph = t["phase"]?.string, alive.contains(ph) else { return nil }
+            guard ThreadVisibility.isVisible(t, in: p, now: now) else { return nil }
             return id
         }.sorted()
     }
@@ -185,19 +187,20 @@ public struct CityModel: Equatable, Sendable {
         }
     }
 
-    public static func makeFloor(_ p: LiveState.Project, company: String, level: Int) -> CityFloor {
+    public static func makeFloor(_ p: LiveState.Project, company: String, level: Int, now: Date) -> CityFloor {
         let st = status(p)
         let running: Int = p.tasks.filter { t in
             guard let ph: String = t["phase"]?.string else { return false }
             return Self.running.contains(ph)
         }.count
-        return CityFloor(project: p.name, company: company, level: level, status: st, activeThreads: activeThreads(p),
+        return CityFloor(project: p.name, company: company, level: level, status: st, activeThreads: activeThreads(p, now: now),
                          running: running, needsYou: needsYou(p), stuck: stuck(p), alert: alert(p, status: st))
     }
 
     /// Agrupa los proyectos por empresa (orden estable: el de la tabla, luego por nombre; pisos por nombre de proyecto)
-    /// y reparte los edificios en una cuadrícula.
-    public static func build(_ s: LiveState, directory: CompanyDirectory = .standard) -> CityModel {
+    /// y reparte los edificios en una cuadrícula. `now`: la hora con la que `ThreadVisibility` decide qué hilos se pintan (la
+    /// cronología y los tests pasan la congelada; por defecto, la del reloj, como `SnapshotMapper.snapshot`).
+    public static func build(_ s: LiveState, directory: CompanyDirectory = .standard, now: Date = Date()) -> CityModel {
         var groups: [String: [LiveState.Project]] = [:]
         for p in s.projects { groups[directory.company(of: p.name), default: []].append(p) }
         let companies = groups.keys.sorted { directory.rank($0) < directory.rank($1) }
@@ -208,7 +211,7 @@ public struct CityModel: Equatable, Sendable {
                 (a.name.lowercased(), a.name) < (b.name.lowercased(), b.name)
             }
             var floors: [CityFloor] = []
-            for (level, p) in ps.enumerated() { floors.append(makeFloor(p, company: c, level: level)) }
+            for (level, p) in ps.enumerated() { floors.append(makeFloor(p, company: c, level: level, now: now)) }
             let col = i % cols, row = i / cols
             let x0: Double = CityGeo.margin + Double(col) * CityGeo.pitchX
             let y0: Double = CityGeo.margin + Double(row) * CityGeo.pitchY
