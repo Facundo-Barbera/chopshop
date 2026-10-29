@@ -32,6 +32,7 @@ si necesitas columnas, usa los campos `extra` JSON). `user_version` 2: la migrac
 | `office.py` | hilo office | `Office(conn, cfg, emit_fn, profiles_fn=None, clock)`: `.reload()` (perfiles con `office:` → tabla `desks`; retira, nunca borra; emite `office.changed {by: "profile"}` al cambiar la estructura o si el último ya no está retenido), `.tick()` (pliega los `task.state` nuevos del bus con cursor `office_cursor` en `meta`: asigna, hereda, encola por rol lleno), `.assign(desk_id, thread_id)` (`OfficeError` 404/409/400), `.release(desk_id, reason)` (para quien decida la salida, p. ej. la semivida), `.desk(desk_id)`. Tablas `desks`, `desk_occupancy` (ocupante = `until` nulo; linaje ≤ 20), `office_threads` (última `task.state` por hilo), `desk_waiting`; `t3_threads` gana `role` y `ended_at` (esquema 5). Herencia: si un ocupante del rol ya terminó (fase terminal, sin atención), el hilo nuevo hereda el que terminó antes (`reason: inherited`); si no, el primer libre (`start`); la herencia es el último ocupante del escritorio (también ya salido). Rol lleno o sin escritorios → `desk.waiting`; sube en cuanto uno queda libre o su ocupante termina. Los hilos sin rol no se sientan (vestíbulo: aparte). `[agent.office] enabled, interval`. |
 | `halflife.py` | hilo semivida | `opacity/exit_at/gone(phase, attention, ended_at, touched_at, half_life_s[, now])` (pura, tabla `fixtures/office/halflife.json`); `touch(conn, thread_id, now)` / `touched_at` / `touches` (tabla propia `thread_touch`, `CREATE TABLE IF NOT EXISTS`, sin tocar `user_version`); `stamp(conn, event, body)` (añade `touched_at` a los `task.state` que emite `AgentService.emit`); `schedule(state, touches)` / `due(state, now, touches)` sobre la proyección v3 (ocupantes y `lobby`; con `attention` en el ocupante o abierta en `projects[].attention` no sale); `Fader(conn, state_fn, emit_fn, clock)`: `.sweep()` emite `desk.released reason: faded` (`desk: null` en el vestíbulo), `.next_delay()` (1–30 s). Hilo `halflife` del servicio (`agent.halflife_enabled`, por defecto `true`). `POST /touch` y `POST /answer` tocan. |
 | `pairing.py` | integrador | `Pairing(conn, clock)`: `create_code(name, ttl)`, `redeem(code, device_name, device_id, ip)`, `check(cred, ip)`, `active(id)`, `list()`, `revoke(id)`, `prune()`; CLI `chopshop pair create\|list\|revoke\|prune`. Tablas propias `pair_codes` y `devices` (`CREATE TABLE IF NOT EXISTS`, sin tocar `user_version`). |
+| `roles.py` | hilo roles | Roles permanentes (fase 6): `Roles(conn, emit_fn, profiles_fn, launch_fn, task_fn, assign_fn, clock)`: `.on_event(sobre)`, `.tick(now)` (schedule), `.sync(now)` (lote lanzado → `assign_fn`, terminado → fin + despertar pendiente), `.manual(project, role)`, `.once(list_after, last_seq)`. Tabla propia `desk_wakes` (`ensure_schema`, `CREATE TABLE IF NOT EXISTS`, sin tocar `user_version`). Ver «Roles permanentes». |
 | `server.py`, `service.py` | integrador | `server.py`: `ThreadingHTTPServer`, `Authenticator` y las rutas (`AgentApp`). `service.py`: `AgentService` (ensambla módulos, hilos de fondo, parada limpia) y el CLI `chopshop agent run\|status\|token\|check-config\|print-unit`. |
 | `ui/` | hilo UI | cliente puro de la API (ver abajo). |
 
@@ -267,6 +268,26 @@ test de Python y `HalfLifeTests.swift`).
 
 Todas exigen permiso de escritura (dueño, origen local o credencial de servicio/dispositivo). No hay `DELETE` de escritorios ni de
 pisos; ninguna ruta crea ni ejecuta scripts.
+
+### Roles permanentes (`[agent.roles]`, opt-in)
+
+Un departamento `permanent: true` cuyo rol declara `office.roles.<rol>.wake` despierta con los disparadores de las
+automatizaciones: `schedule` (`cron`/`every`, hora local de la box) y `type` + `where` sobre los sobres del bus (p. ej.
+`github.issue.opened` del polling de GitHub). El disparador `desk.note` lo declara el perfil pero lo atiende la bandeja de notas
+(otra rama); aquí se ignora. El hilo `roles` del agente (solo si `[agent.roles] enabled = true`; apagado por defecto porque
+**lanza hilos de T3**) lee el bus con cursor propio (`meta` `roles_cursor`) y, al despertar:
+
+1. elige el primer escritorio permanente del rol sin despertar vivo (**una sola instancia viva por escritorio**); si todos están
+   ocupados, el disparo queda como **despertar pendiente** del escritorio (`meta` `role:pending:<escritorio>`, se fusionan
+   varios en uno) y se lanza al terminar el hilo vivo;
+2. crea un lote de una tarea en el motor (`engine.create_batch`, tarea con `role`, `desk`, `wake`) con el prompt del rol
+   (`prompt_file` dentro de `~/.chopshop/automations/<proyecto>/`), el disparador y la herencia del despertar anterior (hilo,
+   resumen final, rama, worktree, PRs); el hilo `engine` lo lanza en T3;
+3. cuando la tarea tiene `threadId` sienta el hilo en el escritorio: `desk.assigned {reason: wake, inheritance}` (por defecto;
+   `assign_fn` es inyectable para la oficina de escritorios); cuando la tarea termina, cierra el despertar (`desk_wakes`).
+
+Topes: `max_wakes_per_hour` por escritorio (6); `cause.depth >= 3` no despierta; los sobres `desk.*`/`office.*` no cuentan como
+disparador por tipo.
 
 ## Suscripciones (webhooks v2)
 
