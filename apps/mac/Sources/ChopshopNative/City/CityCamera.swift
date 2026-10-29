@@ -12,11 +12,16 @@ import CoreGraphics
 func cityClamp(_ x: Double) -> Double { min(1, max(0, x)) }
 func cityLerp(_ a: Double, _ b: Double, _ t: Double) -> Double { a + (b - a) * t }
 /// ease-in-out cúbico
-func cityEIO(_ x: Double) -> Double { let t = cityClamp(x); return t < 0.5 ? 4 * t * t * t : 1 - pow(-2 * t + 2, 3) / 2 }
+func cityEIO(_ x: Double) -> Double {
+    let t: Double = cityClamp(x)
+    if t < 0.5 { return 4 * t * t * t }
+    let q: Double = 2 - 2 * t
+    return 1 - pow(q, 3) / 2
+}
 /// ease-out cúbico
-func cityEOut(_ x: Double) -> Double { let t = cityClamp(x); return 1 - pow(1 - t, 3) }
+func cityEOut(_ x: Double) -> Double { let t: Double = cityClamp(x); let q: Double = 1 - t; return 1 - pow(q, 3) }
 /// smoothstep
-func citySmooth(_ x: Double) -> Double { let t = cityClamp(x); return t * t * (3 - 2 * t) }
+func citySmooth(_ x: Double) -> Double { let t: Double = cityClamp(x); let q: Double = 3 - 2 * t; return t * t * q }
 
 /// Límites en (u, v).
 public struct IsoBounds: Equatable, Sendable {
@@ -27,7 +32,8 @@ public struct IsoBounds: Equatable, Sendable {
     public static let empty = IsoBounds(minU: .infinity, maxU: -.infinity, minV: .infinity, maxV: -.infinity)
     public var isEmpty: Bool { minU > maxU || minV > maxV }
     public mutating func add(_ x: Double, _ y: Double, _ z: Double) {
-        let u = x - y, v = (x + y) * 0.5 - z
+        let u: Double = x - y
+        let v: Double = (x + y) * 0.5 - z
         minU = min(minU, u); maxU = max(maxU, u); minV = min(minV, v); maxV = max(maxV, v)
     }
 }
@@ -39,16 +45,23 @@ public struct IsoFrame: Equatable, Sendable {
         self.s = s; self.cu = cu; self.cv = cv; self.ax = ax; self.ay = ay
     }
     public func pt(_ x: Double, _ y: Double, _ z: Double = 0) -> CGPoint {
-        let u = x - y, v = (x + y) * 0.5 - z
-        return CGPoint(x: (u - cu) * s + ax, y: (v - cv) * s + ay)
+        let u: Double = x - y
+        let v: Double = (x + y) * 0.5 - z
+        let px: Double = (u - cu) * s + ax
+        let py: Double = (v - cv) * s + ay
+        return CGPoint(x: CGFloat(px), y: CGFloat(py))
     }
     /// Distancia máxima en pantalla entre dos encuadres, medida en las esquinas de un rectángulo de mundo (para tests de continuidad).
     public func maxDistance(to o: IsoFrame, over b: IsoBounds) -> Double {
         var m = 0.0
         for (u, v) in [(b.minU, b.minV), (b.maxU, b.minV), (b.minU, b.maxV), (b.maxU, b.maxV)] {
-            let ax = (u - cu) * s + self.ax, ay = (v - cv) * s + self.ay
-            let bx = (u - o.cu) * o.s + o.ax, by = (v - o.cv) * o.s + o.ay
-            m = max(m, ((ax - bx) * (ax - bx) + (ay - by) * (ay - by)).squareRoot())
+            let ax: Double = (u - cu) * s + self.ax
+            let ay: Double = (v - cv) * s + self.ay
+            let bx: Double = (u - o.cu) * o.s + o.ax
+            let by: Double = (v - o.cv) * o.s + o.ay
+            let dx: Double = ax - bx, dy: Double = ay - by
+            let d: Double = (dx * dx + dy * dy).squareRoot()
+            m = max(m, d)
         }
         return m
     }
@@ -60,9 +73,15 @@ public enum OfficeFraming {
 
     public static func frame(_ b: IsoBounds, size: CGSize) -> IsoFrame {
         let W = Double(size.width), H = Double(size.height)
-        let availW = W - 2 * sideMargin, availH = H - topMargin - bottomMargin
-        let s0 = min(availW / (b.maxU - b.minU), availH / (b.maxV - b.minV), maxScale)
-        return IsoFrame(s: s0, cu: (b.minU + b.maxU) / 2, cv: (b.minV + b.maxV) / 2, ax: W / 2, ay: topMargin + availH / 2)
+        let availW: Double = W - 2 * sideMargin
+        let availH: Double = H - topMargin - bottomMargin
+        let su: Double = availW / (b.maxU - b.minU)
+        let sv: Double = availH / (b.maxV - b.minV)
+        let s0: Double = min(su, sv, maxScale)
+        let cu: Double = (b.minU + b.maxU) / 2
+        let cv: Double = (b.minV + b.maxV) / 2
+        let ay: Double = topMargin + availH / 2
+        return IsoFrame(s: s0, cu: cu, cv: cv, ax: W / 2, ay: ay)
     }
 }
 
@@ -97,9 +116,15 @@ public enum CityFraming {
 
     public static func frame(_ b: IsoBounds, size: CGSize) -> IsoFrame {
         let W = Double(size.width), H = Double(size.height)
-        let availW = W - 2 * sideMargin, availH = H - topMargin - bottomMargin
-        let s0 = min(availW / max(1, b.maxU - b.minU), availH / max(1, b.maxV - b.minV), maxScale)
-        return IsoFrame(s: s0, cu: (b.minU + b.maxU) / 2, cv: (b.minV + b.maxV) / 2, ax: W / 2, ay: topMargin + availH / 2)
+        let availW: Double = W - 2 * sideMargin
+        let availH: Double = H - topMargin - bottomMargin
+        let du: Double = max(1, b.maxU - b.minU)
+        let dv: Double = max(1, b.maxV - b.minV)
+        let s0: Double = min(availW / du, availH / dv, maxScale)
+        let cu: Double = (b.minU + b.maxU) / 2
+        let cv: Double = (b.minV + b.maxV) / 2
+        let ay: Double = topMargin + availH / 2
+        return IsoFrame(s: s0, cu: cu, cv: cv, ax: W / 2, ay: ay)
     }
 }
 
@@ -125,15 +150,19 @@ public struct OfficeEmbedding: Equatable, Sendable {
     }
 
     private var eu: Double { ex - ey }
-    private var ev: Double { (ex + ey) * 0.5 - ez }
+    private var ev: Double { let h: Double = (ex + ey) * 0.5; return h - ez }
 
     /// Encuadre en la ciudad que pinta la oficina exactamente como `office`.
     public func cityFrame(fromOffice o: IsoFrame) -> IsoFrame {
-        IsoFrame(s: o.s / k, cu: eu + k * o.cu, cv: ev + k * o.cv, ax: o.ax, ay: o.ay)
+        let cu: Double = eu + k * o.cu
+        let cv: Double = ev + k * o.cv
+        return IsoFrame(s: o.s / k, cu: cu, cv: cv, ax: o.ax, ay: o.ay)
     }
     /// Encuadre de la oficina (en su propio mundo) que corresponde al encuadre de la ciudad `c`.
     public func officeFrame(fromCity c: IsoFrame) -> IsoFrame {
-        IsoFrame(s: c.s * k, cu: (c.cu - eu) / k, cv: (c.cv - ev) / k, ax: c.ax, ay: c.ay)
+        let cu: Double = (c.cu - eu) / k
+        let cv: Double = (c.cv - ev) / k
+        return IsoFrame(s: c.s * k, cu: cu, cv: cv, ax: c.ax, ay: c.ay)
     }
 }
 
@@ -162,7 +191,11 @@ public struct CityTransition: Equatable, Sendable {
         let la = log(a.s), lb = log(b.s)
         let s = exp(cityLerp(la, lb, u))
         let w: Double
-        if abs(lb - la) < 1e-6 { w = u } else { w = (1 - a.s / s) / (1 - a.s / b.s) }
+        if abs(lb - la) < 1e-6 { w = u } else {
+            let num: Double = 1 - a.s / s
+            let den: Double = 1 - a.s / b.s
+            w = num / den
+        }
         return IsoFrame(s: s, cu: cityLerp(a.cu, b.cu, w), cv: cityLerp(a.cv, b.cv, w),
                         ax: cityLerp(a.ax, b.ax, w), ay: cityLerp(a.ay, b.ay, w))
     }
@@ -216,7 +249,12 @@ public enum CityHit {
         var j = poly.count - 1
         for i in 0..<poly.count {
             let a = poly[i], b = poly[j]
-            if (a.y > p.y) != (b.y > p.y), p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x { inside.toggle() }
+            if (a.y > p.y) != (b.y > p.y) {
+                let dx: CGFloat = b.x - a.x
+                let t: CGFloat = (p.y - a.y) / (b.y - a.y)
+                let xCross: CGFloat = dx * t + a.x
+                if p.x < xCross { inside.toggle() }
+            }
             j = i
         }
         return inside

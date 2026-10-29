@@ -50,7 +50,11 @@ public struct CityTimeline: Sendable {
         self.envelopes = envelopes; self.directory = directory; self.target = target; self.seed = seed
         let t0 = envelopes.lazy.compactMap { SnapshotMapper.date($0.ts) }.first ?? Date(timeIntervalSince1970: 0)
         // segundos desde el primer sobre, redondeados al ms (`Date` arrastra error: 8.200 saldría 8.2000001 y `frame(at: 8.2)` no lo vería)
-        func secs(_ e: Envelope) -> Double? { SnapshotMapper.date(e.ts).map { ($0.timeIntervalSince(t0) * 1000).rounded() / 1000 } }
+        func secs(_ e: Envelope) -> Double? {
+            guard let d: Date = SnapshotMapper.date(e.ts) else { return nil }
+            let ms: Double = (d.timeIntervalSince(t0) * 1000).rounded()
+            return ms / 1000
+        }
         var steps: [Step] = []
         var st = LiveState(machine: envelopes.lazy.compactMap(\.machine).first)
         var lights = CityLights()
@@ -108,21 +112,27 @@ public struct CityTimeline: Sendable {
 
     public static func buildingStart(_ index: Int) -> Double {
         if index < buildingStarts.count { return buildingStarts[index] }
-        return (buildingStarts.last ?? 0) + Double(index - buildingStarts.count + 1) * buildingStagger
+        let last: Double = buildingStarts.last ?? 0
+        let extra: Double = Double(index - buildingStarts.count + 1)
+        return last + extra * buildingStagger
     }
 
     /// Altura relativa de un piso (0 … 1, ease-out): sube del suelo.
     public static func floorRise(building: Int, level: Int, t: Double) -> Double {
-        cityEOut((t - buildingStart(building) - Double(level) * floorGap) / floorRise)
+        let lift: Double = Double(level) * floorGap
+        let x: Double = t - buildingStart(building) - lift
+        return cityEOut(x / floorRise)
     }
 
     /// La azotea del edificio aparece cuando termina de subir el último piso.
     public static func roofAlpha(building: Int, floors: Int, t: Double) -> Double {
-        cityClamp((t - buildingStart(building) - Double(max(0, floors - 1)) * floorGap - floorRise) / 0.5)
+        let lift: Double = Double(max(0, floors - 1)) * floorGap
+        let x: Double = t - buildingStart(building) - lift - floorRise
+        return cityClamp(x / 0.5)
     }
 
     /// Progreso lineal del zoom (0 … 1). La cámara aplica su propia curva (`CityTransition.camera`).
-    public static func zoom(_ t: Double) -> Double { cityClamp((t - zoomStart) / (zoomEnd - zoomStart)) }
+    public static func zoom(_ t: Double) -> Double { let span: Double = zoomEnd - zoomStart; return cityClamp((t - zoomStart) / span) }
 
     /// Etiquetas y tráfico aparecen cuando la ciudad ya está en pie.
     public static func ambient(_ t: Double) -> Double { cityClamp((t - 4) / 1.5) }
