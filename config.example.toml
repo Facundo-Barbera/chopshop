@@ -52,17 +52,26 @@ machine_id = "host-b"                     # vacío = nombre de host de la máqui
 bind = "127.0.0.1"                        # solo local por defecto. Para otras máquinas: "auto" (IP de Tailscale) o una IP concreta,
                                           # p. ej. "100.64.0.10". Nunca 0.0.0.0 ni "::" (el agente se niega a arrancar).
 port = 3790
-auth = "tailscale+token"                  # "tailscale+token": identidad Tailscale (+ bearer para escribir) | "token": solo bearer
-                                          # | "none-local": nada de red, solo el origen local
+auth = "tailscale+token"                  # "tailscale+token": identidad Tailscale + credencial en toda petición (salvo
+                                          # GET /health y POST /pair): la de un dispositivo emparejado (`chopshop pair create`
+                                          # + POST /pair, ver docs/agent-api.md) o el bearer legado de token_file (CLI y bots)
+                                          # | "token": solo bearer | "none-local": nada de red, solo el origen local
 trust_local = true                        # el origen local (CLI de esta máquina) no necesita identidad ni bearer
 local_listener = true                     # si bind no es loopback, escucha además en 127.0.0.1:<port> para el CLI local
 tailscale_bin = "tailscale"               # CLI de Tailscale (para `whois` y bind = "auto")
 owner_login = "usuario@"                  # login Tailscale COMPLETO con permiso total (como lo muestra `tailscale whois`);
                                           # esto es un marcador. Vacío = solo origen local
 allowed_logins = ["invitado@"]            # logins con acceso de solo lectura (mismo formato)
+allowed_hosts = []                        # nombres extra válidos en la cabecera Host (anti DNS-rebinding). Ya se aceptan las IPs
+                                          # de escucha, loopback, localhost, machine_id y el hostname; añade aquí el nombre
+                                          # MagicDNS completo si los clientes lo usan
 t3_enabled = true                         # false = máquina solo sensor: no se vigila T3
-import_legacy = true                      # al arrancar, importa <home>/events.jsonl del motor viejo si existe
-token_file = "~/.chopshop/agent/token"    # bearer (0600); se crea con `chopshop agent token`
+import_legacy = true                      # importa <home>/events.jsonl del motor viejo (al arrancar y cada legacy_interval s)
+legacy_interval = 5                       # segundos entre importaciones de events.jsonl (CLI externa)
+engine_enabled = true                     # correr engine.tick dentro del agente cuando hay lotes en <home>/state.json
+engine_interval = 5                       # segundos entre pasadas del motor
+token_file = "~/.chopshop/agent/token"    # bearer legado (0600) para la CLI y bots; se crea con `chopshop agent token`.
+                                          # La app de Mac usa en su lugar una credencial de dispositivo (`chopshop pair create`)
 db_path = "~/.chopshop/agent/agent.db"
 sample_interval = 10                      # segundos entre muestras de métricas
 t3_poll_interval = 5                      # segundos entre sondeos de T3
@@ -81,10 +90,26 @@ credential_file = ""                      # vacío = <CHOPSHOP_HOME>/t3-credenti
 root = "~/projects/proyecto-demo"
 worktrees = "~/.t3/worktrees/proyecto-demo"
 t3_project_id = "00000000-0000-0000-0000-000000000000"
+repo = "dueño/proyecto-demo"              # opcional: repo de GitHub del proyecto (para los eventos github.*)
 
 # Webhooks: nombre -> RUTA a un archivo (0600) cuyo contenido es la URL. Nunca pongas la URL aquí.
 [agent.webhook_files]
 bot = "~/.config/chopshop/webhooks/bot.url"
+
+# Automatizaciones por proyecto (bloque `automations:` del perfil; ver docs/automations.md).
+[agent.automations]
+enabled = true                            # interruptor global: false = el hilo `automations` no ejecuta nada
+interval = 2                              # s entre pasadas (sobres nuevos del bus + horarios)
+
+# Ingreso de GitHub por polling con ETag (eventos github.*; ver docs/agent-service.md). Usa el `gh` ya autenticado de esta
+# máquina (`gh auth login`); el token nunca va aquí ni se lee. El proyecto de cada repo sale de `repo` en el perfil
+# (~/.chopshop/profiles/<proyecto>.yaml) o de `repo` en [agent.projects.<proyecto>].
+[agent.github]
+enabled = false                           # true = hilo `github` del agente
+repos = ["dueño/repo"]                    # repos a vigilar ("dueño/repo"); esto es un marcador
+interval_s = 45                           # segundos entre pasadas (GitHub puede pedir más con X-Poll-Interval)
+gh_bin = "gh"                             # CLI de GitHub
+ci = true                                 # mirar check-runs del HEAD de los PRs abiertos (github.ci.completed)
 
 # Retención del historial de métricas y de eventos.
 [agent.retention]

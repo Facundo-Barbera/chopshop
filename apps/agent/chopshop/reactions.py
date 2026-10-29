@@ -70,7 +70,7 @@ def _notify(st, b, t, rule, level, on, body, adhoc):
         return {}
     if name not in st.get("subscriptions", {}):
         return {name: "sin suscripción"}
-    _, _, res = events.emit(st, "reaction", b["project"], payload, None, only=[name])
+    _, _, res = events.send(st, "reaction", b["project"], payload, None, only=[name])
     return res
 
 
@@ -104,7 +104,7 @@ def on_question(st, b, t, prof, q, hc, log, adhoc, rid):
     if lvl == "auto":
         choice = str(rule.get("choice") or ((q.get("options") or [""])[0]))
         _log(t, "auto", "pending_question", rule, "answer:%s" % choice, q.get("summary") or "")
-        events.emit(st, "reaction", b["project"], dict(body, level="auto", task=t["id"], action="answer", choice=choice), None, only=[])
+        events.send(st, "reaction", b["project"], dict(body, level="auto", task=t["id"], action="answer", choice=choice), None, only=[])
         t["_auto_answer"] = {"choice": choice, "request": rid}
         log("reacción auto %s: responder '%s'" % (t["id"], choice))
         return True

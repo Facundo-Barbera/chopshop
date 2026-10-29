@@ -38,6 +38,7 @@ class Base(unittest.TestCase):
         self.conn = db.connect(os.path.join(self.tmp.name, "agent", "agent.db"))
         self.addCleanup(self.conn.close)
         self.addCleanup(events.flush)
+        self.addCleanup(events.cancel_pending)          # reintentos programados de este test
         self.cfg = {"machine_id": "host-a", "webhook_files": {}}
 
     def hook(self, name, url=SECRET):
@@ -64,13 +65,15 @@ class TestEmitList(Base):
         self.assertEqual((s1, s2), (1, 2))
         evs = events.list_after(self.conn)
         self.assertEqual([e["seq"] for e in evs], [1, 2])
-        self.assertEqual(evs[0]["body"], {"thread_id": "t1", "n": 1})
+        self.assertEqual({k: evs[0]["body"][k] for k in ("thread_id", "n", "legacy", "phase")},
+                         {"thread_id": "t1", "n": 1, "legacy": "thread_started", "phase": "queued"})   # sobre: superconjunto
+        self.assertEqual((evs[0]["type"], evs[0]["machine"]), ("task.state", "host-a"))
         self.assertEqual(evs[0]["machine_id"], "host-a")
         self.assertEqual(evs[0]["event"], "thread_started")
         self.assertEqual(evs[0]["project"], "proyecto-demo")
         self.assertIsNone(evs[1]["project"])
-        self.assertEqual(evs[1]["body"], {})
-        self.assertIsInstance(evs[0]["ts"], float)
+        self.assertEqual((evs[1]["body"]["legacy"], evs[1]["body"]["phase"]), ("thread_done", "done"))
+        self.assertTrue(evs[0]["ts"].endswith("Z"))
         self.assertEqual([e["seq"] for e in events.list_after(self.conn, after=1)], [2])
         self.assertEqual([e["seq"] for e in events.list_after(self.conn, limit=1)], [1])
         self.assertEqual(events.list_after(self.conn, after=2), [])
@@ -142,14 +145,16 @@ class TestDelivery(Base):
         p = FakePoster(200)
         seq = events.emit(self.conn, self.cfg, "pending_question", "proyecto-demo", {"thread_id": "t9"},
                           poster=p, timeout=2, wait=True)
-        self.assertEqual(len(p.calls), 1)
-        url, payload, timeout = p.calls[0]
+        self.assertEqual(len(p.calls), 2)                                # task.state (attention) + question.opened
+        url, payload, timeout = [c for c in p.calls if c[1]["event"] == "pending_question"][0]
         self.assertEqual(url, "https://hooks.example.invalid/cfg")     # primera línea, sin espacios
         self.assertEqual(timeout, 2)
-        self.assertEqual(set(payload), {"seq", "ts", "machine_id", "event", "project", "body"})
+        self.assertEqual(set(payload), {"v", "id", "seq", "ts", "machine", "project", "type", "severity", "needs",
+                                        "subject", "cause", "body", "event", "machine_id"})
         self.assertEqual((payload["seq"], payload["machine_id"], payload["event"], payload["project"]),
                          (seq, "host-a", "pending_question", "proyecto-demo"))
-        self.assertEqual(payload["body"], {"thread_id": "t9"})
+        self.assertEqual((payload["type"], payload["needs"], payload["body"]["thread_id"], payload["body"]["legacy"]),
+                         ("question.opened", "human", "t9", "pending_question"))
         self.assertEqual(self.deliveries(seq), {(seq, "cfgbot"): (1, "HTTP 200")})
 
     def test_default_timeout_is_short(self):
@@ -273,13 +278,16 @@ class TestLegacy(Base):
         r = events.import_legacy(self.conn, p, machine_id="host-a")
         self.assertEqual(r, {"imported": 3, "skipped": 2})
         evs = events.list_after(self.conn)
-        self.assertEqual([e["event"] for e in evs], ["task_done", "pending_question", "batch_done"])
-        self.assertEqual(evs[0]["body"], {"task": "a"})                 # sin event/project/ts/delivery
+        # la pregunta añade antes su task.state con attention
+        self.assertEqual([e["event"] for e in evs], ["task_done", "task.state", "pending_question", "batch_done"])
+        self.assertEqual([e["type"] for e in evs], ["task.state", "task.state", "question.opened", "batch.done"])
+        self.assertEqual(evs[0]["body"]["task"], "a")
+        self.assertFalse({"event", "project", "ts", "delivery"} & set(evs[0]["body"]))
         self.assertEqual(evs[0]["machine_id"], "host-a")
-        self.assertAlmostEqual(evs[0]["ts"], 1790870400.0, delta=1)
-        self.assertIsNone(evs[2]["project"])
+        self.assertEqual(evs[0]["ts"], "2026-10-01T16:00:00.000Z")
+        self.assertIsNone(evs[3]["project"])
         self.assertEqual(events.import_legacy(self.conn, p, machine_id="host-a"), {"imported": 0, "skipped": 0})
-        self.assertEqual(events.last_seq(self.conn), 3)
+        self.assertEqual(events.last_seq(self.conn), 4)
 
     def test_import_incremental_and_dedup_after_reset(self):
         p = self.write(self.LINES[:2])
@@ -289,7 +297,7 @@ class TestLegacy(Base):
         self.conn.execute("DELETE FROM meta WHERE key=?", (events.LEGACY_KEY,))     # se pierde el desplazamiento
         r = events.import_legacy(self.conn, p)
         self.assertEqual(r, {"imported": 0, "skipped": 3})                           # la deduplicación lo salva
-        self.assertEqual(events.last_seq(self.conn), 3)
+        self.assertEqual(events.last_seq(self.conn), 4)                              # 3 + el task.state de la pregunta
 
     def test_partial_last_line_waits(self):
         p = self.write(self.LINES[:1])
@@ -341,7 +349,7 @@ class TestSchema(unittest.TestCase):
                 tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
                 self.assertIn("events", tables)
                 self.assertFalse({"leases", "ports"} & tables)
-                self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 2)
+                self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], db.SCHEMA_VERSION)
             finally:
                 conn.close()
 

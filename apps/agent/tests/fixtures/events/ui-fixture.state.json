@@ -1,0 +1,1808 @@
+{
+  "api_version": 2,
+  "head_seq": 1843,
+  "machine": "contabo-dev",
+  "machine_health": {
+    "agent_version": "0.6.0",
+    "cpu_pct": 35,
+    "disk_pct": 5,
+    "down_seconds": 30.0,
+    "load": [
+      1.1,
+      1.2,
+      0.9
+    ],
+    "ram_pct": 49,
+    "state": "ok",
+    "t3_ok": true,
+    "threads_running": 4
+  },
+  "projects": [
+    {
+      "attention": [],
+      "batches": [],
+      "counts": {
+        "done": 0,
+        "failed": 0,
+        "needs_human": 0,
+        "queued": 0,
+        "running": 1,
+        "stuck": 0,
+        "waiting": 0,
+        "waiting_bot": 0
+      },
+      "graphs": [],
+      "name": "bixku-utilities",
+      "tasks": [
+        {
+          "attention": null,
+          "batch": null,
+          "branch": "wt-csv",
+          "error": null,
+          "id": "mcp:x9",
+          "level": null,
+          "link": "t3-thread://v2/threads/x9",
+          "node": null,
+          "phase": "running",
+          "pull_requests": [],
+          "result": null,
+          "retry_of": null,
+          "seq": 1832,
+          "settled": false,
+          "severity": "info",
+          "started_at": null,
+          "t3status": "running",
+          "thread_id": "mcp:x9",
+          "title": "Utilidades: exportar CSV",
+          "updated": "2026-10-29T16:04:58.000Z",
+          "worktree": "~/.t3/worktrees/bixku-utilities/wt-csv"
+        }
+      ]
+    },
+    {
+      "attention": [
+        {
+          "id": "01M646EGJR58N2MAHA58N2MAHA",
+          "key": "issue:Facundo-Barbera/chopshop#51",
+          "needs": "bot",
+          "seq": 1830,
+          "severity": "info",
+          "since": "2026-10-29T16:03:51.000Z",
+          "subject": {
+            "id": "Facundo-Barbera/chopshop#51",
+            "kind": "issue"
+          },
+          "summary": null,
+          "type": "triage.result"
+        }
+      ],
+      "batches": [
+        {
+          "host": "contabo-dev",
+          "id": "b-0012",
+          "max_parallel": 2,
+          "notes": [],
+          "status": "running",
+          "tasks": {
+            "t-0012-1": "queued",
+            "t-0012-2": "queued"
+          }
+        }
+      ],
+      "counts": {
+        "done": 1,
+        "failed": 0,
+        "needs_human": 0,
+        "queued": 0,
+        "running": 1,
+        "stuck": 0,
+        "waiting": 0,
+        "waiting_bot": 1
+      },
+      "graphs": [],
+      "name": "chopshop",
+      "tasks": [
+        {
+          "attention": null,
+          "batch": "b-0012",
+          "branch": "wt-h",
+          "error": null,
+          "id": "mcp:c41",
+          "level": null,
+          "link": "t3-thread://v2/threads/c41",
+          "node": null,
+          "phase": "running",
+          "pull_requests": [],
+          "result": null,
+          "retry_of": null,
+          "seq": 1833,
+          "settled": false,
+          "severity": "info",
+          "started_at": null,
+          "t3status": "running",
+          "thread_id": "mcp:c41",
+          "title": "H DMG firmado",
+          "updated": "2026-10-29T16:05:05.000Z",
+          "worktree": "~/.t3/worktrees/chopshop/wt-h"
+        },
+        {
+          "attention": null,
+          "batch": "b-0012",
+          "branch": "wt-docs",
+          "error": null,
+          "id": "mcp:c42",
+          "level": null,
+          "link": "t3-thread://v2/threads/c42",
+          "node": null,
+          "phase": "done",
+          "pull_requests": [],
+          "result": "docs/event-envelope.md escrito.",
+          "retry_of": null,
+          "seq": 1834,
+          "settled": false,
+          "severity": "info",
+          "started_at": null,
+          "t3status": "completed",
+          "thread_id": "mcp:c42",
+          "title": "Docs del sobre de eventos",
+          "updated": "2026-10-29T16:05:12.000Z",
+          "worktree": "~/.t3/worktrees/chopshop/wt-docs"
+        }
+      ]
+    },
+    {
+      "attention": [],
+      "batches": [
+        {
+          "host": "contabo-dev",
+          "id": "b-0007",
+          "max_parallel": 3,
+          "notes": [],
+          "status": "done",
+          "tasks": {
+            "t-0007-1": "done",
+            "t-0007-2": "failed",
+            "t-0007-3": "done"
+          }
+        }
+      ],
+      "counts": {
+        "done": 2,
+        "failed": 1,
+        "needs_human": 0,
+        "queued": 0,
+        "running": 0,
+        "stuck": 0,
+        "waiting": 0,
+        "waiting_bot": 0
+      },
+      "graphs": [
+        {
+          "batch": "b-0007",
+          "goal": "Cerrar los bugs de rachas y notificaciones",
+          "id": "g-2",
+          "nodes": [
+            {
+              "deps": [],
+              "id": "n-2",
+              "label": "BUG-1",
+              "phase": "done",
+              "task": "t-0007-1"
+            },
+            {
+              "deps": [],
+              "id": "n-3",
+              "label": "BUG-8",
+              "phase": "failed",
+              "reason": "tests en rojo",
+              "task": "t-0007-2"
+            },
+            {
+              "deps": [
+                "n-2"
+              ],
+              "id": "n-4",
+              "label": "BUG-3",
+              "phase": "running",
+              "task": "t-0007-3"
+            }
+          ],
+          "status": "failed"
+        }
+      ],
+      "name": "nuskills",
+      "tasks": [
+        {
+          "attention": null,
+          "batch": "b-0007",
+          "branch": "wt-1",
+          "error": null,
+          "id": "mcp:a1",
+          "level": null,
+          "link": "t3-thread://v2/threads/a1",
+          "node": "n-2",
+          "phase": "settled",
+          "pull_requests": [
+            "https://github.com/Facundo-Barbera/nuskills/pull/17"
+          ],
+          "result": null,
+          "retry_of": null,
+          "seq": 1843,
+          "settled": true,
+          "severity": "info",
+          "started_at": null,
+          "t3status": "completed",
+          "thread_id": "mcp:a1",
+          "title": "BUG-1 · Racha no suma el domingo",
+          "updated": "2026-10-29T16:06:38.000Z",
+          "worktree": "~/.t3/worktrees/nuskills/wt-1"
+        },
+        {
+          "attention": null,
+          "batch": "b-0007",
+          "branch": "wt-2",
+          "error": "tests en rojo",
+          "id": "mcp:b7",
+          "level": "bot",
+          "link": "t3-thread://v2/threads/b7",
+          "node": "n-3",
+          "phase": "failed",
+          "pull_requests": [],
+          "result": null,
+          "retry_of": null,
+          "seq": 1838,
+          "settled": false,
+          "severity": "error",
+          "started_at": null,
+          "t3status": "failed",
+          "thread_id": "mcp:b7",
+          "title": "BUG-8 · Notificación push llega 2 veces",
+          "updated": "2026-10-29T16:06:03.000Z",
+          "worktree": "~/.t3/worktrees/nuskills/wt-2"
+        },
+        {
+          "attention": null,
+          "batch": "b-0007",
+          "branch": "wt-3",
+          "error": null,
+          "id": "mcp:a036",
+          "level": null,
+          "link": "t3-thread://v2/threads/a036",
+          "node": "n-4",
+          "phase": "done",
+          "pull_requests": [],
+          "result": "Racha estable.",
+          "retry_of": null,
+          "seq": 1840,
+          "settled": false,
+          "severity": "info",
+          "started_at": null,
+          "t3status": "completed",
+          "thread_id": "mcp:a036",
+          "title": "BUG-3 · Racha se reinicia",
+          "updated": "2026-10-29T16:06:17.000Z",
+          "worktree": "~/.t3/worktrees/nuskills/wt-3"
+        }
+      ]
+    }
+  ],
+  "recent": [
+    {
+      "body": {
+        "attention": null,
+        "batch": "b-0007",
+        "branch": "wt-1",
+        "error": null,
+        "level": null,
+        "link": "t3-thread://v2/threads/a1",
+        "node": "n-2",
+        "phase": "settled",
+        "pull_requests": [
+          "https://github.com/Facundo-Barbera/nuskills/pull/17"
+        ],
+        "result": null,
+        "retry_of": null,
+        "settled": true,
+        "started_at": null,
+        "t3status": "completed",
+        "thread_id": "mcp:a1",
+        "title": "BUG-1 · Racha no suma el domingo",
+        "worktree": "~/.t3/worktrees/nuskills/wt-1"
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01M646KKNG58N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": "nuskills",
+      "seq": 1843,
+      "severity": "info",
+      "subject": {
+        "id": "mcp:a1",
+        "kind": "task",
+        "title": "BUG-1 · Racha no suma el domingo",
+        "url": "t3-thread://v2/threads/a1"
+      },
+      "ts": "2026-10-29T16:06:38.000Z",
+      "type": "task.state",
+      "v": 1
+    },
+    {
+      "body": {
+        "batch": "b-0007",
+        "goal": "Cerrar los bugs de rachas y notificaciones",
+        "graph": "g-2",
+        "status": "failed"
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01M646KCTR58N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": "nuskills",
+      "seq": 1842,
+      "severity": "error",
+      "subject": {
+        "id": "g-2",
+        "kind": "graph",
+        "title": "Cerrar los bugs de rachas y notificaciones"
+      },
+      "ts": "2026-10-29T16:06:31.000Z",
+      "type": "graph.done",
+      "v": 1
+    },
+    {
+      "body": {
+        "batch": "b-0007",
+        "host": "contabo-dev",
+        "max_parallel": 3,
+        "notes": [],
+        "tasks": {
+          "t-0007-1": "done",
+          "t-0007-2": "failed",
+          "t-0007-3": "done"
+        }
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01M646K60058N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": "nuskills",
+      "seq": 1841,
+      "severity": "info",
+      "subject": {
+        "id": "b-0007",
+        "kind": "batch"
+      },
+      "ts": "2026-10-29T16:06:24.000Z",
+      "type": "batch.done",
+      "v": 1
+    },
+    {
+      "body": {
+        "attention": null,
+        "batch": "b-0007",
+        "branch": "wt-3",
+        "error": null,
+        "level": null,
+        "link": "t3-thread://v2/threads/a036",
+        "node": "n-4",
+        "phase": "done",
+        "pull_requests": [],
+        "result": "Racha estable.",
+        "retry_of": null,
+        "settled": false,
+        "started_at": null,
+        "t3status": "completed",
+        "thread_id": "mcp:a036",
+        "title": "BUG-3 · Racha se reinicia",
+        "worktree": "~/.t3/worktrees/nuskills/wt-3"
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01M646JZ5858N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": "nuskills",
+      "seq": 1840,
+      "severity": "info",
+      "subject": {
+        "id": "mcp:a036",
+        "kind": "task",
+        "title": "BUG-3 · Racha se reinicia",
+        "url": "t3-thread://v2/threads/a036"
+      },
+      "ts": "2026-10-29T16:06:17.000Z",
+      "type": "task.state",
+      "v": 1
+    },
+    {
+      "body": {
+        "deps": [],
+        "graph": "g-2",
+        "label": "BUG-8",
+        "node": "n-3",
+        "phase": "failed",
+        "reason": "tests en rojo",
+        "task": "t-0007-2"
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01M646JRAG58N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": "nuskills",
+      "seq": 1839,
+      "severity": "error",
+      "subject": {
+        "id": "g-2/n-3",
+        "kind": "node",
+        "title": "BUG-8"
+      },
+      "ts": "2026-10-29T16:06:10.000Z",
+      "type": "node.state",
+      "v": 1
+    },
+    {
+      "body": {
+        "attention": null,
+        "batch": "b-0007",
+        "branch": "wt-2",
+        "error": "tests en rojo",
+        "level": "bot",
+        "link": "t3-thread://v2/threads/b7",
+        "node": "n-3",
+        "phase": "failed",
+        "pull_requests": [],
+        "result": null,
+        "retry_of": null,
+        "settled": false,
+        "started_at": null,
+        "t3status": "failed",
+        "thread_id": "mcp:b7",
+        "title": "BUG-8 · Notificación push llega 2 veces",
+        "worktree": "~/.t3/worktrees/nuskills/wt-2"
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01M646JHFR58N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": "nuskills",
+      "seq": 1838,
+      "severity": "error",
+      "subject": {
+        "id": "mcp:b7",
+        "kind": "task",
+        "title": "BUG-8 · Notificación push llega 2 veces",
+        "url": "t3-thread://v2/threads/b7"
+      },
+      "ts": "2026-10-29T16:06:03.000Z",
+      "type": "task.state",
+      "v": 1
+    },
+    {
+      "body": {
+        "agent_version": "0.6.0",
+        "cpu_pct": 35,
+        "disk_pct": 5,
+        "down_seconds": 30.0,
+        "legacy": "t3_recovered",
+        "load": [
+          1.1,
+          1.2,
+          0.9
+        ],
+        "ram_pct": 49,
+        "state": "ok",
+        "t3_ok": true,
+        "threads_running": 4
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01M646JAN058N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": null,
+      "seq": 1837,
+      "severity": "info",
+      "subject": {
+        "id": "contabo-dev",
+        "kind": "machine"
+      },
+      "ts": "2026-10-29T16:05:56.000Z",
+      "type": "machine.health",
+      "v": 1
+    },
+    {
+      "body": {
+        "agent_version": "0.6.0",
+        "cpu_pct": 38,
+        "disk_pct": 5,
+        "down_seconds": null,
+        "legacy": "t3_unreachable",
+        "load": [
+          1.2,
+          1.3,
+          0.9
+        ],
+        "ram_pct": 50,
+        "state": "degraded",
+        "t3_ok": false,
+        "threads_running": 4
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01M646HDBG58N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": null,
+      "seq": 1836,
+      "severity": "warn",
+      "subject": {
+        "id": "contabo-dev",
+        "kind": "machine"
+      },
+      "ts": "2026-10-29T16:05:26.000Z",
+      "type": "machine.health",
+      "v": 1
+    },
+    {
+      "body": {
+        "action": "opened",
+        "actor": "Facundo-Barbera",
+        "base": "main",
+        "ci": "pending",
+        "etag_source": "events",
+        "head": "wt-docs",
+        "labels": [],
+        "number": 52,
+        "repo": "Facundo-Barbera/chopshop",
+        "state": "open",
+        "title": "Docs del sobre de eventos",
+        "url": "https://github.com/Facundo-Barbera/chopshop/pull/52"
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01M646H6GR58N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": "chopshop",
+      "seq": 1835,
+      "severity": "info",
+      "subject": {
+        "id": "Facundo-Barbera/chopshop#52",
+        "kind": "pr",
+        "title": "Docs del sobre de eventos",
+        "url": "https://github.com/Facundo-Barbera/chopshop/pull/52"
+      },
+      "ts": "2026-10-29T16:05:19.000Z",
+      "type": "github.pr.opened",
+      "v": 1
+    },
+    {
+      "body": {
+        "attention": null,
+        "batch": "b-0012",
+        "branch": "wt-docs",
+        "error": null,
+        "level": null,
+        "link": "t3-thread://v2/threads/c42",
+        "node": null,
+        "phase": "done",
+        "pull_requests": [],
+        "result": "docs/event-envelope.md escrito.",
+        "retry_of": null,
+        "settled": false,
+        "started_at": null,
+        "t3status": "completed",
+        "thread_id": "mcp:c42",
+        "title": "Docs del sobre de eventos",
+        "worktree": "~/.t3/worktrees/chopshop/wt-docs"
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01M646GZP058N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": "chopshop",
+      "seq": 1834,
+      "severity": "info",
+      "subject": {
+        "id": "mcp:c42",
+        "kind": "task",
+        "title": "Docs del sobre de eventos",
+        "url": "t3-thread://v2/threads/c42"
+      },
+      "ts": "2026-10-29T16:05:12.000Z",
+      "type": "task.state",
+      "v": 1
+    },
+    {
+      "body": {
+        "attention": null,
+        "batch": "b-0012",
+        "branch": "wt-h",
+        "error": null,
+        "level": null,
+        "link": "t3-thread://v2/threads/c41",
+        "node": null,
+        "phase": "running",
+        "pull_requests": [],
+        "result": null,
+        "retry_of": null,
+        "settled": false,
+        "started_at": null,
+        "t3status": "running",
+        "thread_id": "mcp:c41",
+        "title": "H DMG firmado",
+        "worktree": "~/.t3/worktrees/chopshop/wt-h"
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01M646GRV858N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": "chopshop",
+      "seq": 1833,
+      "severity": "info",
+      "subject": {
+        "id": "mcp:c41",
+        "kind": "task",
+        "title": "H DMG firmado",
+        "url": "t3-thread://v2/threads/c41"
+      },
+      "ts": "2026-10-29T16:05:05.000Z",
+      "type": "task.state",
+      "v": 1
+    },
+    {
+      "body": {
+        "attention": null,
+        "batch": null,
+        "branch": "wt-csv",
+        "error": null,
+        "level": null,
+        "link": "t3-thread://v2/threads/x9",
+        "node": null,
+        "phase": "running",
+        "pull_requests": [],
+        "result": null,
+        "retry_of": null,
+        "settled": false,
+        "started_at": null,
+        "t3status": "running",
+        "thread_id": "mcp:x9",
+        "title": "Utilidades: exportar CSV",
+        "worktree": "~/.t3/worktrees/bixku-utilities/wt-csv"
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01M646GJ0G58N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": "bixku-utilities",
+      "seq": 1832,
+      "severity": "info",
+      "subject": {
+        "id": "mcp:x9",
+        "kind": "task",
+        "title": "Utilidades: exportar CSV",
+        "url": "t3-thread://v2/threads/x9"
+      },
+      "ts": "2026-10-29T16:04:58.000Z",
+      "type": "task.state",
+      "v": 1
+    },
+    {
+      "body": {
+        "by": "human",
+        "choice": "Coma",
+        "latency_s": 180,
+        "request_id": "rq-3",
+        "thread_id": "mcp:x9"
+      },
+      "cause": {
+        "depth": 1,
+        "id": "01M646BB0R58N2MAHA58N2MAHA"
+      },
+      "id": "01M646GB5R58N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": "bixku-utilities",
+      "seq": 1831,
+      "severity": "info",
+      "subject": {
+        "id": "mcp:x9",
+        "kind": "task",
+        "title": "Utilidades: exportar CSV"
+      },
+      "ts": "2026-10-29T16:04:51.000Z",
+      "type": "question.answered",
+      "v": 1
+    },
+    {
+      "body": {
+        "issue": 51,
+        "kind": "bug",
+        "priority": "p2",
+        "suggest": "fanout"
+      },
+      "cause": {
+        "depth": 1,
+        "id": "01M646E2X858N2MAHA58N2MAHA"
+      },
+      "id": "01M646EGJR58N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": "bot",
+      "project": "chopshop",
+      "seq": 1830,
+      "severity": "info",
+      "subject": {
+        "id": "Facundo-Barbera/chopshop#51",
+        "kind": "issue"
+      },
+      "ts": "2026-10-29T16:03:51.000Z",
+      "type": "triage.result",
+      "v": 1
+    },
+    {
+      "body": {
+        "automation": "triage",
+        "duration_ms": 1830,
+        "emitted": 1,
+        "error": null,
+        "exit": 0,
+        "stdout_tail": "",
+        "trigger": "github.issue.opened",
+        "trigger_event": "01M646E2X858N2MAHA58N2MAHA",
+        "truncated": false
+      },
+      "cause": {
+        "depth": 1,
+        "id": "01M646E2X858N2MAHA58N2MAHA"
+      },
+      "id": "01M646E9R058N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": "chopshop",
+      "seq": 1829,
+      "severity": "info",
+      "subject": {
+        "id": "triage",
+        "kind": "automation"
+      },
+      "ts": "2026-10-29T16:03:44.000Z",
+      "type": "automation.ran",
+      "v": 1
+    },
+    {
+      "body": {
+        "action": "opened",
+        "actor": "Facundo-Barbera",
+        "base": null,
+        "ci": null,
+        "etag_source": "events",
+        "head": null,
+        "labels": [
+          "bug"
+        ],
+        "number": 51,
+        "repo": "Facundo-Barbera/chopshop",
+        "state": "open",
+        "title": "La app no reconecta tras dormir",
+        "url": "https://github.com/Facundo-Barbera/chopshop/issues/51"
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01M646E2X858N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": "chopshop",
+      "seq": 1828,
+      "severity": "info",
+      "subject": {
+        "id": "Facundo-Barbera/chopshop#51",
+        "kind": "issue",
+        "title": "La app no reconecta tras dormir",
+        "url": "https://github.com/Facundo-Barbera/chopshop/issues/51"
+      },
+      "ts": "2026-10-29T16:03:37.000Z",
+      "type": "github.issue.opened",
+      "v": 1
+    },
+    {
+      "body": {
+        "deps": [
+          "n-2"
+        ],
+        "graph": "g-2",
+        "label": "BUG-3",
+        "node": "n-4",
+        "phase": "running",
+        "task": "t-0007-3"
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01M646DW2G58N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": "nuskills",
+      "seq": 1827,
+      "severity": "info",
+      "subject": {
+        "id": "g-2/n-4",
+        "kind": "node",
+        "title": "BUG-3"
+      },
+      "ts": "2026-10-29T16:03:30.000Z",
+      "type": "node.state",
+      "v": 1
+    },
+    {
+      "body": {
+        "attention": null,
+        "batch": "b-0007",
+        "branch": "wt-3",
+        "error": null,
+        "level": null,
+        "link": "t3-thread://v2/threads/a036",
+        "node": "n-4",
+        "phase": "running",
+        "pull_requests": [],
+        "result": null,
+        "retry_of": null,
+        "settled": false,
+        "started_at": null,
+        "t3status": "running",
+        "thread_id": "mcp:a036",
+        "title": "BUG-3 · Racha se reinicia",
+        "worktree": "~/.t3/worktrees/nuskills/wt-3"
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01M646DN7R58N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": "nuskills",
+      "seq": 1826,
+      "severity": "info",
+      "subject": {
+        "id": "mcp:a036",
+        "kind": "task",
+        "title": "BUG-3 · Racha se reinicia",
+        "url": "t3-thread://v2/threads/a036"
+      },
+      "ts": "2026-10-29T16:03:23.000Z",
+      "type": "task.state",
+      "v": 1
+    },
+    {
+      "body": {
+        "deps": [],
+        "graph": "g-2",
+        "label": "BUG-1",
+        "node": "n-2",
+        "phase": "done",
+        "task": "t-0007-1"
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01M646DED058N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": "nuskills",
+      "seq": 1825,
+      "severity": "info",
+      "subject": {
+        "id": "g-2/n-2",
+        "kind": "node",
+        "title": "BUG-1"
+      },
+      "ts": "2026-10-29T16:03:16.000Z",
+      "type": "node.state",
+      "v": 1
+    },
+    {
+      "body": {
+        "attention": null,
+        "batch": "b-0007",
+        "branch": "wt-1",
+        "error": null,
+        "level": null,
+        "link": "t3-thread://v2/threads/a1",
+        "node": "n-2",
+        "phase": "done",
+        "pull_requests": [
+          "https://github.com/Facundo-Barbera/nuskills/pull/17"
+        ],
+        "result": "Arreglado: la racha cuenta en zona local.",
+        "retry_of": null,
+        "settled": false,
+        "started_at": null,
+        "t3status": "completed",
+        "thread_id": "mcp:a1",
+        "title": "BUG-1 · Racha no suma el domingo",
+        "worktree": "~/.t3/worktrees/nuskills/wt-1"
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01M646D7J858N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": "nuskills",
+      "seq": 1824,
+      "severity": "info",
+      "subject": {
+        "id": "mcp:a1",
+        "kind": "task",
+        "title": "BUG-1 · Racha no suma el domingo",
+        "url": "t3-thread://v2/threads/a1"
+      },
+      "ts": "2026-10-29T16:03:09.000Z",
+      "type": "task.state",
+      "v": 1
+    },
+    {
+      "body": {
+        "attention": null,
+        "batch": "b-0007",
+        "branch": "wt-2",
+        "error": null,
+        "level": "bot",
+        "link": "t3-thread://v2/threads/b7",
+        "node": "n-3",
+        "phase": "running",
+        "pull_requests": [],
+        "result": null,
+        "retry_of": null,
+        "settled": false,
+        "started_at": null,
+        "t3status": "running",
+        "thread_id": "mcp:b7",
+        "title": "BUG-8 · Notificación push llega 2 veces",
+        "worktree": "~/.t3/worktrees/nuskills/wt-2"
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01M646D0QG58N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": "nuskills",
+      "seq": 1823,
+      "severity": "info",
+      "subject": {
+        "id": "mcp:b7",
+        "kind": "task",
+        "title": "BUG-8 · Notificación push llega 2 veces",
+        "url": "t3-thread://v2/threads/b7"
+      },
+      "ts": "2026-10-29T16:03:02.000Z",
+      "type": "task.state",
+      "v": 1
+    },
+    {
+      "body": {
+        "by": "bot-nuskills",
+        "choice": "FCM",
+        "latency_s": 41,
+        "request_id": "rq-12",
+        "thread_id": "mcp:b7"
+      },
+      "cause": {
+        "depth": 1,
+        "id": "01M646A8V058N2MAHA58N2MAHA"
+      },
+      "id": "01M646CSWR58N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": "nuskills",
+      "seq": 1822,
+      "severity": "info",
+      "subject": {
+        "id": "mcp:b7",
+        "kind": "task",
+        "title": "BUG-8 · Notificación push llega 2 veces"
+      },
+      "ts": "2026-10-29T16:02:55.000Z",
+      "type": "question.answered",
+      "v": 1
+    },
+    {
+      "body": {
+        "agent_version": "0.6.0",
+        "cpu_pct": 46,
+        "disk_pct": 5,
+        "down_seconds": null,
+        "load": [
+          2.1,
+          1.4,
+          0.8
+        ],
+        "ram_pct": 52,
+        "state": "ok",
+        "t3_ok": true,
+        "threads_running": 5
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01M646BHVG58N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": null,
+      "seq": 1821,
+      "severity": "info",
+      "subject": {
+        "id": "contabo-dev",
+        "kind": "machine"
+      },
+      "ts": "2026-10-29T16:02:14.000Z",
+      "type": "machine.health",
+      "v": 1
+    },
+    {
+      "body": {
+        "level": null,
+        "multi_select": false,
+        "notify": null,
+        "options": [
+          "Punto y coma",
+          "Coma"
+        ],
+        "reply": null,
+        "request_id": "rq-3",
+        "summary": "¿Separador ; o ,?",
+        "thread_id": "mcp:x9"
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01M646BB0R58N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": "human",
+      "project": "bixku-utilities",
+      "seq": 1820,
+      "severity": "notice",
+      "subject": {
+        "id": "mcp:x9",
+        "kind": "task",
+        "title": "Utilidades: exportar CSV"
+      },
+      "ts": "2026-10-29T16:02:07.000Z",
+      "type": "question.opened",
+      "v": 1
+    },
+    {
+      "body": {
+        "attention": "ask",
+        "batch": null,
+        "branch": "wt-csv",
+        "error": null,
+        "level": null,
+        "link": "t3-thread://v2/threads/x9",
+        "node": null,
+        "phase": "waiting",
+        "pull_requests": [],
+        "result": null,
+        "retry_of": null,
+        "settled": false,
+        "started_at": null,
+        "t3status": "waiting",
+        "thread_id": "mcp:x9",
+        "title": "Utilidades: exportar CSV",
+        "worktree": "~/.t3/worktrees/bixku-utilities/wt-csv"
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01M646B46058N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": "human",
+      "project": "bixku-utilities",
+      "seq": 1819,
+      "severity": "notice",
+      "subject": {
+        "id": "mcp:x9",
+        "kind": "task",
+        "title": "Utilidades: exportar CSV",
+        "url": "t3-thread://v2/threads/x9"
+      },
+      "ts": "2026-10-29T16:02:00.000Z",
+      "type": "task.state",
+      "v": 1
+    },
+    {
+      "body": {
+        "count": 1,
+        "note": "se aprueba en la UI de T3",
+        "thread_id": "mcp:c41"
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01M646AXB858N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": "approval",
+      "project": "chopshop",
+      "seq": 1818,
+      "severity": "notice",
+      "subject": {
+        "id": "mcp:c41",
+        "kind": "task",
+        "title": "H DMG firmado"
+      },
+      "ts": "2026-10-29T16:01:53.000Z",
+      "type": "approval.requested",
+      "v": 1
+    },
+    {
+      "body": {
+        "attention": "approval",
+        "batch": "b-0012",
+        "branch": "wt-h",
+        "error": null,
+        "level": null,
+        "link": "t3-thread://v2/threads/c41",
+        "node": null,
+        "phase": "waiting",
+        "pull_requests": [],
+        "result": null,
+        "retry_of": null,
+        "settled": false,
+        "started_at": null,
+        "t3status": "waiting",
+        "thread_id": "mcp:c41",
+        "title": "H DMG firmado",
+        "worktree": "~/.t3/worktrees/chopshop/wt-h"
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01M646APGG58N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": "approval",
+      "project": "chopshop",
+      "seq": 1817,
+      "severity": "notice",
+      "subject": {
+        "id": "mcp:c41",
+        "kind": "task",
+        "title": "H DMG firmado",
+        "url": "t3-thread://v2/threads/c41"
+      },
+      "ts": "2026-10-29T16:01:46.000Z",
+      "type": "task.state",
+      "v": 1
+    },
+    {
+      "body": {
+        "action": "notify:bot-nuskills",
+        "level": "bot",
+        "note": "",
+        "on": "pending_question",
+        "task": "t-0007-2"
+      },
+      "cause": {
+        "depth": 1,
+        "id": "01M646A8V058N2MAHA58N2MAHA"
+      },
+      "id": "01M646AFNR58N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": "nuskills",
+      "seq": 1816,
+      "severity": "info",
+      "subject": {
+        "id": "mcp:b7",
+        "kind": "task",
+        "title": "BUG-8 · Notificación push llega 2 veces"
+      },
+      "ts": "2026-10-29T16:01:39.000Z",
+      "type": "reaction.applied",
+      "v": 1
+    },
+    {
+      "body": {
+        "escalate_after_s": 900,
+        "level": "bot",
+        "multi_select": false,
+        "notify": "bot-nuskills",
+        "options": [
+          "FCM",
+          "APNs"
+        ],
+        "reply": "chopshop answer t-0007-2 \"<opción>\"",
+        "request_id": "rq-12",
+        "summary": "¿Qué canal manda la fuente de verdad?",
+        "thread_id": "mcp:b7"
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01M646A8V058N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": "bot",
+      "project": "nuskills",
+      "seq": 1815,
+      "severity": "notice",
+      "subject": {
+        "id": "mcp:b7",
+        "kind": "task",
+        "title": "BUG-8 · Notificación push llega 2 veces"
+      },
+      "ts": "2026-10-29T16:01:32.000Z",
+      "type": "question.opened",
+      "v": 1
+    },
+    {
+      "body": {
+        "attention": "bot",
+        "batch": "b-0007",
+        "branch": "wt-2",
+        "error": null,
+        "level": "bot",
+        "link": "t3-thread://v2/threads/b7",
+        "node": "n-3",
+        "phase": "waiting",
+        "pull_requests": [],
+        "result": null,
+        "retry_of": null,
+        "settled": false,
+        "started_at": null,
+        "t3status": "waiting",
+        "thread_id": "mcp:b7",
+        "title": "BUG-8 · Notificación push llega 2 veces",
+        "worktree": "~/.t3/worktrees/nuskills/wt-2"
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01M646A20858N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": "bot",
+      "project": "nuskills",
+      "seq": 1814,
+      "severity": "notice",
+      "subject": {
+        "id": "mcp:b7",
+        "kind": "task",
+        "title": "BUG-8 · Notificación push llega 2 veces",
+        "url": "t3-thread://v2/threads/b7"
+      },
+      "ts": "2026-10-29T16:01:25.000Z",
+      "type": "task.state",
+      "v": 1
+    },
+    {
+      "body": {
+        "attention": null,
+        "batch": null,
+        "branch": "wt-csv",
+        "error": null,
+        "level": null,
+        "link": "t3-thread://v2/threads/x9",
+        "node": null,
+        "phase": "running",
+        "pull_requests": [],
+        "result": null,
+        "retry_of": null,
+        "settled": false,
+        "started_at": null,
+        "t3status": "running",
+        "thread_id": "mcp:x9",
+        "title": "Utilidades: exportar CSV",
+        "worktree": "~/.t3/worktrees/bixku-utilities/wt-csv"
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01M6469V5G58N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": "bixku-utilities",
+      "seq": 1813,
+      "severity": "info",
+      "subject": {
+        "id": "mcp:x9",
+        "kind": "task",
+        "title": "Utilidades: exportar CSV",
+        "url": "t3-thread://v2/threads/x9"
+      },
+      "ts": "2026-10-29T16:01:18.000Z",
+      "type": "task.state",
+      "v": 1
+    },
+    {
+      "body": {
+        "attention": null,
+        "batch": "b-0012",
+        "branch": "wt-docs",
+        "error": null,
+        "level": null,
+        "link": "t3-thread://v2/threads/c42",
+        "node": null,
+        "phase": "running",
+        "pull_requests": [],
+        "result": null,
+        "retry_of": null,
+        "settled": false,
+        "started_at": null,
+        "t3status": "running",
+        "thread_id": "mcp:c42",
+        "title": "Docs del sobre de eventos",
+        "worktree": "~/.t3/worktrees/chopshop/wt-docs"
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01M6469MAR58N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": "chopshop",
+      "seq": 1812,
+      "severity": "info",
+      "subject": {
+        "id": "mcp:c42",
+        "kind": "task",
+        "title": "Docs del sobre de eventos",
+        "url": "t3-thread://v2/threads/c42"
+      },
+      "ts": "2026-10-29T16:01:11.000Z",
+      "type": "task.state",
+      "v": 1
+    },
+    {
+      "body": {
+        "attention": null,
+        "batch": "b-0012",
+        "branch": "wt-h",
+        "error": null,
+        "level": null,
+        "link": "t3-thread://v2/threads/c41",
+        "node": null,
+        "phase": "running",
+        "pull_requests": [],
+        "result": null,
+        "retry_of": null,
+        "settled": false,
+        "started_at": null,
+        "t3status": "running",
+        "thread_id": "mcp:c41",
+        "title": "H DMG firmado",
+        "worktree": "~/.t3/worktrees/chopshop/wt-h"
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01M6469DG058N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": "chopshop",
+      "seq": 1811,
+      "severity": "info",
+      "subject": {
+        "id": "mcp:c41",
+        "kind": "task",
+        "title": "H DMG firmado",
+        "url": "t3-thread://v2/threads/c41"
+      },
+      "ts": "2026-10-29T16:01:04.000Z",
+      "type": "task.state",
+      "v": 1
+    },
+    {
+      "body": {
+        "batch": "b-0012",
+        "host": "contabo-dev",
+        "max_parallel": 2,
+        "notes": [],
+        "tasks": {
+          "t-0012-1": "queued",
+          "t-0012-2": "queued"
+        }
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01M64696N858N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": "chopshop",
+      "seq": 1810,
+      "severity": "info",
+      "subject": {
+        "id": "b-0012",
+        "kind": "batch"
+      },
+      "ts": "2026-10-29T16:00:57.000Z",
+      "type": "batch.created",
+      "v": 1
+    },
+    {
+      "body": {
+        "attention": null,
+        "batch": "b-0007",
+        "branch": "wt-2",
+        "error": null,
+        "level": null,
+        "link": "t3-thread://v2/threads/b7",
+        "node": "n-3",
+        "phase": "running",
+        "pull_requests": [],
+        "result": null,
+        "retry_of": null,
+        "settled": false,
+        "started_at": null,
+        "t3status": "running",
+        "thread_id": "mcp:b7",
+        "title": "BUG-8 · Notificación push llega 2 veces",
+        "worktree": "~/.t3/worktrees/nuskills/wt-2"
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01M6468ZTG58N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": "nuskills",
+      "seq": 1809,
+      "severity": "info",
+      "subject": {
+        "id": "mcp:b7",
+        "kind": "task",
+        "title": "BUG-8 · Notificación push llega 2 veces",
+        "url": "t3-thread://v2/threads/b7"
+      },
+      "ts": "2026-10-29T16:00:50.000Z",
+      "type": "task.state",
+      "v": 1
+    },
+    {
+      "body": {
+        "attention": null,
+        "batch": "b-0007",
+        "branch": "wt-1",
+        "error": null,
+        "level": null,
+        "link": "t3-thread://v2/threads/a1",
+        "node": "n-2",
+        "phase": "running",
+        "pull_requests": [],
+        "result": null,
+        "retry_of": null,
+        "settled": false,
+        "started_at": null,
+        "t3status": "running",
+        "thread_id": "mcp:a1",
+        "title": "BUG-1 · Racha no suma el domingo",
+        "worktree": "~/.t3/worktrees/nuskills/wt-1"
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01M6468RZR58N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": "nuskills",
+      "seq": 1808,
+      "severity": "info",
+      "subject": {
+        "id": "mcp:a1",
+        "kind": "task",
+        "title": "BUG-1 · Racha no suma el domingo",
+        "url": "t3-thread://v2/threads/a1"
+      },
+      "ts": "2026-10-29T16:00:43.000Z",
+      "type": "task.state",
+      "v": 1
+    },
+    {
+      "body": {
+        "attention": null,
+        "batch": "b-0007",
+        "branch": null,
+        "error": null,
+        "level": null,
+        "link": "t3-thread://v2/threads/a036",
+        "node": "n-4",
+        "phase": "queued",
+        "pull_requests": [],
+        "result": null,
+        "retry_of": null,
+        "settled": false,
+        "started_at": null,
+        "t3status": null,
+        "thread_id": "mcp:a036",
+        "title": "BUG-3 · Racha se reinicia",
+        "worktree": null
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01M6468J5058N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": "nuskills",
+      "seq": 1807,
+      "severity": "info",
+      "subject": {
+        "id": "mcp:a036",
+        "kind": "task",
+        "title": "BUG-3 · Racha se reinicia",
+        "url": "t3-thread://v2/threads/a036"
+      },
+      "ts": "2026-10-29T16:00:36.000Z",
+      "type": "task.state",
+      "v": 1
+    },
+    {
+      "body": {
+        "attention": null,
+        "batch": "b-0007",
+        "branch": null,
+        "error": null,
+        "level": null,
+        "link": "t3-thread://v2/threads/b7",
+        "node": "n-3",
+        "phase": "preparing",
+        "pull_requests": [],
+        "result": null,
+        "retry_of": null,
+        "settled": false,
+        "started_at": null,
+        "t3status": "starting",
+        "thread_id": "mcp:b7",
+        "title": "BUG-8 · Notificación push llega 2 veces",
+        "worktree": null
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01M6468BA858N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": "nuskills",
+      "seq": 1806,
+      "severity": "info",
+      "subject": {
+        "id": "mcp:b7",
+        "kind": "task",
+        "title": "BUG-8 · Notificación push llega 2 veces",
+        "url": "t3-thread://v2/threads/b7"
+      },
+      "ts": "2026-10-29T16:00:29.000Z",
+      "type": "task.state",
+      "v": 1
+    },
+    {
+      "body": {
+        "attention": null,
+        "batch": "b-0007",
+        "branch": null,
+        "error": null,
+        "level": null,
+        "link": "t3-thread://v2/threads/a1",
+        "node": "n-2",
+        "phase": "preparing",
+        "pull_requests": [],
+        "result": null,
+        "retry_of": null,
+        "settled": false,
+        "started_at": null,
+        "t3status": "starting",
+        "thread_id": "mcp:a1",
+        "title": "BUG-1 · Racha no suma el domingo",
+        "worktree": null
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01M64684FG58N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": "nuskills",
+      "seq": 1805,
+      "severity": "info",
+      "subject": {
+        "id": "mcp:a1",
+        "kind": "task",
+        "title": "BUG-1 · Racha no suma el domingo",
+        "url": "t3-thread://v2/threads/a1"
+      },
+      "ts": "2026-10-29T16:00:22.000Z",
+      "type": "task.state",
+      "v": 1
+    },
+    {
+      "body": {
+        "goal": "Cerrar los bugs de rachas y notificaciones",
+        "graph": "g-2",
+        "nodes": [
+          {
+            "deps": [],
+            "id": "n-2",
+            "label": "BUG-1",
+            "phase": "running",
+            "task": "t-0007-1"
+          },
+          {
+            "deps": [],
+            "id": "n-3",
+            "label": "BUG-8",
+            "phase": "running",
+            "task": "t-0007-2"
+          },
+          {
+            "deps": [
+              "n-2"
+            ],
+            "id": "n-4",
+            "label": "BUG-3",
+            "phase": "queued",
+            "task": "t-0007-3"
+          }
+        ],
+        "status": "running"
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01M6467XMR58N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": "nuskills",
+      "seq": 1804,
+      "severity": "info",
+      "subject": {
+        "id": "g-2",
+        "kind": "graph",
+        "title": "Cerrar los bugs de rachas y notificaciones"
+      },
+      "ts": "2026-10-29T16:00:15.000Z",
+      "type": "graph.state",
+      "v": 1
+    },
+    {
+      "body": {
+        "batch": "b-0007",
+        "host": "contabo-dev",
+        "max_parallel": 3,
+        "notes": [],
+        "tasks": {
+          "t-0007-1": "queued",
+          "t-0007-2": "queued",
+          "t-0007-3": "queued"
+        }
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01M6467PT058N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": "nuskills",
+      "seq": 1803,
+      "severity": "info",
+      "subject": {
+        "id": "b-0007",
+        "kind": "batch"
+      },
+      "ts": "2026-10-29T16:00:08.000Z",
+      "type": "batch.created",
+      "v": 1
+    },
+    {
+      "body": {
+        "agent_version": "0.6.0",
+        "cpu_pct": 8,
+        "disk_pct": 5,
+        "down_seconds": null,
+        "load": [
+          0.2,
+          0.2,
+          0.1
+        ],
+        "ram_pct": 27,
+        "state": "ok",
+        "t3_ok": true,
+        "threads_running": 0
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01M6467FZ858N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": null,
+      "seq": 1802,
+      "severity": "info",
+      "subject": {
+        "id": "contabo-dev",
+        "kind": "machine"
+      },
+      "ts": "2026-10-29T16:00:01.000Z",
+      "type": "machine.health",
+      "v": 1
+    },
+    {
+      "body": {
+        "version": "0.6.0"
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01M6467F0058N2MAHA58N2MAHA",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": null,
+      "seq": 1801,
+      "severity": "info",
+      "subject": {
+        "id": "contabo-dev",
+        "kind": "agent"
+      },
+      "ts": "2026-10-29T16:00:00.000Z",
+      "type": "agent.started",
+      "v": 1
+    }
+  ],
+  "ts": "2026-10-29T16:06:38.000Z"
+}

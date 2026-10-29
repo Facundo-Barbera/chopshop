@@ -1,0 +1,21 @@
+# Perfil de ejemplo: cópialo a ~/.chopshop/profiles/demo.yaml (o añade el bloque `automations:` a tu perfil)
+# y el script a ~/.chopshop/automations/demo/ (`chopshop automation add demo triage --script triage.py`).
+project: demo
+scratch: true
+automations:
+  - name: triage
+    description: clasifica issues nuevos y avisa al bot del proyecto
+    on:
+      - type: github.issue.opened
+        where:
+          body.labels: {not: triaged}       # sin la etiqueta triaged
+      - type: schedule
+        every: 6h
+      - manual
+    run: [python3, triage.py]               # argv, sin shell; cwd = ~/.chopshop/automations/demo/
+    timeout: 30
+    max_runs_per_hour: 30
+    concurrency: 1
+    env: [GITHUB_REPO]                      # única variable heredada del agente
+    emits: [triage.result]
+    on_failure: {needs: bot}

@@ -1,0 +1,26 @@
+{
+  "v": 1,
+  "id": "01M646XHEM0W40J2GB1G6GW3RK",
+  "seq": 1845,
+  "ts": "2026-10-29T16:12:03.412Z",
+  "machine": "contabo-dev",
+  "project": "nuskills",
+  "type": "approval.requested",
+  "severity": "notice",
+  "needs": "approval",
+  "subject": {
+    "kind": "task",
+    "id": "mcp:a03694e5",
+    "title": "BUG-3 · Racha se reinicia",
+    "url": "t3-thread://v2/threads/a03694e5"
+  },
+  "cause": {
+    "id": null,
+    "depth": 0
+  },
+  "body": {
+    "thread_id": "mcp:a03694e5",
+    "count": 1,
+    "note": "se aprueba en la UI de T3"
+  }
+}
