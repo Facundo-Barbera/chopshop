@@ -240,7 +240,72 @@ def cmd_snapshot(a):
     return 0
 
 
+V2_FLAGS = ("types", "exclude_types", "min_severity", "needs", "only_changes", "context", "debounce", "secret_file")
+
+
+def _agent_client():
+    from .agent import client
+    return client.AgentClient()
+
+
+def _csv(v):
+    return [x.strip() for x in v.split(",") if x.strip()] if v else None
+
+
+def _file_arg(path, what):
+    f = os.path.abspath(os.path.expanduser(path))
+    if not os.path.isfile(f):
+        raise profile.ProfileError("no existe el archivo de %s: %s" % (what, path))
+    return f
+
+
+def _subscribe_agent(a):
+    """Suscripción v2 en el chopshop-agent (POST /subscriptions). Las rutas viajan como rutas: nunca la URL ni el secreto."""
+    from .agent import client
+    c = _agent_client()
+    try:
+        if a.list:
+            for n, s in sorted(c.get("/subscriptions").get("subscriptions", {}).items()):
+                print("%s %s" % (n, json.dumps({k: v for k, v in s.items() if k != "created"}, ensure_ascii=False)))
+            return 0
+        if not a.name or not a.webhook_file:
+            raise profile.ProfileError("uso: subscribe <nombre> --webhook-file F [--project P] [--types 'question.*'] ...")
+        f = _file_arg(a.webhook_file, "webhook")
+        if os.stat(f).st_mode & 0o077:
+            print("aviso: %s es legible por otros; haz chmod 600" % a.webhook_file, file=sys.stderr)
+        projects = _csv(a.project) or ["*"]
+        body = {"name": a.name, "webhook_file": f, "project": projects[0] if len(projects) == 1 else "*"}
+        if len(projects) > 1:
+            body["projects"] = projects
+        if a.events_given:
+            body["events"] = _csv(a.events) or []
+        for k in ("types", "exclude_types", "needs"):
+            if getattr(a, k):
+                body[k] = _csv(getattr(a, k))
+        if a.min_severity:
+            body["min_severity"] = a.min_severity
+        if a.only_changes:
+            body["only_changes"] = True
+        if a.context:
+            body["context"] = True
+        if a.debounce is not None:
+            body["debounce_s"] = a.debounce
+        if a.secret_file:
+            body["secret_file"] = _file_arg(a.secret_file, "secreto")
+        res = c.post("/subscriptions", body)
+    except client.AgentError as e:
+        raise profile.ProfileError("agente: %s" % e)
+    print("suscrito %s en el agente (la URL no se muestra): %s" % (
+        a.name, json.dumps({k: v for k, v in (res.get("subscription") or {}).items() if k != "created"}, ensure_ascii=False)))
+    return 0
+
+
 def cmd_subscribe(a):
+    a.events_given = a.events is not None
+    if a.events is None:
+        a.events = "pending_question"
+    if a.agent or any(getattr(a, k) not in (None, False) for k in V2_FLAGS):
+        return _subscribe_agent(a)
     if a.list:
         for n, s in state.read()["subscriptions"].items():
             print("%s project=%s events=%s webhook_file=%s" % (n, s["project"], ",".join(s["events"]), s["webhook_file"]))
@@ -287,8 +352,18 @@ def build():
     x = sp.add_parser("graph"); x.add_argument("action", choices=["new", "run", "status"]); x.add_argument("target", nargs="?", help="new: proyecto; run/status: id del grafo")
     x.add_argument("--bugs"); x.add_argument("--goal"); x.add_argument("--host"); x.add_argument("--max-parallel", type=int); x.add_argument("--json", action="store_true")
     x.add_argument("--timeout", type=int, default=1800); x.add_argument("--interval", type=int, default=10); hook(x); x.set_defaults(f=cmd_graph)
-    x = sp.add_parser("subscribe"); x.add_argument("name", nargs="?"); x.add_argument("--project", default="*"); x.add_argument("--events", default="pending_question")
-    x.add_argument("--webhook-file"); x.add_argument("--list", action="store_true"); x.set_defaults(f=cmd_subscribe)
+    x = sp.add_parser("subscribe", help="webhook del motor (state.json) o, con filtros v2 / --agent, del chopshop-agent")
+    x.add_argument("name", nargs="?"); x.add_argument("--project", default="*", help="proyecto (con --agent: p1,p2 y globs)")
+    x.add_argument("--events", help="nombres viejos, coma (por defecto pending_question)")
+    x.add_argument("--webhook-file"); x.add_argument("--list", action="store_true")
+    x.add_argument("--agent", action="store_true", help="registrar en el chopshop-agent (POST /subscriptions)")
+    x.add_argument("--types", help="tipos del sobre, coma, con globs: 'question.*,task.state'")
+    x.add_argument("--exclude-types"); x.add_argument("--min-severity", choices=["info", "notice", "warn", "error"])
+    x.add_argument("--needs", help="human,bot,approval,none (vacío = cualquiera)")
+    x.add_argument("--only-changes", action="store_true", help="omite task.state sin cambio de phase/attention")
+    x.add_argument("--context", action="store_true", help="añade body.context (sobres previos del sujeto + contadores)")
+    x.add_argument("--debounce", type=float, help="segundos: colapsa ráfagas por sujeto (se entrega el último)")
+    x.add_argument("--secret-file", help="archivo 0600 con el secreto HMAC (X-Chopshop-Signature)"); x.set_defaults(f=cmd_subscribe)
     return p
 
 

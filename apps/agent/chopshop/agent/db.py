@@ -5,7 +5,7 @@ import os
 import sqlite3
 import threading
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS machine_samples (      -- crudo (retención raw_hours)
@@ -61,6 +61,8 @@ def migrate(conn):
         conn.executescript("DROP TABLE IF EXISTS leases; DROP TABLE IF EXISTS ports;")
     if v < 3:
         _migrate_v3(conn)
+    if v < 4:
+        _migrate_v4(conn)
     if v < SCHEMA_VERSION:
         conn.execute("PRAGMA user_version=%d" % SCHEMA_VERSION)
 
@@ -97,6 +99,25 @@ def _migrate_v3(conn):
         except BaseException:
             conn.execute("ROLLBACK")
             raise
+
+
+# v4: filtros de suscripciones v2 (todas nulables: NULL = comportamiento viejo con `project` + `events`)
+# y el seguimiento de reintentos en `deliveries`.
+V4_COLUMNS = {
+    "subscriptions": (("projects", "TEXT"), ("types", "TEXT"), ("exclude_types", "TEXT"), ("min_severity", "TEXT"),
+                      ("needs", "TEXT"), ("only_changes", "INTEGER"), ("context", "INTEGER"), ("debounce_s", "REAL"),
+                      ("secret_file", "TEXT")),
+    "deliveries": (("attempts", "INTEGER"), ("next_retry", "REAL")),
+}
+
+
+def _migrate_v4(conn):
+    """Añade las columnas que falten (idempotente: no depende del orden respecto de otras migraciones)."""
+    for table, cols in V4_COLUMNS.items():
+        have = {r[1] for r in conn.execute("PRAGMA table_info(%s)" % table)}
+        for name, typ in cols:
+            if name not in have:
+                conn.execute("ALTER TABLE %s ADD COLUMN %s %s" % (table, name, typ))
 
 
 def tx():
