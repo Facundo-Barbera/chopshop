@@ -1,12 +1,14 @@
 import AppKit
 import ChopshopNative
 
-// uso: ChopshopSnap <directorio de salida> [demo|demo-keys|city-keys|city-video [vídeo.mp4]|machine-room]
+// uso: ChopshopSnap <directorio de salida> [demo|demo-keys|city-keys|city-video [vídeo.mp4]|machine-room|floor|city-office]
 //   sin 2º argumento: capturas de proyecto/oficina
 //   demo: fotogramas clave de la demo (key-*.png) + secuencia seq/f0000.jpg a 12 fps (demo-keys: solo las claves)
 //   city-keys: claves de la ciudad (city-0N-*.png, 1400×900 @1x) desde city-fixture.jsonl
 //   city-video: la cronología de la ciudad en MP4 H.264, 1400×900 a 30 fps (por defecto <salida>/city.mp4)
 //   machine-room: sala de máquinas desde machine-room-fixture.jsonl (machine-room-dark.png / machine-room-light.png)
+//   floor: previews de FloorOfficeView (floor-*.png: piso Producto oscuro/claro, triage seleccionado, vestíbulo)
+//   city-office: ciudad v3 de CityOfficeFixture (city-office-*.png: varios pisos y vestíbulo, zoom al piso Docs y el piso montado)
 let args = Array(CommandLine.arguments.dropFirst())
 let out = args.first ?? "/tmp/chopshop-snaps"
 try? FileManager.default.createDirectory(atPath: out, withIntermediateDirectories: true)
@@ -55,6 +57,12 @@ if let mode = args.dropFirst().first, mode == "machine-room" {
             Snapshots.renderMachineRoom(dark: dark, to: "\(out)/machine-room-\(dark ? "dark" : "light").png")
             print("ok machine-room-\(dark ? "dark" : "light")")
         }
+    }
+    exit(0)
+}
+if let mode = args.dropFirst().first, mode == "floor" || mode == "city-office" {
+    MainActor.assumeIsolated {
+        if mode == "floor" { Snapshots.renderFloors(to: out) } else { Snapshots.renderCityOffice(to: out) }
     }
     exit(0)
 }

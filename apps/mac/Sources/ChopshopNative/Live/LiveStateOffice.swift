@@ -360,18 +360,16 @@ extension LiveState {
         }
     }
 
-    /// Todos los runs sin terminar y los 5 terminados más recientes (por `updated_at`; si falta, por orden de llegada).
+    /// Todos los runs sin terminar y los 5 terminados más recientes (por `updated_at`; si falta, por orden de llegada), en el
+    /// orden en que estaban (como `_trim` de `agent/machine_room.py`).
     static func trimRuns(_ runs: [JSONValue.Object]) -> [JSONValue.Object] {
-        let order = runs.enumerated().sorted { a, b in
+        let done = runs.enumerated().filter { $0.element["status"]?.string == "completed" }
+        guard done.count > rackCompletedKept else { return runs }
+        let keep = Set(done.sorted { a, b in
             let ua = a.element["updated_at"]?.string ?? "", ub = b.element["updated_at"]?.string ?? ""
             return ua != ub ? ua > ub : a.offset > b.offset
-        }.map(\.element)
-        var kept = 0
-        return order.filter { r in
-            guard r["status"]?.string == "completed" else { return true }
-            kept += 1
-            return kept <= rackCompletedKept
-        }
+        }.prefix(rackCompletedKept).map(\.offset))
+        return runs.enumerated().filter { $0.element["status"]?.string != "completed" || keep.contains($0.offset) }.map(\.element)
     }
 
     private func rackIndex(provider: String, repo: String) -> Int? {
