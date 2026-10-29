@@ -23,8 +23,8 @@ import threading
 import time
 
 from .. import engine as engine_mod, events as legacy_events, graph, home, settings, state
-from . import __version__, automations as automations_mod, collector as collector_mod, config, db, envelope, events, github, \
-    halflife, notes, office as office_mod, pairing, roles as roles_mod, server, t3watch
+from . import __version__, actions as actions_mod, automations as automations_mod, collector as collector_mod, config, db, envelope, \
+    events, github, halflife, notes, office as office_mod, pairing, roles as roles_mod, server, t3watch
 from .forge import rack as forge_rack
 
 log = logging.getLogger("chopshop.agent")
@@ -235,7 +235,8 @@ class AgentService:
     def __init__(self, cfg, conn=None, collector=None, t3=None, runner=None, poster=None,
                  orchestrator_fn=None, clock=time.time, maint_interval=MAINT_INTERVAL, maint_first=MAINT_FIRST, compact_every=COMPACT_EVERY,
                  engine_tick=None, stream_opts=None, automations=None,
-                 gh_runner=None, gh_projects_fn=github.profile_repos, roles=None, forge_entries_fn=None):
+                 gh_runner=None, gh_projects_fn=github.profile_repos, roles=None, forge_entries_fn=None,
+                 gh_profiles_fn=actions_mod.load_profiles):
         self.cfg, self.clock, self.runner, self.poster = cfg, clock, runner, poster
         self.engine_tick = engine_tick or engine_mod.tick
         self.owns_conn = conn is None
@@ -271,6 +272,10 @@ class AgentService:
         if forge_rack.enabled(cfg):
             self.forge = forge_rack.Rack(self.conn, cfg, self.emit_forge, clock=clock, provider_opts={"runner": gh_runner},
                                          entries_fn=forge_entries_fn)
+        self.actions = None
+        if (cfg.get("github") or {}).get("enabled") and (cfg.get("github") or {}).get("actions", True):
+            self.actions = actions_mod.ActionsPoller(self.conn, cfg, self.emit_forge, runner=gh_runner, clock=clock,
+                                                     profiles_fn=gh_profiles_fn)
         self.stop_event = threading.Event()
         self.servers, self.threads, self._serving = [], [], []
         self._stopped = False
@@ -335,7 +340,7 @@ class AgentService:
         return stored
 
     def emit_forge(self, type, project, body, severity=None):
-        """Sobre `forge.*` del rack (tipo nuevo con su severidad) -> bus + /stream."""
+        """Tipo nuevo del agente (`forge.repo.state` del rack, `forge.run.state` de actions) -> bus validado + /stream."""
         env = events.emit_envelope(self.conn, self.cfg, type, project, body, severity=severity, poster=self.poster)
         if env:
             self.app.stream.bus.publish(env["seq"])
@@ -385,6 +390,8 @@ class AgentService:
                 self._spawn("halflife", self._loop, "halflife", self.fader.sweep, self.fader.next_delay)
             if self.forge is not None:
                 self._spawn("forge", self._loop, "forge", self.forge.poll_once, self.forge.next_delay)
+            if self.actions is not None:
+                self._spawn("actions", self._loop, "actions", self.actions.poll_once, self.actions.next_delay)
             self._spawn("maintenance", self._maintenance)
         for s in self.servers:
             self._serving.append(s)

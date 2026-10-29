@@ -63,7 +63,7 @@ DEFAULTS = {
         # roles permanentes de la oficina (agent/roles.py): despertar lanza hilos de T3, por eso es opt-in
         "roles": {"enabled": False, "interval": 5, "max_wakes_per_hour": 6},
         # ingreso de GitHub por polling con ETag (agent/github.py); usa el `gh` ya autenticado, nunca un token aquí
-        "github": {"enabled": False, "repos": [], "interval_s": 45, "gh_bin": "gh", "ci": True},
+        "github": {"enabled": False, "repos": [], "interval_s": 45, "gh_bin": "gh", "ci": True, "actions": True},
         # rack de repos de la sala de máquinas (agent/forge/): luz por repo de `rack.repos` + [agent.github] repos;
         # enabled "auto" = lo mismo que [agent.github] enabled (usa el mismo `gh`)
         "forge": {"enabled": "auto", "interval_s": 60},

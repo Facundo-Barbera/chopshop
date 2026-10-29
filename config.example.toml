@@ -122,6 +122,7 @@ repos = ["dueño/repo"]                    # repos a vigilar ("dueño/repo"); es
 interval_s = 45                           # segundos entre pasadas (GitHub puede pedir más con X-Poll-Interval)
 gh_bin = "gh"                             # CLI de GitHub
 ci = true                                 # mirar check-runs del HEAD de los PRs abiertos (github.ci.completed)
+actions = true                            # runs de Actions con disparador y origen (forge.run.state; también rack.repos)
 
 # Rack de repos de la sala de máquinas (hilo `forge`): una luz por repo de `rack.repos` de los perfiles y de
 # [agent.github] repos (si está activado). Usa el mismo `gh`; emite `forge.repo.state` solo cuando cambia.
