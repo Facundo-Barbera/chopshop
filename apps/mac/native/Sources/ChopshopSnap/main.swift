@@ -1,9 +1,11 @@
 import AppKit
 import ChopshopNative
 
-// uso: ChopshopSnap <directorio de salida> [demo]
+// uso: ChopshopSnap <directorio de salida> [demo|demo-keys|city-keys|city-video [vídeo.mp4]]
 //   sin 2º argumento: capturas de proyecto/oficina
-//   demo: fotogramas clave de la demo (key-*.png) + secuencia seq/f0000.jpg a 12 fps
+//   demo: fotogramas clave de la demo (key-*.png) + secuencia seq/f0000.jpg a 12 fps (demo-keys: solo las claves)
+//   city-keys: claves de la ciudad (city-0N-*.png, 1400×900 @1x) desde city-fixture.jsonl
+//   city-video: la cronología de la ciudad en MP4 H.264, 1400×900 a 30 fps (por defecto <salida>/city.mp4)
 let args = Array(CommandLine.arguments.dropFirst())
 let out = args.first ?? "/tmp/chopshop-snaps"
 try? FileManager.default.createDirectory(atPath: out, withIntermediateDirectories: true)
@@ -22,6 +24,27 @@ if let mode = args.dropFirst().first, mode == "demo" || mode == "demo-keys" {
             if k % 60 == 0 { print("seq \(k)/\(n)") }
         }
         print("done seq \(n)")
+    }
+    exit(0)
+}
+if let mode = args.dropFirst().first, mode == "city-keys" || mode == "city-video" {
+    MainActor.assumeIsolated {
+        let tl = CityTimeline.bundled()
+        if mode == "city-keys" {
+            let keys: [(String, Double, Bool)] = [("01-ciudad", 10.6, true), ("02-subiendo", 2.4, true), ("03-ambar-rojo", 10.2, true),
+                                                  ("04-zoom-mitad", 14.2, true), ("05-paredes", 16.0, true), ("06-oficina", 19.0, true),
+                                                  ("07-claro", 10.6, false)]
+            for (name, t, dark) in keys {
+                Snapshots.renderCity(timeline: tl, t: t, dark: dark, scale: 1, to: "\(out)/city-\(name).png")
+                print("ok city-\(name)")
+            }
+            return
+        }
+        let path = args.count > 2 ? args[2] : "\(out)/city.mp4"
+        let ok = Snapshots.renderCityVideo(timeline: tl, to: path, width: 1400, height: 900, fps: 30) { k, n in
+            if k % 90 == 0 { print("vídeo \(k)/\(n)"); fflush(stdout) }
+        }
+        print(ok ? "ok \(path)" : "error: no se pudo escribir \(path)")
     }
     exit(0)
 }
