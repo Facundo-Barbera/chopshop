@@ -8,14 +8,16 @@ completa en verde en contabo-dev.
 
 - [ ] `cd apps/mac && swift build` (app) y `cd apps/mac/native && swift build` (banco de pruebas, `NATIVE_PREVIEWS`).
 - [ ] Puntos de la integración con más riesgo de no compilar:
-  - **Dos tipos `MachineRoom`**: `LiveState.MachineRoom` (anidado, JSON, `Live/LiveStateOffice.swift`; lo usan `LiveState`,
-    `LiveStateNames`, `OfficeFixture`, `OfficeTests`) y el `MachineRoom` de nivel superior (`MachineRoom/MachineRoomModel.swift`;
-    lo usan `LiveStore`, `MachineRoomView`, `MachineRoomSnapshots`, `MachineRoomTests`). Dentro de `LiveState` el anidado tapa al
-    otro a propósito. Si el compilador se queja de ambigüedad, renombrar el anidado (p. ej. `MachineRoomJSON`).
-  - `City/CityOffice.swift`: dos `init?` sobrecargados (`JSONValue.Object?` y `LiveState.Office?`); `CityModel.build` y
-    `CityOfficeTests` pasan `LiveState.Project.office` (tipado).
-  - `ChopshopUI/Views.swift`: `LiveMachineRoomScreen(store:) { PairingScreen() }` (el init pide `unpaired`).
-  - `MachineRoom/MachineRoomSnapshots.swift`: `Bundle.module` + `FixtureStream.parse` + `MachineRoom.fold`.
+  - **Sala de máquinas, dos tipos**: `LiveState.MachineRoomState` (anidado, JSON, `Live/LiveStateOffice.swift`; lo usan
+    `LiveState`, `LiveStateNames`, `OfficeFixture`, `OfficeTests`) y el `MachineRoom` tipado de nivel superior
+    (`MachineRoom/MachineRoomModel.swift`; lo usan `LiveStore`, `MachineRoomView`, `MachineRoomSnapshots`, `MachineRoomTests`).
+    Ya no comparten nombre (rama `fix/or-swift-risk`): dentro de `LiveState` `MachineRoom` es siempre el tipado.
+  - `City/CityOffice.swift`: `init?(json:)` (`JSONValue.Object?`) e `init?(_:)` (`LiveState.Office?`), con etiqueta distinta para
+    que `CityOffice(nil)` o un literal no sean ambiguos; `CityModel.build` y `CityOfficeTests` pasan `LiveState.Project.office`.
+  - `ChopshopUI/Views.swift`: `LiveMachineRoomScreen(store:) { PairingScreen() }` (cierre final = `unpaired`, como
+    `LiveProjectScreen`; ambas dentro de `if #available(macOS 26.0, *)`).
+  - `MachineRoom/MachineRoomSnapshots.swift`: `Bundle.module` (solo en `native/`, que copia `machine-room-fixture.jsonl`) +
+    `FixtureStream.parse` + `MachineRoom.fold`; si falta el fixture avisa y no escribe el PNG; reloj fijo en el último `ts`.
 
 ## 2. Doradas (si cambia el contrato o un fixture)
 

@@ -18,7 +18,7 @@ public struct CityOffice: Equatable, Sendable {
     /// Por índice, como mucho `maxFloorsPerProject`.
     public var floors: [Floor]
 
-    public init?(_ office: JSONValue.Object?) {
+    public init?(json office: JSONValue.Object?) {
         guard let o = office else { return nil }
         company = SnapshotMapper.nonEmpty(o["company"]?.string)
         var fs: [Floor] = []

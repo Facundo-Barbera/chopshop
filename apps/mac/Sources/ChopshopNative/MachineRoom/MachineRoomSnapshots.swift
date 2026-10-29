@@ -9,9 +9,12 @@ import AppKit
 public extension Snapshots {
     static func renderMachineRoom(dark: Bool = true, width: CGFloat = 1100, height: CGFloat = 420, scale: CGFloat = 1, to path: String) {
         NSApp?.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
-        let url = Bundle.module.url(forResource: "machine-room-fixture", withExtension: "jsonl")
-        let room = MachineRoom.fold(url.flatMap { try? Data(contentsOf: $0) }.map(FixtureStream.parse) ?? [])
-        let v = MachineRoomView(room: room)
+        guard let url = Bundle.module.url(forResource: "machine-room-fixture", withExtension: "jsonl"),
+              let data = try? Data(contentsOf: url) else { print("sin machine-room-fixture.jsonl: \(path)"); return }
+        let envs = FixtureStream.parse(data)
+        // reloj fijo en el último sobre del fixture: los «hace N min» no dependen de cuándo se hace la captura
+        let now = envs.lazy.compactMap { SnapshotMapper.date($0.ts) }.max() ?? Date()
+        let v = MachineRoomView(room: MachineRoom.fold(envs), frozenNow: now)
             .padding(24)
             .frame(width: width, height: height)
             .background(dark ? Color(white: 0.11) : Color(white: 0.96))
