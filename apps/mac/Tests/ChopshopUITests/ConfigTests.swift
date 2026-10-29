@@ -42,9 +42,9 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(c.refreshSeconds, 5)
         XCTAssertEqual(c.agents.map { $0.name }, ["agente", "host-b"])
         XCTAssertEqual(c.agents[0].url, "http://100.64.0.10:3790", "sin barra final")
-        XCTAssertEqual(c.agents[0].tokenFile, "/tmp/chopshop-token-demo")
         XCTAssertEqual(c.agents[1].url, "http://100.64.0.11:3790")
-        XCTAssertFalse(c.agents[1].tokenFile?.hasPrefix("~") ?? true, "expande ~")
+        // token_file (configs viejos) se ignora sin error: la credencial es del Keychain
+        XCTAssertEqual(c.agents, [AgentSpec(name: "agente", url: "http://100.64.0.10:3790"), AgentSpec(name: "host-b", url: "http://100.64.0.11:3790")])
     }
 
     func testEnvOverridesFile() {
@@ -56,7 +56,7 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(c.agents.map { $0.name }, ["agente", "host-b", "host-c"])
         XCTAssertEqual(c.agents[0].url, "http://100.64.0.12:3790")
         XCTAssertEqual(c.agents[1].url, "http://100.64.0.13:3790")
-        XCTAssertEqual(c.agents[2].tokenFile, "/tmp/c.token")
+        XCTAssertEqual(c.agents[2].url, "http://100.64.0.14:3790", "CHOPSHOP_APP__AGENTS__*__TOKEN_FILE se ignora")
     }
 
     func testRefreshIsClampedAndDefaults() {
@@ -64,6 +64,10 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(AppConfig.parse("[app]\nrefresh_seconds = 99999").refreshSeconds, 300)
         XCTAssertEqual(AppConfig.parse("[app]\nrefresh_seconds = \"x\"").refreshSeconds, AppConfig.defaultRefresh)
         XCTAssertEqual(AppConfig.parse("").agents, [])
+    }
+
+    func testOnlyTokenFileAgentIsIgnored() {
+        XCTAssertEqual(AppConfig.parse("[app.agents.x]\ntoken_file = \"/tmp/t\"\n", env: ["CHOPSHOP_APP__TOKEN_FILE": "/tmp/t"]).agents, [])
     }
 
     func testSameURLIsNotDuplicated() {
