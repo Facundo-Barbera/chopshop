@@ -163,6 +163,27 @@ class TestEmitFn(Bridge):
         self.assertEqual(len(self.of("batch_done")), 1)
 
 
+class TestEventsRoute(Bridge):
+    def test_envelopes_ids_seq_and_cause_depth(self):
+        self.start()
+        root = events.emit_envelope(self.conn, self.cfg, "github.issue.opened", "p",
+                                    {"repo": "o/r", "number": 7, "action": "opened", "title": "t", "url": None})
+        child = events.emit_envelope(self.conn, self.cfg, "automation.ran", "p",
+                                     {"automation": "triage", "trigger": "github.issue.opened", "exit": 0,
+                                      "duration_ms": 5, "error": None}, cause=root)
+        events.emit_envelope(self.conn, self.cfg, "triage.result", "p", {"ok": True}, cause=child)
+        evs = self.envs()
+        for e in evs:
+            envelope.validate(e)
+        self.assertEqual([e["type"] for e in evs[-3:]], ["github.issue.opened", "automation.ran", "triage.result"])
+        self.assertEqual([e["cause"] for e in evs[-3:]], [{"id": None, "depth": 0}, {"id": root["id"], "depth": 1},
+                                                          {"id": child["id"], "depth": 2}])
+        self.assertEqual([e["seq"] for e in evs], list(range(evs[0]["seq"], evs[0]["seq"] + len(evs))))
+        self.assertEqual([e["id"] for e in evs], sorted({e["id"] for e in evs}))
+        snap = self.get("/snapshot")[1]["events"]
+        self.assertEqual(snap[0]["id"], evs[-1]["id"])                  # /snapshot.events: sobres, el más nuevo primero
+
+
 class TestAnswerRoute(Bridge):
     def test_post_answer_emits_question_answered(self):
         self.start()

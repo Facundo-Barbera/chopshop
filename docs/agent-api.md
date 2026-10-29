@@ -50,7 +50,7 @@ bearer se compara con `hmac.compare_digest`. No se confía en cabeceras `X-Forwa
 | `GET /health` | `{ok, api_version, version, machine_id, ts, uptime, whoami}` |
 | `GET /snapshot` | ver forma abajo (lo que pinta la UI) |
 | `GET /metrics?from=&to=&group=machine\|app\|project&step=` | series (ver `collector.query`) |
-| `GET /events?after=<seq>&limit=` | `{events:[{seq,ts,machine_id,event,project,body}], last_seq, head_seq}`: `last_seq` = cursor para la siguiente consulta (seq del último devuelto, o `after` si no hay), `head_seq` = último de la máquina |
+| `GET /events?after=<seq>&limit=` | `{events:[sobre], last_seq, head_seq}` (sobre v1 de `docs/event-envelope.md`, + `event` y `machine_id` viejos): `last_seq` = cursor para la siguiente consulta (seq del último devuelto, o `after` si no hay), `head_seq` = último de la máquina |
 | `GET /threads?project=&limit=` | `{threads:[...]}` desde `t3_threads` (más recientes primero) |
 | `GET /subscriptions` | `{subscriptions:{nombre:{project,events,created}}}` (sin URL ni ruta) |
 | `POST /answer` | `{thread_id, choice, request?}` → responde en T3 (`{ok, request_id, answers, question}`). `AnswerError` (sin pendientes, ambigua, opción no válida) → 400; T3 caído → 502 |
@@ -90,5 +90,5 @@ Notas de `snapshot`:
 - **Eventos**: los de T3 (`thread_*`, `pending_question`, `pending_approval`, `t3_unreachable`, `t3_recovered`) y `agent_started` al
   arrancar. El agente mismo corre en `chopshop.slice`.
 - **`emit_fn(event, project, body)`**: `T3` (poll) lo recibe; el servicio lo implementa sobre `events.emit`.
-- **Hilos**: muestreo + compactación (`Collector.run_forever`), sondeo de T3 (`t3_poll_interval`, con backoff propio) y mantenimiento horario (retención de eventos `retention.events_days`, checkpoint WAL). Parada limpia con SIGTERM/SIGINT.
-- **Migración**: al arrancar, `events.import_legacy(<general.home>/events.jsonl)` si existe y `agent.import_legacy = true`.
+- **Hilos**: muestreo + compactación (`Collector.run_forever`), sondeo de T3 (`t3_poll_interval`, con backoff propio), motor (`engine.tick` con el bus inyectado cada `engine_interval` s si hay lotes en `state.json`), importación de `events.jsonl` (`legacy_interval`) y mantenimiento horario (retención de eventos `retention.events_days`, checkpoint WAL). Parada limpia con SIGTERM/SIGINT.
+- **Migración**: al arrancar y cada `legacy_interval` s, `events.import_legacy(<general.home>/events.jsonl)` si existe y `agent.import_legacy = true` (idempotente).
