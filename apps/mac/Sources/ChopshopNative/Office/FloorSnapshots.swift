@@ -19,6 +19,15 @@ public extension Snapshots {
                 .background(IsoBackdrop())
             write(v, dark: dark, size: size, to: "\(out)/\(name).png")
         }
+        // La pestaña «Oficina» de un proyecto con 46 hilos (1 corriendo), con perfil y sin él: `floor-proyecto-46-*.png`.
+        for (name, office, dark) in [("perfil-dark", true, true), ("perfil-light", true, false), ("sin-perfil-dark", false, true)] {
+            let st = ProjectOfficeFixture.state(office: office)
+            let v = ProjectContent(project: ProjectOfficeFixture.project, snapshot: SnapshotMapper.snapshot(st, now: ProjectOfficeFixture.now),
+                                   frozenTime: 2, state: st, frozenNow: ProjectOfficeFixture.now)
+                .padding(.horizontal, 26).padding(.vertical, 22)
+                .background(Color(nsColor: .windowBackgroundColor))
+            write(v, dark: dark, size: CGSize(width: 1100, height: 1240), to: "\(out)/floor-proyecto-46-\(name).png")
+        }
     }
 
     /// Ciudad de `CityOfficeFixture`: vista general (oscuro/claro), zoom a medias y al final hacia el piso Docs (el segundo del
@@ -42,6 +51,20 @@ public extension Snapshots {
               to: "\(out)/city-office-zoom-mitad.png")
         write(city(CityFocus(project: "awesome-gb", p: 1, floor: "awesome-gb#1")), dark: true, size: size,
               to: "\(out)/city-office-zoom-fin.png")
+        // 46 hilos de chopshop: la ciudad y el zoom ya montado en su piso Producto (`city-office-46-*.png`).
+        let st46 = ProjectOfficeFixture.state(office: true)
+        let m46 = CityModel.build(st46)
+        var l46 = CityLights()
+        l46.observe(m46, at: 0)
+        func city46(_ zoom: CityFocus?) -> some View {
+            CityView(model: m46, lights: l46, snapshot: SnapshotMapper.snapshot(st46, now: ProjectOfficeFixture.now), state: st46,
+                     frozenTime: 10, frozenNow: ProjectOfficeFixture.now, frozenZoom: zoom, flatChrome: true)
+                .padding(.horizontal, 26).padding(.vertical, 22)
+                .background(Color(nsColor: .windowBackgroundColor))
+        }
+        write(city46(nil), dark: true, size: size, to: "\(out)/city-office-46-ciudad.png")
+        write(city46(CityFocus(project: ProjectOfficeFixture.project, p: 1, floor: "\(ProjectOfficeFixture.project)#0")), dark: true, size: size,
+              to: "\(out)/city-office-46-piso.png")
         if let docs = FloorPlan.floor(in: state, project: "awesome-gb", index: 1) {
             write(FloorOfficeView(plan: docs, frozenNow: FloorFixture.now, flatChrome: true).background(IsoBackdrop()),
                   dark: true, size: CGSize(width: 1100, height: 620), to: "\(out)/city-office-piso-docs.png")

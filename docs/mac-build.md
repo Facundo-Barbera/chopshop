@@ -95,7 +95,15 @@ En macOS 26 o posterior el detalle de un **proyecto** es la vista nativa `Chopsh
 - La vista web (`WKWebView`) sigue cargada detrás: Resumen, Preguntas, Actividad… y todo en macOS < 26 siguen con `GET /snapshot`.
   Si el stream no responde y no hay datos (agente antiguo), se ve la vista web.
 - Modo demo sin agente: `Chopshop.app/Contents/MacOS/Chopshop --demo-fixture apps/agent/tests/fixtures/events/ui-fixture.jsonl`
-  (o `CHOPSHOP_DEMO_FIXTURE=…`): reproduce la secuencia acelerada.
+  (o `CHOPSHOP_DEMO_FIXTURE=…`): reproduce la secuencia acelerada. `--demo-speed 0` (o `CHOPSHOP_DEMO_SPEED`) la entrega de golpe.
+  Escena de muchos hilos (46, 1 corriendo; tiempos relativos a ahora):
+  `python3 apps/mac/Tests/ChopshopNativeTests/tools/make_office_layout_fixture.py /tmp/office-46.jsonl [--no-office]`.
+- **Oficina** de un proyecto: pisos (`ProjectOfficeView`, un selector abajo a la izquierda): el vestíbulo y los pisos de escritorios
+  por rol (los del perfil `office`; sin perfil, departamentos sintéticos por `role` de hasta 6 escritorios, ≤ 24 por piso, el resto
+  sube a otro piso). Los hilos terminados se desvanecen con la semivida y salen; un terminado sin `ended_at` usa la hora de su
+  último `task.state`. Etiqueta = nombre corto del hilo; el título entero, al pasar el ratón. «Grafo» sigue siendo el grafo.
+- **Ciudad** (barra lateral, arriba): todos los proyectos como edificios; clic en un piso → zoom a la oficina de ese piso.
+- Con `--capture`, `apps/mac/shot.sh <salida.png> click:<x>,<y>` hace clic en esos puntos de la ventana y captura tras el zoom.
 - Por ahora el stream es de un solo agente; los demás se ven por `/snapshot` en la vista web.
 - Requiere un agente con `api_version 2` (`/stream`, `/state`, `/pair`). Mientras el agente instalado sea anterior, el
   emparejamiento responde «agente sin emparejamiento», las acciones dan 403 con un mensaje claro y los proyectos se ven en la web.

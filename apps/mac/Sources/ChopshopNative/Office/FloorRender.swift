@@ -208,8 +208,17 @@ struct FloorRenderer {
             var g = ctx; g.opacity = 0.9
             g.draw(s, at: P(r.x0 + r.w * 0.5, r.y0, Iso.slabH + Iso.wallH + 16), anchor: .center)
         }
+        // Con el piso muy alejado solo se rotula lo que importa (trabajando, te necesita, trabado) y lo señalado: el resto, al pasar
+        // el ratón. Así las etiquetas no se pisan.
+        let crowded = cam.s < 0.62
         for sp in layout.spots {
             guard let lk = looks[sp.id] ?? nil, let s = ctx.resolveSymbol(id: "d:\(sp.id)") else { continue }
+            if crowded && sp.id != hovered && sp.id != selected {
+                switch lk.visual {
+                case .running?, .needsYou?, .stuck?, .waitingBot?: break
+                default: continue
+                }
+            }
             var g = ctx
             switch lk {
             case .occupied(let v, let o): g.opacity = o * (v == .done ? 0.75 : (v == .skipped ? 0.5 : 1))

@@ -77,3 +77,15 @@ cp apps/agent/tests/fixtures/events/machine-room-fixture.jsonl apps/mac/Sources/
   `onInspect` (→ `POST /touch`) queda expuesto en `CityView(state:…)` pero nadie lo cablea aún. El vestíbulo no tiene zoom.
 - `IsoScene`/`IsoOfficeView` siguen con salas por rango de dependencias (modo Grafo); la oficina por departamentos vive en
   `Office/` aparte.
+
+## La oficina en la app real (rama `fix/or-office-layout`, 2026-10-29)
+
+Las capturas de v0.8 salían de `ChopshopSnap`, que pinta `FloorOfficeView` directamente; la app nunca la montaba:
+
+- La pestaña «Oficina» del proyecto (`LiveProjectScreen` → `ProjectContent`) seguía con `IsoOfficeView` sobre el grafo sintético
+  (un nodo por tarea, todas en el rango 0 → una sala de 3 × 16 en diagonal) y con **todas** las tareas: la proyección no poda
+  `tasks` y ese camino ignoraba `ended_at`/`touched_at` (el agente sí los manda). Ahora monta `ProjectOfficeView` con
+  `ProjectOffice.floors` (perfil o pisos sintéticos por rol, vestíbulo, semivida aplicada).
+- La Ciudad no tenía entrada en la app (`LiveCityScreen` no se usaba) y además se construía sin `state`, así que su zoom tampoco
+  podía montar los pisos. Ahora: «Ciudad» arriba en la barra lateral, con `state`, y el zoom monta `ProjectOfficeView` en el piso pulsado.
+- Capturas nuevas: `ChopshopSnap <salida> floor` → `floor-proyecto-46-*.png`; `city-office` → `city-office-46-*.png`.

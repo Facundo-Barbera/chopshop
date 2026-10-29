@@ -149,7 +149,7 @@ public struct FloorOfficeView: View {
         ForEach(lay.spots, id: \.id) { sp in
             let lk = plan.look(sp.id, now: now)
             let tint = lk?.visual?.tint
-            Text(label(plan, sp.id))
+            Text(tag(plan, sp.id, now: now))
                 .font(.system(size: 10, weight: .semibold))
                 .padding(.horizontal, 7).padding(.vertical, 2)
                 .background(Capsule().fill(dark ? Color.black.opacity(0.5) : Color.white.opacity(0.78)))
@@ -166,6 +166,16 @@ public struct FloorOfficeView: View {
                 .foregroundStyle(Color.primary.opacity(0.75))
                 .tag("r:\(r.index)")
         }
+    }
+
+    /// Lo que dice la etiqueta del hueco en el piso: el nombre corto del hilo (el título entero y el escritorio, al pasar el ratón);
+    /// un escritorio sin hilo, su `rol · n`.
+    static func tag(_ plan: FloorPlan, _ id: String, now: Date) -> String {
+        if let o = plan.occupant(of: id, now: now) {
+            let name = ProjectOffice.shortName(o.title ?? o.threadID)
+            return o.waitingRole.map { "\(name) → \($0)" } ?? name
+        }
+        return label(plan, id)
     }
 
     private func roomTitle(_ r: FloorLayout.RoomBox) -> String { Self.roomTitle(plan, r) }

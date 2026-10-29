@@ -68,11 +68,19 @@ public struct ProjectContent: View {
     let snapshot: MockSnapshot
     var frozenTime: Double?
     var selectedNode: String?
+    /// Proyección viva: con ella, «Oficina» es la de pisos (`ProjectOfficeView`: vestíbulo y escritorios por rol, con semivida);
+    /// sin ella (datos de prueba sin hilos), la oficina por rangos del grafo.
+    var state: LiveState?
+    var frozenNow: Date?
     @State private var mode: GraphMode
-    public init(project: String, snapshot: MockSnapshot, frozenTime: Double?, selectedNode: String? = nil, mode: GraphMode = .office) {
+    public init(project: String, snapshot: MockSnapshot, frozenTime: Double?, selectedNode: String? = nil, mode: GraphMode = .office,
+                state: LiveState? = nil, frozenNow: Date? = nil) {
         self.project = project; self.snapshot = snapshot; self.frozenTime = frozenTime; self.selectedNode = selectedNode
+        self.state = state; self.frozenNow = frozenNow
         _mode = State(initialValue: mode)
     }
+
+    private var officeFloors: [FloorPlan]? { state.map { ProjectOffice.floors(in: $0, project: project, now: frozenNow ?? Date()) } }
 
     private var summary: ProjectSummary { snapshot.summary(of: project) }
     private var taskByID: [String: MockTask] { Dictionary(snapshot.tasks(of: project).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }) }
@@ -120,22 +128,37 @@ public struct ProjectContent: View {
         return t.font(.title3.weight(.semibold))
     }
 
+    /// Recuento de la cabecera en «Oficina»: quién está en la oficina ahora (los desvanecidos ya no cuentan).
+    private func officeCount(_ floors: [FloorPlan]) -> String {
+        let now = frozenNow ?? Date()
+        let people = floors.flatMap { f in f.kind == .lobby ? f.lobby : f.desks.compactMap(\.occupant) }.filter { !$0.gone(at: now) }
+        let active = people.filter { !$0.isTerminal }.count
+        return "\(active) \(active == 1 ? "activo" : "activos") · \(people.count - active) desvaneciéndose"
+    }
+
     @ViewBuilder private var graphCard: some View {
+        let floors = officeFloors
         if let g = snapshot.graph(for: project) {
             let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
             VStack(spacing: 0) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(g.goal).font(.callout.weight(.medium))
+                    Text(mode == .office && floors != nil ? project : g.goal).font(.callout.weight(.medium))
                     Spacer()
-                    Text("\(g.threads) de \(g.threadBudget) hilos").font(.caption).foregroundStyle(.secondary).padding(.trailing, 6)
+                    Text(mode == .office && floors != nil ? officeCount(floors!) : "\(g.threads) de \(g.threadBudget) hilos")
+                        .font(.caption).foregroundStyle(.secondary).padding(.trailing, 6)
                     ModeSwitch(mode: $mode, flat: frozenTime != nil)
                 }
                 .padding(.horizontal, 16).padding(.top, 10)
                 Group {
                     switch mode {
                     case .office:
-                        IsoOfficeView(graph: g, tasks: taskByID, hostOf: hostOf, frozenTime: frozenTime, selected: selectedNode, flatChrome: frozenTime != nil)
-                            .frame(height: g.nodes.count > 8 ? 600 : 460)
+                        if let floors {
+                            ProjectOfficeView(floors: floors, frozenNow: frozenNow, flatChrome: frozenTime != nil)
+                                .frame(height: 560)
+                        } else {
+                            IsoOfficeView(graph: g, tasks: taskByID, hostOf: hostOf, frozenTime: frozenTime, selected: selectedNode, flatChrome: frozenTime != nil)
+                                .frame(height: g.nodes.count > 8 ? 600 : 460)
+                        }
                     case .graph:
                         GraphView(graph: g, tasks: taskByID, hostOf: hostOf, frozenTime: frozenTime, selected: selectedNode, flatChrome: frozenTime != nil)
                             .frame(height: g.nodes.count > 8 ? 560 : 360)
@@ -143,7 +166,7 @@ public struct ProjectContent: View {
                 }
                 HStack {
                     legend
-                    Text(frozenTime == nil ? (mode == .office ? "clic en un escritorio · arrastra para mover la vista" : "arrastra para orbitar · clic en un nodo") : "").font(.caption).foregroundStyle(.tertiary)
+                    Text(frozenTime == nil ? (mode == .office ? "pasa el ratón para ver el hilo · clic para el detalle" : "arrastra para orbitar · clic en un nodo") : "").font(.caption).foregroundStyle(.tertiary)
                 }
                 .padding(.horizontal, 16).padding(.bottom, 11)
             }

@@ -93,11 +93,22 @@ public struct CityView: View {
     /// Piso v3 enfocado, del `office` tipado de la proyección (nil si el proyecto no lo trae).
     private var targetPlan: FloorPlan? { target.flatMap { plan($0, floor: targetFloor) } }
 
-    private func plan(_ project: String, floor id: String?) -> FloorPlan? {
-        guard let state else { return nil }
-        let all = FloorPlan.floors(in: state, project: project)
+    /// Pisos de la oficina del proyecto (`ProjectOffice`: los del perfil o, sin `office`, los sintéticos por rol, y el vestíbulo).
+    private func floors(_ project: String) -> [FloorPlan] {
+        state.map { ProjectOffice.floors(in: $0, project: project, now: officeNow ?? Date()) } ?? []
+    }
+
+    /// Índice (en `floors`) del piso pulsado; si no se sabe, el de escritorios más bajo, o el vestíbulo si no hay otro.
+    private func floorIndex(_ project: String, floor id: String?, in all: [FloorPlan]) -> Int? {
+        guard !all.isEmpty else { return nil }
         let idx = id.flatMap { model.floor(id: $0) }.flatMap { $0.isLobby ? nil : $0.floorIndex }
-        return idx.flatMap { i in all.first { $0.floorIndex == i } } ?? all.first
+        return idx.flatMap { i in all.firstIndex { $0.kind != .lobby && $0.floorIndex == i } }
+            ?? all.firstIndex { $0.kind != .lobby } ?? 0
+    }
+
+    private func plan(_ project: String, floor id: String?) -> FloorPlan? {
+        let all = floors(project)
+        return floorIndex(project, floor: id, in: all).map { all[$0] }
     }
 
     /// Hay algo que abrir: el piso v3 o, sin `office`, el grafo.
@@ -200,8 +211,8 @@ public struct CityView: View {
                 // el grafo primero: con la oficina montada, "Grafo" también tiene que verse
                 if showGraph, let pr = graphProject, let g = graph(pr) {
                     GraphView(graph: g, tasks: tasks(pr), hostOf: hosts(pr), frozenTime: frozenTime, flatChrome: flatChrome)
-                } else if office, let plan = targetPlan {
-                    FloorOfficeView(plan: plan, frozenNow: officeNow, flatChrome: flatChrome, onInspect: onInspect)
+                } else if office, let pr = target, case let all = floors(pr), let i = floorIndex(pr, floor: targetFloor, in: all) {
+                    ProjectOfficeView(floors: all, initial: i, frozenNow: officeNow, flatChrome: flatChrome, onInspect: onInspect)
                 } else if office, let pr = target, let g = graph(pr) {
                     IsoOfficeView(graph: g, tasks: tasks(pr), hostOf: hosts(pr), frozenTime: frozenTime, flatChrome: flatChrome)
                 } else {
@@ -524,8 +535,8 @@ struct IsoRoomLabel: View {
 // MARK: - En vivo
 
 /// Ciudad en vivo (macOS 26): la flota del `LiveStore` (el mismo estado que pinta la oficina). `onSelectFloor` recibe el proyecto
-/// del piso pulsado (la vista ya hace el zoom a su oficina). La app la abrirá desde la barra lateral; el banco de pruebas, desde la
-/// escena "Ciudad".
+/// del piso pulsado (la vista ya hace el zoom a su oficina). La app la abre desde la barra lateral («Ciudad»); el banco de pruebas,
+/// desde la escena "Ciudad".
 @available(macOS 26.0, *)
 public struct LiveCityScreen: View {
     @ObservedObject var store: LiveStore
@@ -547,7 +558,7 @@ public struct LiveCityScreen: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                CityView(model: model, lights: lights, snapshot: store.snapshot, onSelectFloor: onSelectFloor)
+                CityView(model: model, lights: lights, snapshot: store.snapshot, state: store.state, onSelectFloor: onSelectFloor)
                     .padding(.horizontal, 26).padding(.vertical, 22)
             }
         }
