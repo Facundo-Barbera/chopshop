@@ -243,8 +243,10 @@ public struct CityView: View {
 
     private func progress(_ now: Double) -> Double {
         if let z = frozenZoom { return cityClamp(z.p) }
-        let dur = Self.zoomDuration * max(0.05, abs(zoomTo - zoomFrom))
-        return zoomFrom + (zoomTo - zoomFrom) * cityClamp((now - zoomAt) / dur)
+        let span: Double = zoomTo - zoomFrom
+        let dur: Double = Self.zoomDuration * max(0.05, abs(span))
+        let k: Double = cityClamp((now - zoomAt) / dur)
+        return zoomFrom + span * k
     }
 
     private var officeMounted: Bool {
@@ -285,9 +287,10 @@ public struct CityView: View {
         focus = project; focusFloor = floor; zoomFrom = cur; zoomTo = 1; zoomAt = t; mounted = false
         box.zoomGen += 1
         let gen = box.zoomGen
-        let wait = Self.zoomDuration * (1 - cur)
+        let wait: Double = Self.zoomDuration * (1 - cur)
+        let ns: Double = max(0, wait) * 1_000_000_000
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: UInt64(max(0, wait) * 1_000_000_000))
+            try? await Task.sleep(nanoseconds: UInt64(ns))
             if box.zoomGen == gen { mounted = true }
         }
     }
@@ -306,6 +309,7 @@ public struct CityView: View {
         zoomFrom = cur; zoomTo = 0; zoomAt = t
         box.zoomGen += 1
         let gen = box.zoomGen
+        let ns: Double = Self.zoomDuration * cur * 1_000_000_000
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: UInt64(Self.zoomDuration * cur * 1_000_000_000))
             if box.zoomGen == gen { focus = nil; focusFloor = nil }

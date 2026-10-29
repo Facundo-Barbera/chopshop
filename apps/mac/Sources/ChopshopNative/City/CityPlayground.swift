@@ -82,7 +82,8 @@ public struct CityPlaygroundScreen: View {
     private func clock(_ now: Date) -> Double { clock(now, speed: speed) }
 
     private func clock(_ now: Date, speed v: Double) -> Double {
-        let raw = playing ? base + now.timeIntervalSince(anchor) * v : base
+        let elapsed: Double = now.timeIntervalSince(anchor) * v
+        let raw: Double = playing ? base + elapsed : base
         let d = CityTimeline.duration
         let m = raw.truncatingRemainder(dividingBy: d)
         return m < 0 ? m + d : m

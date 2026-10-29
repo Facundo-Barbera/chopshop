@@ -13,8 +13,11 @@ struct CityRGB {
     init(_ r: Double, _ g: Double, _ b: Double) { self.r = r / 255; self.g = g / 255; self.b = b / 255 }
     init(unit r: Double, _ g: Double, _ b: Double) { self.r = r; self.g = g; self.b = b }
     func mix(_ o: CityRGB, _ t: Double) -> CityRGB {
-        let k = cityClamp(t)
-        return CityRGB(unit: r + (o.r - r) * k, g + (o.g - g) * k, b + (o.b - b) * k)
+        let k: Double = cityClamp(t)
+        let nr: Double = r + (o.r - r) * k
+        let ng: Double = g + (o.g - g) * k
+        let nb: Double = b + (o.b - b) * k
+        return CityRGB(unit: nr, ng, nb)
     }
     func scaled(_ f: Double) -> CityRGB { CityRGB(unit: r * f, g * f, b * f) }
     var color: Color { Color(red: r, green: g, blue: b) }
@@ -174,7 +177,8 @@ struct CityRenderer {
         if topFace { g.fill(poly([P(x0, y0, z1), P(x1, y0, z1), P(x1, y1, z1), P(x0, y1, z1)]), with: .color(top.color)) }
         if let e = edge {
             var l = Path(); l.move(to: P(x0, y1, z1)); l.addLine(to: P(x1, y1, z1)); l.addLine(to: P(x1, y0, z1))
-            g.stroke(l, with: .color(e.color.opacity(dark ? 0.9 : 0.8)), style: StrokeStyle(lineWidth: 1.1, lineCap: .round, lineJoin: .round))
+            let ea: Double = dark ? 0.9 : 0.8
+            g.stroke(l, with: .color(e.color.opacity(ea)), style: StrokeStyle(lineWidth: 1.1, lineCap: .round, lineJoin: .round))
         }
     }
 
@@ -238,7 +242,8 @@ struct CityRenderer {
         if let h = hovered, zoom == nil, let b = model.buildings.first(where: { $0.floors.contains { $0.id == h } }),
            let f = b.floors.first(where: { $0.id == h }) {
             let path = poly(CityHit.floorPolygon(b, level: f.level, frame: cam))
-            ctx.stroke(path, with: .color((dark ? Color.white : Color.black).opacity(0.45)), style: StrokeStyle(lineWidth: 1.3, lineJoin: .round))
+            let ink: Color = dark ? Color.white : Color.black
+            ctx.stroke(path, with: .color(ink.opacity(0.45)), style: StrokeStyle(lineWidth: 1.3, lineJoin: .round))
         }
         drawLabels(&ctx)
     }
@@ -341,7 +346,7 @@ struct CityRenderer {
         }
 
         for b in model.buildings {
-            let a = cityClamp(rise(b, 0) / 0.6)
+            let a: Double = cityClamp(rise(b, 0) / 0.6)
             guard a > 0 else { continue }
             let po = 0.22 * tile, k = 0.05 * tile, cast = 0.55 * tile
             let x0 = b.x0 - po, y0 = b.y0 - po, x1 = b.x1 + po, y1 = b.y1 + po
@@ -546,10 +551,10 @@ struct CityRenderer {
         }
         var topZ = b.floorZ(0)
         for f in b.floors {
-            let r = rise(b, f.level)
+            let r: Double = rise(b, f.level)
             guard r > 0 else { break }
             var g = ctx
-            var zOff = 0.0
+            var zOff: Double = 0
             if let tl = targetLevel {
                 if f.level > tl { zOff = lift; g.opacity = CityTransition.upperAlpha(p) }
             }
@@ -581,7 +586,7 @@ struct CityRenderer {
                 drawRail(&g, R, z: z1)
             }
             // brillo ámbar/rojo (pulso lento)
-            let att = max(tn.amber, tn.red)
+            let att: Double = max(tn.amber, tn.red)
             if att > 0.01 {
                 let sil = poly([P(R.x0 - so, R.y0 - so, z1), P(R.x1 + so, R.y0 - so, z1), P(R.x1 + so, R.y0 - so, z0), P(R.x1 + so, R.y1 + so, z0),
                                 P(R.x0 - so, R.y1 + so, z0), P(R.x0 - so, R.y1 + so, z1)])
@@ -840,7 +845,7 @@ struct CityRenderer {
         }
         let za = zb + op.za * hh, zt = zb + op.zt * hh
         guard zt - za > 1 else { return }
-        let lit = face == .left || face == .backY
+        let lit: Bool = face == .left || face == .backY
         var gg = g; gg.opacity = g.opacity * alpha
         let frame = (lit ? pal.frameL : pal.frameR).color
         let fu = 1.2 / max(1, len), gap = 0.8 / max(1, len)
@@ -854,6 +859,7 @@ struct CityRenderer {
         if red > 0 { lc1 = lc1.mix(CityPalette.redLit.0, 0.45 * red); lc2 = lc2.mix(CityPalette.redLit.1, 0.45 * red) }
         let zm = (za + zt) / 2
         var halo: [Path] = []
+        let dn: Double = Double(n)
         for i in 0..<n {
             let (a0, a1) = Self.bay(i, n)
             let m = (a1 - a0) * (1 - op.width) / 2
@@ -964,10 +970,16 @@ struct CityRenderer {
 
     /// Lado de las píldoras de proyecto: a la izquierda los edificios del borde izquierdo de la pantalla.
     func labelsOnLeft(_ b: CityBuilding) -> Bool {
-        let us = model.buildings.map { ($0.x0 + $0.x1) / 2 - ($0.y0 + $0.y1) / 2 }
+        func centerU(_ c: CityBuilding) -> Double {
+            let mx: Double = (c.x0 + c.x1) / 2
+            let my: Double = (c.y0 + c.y1) / 2
+            return mx - my
+        }
+        let us: [Double] = model.buildings.map(centerU)
         guard let lo = us.min(), let hi = us.max(), hi - lo > 1 else { return false }
-        let u = (b.x0 + b.x1) / 2 - (b.y0 + b.y1) / 2
-        return u < lo + (hi - lo) * 0.25
+        let u: Double = centerU(b)
+        let cut: Double = lo + (hi - lo) * 0.25
+        return u < cut
     }
 
     private func drawLabels(_ ctx: inout GraphicsContext) {
@@ -982,13 +994,16 @@ struct CityRenderer {
             g.draw(s, at: q, anchor: .top)
         }
         for b in model.buildings {
-            let left = labelsOnLeft(b)
+            let left: Bool = labelsOnLeft(b)
+            let lx0: Double = b.x0 - o, ly1: Double = b.y1 + o, rx1: Double = b.x1 + o, ry0: Double = b.y0 - o
+            let dx: CGFloat = left ? -8 : 8
             for f in b.floors where rise(b, f.level) >= 1 {
                 guard let s = ctx.resolveSymbol(id: "cf:\(f.id)") else { continue }
                 let z = b.floorZ(f.level) + b.floorHeight(f.level) * 0.55, r = b.rect(f.level)
                 let a = left ? P(r.x0 - o, r.y1 + o, z) : P(r.x1 + o, r.y0 - o, z)
                 var g = ctx; g.opacity = la
-                g.draw(s, at: CGPoint(x: a.x + (left ? -8 : 8), y: a.y), anchor: left ? .trailing : .leading)
+                let at = CGPoint(x: a.x + dx, y: a.y)
+                g.draw(s, at: at, anchor: left ? .trailing : .leading)
             }
             let ra = roofAlpha(b)
             guard ra > 0.01, let s = ctx.resolveSymbol(id: "cb:\(b.company)") else { continue }

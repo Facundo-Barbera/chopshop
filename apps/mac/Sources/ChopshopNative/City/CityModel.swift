@@ -133,7 +133,11 @@ public struct CityBuilding: Hashable, Sendable, Identifiable {
     /// Altura del techo (plinto y pisos, sin la azotea).
     public var height: Double { floorZ(floors.count) }
     /// Profundidad para pintar de atrás hacia delante.
-    public var depthKey: Double { x0 + w / 2 + y0 + d / 2 }
+    public var depthKey: Double {
+        let hw: Double = w / 2, hd: Double = d / 2
+        let a: Double = x0 + hw + y0
+        return a + hd
+    }
 }
 
 /// Medidas de la ciudad en unidades del mundo (las mismas que la proyección isométrica 2:1 de la oficina:
@@ -261,7 +265,10 @@ public struct CityModel: Equatable, Sendable {
 
     public static func makeFloor(_ p: LiveState.Project, company: String, level: Int) -> CityFloor {
         let st = status(p)
-        let running = p.tasks.filter { ($0["phase"]?.string).map { Self.running.contains($0) } ?? false }.count
+        let running: Int = p.tasks.filter { t in
+            guard let ph: String = t["phase"]?.string else { return false }
+            return Self.running.contains(ph)
+        }.count
         return CityFloor(project: p.name, company: company, level: level, status: st, activeThreads: activeThreads(p),
                          running: running, needsYou: needsYou(p), stuck: stuck(p), alert: alert(p, status: st))
     }
