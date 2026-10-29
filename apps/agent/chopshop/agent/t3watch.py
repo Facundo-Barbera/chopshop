@@ -10,7 +10,8 @@
   `approval.requested`, `machine.health`). `level_fn(project, texto) -> (nivel, notify)` decide si una pregunta la atiende
   un bot o una persona (por defecto: la regla `reactions` `on: pending_question` del perfil del proyecto, si existe).
   Eventos: `thread_started`, `thread_done`, `thread_failed`, `thread_settled`, `pending_question`, `pending_approval`,
-  `t3_unreachable` (una sola vez al caer) y `t3_recovered`. La primera pasada (sin línea base) siembra la tabla en silencio
+  `t3_unreachable` (una sola vez al caer) y `t3_recovered`. Los cuerpos de hilo llevan además `role` (el guardado, o el de
+  las reglas `match` del perfil), `ended_at` y `touched_at` (ISO, para la semivida de la oficina; `agent/office.py`). La primera pasada (sin línea base) siembra la tabla en silencio
   salvo las preguntas pendientes, que sí se avisan (son accionables).
 - `settle(t3, thread_id)`: `t3_thread_organize {action: "settle"}`. Nunca archiva.
 - `answer(t3, thread_id, choice, request=None)`: resuelve la opción con `chopshop/answers.py` (igual que el motor).
@@ -19,7 +20,7 @@ import time
 from datetime import datetime, timezone
 
 from .. import answers, profile, reactions, t3mcp
-from . import db
+from . import db, envelope, layout
 
 # Estados de hilo de T3 (los terminales coinciden con engine.TERMINAL). `idle` (hilos de proveedor/subagentes sin
 # ejecuciones) no es activo ni terminal: se registra pero no genera transiciones de inicio/fin.
@@ -118,6 +119,10 @@ def _epoch(s, default=None):
         return default
 
 
+def _iso(ts):
+    return envelope.iso(ts) if ts is not None else None
+
+
 def _meta(conn, key, default=None):
     r = conn.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
     return r["value"] if r else default
@@ -193,6 +198,17 @@ class _Pass:
         self.level_fn = level_fn or reaction_level
         self.baseline, self.last_poll, self.reads_left = baseline, last_poll, max_reads
         self.changes, self.errors, self.seen = [], [], set()
+        self.profiles = {}
+
+    def role(self, project, title, branch):
+        """Rol de la oficina por las reglas `match` del perfil (perfil leído una vez por pasada)."""
+        if project not in self.profiles:
+            try:
+                self.profiles[project] = profile.load(project)
+            except Exception:  # noqa: BLE001 - sin perfil (o inválido): sin rol
+                self.profiles[project] = None
+        prof = self.profiles[project]
+        return layout.role_for(prof, title, branch) if prof else None
 
     def emit(self, event, project, body):
         seq = self.emit_fn(event, project, body)
@@ -235,8 +251,16 @@ def _process(p, t, project, project_id, prev):
                 approvals = max(npend - len(pending), 0)
 
     row_title = t.get("title") or (prev or {}).get("title")
+    role = (prev or {}).get("role") or p.role(project, row_title, branch)
+    ended_at = None
+    if status in DONE | FAILED:     # semivida: cuándo terminó (el primer avistamiento usa la última actualización de T3)
+        ended_at = (prev or {}).get("ended_at") if prev and prev["status"] in DONE | FAILED else None
+        ended_at = ended_at or (p.now if terminal_change else _epoch(t.get("updatedAt"), p.now))
+    with db.tx():
+        touched = p.conn.execute("SELECT touched_at FROM thread_touch WHERE thread_id=?", (tid,)).fetchone()
     body = {"thread_id": tid, "title": row_title, "status": status, "link": t.get("link"), "worktree": worktree,
-            "branch": branch, "pull_requests": _prs(t)}
+            "branch": branch, "pull_requests": _prs(t), "role": role, "ended_at": _iso(ended_at),
+            "touched_at": _iso(touched["touched_at"]) if touched else None}
     quiet = p.baseline   # primera pasada: sembrar sin avisar (salvo preguntas)
     if not quiet:
         if active and not was_active:
@@ -244,7 +268,7 @@ def _process(p, t, project, project_id, prev):
         elif prev is None and fresh and (status in DONE or status in FAILED):
             p.emit("thread_started", project, dict(body))
         if terminal_change and status in DONE:
-            p.emit("thread_done", project, dict(body, **({"result": result} if result else {})))
+            p.emit("thread_done", project, dict(body, **({"result": result, "summary": result} if result else {})))
         elif terminal_change and status in FAILED:
             p.emit("thread_failed", project, dict(body))
         if settled and not (prev and prev["settled"]) and (prev is not None or fresh):
@@ -263,9 +287,10 @@ def _process(p, t, project, project_id, prev):
     with db.tx():
         p.conn.execute(
             "INSERT OR REPLACE INTO t3_threads(thread_id, project, t3_project_id, title, status, settled, worktree, branch, pending,"
-            " first_seen, last_seen, updated, extra) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " first_seen, last_seen, updated, extra, role, ended_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (tid, project, project_id, row_title, status, int(settled), worktree, branch, db.jdump(pending),
-             (prev or {}).get("first_seen") or p.now, p.now, _epoch(t.get("updatedAt"), p.now), db.jdump(extra)))
+             (prev or {}).get("first_seen") or p.now, p.now, _epoch(t.get("updatedAt"), p.now), db.jdump(extra), role,
+             ended_at))
 
 
 def poll(conn, cfg, t3, emit_fn, max_reads=MAX_READS, level_fn=None):

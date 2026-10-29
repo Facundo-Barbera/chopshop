@@ -58,6 +58,7 @@ DEFAULTS = {
         "projects": {},
         "webhook_files": {},           # nombre -> ruta a un archivo (0600) con la URL
         "automations": {"enabled": True, "interval": 2},   # interruptor global + s entre pasadas del hilo `automations`
+        "office": {"enabled": True, "interval": 2},        # escritorios, vestíbulo y semivida (agent/office.py): s entre pasadas
         # ingreso de GitHub por polling con ETag (agent/github.py); usa el `gh` ya autenticado, nunca un token aquí
         "github": {"enabled": False, "repos": [], "interval_s": 45, "gh_bin": "gh", "ci": True},
         "retention": {"raw_hours": 24, "m1_days": 30, "h1_days": 365, "events_days": 90},

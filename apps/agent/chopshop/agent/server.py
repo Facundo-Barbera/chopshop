@@ -29,7 +29,7 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import API_VERSION, __version__, collector as collector_mod, db, events, pairing as pairing_mod, projection, stream, t3watch, webhooks
+from . import API_VERSION, __version__, collector as collector_mod, db, events, layout, office as office_mod, pairing as pairing_mod, projection, stream, t3watch, webhooks
 
 log = logging.getLogger("chopshop.agent")
 
@@ -319,11 +319,13 @@ class AgentApp:
         ("GET", "/subscriptions"): "subscriptions", ("POST", "/answer"): "answer", ("POST", "/settle"): "settle",
         ("POST", "/subscriptions"): "subscribe",
         ("GET", "/state"): "state", ("GET", "/stream"): "stream", ("POST", "/pair"): "pair",
+        ("POST", "/touch"): "touch",
     }
 
     def __init__(self, cfg, conn, collector, t3, auth, runtime=None, emit_fn=None, orchestrator_fn=None,
-                 clock=time.time, pairing=None, stream_opts=None):
+                 clock=time.time, pairing=None, stream_opts=None, office=None):
         self.cfg, self.conn = cfg, conn
+        self.office = office              # agent/office.py (None = sin oficina: las rutas /desks y /touch dan 503)
         self.collector, self.t3, self.auth = collector, t3, auth
         self.runtime = runtime or Runtime(clock)
         self.clock = clock
@@ -349,6 +351,17 @@ class AgentApp:
             if method == "DELETE":
                 return "unsubscribe", {"name": urllib.parse.unquote(path[len("/subscriptions/"):])}
             raise ApiError(405, "método no permitido")
+        if path.startswith("/desks/"):
+            rest = urllib.parse.unquote(path[len("/desks/"):])
+            if layout.parse_desk_id(rest):
+                if method == "GET":
+                    return "desk", {"desk_id": rest}
+                raise ApiError(405, "método no permitido")
+            head, _, action = rest.rpartition("/")
+            if action == "assign" and layout.parse_desk_id(head):
+                if method == "POST":
+                    return "desk_assign", {"desk_id": head}
+                raise ApiError(405, "método no permitido")
         if any(p == path for (_m, p) in self.ROUTES):
             raise ApiError(405, "método no permitido")
         raise ApiError(404, "ruta desconocida")
@@ -492,6 +505,7 @@ class AgentApp:
         res = self._t3(t3watch.answer, thread, choice if isinstance(choice, dict) else str(choice), _text(body, "request", False, 128))
         log.info("respuesta enviada al hilo %s por %s", thread, ident.login or ident.via)
         self._answered(thread, res, by or ident.login or "human")
+        self._touch(thread)
         return dict(res, ok=True)
 
     def _answered(self, thread, res, by):
@@ -518,6 +532,40 @@ class AgentApp:
         self._t3(t3watch.settle, thread)
         log.info("hilo %s settled por %s", thread, ident.login or ident.via)
         return {"ok": True, "thread_id": thread}
+
+    # -- oficina (api_version 3)
+    def _office(self):
+        if self.office is None:
+            raise ApiError(503, "oficina no disponible en este agente")
+        return self.office
+
+    def _touch(self, thread):
+        """Responder cuenta como «tocar» (reinicia la semivida); un fallo aquí no deshace la respuesta."""
+        if self.office is None:
+            return
+        try:
+            self.office.touch(thread)
+        except Exception:  # noqa: BLE001
+            log.exception("no pude tocar el hilo %s", thread)
+
+    def r_touch(self, ident, q, body):
+        thread = _ident(body, "thread_id", True)
+        return {"ok": True, "thread_id": thread, "touched_at": self._office().touch(thread)}
+
+    def r_desk(self, ident, q, body, desk_id):
+        d = self._office().desk(desk_id)
+        if d is None:
+            raise ApiError(404, "escritorio desconocido")
+        return d
+
+    def r_desk_assign(self, ident, q, body, desk_id):
+        thread = _ident(body, "thread_id", True)
+        try:
+            self._office().assign(desk_id, thread)
+        except office_mod.OfficeError as e:
+            raise ApiError(e.status, e.message)
+        log.info("hilo %s asignado a %s por %s", thread, desk_id, ident.login or ident.via)
+        return {"ok": True, "desk": desk_id, "thread_id": thread}
 
     # -- suscripciones
     def r_subscribe(self, ident, q, body):

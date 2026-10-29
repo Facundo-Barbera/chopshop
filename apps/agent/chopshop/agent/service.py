@@ -22,7 +22,7 @@ import threading
 import time
 
 from .. import engine as engine_mod, events as legacy_events, graph, home, settings, state
-from . import __version__, automations as automations_mod, collector as collector_mod, config, db, envelope, events, github, pairing, server, t3watch
+from . import __version__, automations as automations_mod, collector as collector_mod, config, db, envelope, events, github, office as office_mod, pairing, server, t3watch
 
 log = logging.getLogger("chopshop.agent")
 
@@ -244,6 +244,8 @@ class AgentService:
         self.app = server.AgentApp(cfg, self.conn, self.collector, self.t3, self.auth, self.runtime,
                                    self.emit, orchestrator_fn, clock, pairing=self.pairing, stream_opts=stream_opts)
         self.engine_emit = engine_emitter(self.conn, cfg, poster, self.app.stream.bus.publish)
+        self.office = office_mod.Office(self.conn, cfg, self.emit_office, clock=clock)
+        self.app.office = self.office
         self.maint_interval, self.maint_first = maint_interval, maint_first
         self.compact_every = compact_every
         acfg = cfg.get("automations") or {}
@@ -264,6 +266,13 @@ class AgentService:
         seq = events.emit(self.conn, self.cfg, event, project, body, poster=self.poster)
         self.app.stream.bus.publish(seq)            # despierta a los clientes de /stream
         return seq
+
+    def emit_office(self, type, project, body, **kw):
+        """Sobre de la oficina (`desk.*`, `office.changed`, `task.state` de un toque) -> bus + `/stream`."""
+        env = events.emit_envelope(self.conn, self.cfg, type, project, body, poster=self.poster, ts=self.clock(), **kw)
+        if env:
+            self.app.stream.bus.publish(env["seq"])
+        return env
 
     def emit_envelope(self, env):
         """Sobre parcial de una automatización -> bus (mismo `emit`, con los metadatos del sobre)."""
@@ -302,6 +311,9 @@ class AgentService:
             if (self.cfg.get("automations") or {}).get("enabled", True):
                 self._spawn("automations", self._loop, "automations", self.automations_once,
                             lambda: (self.cfg.get("automations") or {}).get("interval") or 2)
+            if (self.cfg.get("office") or {}).get("enabled", True):
+                self._spawn("office", self._loop, "office", self.office.tick,
+                            lambda: (self.cfg.get("office") or {}).get("interval") or 2)
             if self.github is not None:
                 self._spawn("github", self._loop, "github", self.github.poll_once, self.github.next_delay)
             self._spawn("maintenance", self._maintenance)
