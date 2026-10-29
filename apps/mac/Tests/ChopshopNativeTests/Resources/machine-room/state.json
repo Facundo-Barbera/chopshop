@@ -1,0 +1,17 @@
+{"api_version": 3, "machine": "contabo-dev", "head_seq": 1900, "ts": "2026-10-29T16:12:00.000Z", "projects": [], "lobby": [],
+ "machine_room": {
+  "listeners": [
+   {"name": "forge", "state": "degraded", "last_ok": "2026-10-29T16:05:00.000Z", "last_cycle": "2026-10-29T16:11:00.000Z", "backoff_s": 120, "error": "rate limit", "ts": "2026-10-29T16:11:00.000Z"},
+   {"name": "t3watch", "state": "ok", "last_ok": "2026-10-29T16:11:58.000Z", "last_cycle": "2026-10-29T16:11:58.000Z", "backoff_s": 0, "error": null, "ts": "2026-10-29T16:11:58.000Z"}],
+  "automations": [
+   {"project": "awesome-gb", "name": "triage", "trigger": "schedule", "exit": 0, "duration_ms": 2310, "error": null, "ts": "2026-10-29T08:30:02.000Z", "next_run": "2026-10-30T08:30:00.000Z", "severity": "info"}],
+  "subscriptions": [
+   {"name": "bots", "last_ok": "2026-10-29T16:10:00.000Z", "last_error": null, "signed": true},
+   {"name": "chat", "last_ok": null, "last_error": "HTTP 500", "signed": false}],
+  "rack": [
+   {"provider": "github", "repo": "<org>/<engine-cx>", "project": "awesome-gb", "kind": "docs", "label": "Engine CX", "light": "green", "default_branch": "main", "ci": "success", "url": "https://github.com/<org>/<engine-cx>", "ts": "2026-10-29T16:00:00.000Z",
+    "runs": [{"run_id": "8001", "workflow": "docs.yml", "status": "completed", "conclusion": "success", "event": "workflow_dispatch", "actor": "<login-humano>", "head_branch": "main", "head_sha": "aa11bb22cc", "url": "https://github.com/<org>/<engine-cx>/actions/runs/8001", "updated_at": "2026-10-29T15:58:00.000Z",
+             "origin": {"kind": "automation", "id": "triage", "label": "automatización triage"}}]},
+   {"provider": "github", "repo": "<org>/<repo-principal>", "project": "awesome-gb", "kind": "main", "label": "repo-principal", "light": "red", "default_branch": "main", "ci": "failure", "url": "https://github.com/<org>/<repo-principal>", "ts": "2026-10-29T16:00:00.000Z",
+    "runs": [{"run_id": 8999, "workflow": "ci", "status": "completed", "conclusion": "failure", "event": "schedule", "actor": null, "head_branch": "main", "head_sha": "ff00ee11", "url": null, "updated_at": "2026-10-29T15:00:00.000Z",
+             "origin": {"kind": "schedule", "id": null, "label": null}}]}]}}
