@@ -198,11 +198,16 @@ public enum CityHit {
         return inside
     }
 
-    /// El piso más cercano a la cámara bajo `p` (edificios de delante primero, pisos de arriba primero).
-    public static func floor(at p: CGPoint, in m: CityModel, frame f: IsoFrame) -> String? {
+    /// `CityFloor.id` del piso más cercano a la cámara bajo `p` (edificios de delante primero, pisos de arriba primero).
+    public static func floorID(at p: CGPoint, in m: CityModel, frame f: IsoFrame) -> String? {
         for b in m.buildings.sorted(by: { $0.depthKey > $1.depthKey }) {
-            for fl in b.floors.reversed() where contains(floorPolygon(b, level: fl.level, frame: f), p) { return fl.project }
+            for fl in b.floors.reversed() where contains(floorPolygon(b, level: fl.level, frame: f), p) { return fl.id }
         }
         return nil
+    }
+
+    /// Proyecto del piso bajo `p` (nil fuera de la ciudad o en el vestíbulo, que no es de ningún proyecto).
+    public static func floor(at p: CGPoint, in m: CityModel, frame f: IsoFrame) -> String? {
+        floorID(at: p, in: m, frame: f).flatMap { m.floor(id: $0) }.flatMap { $0.isLobby ? nil : $0.project }
     }
 }
