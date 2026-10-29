@@ -57,6 +57,7 @@ DEFAULTS = {
         "worktrees_root": "~/.t3/worktrees",
         "projects": {},
         "webhook_files": {},           # nombre -> ruta a un archivo (0600) con la URL
+        "automations": {"enabled": True, "interval": 2},   # interruptor global + s entre pasadas del hilo `automations`
         "retention": {"raw_hours": 24, "m1_days": 30, "h1_days": 365, "events_days": 90},
     },
 }
