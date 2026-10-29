@@ -667,6 +667,7 @@ public struct CityView: View {
         let origin = frozenZoom != nil ? nil : zoomOrigin
         let goalCampus = frozenZoom != nil ? nil : campusFocus
         let animate = frozenTime == nil
+        let zoomTasks: [String: MockTask] = (p > 0 ? target : nil).map { tasks($0) } ?? [:]
         return Canvas { ctx, size in
             guard !model.buildings.isEmpty else { return }
             let z = zoomData(p: p, size: size, content: inside, city: levelFrame(size, campus: origin))
@@ -688,7 +689,7 @@ public struct CityView: View {
                 FloorOfficeView.labels(plan, layout: lay, now: now, dark: dark)
             case .graph(let sc)?:
                 ForEach(sc.desks) { d in
-                    IsoDeskLabel(label: d.node.label, visual: d.visual).tag("d:\(d.id)")
+                    IsoDeskLabel(name: sc.person(d.id), work: d.work(zoomTasks), visual: d.visual).tag("d:\(d.id)")
                 }
                 ForEach(sc.rooms, id: \.index) { r in
                     IsoRoomLabel(index: r.index).tag("r:\(r.index)")
@@ -764,7 +765,7 @@ public struct CityView: View {
     static func officeAlerts(_ sc: IsoScene, tasks: [String: MockTask]) -> [IsoAlert] {
         sc.desks.filter { $0.visual == .needsYou || $0.visual == .stuck }
             .sorted { ($0.visual == .needsYou ? 0 : 1, $0.id) < ($1.visual == .needsYou ? 0 : 1, $1.id) }
-            .map { IsoAlert(id: $0.id, label: $0.node.label, title: $0.node.task.flatMap { tasks[$0]?.title } ?? $0.node.title, visual: $0.visual) }
+            .map { IsoAlert(id: $0.id, label: sc.person($0.id), title: $0.work(tasks), visual: $0.visual) }
     }
 }
 
@@ -947,19 +948,25 @@ final class CityCameraEase {
     func snap(_ f: IsoFrame) { current = f }
 }
 
-/// Etiqueta de escritorio: el mismo estilo que los símbolos "d:" de IsoOfficeView.
+/// Etiqueta de escritorio (oficina y ciudad): el nombre del muñeco y, debajo, el título del hilo de T3 en el que trabaja.
 @available(macOS 26.0, *)
 struct IsoDeskLabel: View {
-    let label: String
+    let name: String
+    let work: String
     let visual: NodeVisual
     @Environment(\.colorScheme) private var scheme
     var body: some View {
-        Text(label)
-            .font(.system(size: 10, weight: .semibold))
-            .padding(.horizontal, 7).padding(.vertical, 2)
-            .background(Capsule().fill(scheme == .dark ? Color.black.opacity(0.5) : Color.white.opacity(0.78)))
-            .overlay(Capsule().strokeBorder(visual.tint?.opacity(0.9) ?? Color.primary.opacity(0.14), lineWidth: 0.7))
-            .foregroundStyle(visual.tint ?? Color.primary.opacity(0.85))
+        VStack(spacing: 0) {
+            Text(name).font(.system(size: 10, weight: .semibold))
+            if !work.isEmpty {
+                Text(work).font(.system(size: 8.5)).foregroundStyle(Color.primary.opacity(0.6)).lineLimit(1).truncationMode(.tail)
+            }
+        }
+        .frame(maxWidth: 150)
+        .padding(.horizontal, 8).padding(.vertical, 2)
+        .background(Capsule().fill(scheme == .dark ? Color.black.opacity(0.5) : Color.white.opacity(0.78)))
+        .overlay(Capsule().strokeBorder(visual.tint?.opacity(0.9) ?? Color.primary.opacity(0.14), lineWidth: 0.7))
+        .foregroundStyle(visual.tint ?? Color.primary.opacity(0.85))
     }
 }
 
