@@ -89,3 +89,25 @@ Las capturas de v0.8 salían de `ChopshopSnap`, que pinta `FloorOfficeView` dire
 - La Ciudad no tenía entrada en la app (`LiveCityScreen` no se usaba) y además se construía sin `state`, así que su zoom tampoco
   podía montar los pisos. Ahora: «Ciudad» arriba en la barra lateral, con `state`, y el zoom monta `ProjectOfficeView` en el piso pulsado.
 - Capturas nuevas: `ChopshopSnap <salida> floor` → `floor-proyecto-46-*.png`; `city-office` → `city-office-46-*.png`.
+
+### Tras el WIP «mundo continuo» (`fd90e81`), en contabo-dev sin compilar
+
+- `WorldLayout`: las regiones iban en una rejilla del **mundo** (filas a lo largo de +x, la siguiente fila en +y), que en
+  isométrico es una diagonal: con la escena de 46 hilos (vestíbulo, Producto, máquinas) salía una columna, la franja diagonal, a
+  cualquier proporción. Ahora van en **filas de pantalla** (cada fila horizontal y centrada) con el corte que mejor llena la
+  proporción: 0,6–1 → 3 filas; 1,6–2,4 → vestíbulo y piso arriba, máquinas debajo; 3,5 → una fila. API sin cambios (`columns` =
+  regiones de la fila más larga).
+- `ProjectWorkspace`: con el reloj real, los pisos se rehacen cada 15 s (`TimelineView(.periodic)`) para que lo que la semivida
+  desvaneció salga aunque no llegue nada del stream.
+- Ciudad de la barra lateral: `LiveCityScreen(perProject: true)` → `CityModel.build(perProject:)`: un edificio por proyecto; la
+  píldora del piso no repite el proyecto; el vestíbulo de un edificio de un solo proyecto también entra en su oficina.
+- `WorldLayoutTests` (nuevo): losas sin solaparse y salas dentro de su losa a 5 proporciones, filas según la ventana, ids únicos,
+  semivida (16 visibles; 6 h después solo el que corre), sala de máquinas por proyecto, ciudad por proyecto.
+
+Pendiente en el Mac (sin ratón ni teclado reales: compilar, tests y capturas sin interfaz):
+
+- [ ] `swift build` en `apps/mac` y `apps/mac/native`; `swift test` (`WorldLayoutTests` nuevo; el resto sin cambios esperados).
+- [ ] `ChopshopSnap <salida> floor` → `floor-proyecto-46-*`: el mundo en filas horizontales (no en diagonal) a 1440×900 y
+      2560×1440, llenando el ancho.
+- [ ] `ChopshopSnap <salida> city-office` → `city-office-*` y `city-office-46-*` (zoom terminado en el mundo, encuadrado en el piso).
+      Nuevas: `city-por-proyecto-dark.png` (un edificio por proyecto) y `city-por-proyecto-zoom-fin.png` (mundo encuadrado en Docs).

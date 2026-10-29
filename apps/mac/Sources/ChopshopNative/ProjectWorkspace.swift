@@ -29,13 +29,25 @@ public struct ProjectWorkspace: View {
         }
     }
 
+    /// Cada cuánto se rehacen los pisos con el reloj (semivida).
+    static let refresh = 15.0
+
+    private func office(now: Date?) -> some View {
+        OfficeWorldView(state: state, project: project, now: now, selected: selected) { tid in
+            withAnimation(.snappy(duration: 0.2)) { selected = tid }
+        }
+        .background(IsoBackdrop())
+    }
+
     @ViewBuilder private var stage: some View {
         switch mode {
         case .office:
-            OfficeWorldView(state: state, project: project, now: frozenNow, selected: selected) { tid in
-                withAnimation(.snappy(duration: 0.2)) { selected = tid }
+            if frozenNow != nil { office(now: frozenNow) }
+            else {
+                // los pisos se rehacen cada `refresh` s aunque no llegue nada del stream: lo que la semivida ya desvaneció sale
+                // del mundo (sin dejar el hueco del invitado ni el escritorio «ocupado» por alguien invisible)
+                TimelineView(.periodic(from: .now, by: Self.refresh)) { _ in office(now: nil) }
             }
-            .background(IsoBackdrop())
         case .graph:
             if let g = snapshot.graph(for: project) {
                 let tasks = Dictionary(snapshot.tasks(of: project).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })

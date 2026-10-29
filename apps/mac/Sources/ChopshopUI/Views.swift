@@ -389,8 +389,8 @@ struct StatusCapsule<Content: View>: View {
     }
 }
 
-/// «Ciudad» de la barra lateral (macOS 26): todos los proyectos como edificios; clic en un piso → zoom a su oficina (pisos,
-/// escritorios por rol y vestíbulo). Sin credencial, la pantalla de emparejar.
+/// «Ciudad» de la barra lateral (macOS 26): un edificio por proyecto; clic en un piso → zoom a la oficina del proyecto (vestíbulo,
+/// pisos por rol y sala de máquinas en un solo mundo). Sin credencial, la pantalla de emparejar.
 @available(macOS 26.0, *)
 private struct LiveCityRoot: View {
     @ObservedObject var store: LiveStore
@@ -399,7 +399,7 @@ private struct LiveCityRoot: View {
         case .noCredential, .unauthorized:
             PairingScreen().frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(nsColor: .windowBackgroundColor))
         default:
-            LiveCityScreen(store: store)
+            LiveCityScreen(store: store, perProject: true)
         }
     }
 }

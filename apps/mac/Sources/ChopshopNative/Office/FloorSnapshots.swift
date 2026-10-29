@@ -72,6 +72,16 @@ public extension Snapshots {
             write(city46(CityFocus(project: ProjectOfficeFixture.project, p: 1, floor: "\(ProjectOfficeFixture.project)#0")), dark: true, size: s46,
                   to: "\(out)/city-office-46-piso-\(sz).png")
         }
+        // la «Ciudad» de la barra lateral: un edificio por proyecto (`city-por-proyecto-*.png`), y su zoom terminado en el piso Docs
+        let mp = CityModel.build(state, perProject: true)
+        var lp = CityLights()
+        lp.observe(mp, at: 0)
+        for (name, zoom) in [("dark", nil), ("zoom-fin", CityFocus(project: "awesome-gb", p: 1, floor: "awesome-gb#1"))] as [(String, CityFocus?)] {
+            write(CityView(model: mp, lights: lp, snapshot: snap, state: state, frozenTime: 10, frozenNow: FloorFixture.now,
+                           frozenZoom: zoom, flatChrome: true)
+                    .padding(10).background(Color(nsColor: .windowBackgroundColor)),
+                  dark: true, size: size, to: "\(out)/city-por-proyecto-\(name).png")
+        }
         if let docs = FloorPlan.floor(in: state, project: "awesome-gb", index: 1) {
             write(FloorOfficeView(plan: docs, frozenNow: FloorFixture.now, flatChrome: true).background(IsoBackdrop()),
                   dark: true, size: CGSize(width: 1100, height: 620), to: "\(out)/city-office-piso-docs.png")
