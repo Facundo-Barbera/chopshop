@@ -19,7 +19,6 @@ import json
 import logging
 import os
 import re
-import secrets as _secrets
 import shutil
 import signal
 import subprocess
@@ -29,6 +28,7 @@ import threading
 import time
 
 from .. import home
+from . import envelope
 
 log = logging.getLogger("chopshop.agent.automations")
 
@@ -59,17 +59,10 @@ WHERE_OPS = ("in", "not", "regex")
 # Espacios de nombres de tipos del agente (§2.2): se pueden escuchar pero no emitir desde un script.
 RESERVED = ("task", "question", "approval", "batch", "graph", "node", "reaction", "machine", "github", "automation", "agent")
 RESERVED_ENV = ("PATH", "CHOPSHOP_EVENT_FILE", "CHOPSHOP_PROJECT", "CHOPSHOP_AUTOMATION")
-# Nombres viejos del bus (antes del contrato de sobre) -> tipo nuevo. Si existe `envelope.LEGACY_MAP` se usa ese.
-LEGACY = {"thread_started": "task.state", "thread_done": "task.state", "thread_failed": "task.state",
-          "thread_settled": "task.state", "pending_question": "question.opened", "pending_approval": "approval.requested",
-          "task_done": "task.state", "batch_done": "batch.done", "graph_exception": "node.state", "graph_done": "graph.done",
-          "reaction": "reaction.applied", "t3_unreachable": "machine.health", "t3_recovered": "machine.health",
-          "agent_started": "agent.started"}
-
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _ENVNAME = re.compile(r"^[A-Z_][A-Z0-9_]{0,63}$")
-_TYPE = re.compile(r"^[a-z][a-z0-9_-]*(\.[a-z0-9_-]+)+$")
-_GLOB = re.compile(r"^[a-z0-9_*?-]+(\.[a-z0-9_*?-]+)*$")
+_TYPE = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z0-9_]+)+$")         # el de envelope.py
+_GLOB = re.compile(r"^[a-z0-9_*?]+(\.[a-z0-9_*?]+)*$")
 _EVERY = re.compile(r"^\s*(\d+)\s*([smhd])\s*$")
 _UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 
@@ -398,53 +391,41 @@ def where_match(where, env):
 # ---------------------------------------------------------------- sobres
 
 def new_id():
-    """Id único y ordenable (ULID). Usa `envelope.new_id` si el contrato ya existe."""
-    try:
-        from . import envelope  # noqa: PLC0415
-        return envelope.new_id()
-    except (ImportError, AttributeError):
-        pass
-    alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
-    n = (int(time.time() * 1000) << 80) | _secrets.randbits(80)
-    return "".join(alphabet[(n >> (5 * i)) & 31] for i in range(25, -1, -1))
-
-
-def _legacy_map():
-    try:
-        from . import envelope  # noqa: PLC0415
-        return dict(LEGACY, **envelope.LEGACY_MAP)
-    except (ImportError, AttributeError):
-        return LEGACY
+    return envelope.new_id()
 
 
 def normalize(row):
-    """Fila del bus (`events.list_after`) o sobre -> sobre con las claves que usa el matcher.
-    Mientras el bus no guarde columnas del sobre, sus metadatos viajan en `body._env` (puente hasta el contrato v3)."""
+    """Sobre del bus (`events.list_after`) o sobre suelto -> sobre con `cause`, `subject` y `body` bien formados.
+    Un dict con el nombre viejo (`event`) y sin `type` se traduce con `envelope.from_legacy`."""
     if not isinstance(row, dict):
         return None
-    body = row.get("body") if isinstance(row.get("body"), dict) else {}
-    meta = body.get("_env") if isinstance(body.get("_env"), dict) else {}
-    if "type" in row and "v" in row:
-        env = dict(row)
-    else:
-        ev = row.get("event") or row.get("type")
-        env = {"v": 1, "id": meta.get("id") or row.get("id") or ("seq-%s" % row.get("seq")), "seq": row.get("seq"),
-               "ts": row.get("ts"), "machine": row.get("machine") or row.get("machine_id"), "project": row.get("project"),
-               "type": row.get("type") or _legacy_map().get(ev, ev), "severity": meta.get("severity") or row.get("severity") or "info",
-               "needs": meta.get("needs", row.get("needs")), "subject": meta.get("subject") or row.get("subject") or {},
-               "cause": meta.get("cause") or row.get("cause") or {"id": None, "depth": 0},
-               "body": {k: v for k, v in body.items() if k != "_env"}}
+    env = dict(row)
+    if not env.get("type") and env.get("event"):
+        f = envelope.from_legacy(env["event"], env.get("body") if isinstance(env.get("body"), dict) else {})
+        env.update({k: f[k] for k in ("type", "severity", "needs", "subject", "body")})
+    if not env.get("id"):
+        env["id"] = "seq-%s" % env.get("seq")
     cause = env.get("cause") if isinstance(env.get("cause"), dict) else {}
     try:
         depth = int(cause.get("depth") or 0)
     except (TypeError, ValueError):
         depth = MAX_DEPTH
     env["cause"] = {"id": cause.get("id"), "depth": depth}
-    if not isinstance(env.get("body"), dict):
-        env["body"] = {}
-    if not isinstance(env.get("subject"), dict):
-        env["subject"] = {}
+    for k in ("body", "subject"):
+        if not isinstance(env.get(k), dict):
+            env[k] = {}
     return env
+
+
+def _clean_subject(o, spec):
+    """Sujeto que da el script, si cumple el contrato (kind conocido, id texto); si no, el de la automatización."""
+    if not isinstance(o, dict) or o.get("kind") not in envelope.SUBJECT_KINDS or o.get("id") in (None, ""):
+        return _subject(spec)
+    out = {"kind": o["kind"], "id": str(o["id"])[:200]}
+    for k in ("title", "url"):
+        if isinstance(o.get(k), str) and o[k]:
+            out[k] = o[k][:500]
+    return out
 
 
 def parse_output(text, spec, trigger_env):
@@ -466,7 +447,7 @@ def parse_output(text, spec, trigger_env):
             continue
         sev = o.get("severity") if o.get("severity") in SEVERITY else "info"
         needs = o.get("needs") if o.get("needs") in NEEDS else None
-        subj = o.get("subject") if isinstance(o.get("subject"), dict) else _subject(spec)
+        subj = _clean_subject(o.get("subject"), spec)
         body = o.get("body") if isinstance(o.get("body"), dict) else {}
         out.append({"v": 1, "type": o["type"], "project": spec["project"], "severity": sev, "needs": needs, "subject": subj,
                     "cause": dict(cause), "body": body})
@@ -474,7 +455,7 @@ def parse_output(text, spec, trigger_env):
 
 
 def _subject(spec):
-    return {"kind": "automation", "id": "%s/%s" % (spec["project"], spec["name"]), "title": spec["name"]}
+    return envelope.subject("automation", spec["name"])
 
 
 # ---------------------------------------------------------------- runner
@@ -650,6 +631,14 @@ def read_log(project, name=None, n=20, root=None):
     return out[-n:]
 
 
+def _publish(emit_fn, e):
+    stored = emit_fn(e)
+    if isinstance(stored, dict):                     # el bus pone id/seq/ts/machine definitivos
+        e.update({k: stored[k] for k in ("id", "seq", "ts", "machine") if k in stored})
+    else:
+        e.setdefault("id", new_id())
+
+
 def run_once(spec, emit_fn, trigger="manual", trigger_env=None, root=None, secrets_root=None, environ=None,
              grace=KILL_GRACE, wall=time.time):
     """Ejecuta, convierte la salida en sobres, los emite (más `automation.ran`) y deja una línea en el log."""
@@ -657,12 +646,16 @@ def run_once(spec, emit_fn, trigger="manual", trigger_env=None, root=None, secre
     envs, discarded = parse_output(res["stdout"], spec, trigger_env)
     if res["timed_out"]:
         envs = []                                    # una ejecución que no terminó no publica nada a medias
+    sent = []
     for e in envs:
-        e["id"] = new_id()
-        emit_fn(e)
+        try:
+            _publish(emit_fn, e)
+            sent.append(e)
+        except envelope.EnvelopeError:               # el bus lo rechaza (esquema del tipo): se descarta y se cuenta
+            discarded += 1
+    envs = sent
     ran = ran_envelope(spec, trigger, trigger_env, res, len(envs), discarded)
-    ran["id"] = new_id()
-    emit_fn(ran)
+    _publish(emit_fn, ran)
     write_log(spec, {"ts": wall(), "trigger": trigger, "trigger_event": (trigger_env or {}).get("id"), "exit": res["exit"],
                      "duration_ms": res["duration_ms"], "emitted": len(envs), "discarded": discarded,
                      "error": ran["body"]["error"], "stderr_tail": res["stderr"][-500:]}, root)
@@ -971,11 +964,10 @@ def _db_emitter():
 
 
 def bus_emit(conn, cfg, env, poster=None, wait=False):
-    """Sobre parcial -> bus del agente. Hasta el contrato v3, severity/needs/subject/cause/id viajan en `body._env`."""
+    """Sobre parcial -> bus del agente (`events.emit_envelope`, que valida y asigna id/seq/ts). Devuelve el sobre guardado."""
     from . import events  # noqa: PLC0415
-    body = dict(env.get("body") or {})
-    body["_env"] = {k: env.get(k) for k in ("id", "severity", "needs", "subject", "cause")}
-    return events.emit(conn, cfg, env["type"], env.get("project"), body, poster=poster, wait=wait)
+    return events.emit_envelope(conn, cfg, env["type"], env.get("project"), env.get("body") or {}, env.get("subject"),
+                                env.get("severity"), env.get("needs"), env.get("cause"), poster=poster, wait=wait)
 
 
 def cmd_run(a, out, err):
