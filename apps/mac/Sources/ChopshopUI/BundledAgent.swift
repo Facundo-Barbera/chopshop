@@ -44,6 +44,7 @@ final class BundledAgent: ObservableObject {
     private let bundle: Bundle
     private let defaults: UserDefaults
     private var syncing = false
+    private var resync = false                // el ajuste cambió durante un `sync`: se repite al terminar
 
     init(bundle: Bundle = .main, defaults: UserDefaults = .standard) {
         self.bundle = bundle
@@ -111,9 +112,17 @@ final class BundledAgent: ObservableObject {
     @MainActor
     func sync(isPaired: @escaping () -> Bool, pair: @escaping (String, String) async -> String?) async {
         guard isAvailable else { state = .unavailable; return }
-        guard !syncing else { return }
+        guard !syncing else { resync = true; return }
         syncing = true
-        defer { syncing = false }
+        repeat {
+            resync = false
+            await syncOnce(isPaired: isPaired, pair: pair)
+        } while resync
+        syncing = false
+    }
+
+    @MainActor
+    private func syncOnce(isPaired: @escaping () -> Bool, pair: @escaping (String, String) async -> String?) async {
         let svc = service
         guard isEnabled else {
             if svc.status == .enabled || svc.status == .requiresApproval { try? await svc.unregister() }

@@ -90,6 +90,9 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# El OpenSSL de python-build-standalone no conoce los certificados del sistema: sin esto fallan los webhooks HTTPS
+if not os.environ.get("SSL_CERT_FILE") and os.path.isfile("/etc/ssl/cert.pem"):
+    os.environ["SSL_CERT_FILE"] = "/etc/ssl/cert.pem"
 from chopshop.cli import main  # noqa: E402
 
 sys.exit(main(sys.argv[1:]))

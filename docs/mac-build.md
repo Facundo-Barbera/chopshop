@@ -83,6 +83,30 @@ cuenta `<máquina>@<host:puerto>`, solo este dispositivo, sin sincronizar con iC
   el detalle del proyecto ofrece «Seguir con la vista clásica».
 - Al primer arranque con un ad-hoc nuevo, macOS puede preguntar si la app puede usar el Llavero: pulsa «Permitir siempre».
 
+## Usar esta Mac como máquina
+
+Chopshop.app lleva dentro su propio agente: al instalar la app, este Mac aparece como una máquina más sin instalar nada aparte.
+**Ajustes… (⌘,) → «Usar esta Mac como máquina»** (activado por defecto):
+
+- La app registra el agente como ítem de inicio en segundo plano con `SMAppService` (LaunchAgent
+  `Contents/Library/LaunchAgents/chopshop-agent.plist`, nunca `launchctl`). Arranca al iniciar sesión aunque la app esté cerrada;
+  macOS lo muestra en **Ajustes del Sistema → General → Ítems de inicio** (si pide permiso, la app ofrece abrir esa pantalla).
+- Se añade como agente `esta-mac` en `http://127.0.0.1:<[agent] port>` (3790 por defecto), sin escribir en `config.toml`, y la app
+  se empareja sola: ejecuta `chopshop-agent pair create --json` (CLI local incrustada, código de 2 minutos) y lo canjea por `POST /pair`.
+  La credencial va al Llavero como cualquier otra.
+- Usa la misma configuración (`[agent]` de `config.toml`) y la misma base de datos que un agente instalado a mano. Si ya hay un
+  agente propio escuchando en ese puerto, la app no registra otro y usa ese.
+- Al desactivarlo se quita el ítem de inicio y el agente se detiene. Tras actualizar la app se vuelve a registrar para que corra el
+  código nuevo.
+- Log: `~/Library/Logs/Chopshop/agent.log` (rota a `agent.log.1` pasados 5 MB).
+
+Contenido del bundle (`release/embed-agent.sh`, lo llama `build.sh`): `Contents/MacOS/chopshop-agent` (lanzador Swift,
+`Sources/ChopshopAgent`) y `Contents/Resources/agent/` (paquete `apps/agent/chopshop` con `.pyc` precompilados y un Python de
+[python-build-standalone](https://github.com/astral-sh/python-build-standalone) fijado con SHA-256 en
+`release/python-runtime.version`, recortado). La primera build lo descarga a `apps/mac/.build/python-runtime`; `EMBED_AGENT=0`
+construye sin agente (el ajuste queda inactivo). Una instalación headless (VPS, Linux) no cambia: sigue con su unidad systemd
+(docs/agent-service.md).
+
 ## Oficina en vivo (macOS 26)
 
 En macOS 26 o posterior el detalle de un **proyecto** es la vista nativa `ChopshopNative` (oficina isométrica / grafo en capas,
