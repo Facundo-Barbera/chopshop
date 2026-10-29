@@ -176,7 +176,7 @@ graph:
 
 ## App de macOS
 
-`apps/mac`: ejecutable SwiftPM `ChopshopUI` (SwiftUI, macOS 13+; vidrio líquido en macOS 26) con `NavigationSplitView` y un `WKWebView` transparente que carga la app React (`apps/ui`). Es un **cliente puro de la API del agente** ([`docs/agent-api.md`](docs/agent-api.md)): no ejecuta Python ni habla con T3, y se empaqueta como un único `Chopshop.app`. Vistas: **Resumen**, **Preguntas** (responder), **Actividad**, **Reacciones**, **Grafo**, **Lotes**, **Máquinas** (CPU/RAM/disco por app y proyecto, servidores de prueba) y una vista por proyecto. Los permisos (approvals) son de solo lectura: se aprueban en T3.
+`apps/mac`: ejecutable SwiftPM `ChopshopUI` (SwiftUI, macOS 13+; vidrio líquido en macOS 26) con `NavigationSplitView` y un `WKWebView` transparente que carga la app React (`apps/ui`). Es un **cliente puro de la API del agente** ([`docs/agent-api.md`](docs/agent-api.md)): no ejecuta Python ni habla con T3, y se empaqueta como un único `Chopshop.app`. Vistas: **Resumen**, **Preguntas** (responder), **Actividad**, **Reacciones**, **Grafo**, **Lotes**, **Máquinas** (CPU/RAM/disco por app y proyecto) y una vista por proyecto. Los permisos (approvals) son de solo lectura: se aprueban en T3.
 
 ### Build
 
@@ -209,7 +209,7 @@ Entorno (tiene prioridad): `CHOPSHOP_APP__AGENT_URL`, `CHOPSHOP_APP__TOKEN_FILE`
 ### Cómo funciona
 
 - Cada `refresh_seconds` la app consulta `GET /snapshot` de cada agente (URLSession, con `Authorization: Bearer <token>` leído del archivo en cada petición; el token no se imprime ni se guarda) y entrega los resultados crudos a la UI web, que los combina por `machine_id` (`packages/api/src/view.js`).
-- Puente JSON `{type, payload, id?}`. JS→Swift (`window.webkit.messageHandlers.chopshop.postMessage`): `ready`, `refresh`, `navigate`, `openLink` y las acciones `answer`, `settle`, `leaseRequest`, `leaseRelease`, `leaseTouch`, `sweep` (cada una un `POST` de la API al agente indicado en `agent`). Swift→JS (`window.chopshop.receive`): `agents`, `select`, `error`, `actionResult`.
+- Puente JSON `{type, payload, id?}`. JS→Swift (`window.webkit.messageHandlers.chopshop.postMessage`): `ready`, `refresh`, `navigate`, `openLink` y las acciones `answer` y `settle` (cada una un `POST` de la API al agente indicado en `agent`). Swift→JS (`window.chopshop.receive`): `agents`, `select`, `error`, `actionResult`.
 - Pruebas: la lógica pura de Swift (config, cliente con transporte falso, resumen) está en `apps/mac/Tests` (`swift test`, requiere Xcode); la combinación de snapshots y el cliente JS, en `packages/api/test` (`pnpm test`).
 - Argumentos de la app: `--select overview|questions|batches|events|project:<nombre>`, `--capture`.
 

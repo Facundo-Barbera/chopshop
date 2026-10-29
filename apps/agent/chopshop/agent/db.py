@@ -5,7 +5,7 @@ import os
 import sqlite3
 import threading
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS machine_samples (      -- crudo (retención raw_hours)
@@ -31,19 +31,6 @@ CREATE TABLE IF NOT EXISTS subscriptions (
 CREATE TABLE IF NOT EXISTS t3_threads (
   thread_id TEXT PRIMARY KEY, project TEXT, t3_project_id TEXT, title TEXT, status TEXT, settled INTEGER DEFAULT 0,
   worktree TEXT, branch TEXT, pending TEXT NOT NULL DEFAULT '[]', first_seen REAL, last_seen REAL, updated REAL, extra TEXT);
-CREATE TABLE IF NOT EXISTS ports (                -- puertos asignados por worktree
-  port INTEGER PRIMARY KEY, project TEXT NOT NULL, worktree TEXT NOT NULL, role TEXT DEFAULT 'base',
-  lease_id TEXT, assigned REAL NOT NULL);
-CREATE UNIQUE INDEX IF NOT EXISTS ports_wt ON ports(project, worktree, role);
-CREATE TABLE IF NOT EXISTS leases (               -- servers de prueba bajo demanda (cola por capacidad)
-  id TEXT PRIMARY KEY,                            -- 'l-0001'
-  kind TEXT NOT NULL,                             -- 'test_server' | 'port'
-  project TEXT NOT NULL, worktree TEXT, thread_id TEXT,
-  state TEXT NOT NULL,                            -- queued | active | released | expired | failed
-  port INTEGER, unit TEXT, pid INTEGER, cmd TEXT, cwd TEXT,
-  requested REAL NOT NULL, started REAL, last_used REAL, ended REAL,
-  idle_seconds INTEGER, cpu_quota TEXT, mem_max TEXT, reason TEXT, detail TEXT);
-CREATE INDEX IF NOT EXISTS leases_state ON leases(state);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 """
 
@@ -69,6 +56,10 @@ def migrate(conn):
     v = conn.execute("PRAGMA user_version").fetchone()[0]
     if v < 1:
         conn.executescript(SCHEMA)
+    if v < 2:
+        # v2: Chopshop deja de gestionar servers de prueba y puertos (eso es de T3); se borran las tablas de la v1
+        conn.executescript("DROP TABLE IF EXISTS leases; DROP TABLE IF EXISTS ports;")
+    if v < SCHEMA_VERSION:
         conn.execute("PRAGMA user_version=%d" % SCHEMA_VERSION)
 
 

@@ -7,7 +7,7 @@ import time
 
 from . import engine, events, graph, home, inbox, metrics, miniyaml, profile, state, t3
 
-HELP_EPILOG = """comandos: profile list|show|check | fanout | run | poll | watch | status | snapshot | metrics | wait | gather | answer [--queue] | stop | settle | subscribe | graph new|run|status | mcp (servidor MCP stdio) | release --worktree DIR [--thread ID] | agent run|status|token|check-config|print-unit"""
+HELP_EPILOG = """comandos: profile list|show|check | fanout | run | poll | watch | status | snapshot | metrics | wait | gather | answer [--queue] | stop | settle | subscribe | graph new|run|status | agent run|status|token|check-config|print-unit"""
 
 
 def _load_tasks(args):
@@ -282,9 +282,6 @@ def build():
 
 
 def main(argv):
-    if argv and argv[0] in ("mcp", "release"):  # no pasan por argparse: stdout del MCP es solo protocolo y release nunca falla
-        from .agent import mcp
-        return (mcp.main_mcp if argv[0] == "mcp" else mcp.main_release)(argv[1:])
     if argv and argv[0] == "agent":  # servicio chopshop-agent: tiene su propio parser (run|status|token|check-config|print-unit)
         from .agent import service
         return service.main(argv[1:])

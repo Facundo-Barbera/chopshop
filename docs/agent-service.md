@@ -9,9 +9,12 @@ diseño: [`agent-architecture.md`](agent-architecture.md). Todos los nombres de 
 
 ## Qué hace el servicio
 
-Un proceso Python (solo stdlib, >= 3.9) con: API HTTP (`/health`, `/snapshot`, `/metrics`, `/events`, `/threads`, `/leases`, ...),
-muestreo de CPU/RAM por app y proyecto desde `/proc`, vigilancia de los hilos de T3, servidores de prueba con cola por capacidad
-(`systemd-run --user`), eventos y webhooks. La base de datos es SQLite (WAL) en `agent.db_path`.
+Un proceso Python (solo stdlib, >= 3.9) con: API HTTP (`/health`, `/snapshot`, `/metrics`, `/events`, `/threads`, `/answer`,
+`/settle`, `/subscriptions`), muestreo de CPU/RAM/disco por app y proyecto desde `/proc` (solo lectura), vigilancia de los hilos de T3,
+eventos y webhooks. La base de datos es SQLite (WAL) en `agent.db_path`.
+
+Es una capa delgada sobre T3: **no** lanza servidores de prueba, no reparte puertos, no barre procesos ni ejecuta comandos. Todo eso
+(worktrees, servidores, comandos de cada hilo) lo gestiona T3; el agente solo observa, resume y, por `answer`/`settle`, habla con T3.
 
 ## Instalación paso a paso
 
@@ -41,7 +44,7 @@ muestreo de CPU/RAM por app y proyecto desde `/proc`, vigilancia de los hilos de
    | `bind`, `port` | dónde escucha. **`127.0.0.1` por defecto** (solo local). Para otras máquinas: `"auto"` (IP de Tailscale) o la IP concreta, p. ej. `"100.64.0.10"`. `0.0.0.0` y `::` se rechazan |
    | `auth`, `owner_login`, `allowed_logins`, `token_file` | ver [Autenticación](#autenticación) |
    | `t3.*`, `t3_enabled` | cómo hablar con T3 de esta máquina (`false` = máquina solo sensor) |
-   | `projects.<p>.test_server.cmd` | comando del servidor de pruebas de cada proyecto (el agente **solo** ejecuta lo que pones aquí) |
+   | `projects.<p>.root`, `worktrees` | dónde vive cada proyecto, para atribuirle métricas e hilos (opcional: por defecto `projects_root`/`worktrees_root`) |
    | `webhook_files.<nombre>` | **ruta** a un archivo 0600 que contiene la URL del webhook (la URL nunca va en la config) |
 
    Valida:
@@ -96,12 +99,11 @@ muestreo de CPU/RAM por app y proyecto desde `/proc`, vigilancia de los hilos de
    systemctl --user start chopshop-agent
    systemctl --user status chopshop-agent
    journalctl --user -u chopshop-agent -f          # logs (nunca contienen tokens ni URLs de webhook)
-   apps/agent/bin/chopshop agent status            # resumen: versión, T3, última muestra/sondeo, leases, estado de la unidad
+   apps/agent/bin/chopshop agent status            # resumen: versión, T3, última muestra/sondeo, hilos, estado de la unidad
    systemctl --user stop chopshop-agent
    ```
 
-   La parada es limpia (SIGTERM): se cierran los sockets, se esperan los hilos y se vacía la cola de webhooks. Los servidores de prueba
-   que el agente lanzó son unidades aparte (`chopshop-ts-*`): no mueren con él; se liberan con `/leases/release` o por inactividad.
+   La parada es limpia (SIGTERM): se cierran los sockets, se esperan los hilos y se vacía la cola de webhooks.
 
 7. **Probar la API con `curl`**. Desde la propia máquina (origen local, sin token):
 
@@ -115,8 +117,8 @@ muestreo de CPU/RAM por app y proyecto desde `/proc`, vigilancia de los hilos de
    ```sh
    TOKEN="$(cat ~/.chopshop/agent/token)"      # el archivo copiado en el paso 3
    curl -s http://100.64.0.10:3790/snapshot | head -c 300
-   curl -s -X POST http://100.64.0.10:3790/sweep \
-        -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"dry_run": true}'
+   curl -s -X POST http://100.64.0.10:3790/settle \
+        -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"thread_id": "<id del hilo>"}'
    ```
 
 8. **(Opcional, decisión tuya) arranque automático**. Solo cuando ya lo hayas probado y lo quieras:
@@ -138,25 +140,13 @@ muestreo de CPU/RAM por app y proyecto desde `/proc`, vigilancia de los hilos de
 | `token` | solo el bearer, en toda petición. Para clientes sin identidad Tailscale o si no usas Tailscale |
 | `none-local` | nadie por red; solo el origen local |
 
-El **origen local** (misma máquina: MCP, CLI, `curl` a `127.0.0.1`) se acepta siempre mientras `trust_local = true`; ponlo en `false`
+El **origen local** (misma máquina: CLI, `curl` a `127.0.0.1`) se acepta siempre mientras `trust_local = true`; ponlo en `false`
 si en la máquina hay otros usuarios en los que no confíes. Los logins se escriben completos, como los muestra `tailscale whois`
 (el `usuario@` de `config.example.toml` es un marcador). Para `whois` el usuario del servicio debe poder hablar con `tailscaled`
 (`sudo tailscale set --operator=$USER`). Si `bind` no es loopback, el agente abre además `127.0.0.1:<port>` (`local_listener`).
 
-El agente **no ejecuta comandos que le pida un cliente**: `POST /leases/request` solo lanza el `test_server.cmd` de la config
-(`allow_request_cmd = false`), y solo para worktrees bajo `projects_root` / `worktrees_root` / proyectos configurados.
-
-## MCP y `runOnSettle` para los hilos de T3
-
-Los ejemplos están en [`examples/`](../examples):
-
-- **MCP** (`examples/mcp.json`): registra el servidor `chopshop` (`chopshop mcp`) en el cliente MCP de tu agente. Habla con el agente en
-  `CHOPSHOP_AGENT_URL` (por defecto `http://127.0.0.1:<port>`). Tools: `chopshop_request_test_server`, `chopshop_request_port`,
-  `chopshop_release`, `chopshop_status`. Instrucciones para los agentes: `examples/AGENTS-chopshop.md`.
-- **`runOnSettle`** (`examples/t3.json`): script de T3 que al hacer *settle* de un hilo ejecuta `chopshop release --worktree ... --thread ...`
-  y libera sus servidores de prueba. Siempre sale con 0 aunque el agente esté caído.
-
-Para usarlos desde otra máquina, apunta `CHOPSHOP_AGENT_URL` a `http://100.64.0.10:3790` y deja el token en `agent.token_file` del cliente.
+El agente **no ejecuta comandos que le pida un cliente**: no hay ninguna ruta que lance procesos; las únicas escrituras son
+`answer`/`settle` en T3 y las suscripciones de webhooks.
 
 ## Troubleshooting
 
@@ -167,16 +157,13 @@ Para usarlos desde otra máquina, apunta `CHOPSHOP_AGENT_URL` a `http://100.64.0
 | `403 sin identidad válida` desde otra máquina | `owner_login`/`allowed_logins` no coincide con el login real (`tailscale whois 100.64.0.x`), o `tailscale whois` no responde (falta `tailscale set --operator`). Con `auth = "token"` falta el bearer |
 | `403 las escrituras exigen el bearer` | añade `Authorization: Bearer $(cat token)`; el token del cliente debe ser el mismo archivo del agente |
 | `403 esta identidad es de solo lectura` | el login está en `allowed_logins`; solo `owner_login` escribe |
-| `400 cmd no permitido` | definido a propósito: pon `test_server.cmd` en el proyecto (o `allow_request_cmd = true` si aceptas el riesgo) |
-| `400 worktree fuera de ...` | el worktree no cuelga de `projects_root`/`worktrees_root`/proyectos configurados |
 | `agent.t3_ok` es `false` / evento `t3_unreachable` | revisa `agent.t3.helper`, `node`, `t3_bin` y que T3 esté arriba; el agente reintenta con backoff (10 s → 5 min) y avisa `t3_recovered` |
 | `503 T3 desactivado` | `agent.t3_enabled = false` en esa máquina |
-| Un servidor de prueba no arranca (`lease_failed`) | mira `reason`/`detail` del lease (`GET /leases`): directorio inexistente, sin comando o fallo de `systemd-run` |
+| `404 ruta desconocida` | la ruta no existe en esta versión (ver [`agent-api.md`](agent-api.md)); servidores de prueba y puertos los gestiona T3 |
 | El agente no puede escribir en alguna carpeta | `ProtectSystem=strict` deja todo en solo lectura salvo `ReadWritePaths`: añade `--rw` en `print-unit` o `[agent.service] read_write_paths` y reinstala |
 | `MemoryMax`/`CPUQuota` no se aplican | el gestor de usuario no tiene esos controladores delegados; la unidad funciona igual, solo sin topes |
 | Cambié la config | `systemctl --user restart chopshop-agent` (la config se lee al arrancar) |
 | Cambié la plantilla de la unidad | `scripts/install-user-unit.sh --force` y `systemctl --user daemon-reload` (ya lo hace) y reinicia |
 
-Reglas de seguridad que el agente respeta siempre: nunca `pkill`/`killall`; los barridos solo paran la unidad exacta (`systemctl --user
-stop chopshop-ts-...`) o señalan PIDs exactos de un `cgroup.procs` concreto (y solo con `sweep.agent_scopes = "kill"`); nunca archiva
-hilos (solo `settle`); nunca imprime tokens ni URLs de webhook.
+Reglas de seguridad que el agente respeta siempre: no lanza ni mata procesos (solo lee `/proc`); nunca archiva hilos (solo `settle`);
+nunca imprime tokens ni URLs de webhook.

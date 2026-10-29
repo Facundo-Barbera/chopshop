@@ -1,5 +1,6 @@
 import json
 import os
+import sqlite3
 import sys
 import tempfile
 import threading
@@ -309,6 +310,40 @@ class TestLegacy(Base):
         events.import_legacy(self.conn, self.write(self.LINES))
         events.flush()
         self.assertEqual(self.deliveries(), {})
+
+
+class TestSchema(unittest.TestCase):
+    def test_v1_database_drops_old_tables_and_keeps_data(self):
+        """Una base v1 (con las tablas viejas de servers de prueba y puertos) migra a v2 sin perder eventos."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "agent", "agent.db")
+            os.makedirs(os.path.dirname(path))
+            old = sqlite3.connect(path)
+            old.executescript(db.SCHEMA + "CREATE TABLE ports (port INTEGER PRIMARY KEY); CREATE TABLE leases (id TEXT PRIMARY KEY);"
+                              "INSERT INTO events(ts,machine_id,event,project) VALUES(1.0,'host-a','prueba','p1');"
+                              "PRAGMA user_version=1;")
+            old.close()
+            conn = db.connect(path)
+            try:
+                tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                self.assertFalse({"leases", "ports"} & tables)
+                self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], db.SCHEMA_VERSION)
+                self.assertEqual(conn.execute("SELECT event FROM events").fetchone()[0], "prueba")
+            finally:
+                conn.close()
+            conn = db.connect(path)                                     # reabrir una v2 no toca nada
+            conn.close()
+
+    def test_new_database_has_no_old_tables(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = db.connect(os.path.join(tmp, "agent", "agent.db"))
+            try:
+                tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                self.assertIn("events", tables)
+                self.assertFalse({"leases", "ports"} & tables)
+                self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 2)
+            finally:
+                conn.close()
 
 
 if __name__ == "__main__":
