@@ -63,7 +63,7 @@ public struct IsoOfficeView: View {
         let tasks = tasksNow
         return sc.desks.filter { ($0.visual == .needsYou || $0.visual == .stuck) && $0.pop > 0.6 && $0.walk > 0.9 }
             .sorted { ($0.visual == .needsYou ? 0 : 1, $0.id) < ($1.visual == .needsYou ? 0 : 1, $1.id) }
-            .map { IsoAlert(id: $0.id, label: $0.node.label, title: $0.node.task.flatMap { tasks[$0]?.title } ?? $0.node.title, visual: $0.visual) }
+            .map { IsoAlert(id: $0.id, label: sc.person($0.id), title: $0.work(tasks), visual: $0.visual) }
     }
 
     public var body: some View {
@@ -120,7 +120,7 @@ public struct IsoOfficeView: View {
 
             if let id = selected, let c = sc.data.card(id) {
                 GraphInspector(card: c, task: c.node.task.flatMap { tasksNow[$0] }, scene: sc.data, host: c.node.task.flatMap { hostOf[$0] },
-                               flat: flatChrome) { withAnimation(.snappy(duration: 0.25)) { selected = nil } }
+                               flat: flatChrome, person: sc.person(id)) { withAnimation(.snappy(duration: 0.25)) { selected = nil } }
                     .frame(width: 280)
                     .padding(.trailing, 14).padding(.top, 62)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
@@ -148,13 +148,7 @@ public struct IsoOfficeView: View {
             IsoRenderer(scene: scene, cam: cam, box: box, dark: scheme == .dark, t: t, selected: selected, hovered: hovered, size: size).draw(&ctx)
         } symbols: {
             ForEach(scene.desks) { d in
-                Text(d.node.label)
-                    .font(.system(size: 10, weight: .semibold))
-                    .padding(.horizontal, 7).padding(.vertical, 2)
-                    .background(Capsule().fill(scheme == .dark ? Color.black.opacity(0.5) : Color.white.opacity(0.78)))
-                    .overlay(Capsule().strokeBorder(d.visual.tint?.opacity(0.9) ?? Color.primary.opacity(0.14), lineWidth: 0.7))
-                    .foregroundStyle(d.visual.tint ?? Color.primary.opacity(0.85))
-                    .tag("d:\(d.id)")
+                IsoDeskLabel(name: scene.person(d.id), work: d.work(tasks), visual: d.visual).tag("d:\(d.id)")
             }
             ForEach(scene.rooms, id: \.index) { r in
                 Text("RANGO \(r.index + 1)")
@@ -166,7 +160,7 @@ public struct IsoOfficeView: View {
                     .tag("r:\(r.index)")
             }
             if let h = hovered, let d = scene.desk(h) {
-                IsoTooltip(label: d.node.label, title: d.node.task.flatMap { tasks[$0]?.title } ?? d.node.title, visual: d.visual, host: d.node.task.flatMap { hostOf[$0] })
+                IsoTooltip(label: scene.person(d.id), title: d.work(tasks), visual: d.visual, host: d.node.task.flatMap { hostOf[$0] })
                     .tag("tip")
             }
         }
