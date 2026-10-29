@@ -4,7 +4,7 @@
   hilos: muestreo (+ compactación) · sondeo de T3 · motor (`engine.tick` con el bus inyectado, solo si hay lotes en
   state.json) · importación periódica de events.jsonl (CLI externa) · automatizaciones (sobres del bus + horarios) ·
   GitHub (si `[agent.github] enabled`) · roles permanentes (si `[agent.roles] enabled`: despertar por horario/eventos y
-  seguimiento del hilo en su escritorio) · mantenimiento (retención de eventos, checkpoint WAL).
+  seguimiento del hilo en su escritorio) · rack de repos (`forge/rack.py`) · mantenimiento (retención de eventos, checkpoint WAL).
   Un fallo en un hilo se registra (sin repetirlo cada ciclo) y el hilo sigue; `stop()` los para a todos de forma ordenada.
 `run` instala SIGTERM/SIGINT para la parada limpia. Nada aquí habla con systemd salvo `status` (solo lectura, inyectable) y
 `print-unit` solo IMPRIME la unidad: no escribe, no habilita y no arranca nada.
@@ -25,6 +25,7 @@ import time
 from .. import engine as engine_mod, events as legacy_events, graph, home, settings, state
 from . import __version__, automations as automations_mod, collector as collector_mod, config, db, envelope, events, github, \
     halflife, notes, office as office_mod, pairing, roles as roles_mod, server, t3watch
+from .forge import rack as forge_rack
 
 log = logging.getLogger("chopshop.agent")
 
@@ -181,6 +182,7 @@ def check_config(cfg, runner=None, which=shutil.which):
     gerrs, gwarns = github.check(cfg, which)
     errs += gerrs
     warns += gwarns
+    errs += forge_rack.check(cfg)
     for k, v in (cfg.get("retention") or {}).items():
         if isinstance(v, bool) or not isinstance(v, (int, float)) or v <= 0:
             errs.append("retention.%s debe ser un número > 0 (es %r)" % (k, v))
@@ -233,7 +235,7 @@ class AgentService:
     def __init__(self, cfg, conn=None, collector=None, t3=None, runner=None, poster=None,
                  orchestrator_fn=None, clock=time.time, maint_interval=MAINT_INTERVAL, maint_first=MAINT_FIRST, compact_every=COMPACT_EVERY,
                  engine_tick=None, stream_opts=None, automations=None,
-                 gh_runner=None, gh_projects_fn=github.profile_repos, roles=None):
+                 gh_runner=None, gh_projects_fn=github.profile_repos, roles=None, forge_entries_fn=None):
         self.cfg, self.clock, self.runner, self.poster = cfg, clock, runner, poster
         self.engine_tick = engine_tick or engine_mod.tick
         self.owns_conn = conn is None
@@ -265,6 +267,10 @@ class AgentService:
             self.github = github.GitHubPoller(self.conn, cfg, self.emit, runner=gh_runner, clock=clock,
                                               projects_fn=gh_projects_fn)
         self.fader = halflife.Fader(self.conn, self.app.projector.current, self._fade_emit, clock=clock)
+        self.forge = None
+        if forge_rack.enabled(cfg):
+            self.forge = forge_rack.Rack(self.conn, cfg, self.emit_forge, clock=clock, provider_opts={"runner": gh_runner},
+                                         entries_fn=forge_entries_fn)
         self.stop_event = threading.Event()
         self.servers, self.threads, self._serving = [], [], []
         self._stopped = False
@@ -328,6 +334,13 @@ class AgentService:
         self.app.stream.bus.publish(stored.get("seq") if stored else None)
         return stored
 
+    def emit_forge(self, type, project, body, severity=None):
+        """Sobre `forge.*` del rack (tipo nuevo con su severidad) -> bus + /stream."""
+        env = events.emit_envelope(self.conn, self.cfg, type, project, body, severity=severity, poster=self.poster)
+        if env:
+            self.app.stream.bus.publish(env["seq"])
+        return env
+
     @property
     def address(self):
         """(host, puerto) del listener principal (el puerto real si se pidió 0)."""
@@ -370,6 +383,8 @@ class AgentService:
                 self._spawn("github", self._loop, "github", self.github.poll_once, self.github.next_delay)
             if self.cfg.get("halflife_enabled", True):
                 self._spawn("halflife", self._loop, "halflife", self.fader.sweep, self.fader.next_delay)
+            if self.forge is not None:
+                self._spawn("forge", self._loop, "forge", self.forge.poll_once, self.forge.next_delay)
             self._spawn("maintenance", self._maintenance)
         for s in self.servers:
             self._serving.append(s)

@@ -123,6 +123,12 @@ interval_s = 45                           # segundos entre pasadas (GitHub puede
 gh_bin = "gh"                             # CLI de GitHub
 ci = true                                 # mirar check-runs del HEAD de los PRs abiertos (github.ci.completed)
 
+# Rack de repos de la sala de máquinas (hilo `forge`): una luz por repo de `rack.repos` de los perfiles y de
+# [agent.github] repos (si está activado). Usa el mismo `gh`; emite `forge.repo.state` solo cuando cambia.
+[agent.forge]
+enabled = "auto"                          # "auto" = igual que [agent.github] enabled; true/false lo fuerza
+interval_s = 60                           # segundos entre pasadas (>= 10; GitHub puede pedir más con X-Poll-Interval)
+
 # Retención del historial de métricas y de eventos.
 [agent.retention]
 raw_hours = 24
