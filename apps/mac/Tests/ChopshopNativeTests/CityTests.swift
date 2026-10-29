@@ -9,7 +9,8 @@ final class CityTests: XCTestCase {
     func cityState(until t: Double) throws -> LiveState {
         let envs = try cityEnvelopes()
         let t0 = SnapshotMapper.date(envs[0].ts)!
-        return LiveState.fold(envs.filter { SnapshotMapper.date($0.ts)!.timeIntervalSince(t0) <= t + 1e-9 })
+        // tolerancia de 1 ms: `Date` (segundos desde 2001) no representa exacto 8.200 − 0.000
+        return LiveState.fold(envs.filter { SnapshotMapper.date($0.ts)!.timeIntervalSince(t0) <= t + 1e-3 })
     }
 
     // MARK: Fixture
@@ -160,8 +161,8 @@ final class CityTests: XCTestCase {
         l.observe(model(["a", "c"]), at: 20.2)
         let after = l.windows("p", t: 20.2)
         assertLevels(before, after, accuracy: 1e-9)
-        // más hilos que ventanas: se llenan todas, sin repetir
-        l.observe(model((0..<20).map { "h\($0)" }), at: 30)
+        // más hilos que ventanas: se llenan todas, sin repetir (a y c siguen vivos: si se apagaran, conservarían su ventana hasta apagarse)
+        l.observe(model(["a", "c"] + (0..<20).map { "h\($0)" }), at: 30)
         XCTAssertEqual(l.windows("p", t: 40).filter { $0 > 0.999 }.count, CityGeo.windowsPerFloor)
     }
 
@@ -299,10 +300,10 @@ final class CityTests: XCTestCase {
         XCTAssertEqual(CityTransition.backWalls(0), 1)
         XCTAssertEqual(CityTransition.slab(0), 1)
         XCTAssertEqual(CityTransition.upperLift(0), 0)
-        // sin saltos
+        // sin saltos: smoothstep sube como mucho 1.5/ancho; el más estrecho (labels, 0.06) da 0.025 por paso de 0.001
         for f in [CityTransition.labels, CityTransition.others, CityTransition.upperLift, CityTransition.upperAlpha, CityTransition.frontWalls,
                   CityTransition.backWalls, CityTransition.roomRise, CityTransition.deskPop, CityTransition.slab, CityTransition.chrome] {
-            for i in 0..<1000 { XCTAssertLessThan(abs(f(Double(i + 1) / 1000) - f(Double(i) / 1000)), 0.02) }
+            for i in 0..<1000 { XCTAssertLessThan(abs(f(Double(i + 1) / 1000) - f(Double(i) / 1000)), 0.03) }
         }
     }
 

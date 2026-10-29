@@ -46,6 +46,8 @@ public struct CityTimeline: Sendable {
     public init(envelopes: [Envelope], directory: CompanyDirectory = .standard, target: String = CityTimeline.defaultTarget) {
         self.envelopes = envelopes; self.directory = directory; self.target = target
         let t0 = envelopes.lazy.compactMap { SnapshotMapper.date($0.ts) }.first ?? Date(timeIntervalSince1970: 0)
+        // segundos desde el primer sobre, redondeados al ms (`Date` arrastra error: 8.200 saldría 8.2000001 y `frame(at: 8.2)` no lo vería)
+        func secs(_ e: Envelope) -> Double? { SnapshotMapper.date(e.ts).map { ($0.timeIntervalSince(t0) * 1000).rounded() / 1000 } }
         var steps: [Step] = []
         var st = LiveState(machine: envelopes.lazy.compactMap(\.machine).first)
         var lights = CityLights()
@@ -55,9 +57,9 @@ public struct CityTimeline: Sendable {
         var i = 0
         while i < envelopes.count {
             // los sobres del mismo instante se aplican juntos
-            let time = SnapshotMapper.date(envelopes[i].ts).map { $0.timeIntervalSince(t0) } ?? (steps.last?.time ?? 0)
+            let time = secs(envelopes[i]) ?? (steps.last?.time ?? 0)
             var j = i
-            while j < envelopes.count, (SnapshotMapper.date(envelopes[j].ts).map { $0.timeIntervalSince(t0) } ?? time) == time {
+            while j < envelopes.count, (secs(envelopes[j]) ?? time) == time {
                 st.apply(envelopes[j]); j += 1
             }
             let m = CityModel.build(st, directory: directory)
