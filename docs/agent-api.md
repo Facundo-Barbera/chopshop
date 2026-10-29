@@ -102,7 +102,7 @@ ciclo de versión el cuerpo trae además `event` (nombre viejo, p. ej. `pending_
 
 Filtros (todos opcionales; `null` = sin filtro):
 - `projects`: lista con globs (`fnmatch`, `*` incluye eventos sin proyecto). Si falta se usa `project` (exacto o `*`, como antes).
-- `types`: globs sobre el `type` (`question.*`, `github.*`); también casan con el nombre viejo (`body.legacy`). Lista vacía = todos.
+- `types`: globs sobre el `type` (`question.*`, `github.*`); también casan con el nombre viejo (`event`). Lista vacía = todos.
 - `exclude_types`: globs; gana sobre `types`.
 - `min_severity`: `info < notice < warn < error`.
 - `needs`: `human | bot | approval | none` (`none` = eventos con `needs: null`, p. ej. los que cierran una atención). Vacío = cualquiera.
@@ -116,8 +116,9 @@ Filtros (todos opcionales; `null` = sin filtro):
 - `batch_window_s`: reservado (solo `0` en v1).
 
 **Compatibilidad**: las suscripciones viejas (`project` + `events: [nombres]`, sin columnas v4) siguen igual: un nombre viejo casa con
-el `body.legacy` del sobre (así `events: ["thread_done"]` no recibe todo `task.state`) y, si el sobre no trae nombre viejo, con su tipo
-nuevo vía `LEGACY_MAP` (`pending_question` → `question.opened`). `events` vacío = todos. `cfg["webhook_files"]` = destinos sin filtro.
+el nombre viejo del evento (`event`; así `events: ["thread_done"]` no recibe todo `task.state`, y el `task.state` acompañante de una
+pregunta no cuenta como `pending_question`) y, si el evento no tiene nombre viejo, con su tipo nuevo vía `LEGACY_MAP`
+(`pending_question` → `question.opened`). `events` vacío = todos. `cfg["webhook_files"]` = destinos sin filtro.
 
 **Entrega**: cabeceras `X-Chopshop-Event: <type>`, `X-Chopshop-Id: <id>` (clave de idempotencia; igual en todos los intentos),
 `X-Chopshop-Delivery: <n.º de intento, 1–4>` y, con `secret_file`, `X-Chopshop-Signature: sha256=<hex(HMAC-SHA256(secreto, cuerpo))>`
