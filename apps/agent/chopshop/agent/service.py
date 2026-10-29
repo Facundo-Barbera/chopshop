@@ -3,7 +3,7 @@
 `AgentService` ensambla los módulos (colector, T3, eventos) y el servidor HTTP (`server.py`):
   hilos: muestreo (+ compactación) · sondeo de T3 · motor (`engine.tick` con el bus inyectado, solo si hay lotes en
   state.json) · importación periódica de events.jsonl (CLI externa) · automatizaciones (sobres del bus + horarios) ·
-  GitHub (si `[agent.github] enabled`) · mantenimiento (retención de eventos, checkpoint WAL).
+  forja (si `[agent.github] enabled`: eventos `github.*` + rack de Actions `forge.*`) · mantenimiento (retención de eventos, checkpoint WAL).
   Un fallo en un hilo se registra (sin repetirlo cada ciclo) y el hilo sigue; `stop()` los para a todos de forma ordenada.
 `run` instala SIGTERM/SIGINT para la parada limpia. Nada aquí habla con systemd salvo `status` (solo lectura, inyectable) y
 `print-unit` solo IMPRIME la unidad: no escribe, no habilita y no arranca nada.
@@ -22,7 +22,7 @@ import threading
 import time
 
 from .. import engine as engine_mod, events as legacy_events, graph, home, settings, state
-from . import __version__, automations as automations_mod, collector as collector_mod, config, db, envelope, events, github, pairing, server, t3watch
+from . import __version__, automations as automations_mod, collector as collector_mod, config, db, envelope, events, forge, github, listeners, pairing, server, t3watch
 
 log = logging.getLogger("chopshop.agent")
 
@@ -231,7 +231,7 @@ class AgentService:
     def __init__(self, cfg, conn=None, collector=None, t3=None, runner=None, poster=None,
                  orchestrator_fn=None, clock=time.time, maint_interval=MAINT_INTERVAL, maint_first=MAINT_FIRST, compact_every=COMPACT_EVERY,
                  engine_tick=None, stream_opts=None, automations=None,
-                 gh_runner=None, gh_projects_fn=github.profile_repos):
+                 gh_runner=None, gh_projects_fn=github.profile_repos, rack_profiles_fn=None):
         self.cfg, self.clock, self.runner, self.poster = cfg, clock, runner, poster
         self.engine_tick = engine_tick or engine_mod.tick
         self.owns_conn = conn is None
@@ -251,10 +251,14 @@ class AgentService:
             self.emit_envelope, clock=clock, store=automations_mod.MetaStore(self.conn), enabled=acfg.get("enabled", True))
         self._auto_cursor = None
         self._auto_loaded = None
-        self.github = None
+        self.github = self.rack = None
         if (cfg.get("github") or {}).get("enabled"):
-            self.github = github.GitHubPoller(self.conn, cfg, self.emit, runner=gh_runner, clock=clock,
-                                              projects_fn=gh_projects_fn)
+            self.github = github.GitHubProvider(self.conn, cfg, self.emit, runner=gh_runner, clock=clock,
+                                                projects_fn=gh_projects_fn)
+            if cfg["github"].get("actions", True):
+                self.rack = forge.Rack(self.conn, cfg, self.emit, {"github": self.github}, clock=clock,
+                                       profiles_fn=rack_profiles_fn)
+        self.listeners = listeners.Listeners(self.emit, clock) if cfg.get("listeners", True) else None
         self.stop_event = threading.Event()
         self.servers, self.threads, self._serving = [], [], []
         self._stopped = False
@@ -293,6 +297,7 @@ class AgentService:
         self._import_legacy()
         if background:
             self._spawn("sampler", self._run_sampler)
+            self._listener("sampler", None)
             if self.cfg.get("t3_enabled", True):
                 self._spawn("t3", self._loop, "t3", self._poll_once, lambda: self.cfg.get("t3_poll_interval") or 5)
             if self.cfg.get("engine_enabled", True):
@@ -303,7 +308,7 @@ class AgentService:
                 self._spawn("automations", self._loop, "automations", self.automations_once,
                             lambda: (self.cfg.get("automations") or {}).get("interval") or 2)
             if self.github is not None:
-                self._spawn("github", self._loop, "github", self.github.poll_once, self.github.next_delay)
+                self._spawn("github", self._loop, "github", self.forge_once, self.github.next_delay)
             self._spawn("maintenance", self._maintenance)
         for s in self.servers:
             self._serving.append(s)
@@ -343,15 +348,40 @@ class AgentService:
             return None
         return self.engine_tick(None, None, lambda m: log.info("motor: %s", m), emit_fn=self.engine_emit)
 
+    def forge_once(self):
+        """Una pasada de la forja: eventos `github.*` y, si no quedó en backoff, el rack (`forge.*`)."""
+        res = self.github.poll_events()
+        if self.rack is not None and not self.github.in_backoff():
+            res = dict(res, rack=self.rack.poll_once())
+        return res
+
     # -- hilos
+    def _listener(self, name, res, exc=None):
+        """`listener.state` del hilo tras un ciclo (nunca lanza: la sala de máquinas no frena a nadie)."""
+        if self.listeners is None:
+            return
+        state, error, backoff = "ok", None, 0
+        if exc is not None:
+            state, error = "degraded", "%s: %s" % (type(exc).__name__, exc)
+        elif name == "t3" and isinstance(res, dict) and res.get("reachable") is False:
+            state, error, backoff = "down", getattr(self.t3, "last_error", None), res.get("backoff") or 0
+        elif name == "github" and self.github is not None and self.github.degraded_since is not None:
+            state, error, backoff = "degraded", self.github.error(), self.github.until - self.clock()
+        try:
+            self.listeners.report(name, state, error, backoff)
+        except Exception:  # noqa: BLE001
+            log.debug("no pude publicar listener.state de %s", name, exc_info=True)
+
     def _loop(self, name, fn, interval):
         while not self.stop_event.is_set():
             try:
-                fn()
+                res = fn()
                 self.runtime.ok(name)
+                self._listener(name, res)
             except Exception as e:  # noqa: BLE001 - un fallo no mata el hilo
                 if self.runtime.fail(name, e):
                     log.warning("hilo %s: %s: %s", name, type(e).__name__, e)
+                self._listener(name, None, e)
             if self.stop_event.wait(max(0.05, float(interval()))):
                 break
 

@@ -9,13 +9,15 @@
   `automation.ran` no abren ni cierran (describen una acción, no el estado del sujeto).
 - `counts` por proyecto: running, queued, waiting, needs_human, waiting_bot, stuck, done, failed (ver `_counts`).
 - `recent` = últimos 50 sobres, el más nuevo primero.
+- `machine_room` (v3): listeners, automatizaciones y rack de la sala de máquinas (`machine_room.py`); sus `subscriptions` las
+  rellena `Projector.current()` desde SQLite (no vienen de sobres).
 Los sobres salen de `events.list_after` (contrato del bus, docs/event-envelope.md)."""
 import copy
 import threading
 
-from . import db, events
+from . import db, events, machine_room
 
-API_VERSION = 2
+API_VERSION = 3
 RECENT = 50
 PAGE = 1000
 _RUNNING = ("running", "preparing")
@@ -45,7 +47,7 @@ def min_seq(conn):
 
 def empty(machine=None):
     return {"api_version": API_VERSION, "machine": machine, "head_seq": 0, "ts": None, "machine_health": None,
-            "projects": [], "recent": []}
+            "projects": [], "recent": [], "machine_room": machine_room.empty()}
 
 
 def _project(state, name):
@@ -112,6 +114,7 @@ def _apply(state, env):
     typ, body, proj = env.get("type") or "", env.get("body") or {}, env.get("project")
     if typ == "machine.health":
         state["machine_health"] = _clean(body)
+    machine_room.apply(state, env)
     p = _project(state, proj) if proj else None
     if p is not None:
         sid = (env.get("subject") or {}).get("id")
@@ -186,6 +189,8 @@ def filter_project(st, project):
     out = dict(st)
     out["projects"] = [p for p in st["projects"] if p["name"] == project]
     out["recent"] = [e for e in st["recent"] if e.get("project") == project]
+    if "machine_room" in st:
+        out["machine_room"] = machine_room.filter_project(st["machine_room"], project)
     return out
 
 
@@ -206,4 +211,4 @@ class Projector:
                     _apply(self._state, e)
                 if len(page) < PAGE:
                     break
-            return copy.deepcopy(self._state)
+            return machine_room.live(copy.deepcopy(self._state), self.conn)
