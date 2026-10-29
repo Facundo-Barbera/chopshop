@@ -64,6 +64,8 @@ struct IsoDesk: Identifiable {
         if dist < l1 { return (entryX + dist, frontAisle) }
         return (figX0, frontAisle - (dist - l1))
     }
+    /// Lo que hace: el título del hilo de T3 (si no hay hilo, el del nodo). Subtítulo bajo el nombre del muñeco.
+    func work(_ tasks: [String: MockTask]) -> String { node.task.flatMap { tasks[$0]?.title } ?? node.title }
     var backAisle: Double { cy - 32 }
     var frontAisle: Double { cy + 32 }
     var key: Double { cx + cy }
@@ -115,10 +117,13 @@ struct IsoScene {
     var rooms: [IsoRoom] = []
     var wires: [IsoWire] = []
     var byID: [String: Int] = [:]
+    /// Nombre de pila del muñeco de cada escritorio (`DeskNames`: estable por escritorio, sin repetir en la oficina).
+    var names: [String: String] = [:]
     let data: GraphScene
     var minU = 0.0, maxU = 1.0, minV = 0.0, maxV = 1.0
 
     func desk(_ id: String) -> IsoDesk? { byID[id].map { desks[$0] } }
+    func person(_ id: String) -> String { names[id] ?? DeskNames.name(for: id) }
 
     init(graph: MockGraph, tasks: [String: MockTask]) {
         data = GraphScene(graph: graph, tasks: tasks)
@@ -145,6 +150,7 @@ struct IsoScene {
             rooms.append(room)
             x += w + Iso.gap
         }
+        names = DeskNames.assign(desks.map(\.id))
         routeWires()
         computeBounds(visible: nil)
     }

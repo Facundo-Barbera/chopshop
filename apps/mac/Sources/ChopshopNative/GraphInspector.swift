@@ -8,6 +8,8 @@ struct GraphInspector: View {
     let scene: GraphScene
     let host: String?
     let flat: Bool
+    /// En la oficina, el nombre del muñeco (va de título; el del hilo, debajo). En el grafo, nil: la etiqueta del nodo.
+    var person: String? = nil
     let close: () -> Void
     @Environment(\.colorScheme) private var scheme
 
@@ -17,7 +19,7 @@ struct GraphInspector: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(card.node.label).font(.headline)
+                    Text(person ?? card.node.label).font(.headline)
                     HStack(spacing: 5) {
                         Circle().fill(card.visual.tint ?? Color.secondary.opacity(0.7)).frame(width: 6, height: 6)
                         Text(card.visual.title).font(.caption).foregroundStyle(card.visual.tint ?? Color.secondary)
