@@ -3,25 +3,24 @@
 - Cada fila es un sobre (`agent/envelope.py`, columnas v3): `emit(event, project, body)` acepta el nombre viejo y lo traduce
   (`LEGACY_MAP`, `body.legacy`); `emit_envelope(type, ...)` emite tipos nuevos con `subject`/`needs`/`severity`/`cause`.
   `list_after`/`recent` devuelven sobres (+ `event` y `machine_id` viejos). El webhook recibe el sobre + `event`/`machine_id`.
-- `emit` inserta y devuelve `seq`; la entrega va a una cola con hilos de fondo (no bloquea) y deja su resultado en `deliveries`.
+- `emit` inserta y devuelve `seq`; la entrega (filtros v2, reintentos, firma: ver `webhooks.py`) va por hilos de fondo
+  (no bloquea) y deja su resultado en `deliveries`.
 - La URL del webhook se lee del archivo (primera línea) en cada entrega; nunca se guarda, se imprime ni se registra.
   `deliveries.detail` solo lleva `HTTP <código>` o el NOMBRE del tipo de excepción (los mensajes de urllib pueden traer la URL).
-- Todo es inyectable: `poster(url, payload_bytes, timeout) -> código HTTP` (por defecto urllib), para tests sin red."""
+- Todo es inyectable: `poster(url, payload_bytes, timeout, headers=None) -> código HTTP` (por defecto urllib; los
+  posters de 3 argumentos siguen valiendo, sin cabeceras) y el despachador (`set_dispatcher`, reloj), para tests sin red."""
 import datetime
 import json
 import os
 import re
 import socket
-import threading
 import time
 import urllib.error
 import urllib.request
-from collections import deque
 
-from . import db, envelope
+from . import db, envelope, webhooks
 
 TIMEOUT = 3                       # segundos por POST
-WORKERS = 4                       # hilos de entrega (un webhook lento no frena a los demás)
 MAX_LIMIT = 1000                  # tope de list_after
 LEGACY_KEY = "events_legacy_offset"
 _NAME = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
@@ -33,10 +32,11 @@ class EventsError(Exception):
 
 # ---------------------------------------------------------------- entrega
 
-def _default_poster(url, data, timeout):
+def _default_poster(url, data, timeout, headers=None):
     """POST JSON con urllib. Devuelve el código HTTP (también para 4xx/5xx); el resto de fallos se propagan."""
-    req = urllib.request.Request(url, data=data, method="POST",
-                                 headers={"Content-Type": "application/json", "User-Agent": "chopshop-agent/0.6"})
+    h = {"Content-Type": "application/json", "User-Agent": "chopshop-agent/0.6"}
+    h.update(headers or {})
+    req = urllib.request.Request(url, data=data, method="POST", headers=h)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return r.status
@@ -44,117 +44,28 @@ def _default_poster(url, data, timeout):
         return e.code
 
 
-def _read_url(path):
-    """Primera línea del archivo, sin espacios. Solo http(s)."""
-    with open(os.path.expanduser(path), encoding="utf-8") as f:
-        url = f.readline().strip()
-    if not url.startswith(("http://", "https://")):
-        raise ValueError("sin URL http(s)")
-    return url
+_dispatcher = webhooks.Dispatcher()
 
 
-def _exc_detail(e):
-    """Describe una excepción SIN su mensaje (puede contener la URL). Solo tipos (y el del motivo en URLError)."""
-    name = type(e).__name__
-    reason = getattr(e, "reason", None)
-    if isinstance(e, urllib.error.URLError) and reason is not None and not isinstance(reason, str):
-        name += "/" + type(reason).__name__
-    return name
+def dispatcher():
+    return _dispatcher
 
 
-def _deliver(webhook_file, data, poster, timeout):
-    """(ok, detail). Nunca lanza; el detail no incluye la URL ni mensajes de excepción."""
-    try:
-        url = _read_url(webhook_file)
-    except Exception as e:  # noqa: BLE001
-        return False, "archivo de webhook ilegible (%s)" % type(e).__name__
-    try:
-        status = poster(url, data, timeout)
-    except Exception as e:  # noqa: BLE001 - solo el tipo, nunca str(e)
-        return False, _exc_detail(e)
-    if isinstance(status, bool) or not isinstance(status, int):
-        return bool(status), "ok" if status else "fallo"
-    return 200 <= status < 300, "HTTP %d" % status
-
-
-class _Queue:
-    """Cola de entregas con hilos daemon creados bajo demanda. `flush` espera a que se vacíe (tests, apagado limpio)."""
-
-    def __init__(self):
-        self._cv = threading.Condition()
-        self._items = deque()
-        self._pending = 0
-        self._threads = 0
-
-    def put(self, fn):
-        with self._cv:
-            self._items.append(fn)
-            self._pending += 1
-            if self._threads < WORKERS and self._threads < self._pending:
-                self._threads += 1
-                threading.Thread(target=self._run, name="chopshop-webhook", daemon=True).start()
-            self._cv.notify()
-
-    def _run(self):
-        while True:
-            with self._cv:
-                while not self._items:
-                    if not self._cv.wait(30):          # inactivo: el hilo termina y se recrea al necesitarlo
-                        if not self._items:
-                            self._threads -= 1
-                            return
-                fn = self._items.popleft()
-            try:
-                fn()
-            except Exception:  # noqa: BLE001 - un fallo de entrega no debe matar al hilo
-                pass
-            finally:
-                with self._cv:
-                    self._pending -= 1
-                    self._cv.notify_all()
-
-    def flush(self, timeout=10):
-        end = time.monotonic() + timeout
-        with self._cv:
-            while self._pending:
-                left = end - time.monotonic()
-                if left <= 0:
-                    return False
-                self._cv.wait(left)
-        return True
-
-
-_queue = _Queue()
+def set_dispatcher(d):
+    """Cambia el despachador del proceso (tests con reloj falso). Devuelve el anterior."""
+    global _dispatcher
+    old, _dispatcher = _dispatcher, d
+    return old
 
 
 def flush(timeout=10):
-    """Espera a que terminen las entregas en curso. True si quedó vacía."""
-    return _queue.flush(timeout)
+    """Espera a que terminen las entregas en curso (no los reintentos programados). True si quedó vacía."""
+    return _dispatcher.flush(timeout)
 
 
-def _record(conn, seq, name, ok, detail):
-    try:
-        with db.tx():
-            conn.execute("INSERT OR REPLACE INTO deliveries(event_seq,name,ok,detail,ts) VALUES(?,?,?,?,?)",
-                         (seq, name, 1 if ok else 0, detail, time.time()))
-    except Exception:  # noqa: BLE001 - conexión cerrada al apagar, etc.
-        pass
-
-
-def _matches(project, events, event, proj, typ=None):
-    return project in ("*", proj) and (not events or event in events or (typ is not None and typ in events))
-
-
-def _targets(conn, cfg, event, project, typ=None):
-    """{nombre: archivo}: webhook_files de la config (sin filtro) + suscripciones cuyo filtro coincide (pisan al mismo nombre).
-    El filtro de eventos acepta el nombre viejo o el tipo nuevo."""
-    out = {str(n): f for n, f in (cfg.get("webhook_files") or {}).items() if f}
-    with db.tx():
-        subs = db.rows(conn.execute("SELECT name, webhook_file, project, events FROM subscriptions"))
-    for s in subs:
-        if _matches(s["project"], db.jload(s["events"], []), event, project, typ):
-            out[s["name"]] = s["webhook_file"]
-    return out
+def cancel_pending():
+    """Descarta reintentos y entregas retenidas por debounce (apagado, tests)."""
+    _dispatcher.cancel()
 
 
 def _machine(cfg):
@@ -189,23 +100,23 @@ def payload(env, event=None):
     return dict(env, event=event or (env.get("body") or {}).get("legacy") or env["type"], machine_id=env["machine"])
 
 
+def _subscriptions(conn):
+    with db.tx():
+        return [webhooks.effective(r) for r in db.rows(conn.execute("SELECT * FROM subscriptions ORDER BY name"))]
+
+
 def _publish(conn, cfg, stored, poster, timeout, wait):
-    post = poster or _default_poster
-    n = 0
+    """Entrega cada sobre guardado a los destinos cuyo filtro casa (`webhooks.Dispatcher`: filtros v2, debounce,
+    reintentos). `cfg["webhook_files"]` = destinos sin filtro (una suscripción del mismo nombre que case los pisa)."""
+    fixed = {str(n): f for n, f in (cfg.get("webhook_files") or {}).items() if f}
+    subs = _subscriptions(conn)
+    if not (fixed or subs):
+        return
+    d, n = _dispatcher, 0
     for event, env in stored:
-        targets = _targets(conn, cfg, event, env["project"], env["type"])
-        if not targets:
-            continue
-        data = db.jdump(payload(env, event)).encode("utf-8")
-        seq = env["seq"]
-        for name, wfile in targets.items():
-            def job(name=name, wfile=wfile, data=data, seq=seq):
-                ok, detail = _deliver(wfile, data, post, timeout)
-                _record(conn, seq, name, ok, detail)
-            _queue.put(job)
-            n += 1
+        n += len(d.dispatch(conn, subs, fixed, payload(env, event), poster or _default_poster, timeout))
     if wait and n:
-        _queue.flush(timeout * (n + 1))
+        d.flush(timeout * (n + 1))
 
 
 def emit(conn, cfg, event, project, body=None, poster=None, timeout=TIMEOUT, wait=False, ts=None, cause=None):
@@ -284,8 +195,10 @@ def last_seq(conn):
 
 # ---------------------------------------------------------------- suscripciones
 
-def subscribe(conn, name, webhook_file, project="*", events=None):
-    """Crea o actualiza una suscripción. `webhook_file` es una RUTA; se rechaza una URL para que nunca llegue a la DB."""
+def subscribe(conn, name, webhook_file, project="*", events=None, **opts):
+    """Crea o actualiza (reemplaza) una suscripción. `webhook_file` y `secret_file` son RUTAS; se rechaza una URL para
+    que nunca llegue a la DB. `opts` = filtros v2 (`webhooks.FIELDS`); sin ellos, la suscripción es vieja
+    (`project` exacto o `*` + nombres de `events`)."""
     if not isinstance(name, str) or not _NAME.match(name):
         raise EventsError("nombre de suscripción inválido")
     if not isinstance(webhook_file, str) or not webhook_file.strip():
@@ -298,11 +211,24 @@ def subscribe(conn, name, webhook_file, project="*", events=None):
         events = [events]
     if not isinstance(events, (list, tuple)) or not all(isinstance(e, str) and e for e in events):
         raise EventsError("events debe ser una lista de nombres de evento")
+    unknown = set(opts) - set(webhooks.FIELDS) - {"batch_window_s"}      # batch_window_s: solo 0 en v1
+    if unknown:
+        raise EventsError("opciones desconocidas: %s" % ", ".join(sorted(unknown)))
+    try:
+        v2 = webhooks.validate(opts)                  # no guarda batch_window_s (rechaza > 0)
+    except webhooks.WebhookError as e:
+        raise EventsError(str(e))
     project = project or "*"
+    cols = ["name", "webhook_file", "project", "events", "created"] + list(webhooks.FIELDS)
     with db.tx():
         old = conn.execute("SELECT created FROM subscriptions WHERE name=?", (name,)).fetchone()
-        conn.execute("INSERT OR REPLACE INTO subscriptions(name,webhook_file,project,events,created) VALUES(?,?,?,?,?)",
-                     (name, webhook_file.strip(), project, db.jdump(list(events)), old["created"] if old else time.time()))
+        vals = [name, webhook_file.strip(), project, db.jdump(list(events)), old["created"] if old else time.time()]
+        for k in webhooks.FIELDS:
+            v = v2[k]
+            vals.append(db.jdump(v) if k in webhooks.JSON_FIELDS and v is not None
+                        else (int(v) if isinstance(v, bool) else v))
+        conn.execute("INSERT OR REPLACE INTO subscriptions(%s) VALUES(%s)" % (",".join(cols), ",".join("?" * len(cols))),
+                     vals)
 
 
 def unsubscribe(conn, name):
@@ -312,10 +238,14 @@ def unsubscribe(conn, name):
 
 
 def list_subscriptions(conn):
-    """{nombre: {"project","events","created"}}. Sin URL y sin ruta del archivo."""
+    """{nombre: {"project","events","created", filtros v2..., "signed"}}. Sin URL y sin rutas de archivos."""
     with db.tx():
-        rs = db.rows(conn.execute("SELECT name, project, events, created FROM subscriptions ORDER BY name"))
-    return {r["name"]: {"project": r["project"], "events": db.jload(r["events"], []), "created": r["created"]} for r in rs}
+        rs = db.rows(conn.execute("SELECT * FROM subscriptions ORDER BY name"))
+    out = {}
+    for r in rs:
+        out[r["name"]] = dict({"project": r["project"], "events": db.jload(r["events"], []), "created": r["created"]},
+                              **webhooks.public(webhooks.effective(r)))
+    return out
 
 
 # ---------------------------------------------------------------- migración del motor viejo
