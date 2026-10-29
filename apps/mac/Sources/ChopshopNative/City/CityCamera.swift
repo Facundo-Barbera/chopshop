@@ -172,6 +172,9 @@ public struct CityTransition: Equatable, Sendable {
     public static func slab(_ p: Double) -> Double { 1 - citySmooth((p - 0.86) / 0.11) }
     /// Cabecera: "Ciudad" → proyecto (13.6 → 15.8 s).
     public static func chrome(_ p: Double) -> Double { citySmooth((p - 0.39) / 0.4) }
+    /// Fundido secuencial de la cabecera (sin solapar textos): lo de la ciudad sale en la primera mitad, lo del proyecto entra en la segunda.
+    public static func chromeOut(_ ch: Double) -> Double { cityClamp(1 - 2 * ch) }
+    public static func chromeIn(_ ch: Double) -> Double { cityClamp(2 * ch - 1) }
 }
 
 /// Clic en la ciudad: qué piso hay bajo un punto de pantalla.

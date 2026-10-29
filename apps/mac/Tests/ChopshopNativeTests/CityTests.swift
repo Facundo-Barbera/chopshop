@@ -300,6 +300,13 @@ final class CityTests: XCTestCase {
         XCTAssertEqual(CityTransition.backWalls(0), 1)
         XCTAssertEqual(CityTransition.slab(0), 1)
         XCTAssertEqual(CityTransition.upperLift(0), 0)
+        // cabecera: nunca dos textos a la vez, y en p = 1 solo el del proyecto
+        for i in 0...1000 {
+            let ch = CityTransition.chrome(Double(i) / 1000)
+            XCTAssertEqual(min(CityTransition.chromeOut(ch), CityTransition.chromeIn(ch)), 0)
+        }
+        XCTAssertEqual(CityTransition.chromeIn(CityTransition.chrome(1)), 1)
+        XCTAssertEqual(CityTransition.chromeOut(CityTransition.chrome(1)), 0)
         // sin saltos: smoothstep sube como mucho 1.5/ancho; el más estrecho (labels, 0.06) da 0.025 por paso de 0.001
         for f in [CityTransition.labels, CityTransition.others, CityTransition.upperLift, CityTransition.upperAlpha, CityTransition.frontWalls,
                   CityTransition.backWalls, CityTransition.roomRise, CityTransition.deskPop, CityTransition.slab, CityTransition.chrome] {

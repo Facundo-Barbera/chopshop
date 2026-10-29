@@ -59,13 +59,13 @@ struct CitySnapshotFrame: View {
                         Text("\(model.buildings.count) empresas · \(model.projectCount) proyectos")
                             .font(.subheadline).foregroundStyle(.secondary)
                     }
-                    .opacity(1 - ch)
+                    .opacity(CityTransition.chromeOut(ch))
                     if ch > 0 {
                         HStack(alignment: .firstTextBaseline, spacing: 10) {
                             Text(pr).font(.headline)
                             Text(ProjectContent.subtitle(s.snapshot.summary(of: pr))).font(.subheadline).foregroundStyle(.secondary)
                         }
-                        .opacity(ch)
+                        .opacity(CityTransition.chromeIn(ch))
                     }
                 }
                 Spacer()
