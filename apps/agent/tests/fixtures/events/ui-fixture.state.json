@@ -97,6 +97,24 @@
     "t3_ok": true,
     "threads_running": 4
   },
+  "machine_room": {
+    "automations": [
+      {
+        "duration_ms": 1830,
+        "error": null,
+        "exit": 0,
+        "name": "triage",
+        "next_run": null,
+        "project": "chopshop",
+        "severity": "info",
+        "trigger": "github.issue.opened",
+        "ts": "2026-10-29T16:03:44.000Z"
+      }
+    ],
+    "listeners": [],
+    "rack": [],
+    "subscriptions": []
+  },
   "projects": [
     {
       "attention": [],

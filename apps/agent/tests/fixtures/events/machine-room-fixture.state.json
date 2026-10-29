@@ -1,0 +1,57 @@
+{
+  "automations": [
+    {
+      "duration_ms": 900,
+      "error": "exit 1",
+      "exit": 1,
+      "name": "docs-sync",
+      "next_run": "2026-10-30T07:30:00.000Z",
+      "project": "awesome-gb",
+      "severity": "error",
+      "trigger": "manual",
+      "ts": "2026-10-29T16:07:15.000Z"
+    },
+    {
+      "duration_ms": 410,
+      "error": null,
+      "exit": 0,
+      "name": "triage",
+      "next_run": null,
+      "project": "chopshop",
+      "severity": "info",
+      "trigger": "github.issue.opened",
+      "ts": "2026-10-29T16:07:22.000Z"
+    }
+  ],
+  "listeners": [
+    {
+      "backoff_s": 0,
+      "error": null,
+      "last_cycle": "2026-10-29T16:09:30.000Z",
+      "last_ok": "2026-10-29T16:09:30.000Z",
+      "name": "automations",
+      "state": "ok",
+      "ts": "2026-10-29T16:07:36.000Z"
+    },
+    {
+      "backoff_s": 0,
+      "error": null,
+      "last_cycle": "2026-10-29T16:07:00.000Z",
+      "last_ok": "2026-10-29T16:07:00.000Z",
+      "name": "forge",
+      "state": "ok",
+      "ts": "2026-10-29T16:07:01.000Z"
+    },
+    {
+      "backoff_s": 30,
+      "error": "T3Error: conexión rechazada",
+      "last_cycle": "2026-10-29T16:09:00.000Z",
+      "last_ok": "2026-10-29T16:00:00.000Z",
+      "name": "t3watch",
+      "state": "down",
+      "ts": "2026-10-29T16:07:29.000Z"
+    }
+  ],
+  "rack": [],
+  "subscriptions": []
+}

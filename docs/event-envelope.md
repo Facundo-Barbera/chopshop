@@ -63,7 +63,7 @@ Mientras dure la compatibilidad (un ciclo), `GET /events`, `/snapshot.events` y 
 | `forge.repo.state` | repo (`<proveedor>:<repo>`) | null / info (red → warn) | **provider**, **repo**, **light** (`green, amber, red, gray`), project, kind, label, default_branch, ci, url, error |
 | `forge.run.state` | run (`<proveedor>:<repo>#<run_id>`) | null / info (failure → warn) | **provider**, **repo**, **run_id**, **workflow**, **status** (`queued, in_progress, completed`), **event**, **origin** `{kind: thread\|automation\|bot\|schedule\|human\|unknown, id, label}`, conclusion, actor, head_branch, head_sha, url, created_at, updated_at, project |
 | `forge.dispatch` | run (`<proveedor>:<repo>#<nonce>`) | null / info | **provider**, **repo**, **workflow**, **ref**, nonce, inputs (lo emite una automatización: es el único tipo reservado que un script puede emitir) |
-| `listener.state` | listener | null / info (degraded → warn, down → error) | **name** (`t3watch, forge, webhooks, automations, collector, engine, office`), **state** (`ok, degraded, down`), last_ok, last_cycle, backoff_s, error |
+| `listener.state` | listener | null / info (degraded → warn, down → error) | **name** (`t3watch`, `forge` (eventos de GitHub), `rack`, `actions`, `webhooks`, `automations`, `collector`, `engine`, `office`, `halflife`, `roles`), **state** (`ok, degraded, down`), last_ok, last_cycle, backoff_s, error |
 | `agent.started` | agent | null / info | **version** |
 
 `task.state` gana (aditivo) `role` (rol de la oficina o `null` = vestíbulo), `ended_at` y `touched_at` (ISO, para la
