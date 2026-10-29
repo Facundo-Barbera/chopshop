@@ -42,8 +42,7 @@ public struct LiveProjectScreen<Unpaired: View>: View {
             default:
                 if store.snapshot.projects.contains(project) {
                     ScrollView {
-                        ProjectContent(project: project, snapshot: store.snapshot, frozenTime: nil,
-                                       office: OfficePlan.build(project: project, state: store.state))
+                        ProjectContent(project: project, snapshot: store.snapshot, frozenTime: nil)
                             .id(project)
                             .padding(.horizontal, 26).padding(.vertical, 22)
                             .frame(maxWidth: 1060)

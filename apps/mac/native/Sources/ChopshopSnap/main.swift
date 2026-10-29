@@ -1,12 +1,11 @@
 import AppKit
 import ChopshopNative
 
-// uso: ChopshopSnap <directorio de salida> [demo|demo-keys|city-keys|city-video [vídeo.mp4]|office-v3]
+// uso: ChopshopSnap <directorio de salida> [demo|demo-keys|city-keys|city-video [vídeo.mp4]]
 //   sin 2º argumento: capturas de proyecto/oficina
 //   demo: fotogramas clave de la demo (key-*.png) + secuencia seq/f0000.jpg a 12 fps (demo-keys: solo las claves)
 //   city-keys: claves de la ciudad (city-0N-*.png, 1400×900 @1x) desde city-fixture.jsonl
 //   city-video: la cronología de la ciudad en MP4 H.264, 1400×900 a 30 fps (por defecto <salida>/city.mp4)
-//   office-v3: oficina por escritorios, sala de máquinas y ciudad con vestíbulo (OfficeFixture)
 let args = Array(CommandLine.arguments.dropFirst())
 let out = args.first ?? "/tmp/chopshop-snaps"
 try? FileManager.default.createDirectory(atPath: out, withIntermediateDirectories: true)
@@ -25,20 +24,6 @@ if let mode = args.dropFirst().first, mode == "demo" || mode == "demo-keys" {
             if k % 60 == 0 { print("seq \(k)/\(n)") }
         }
         print("done seq \(n)")
-    }
-    exit(0)
-}
-if let mode = args.dropFirst().first, mode == "office-v3" {
-    MainActor.assumeIsolated {
-        for dark in [true, false] {
-            let k = dark ? "dark" : "light"
-            Snapshots.renderDeskOffice(dark: dark, to: "\(out)/office-v3-piso1-\(k).png")
-            Snapshots.renderMachineRoom(dark: dark, to: "\(out)/machine-room-\(k).png")
-            Snapshots.renderOfficeCity(dark: dark, to: "\(out)/city-v3-\(k).png")
-        }
-        Snapshots.renderDeskOffice(dark: true, floor: 1, to: "\(out)/office-v3-piso2-dark.png")
-        Snapshots.renderDeskOffice(dark: true, selected: "awesome-gb/0/backend/0", to: "\(out)/office-v3-inspector-dark.png")
-        Snapshots.renderDeskOffice(dark: true, hovered: "awesome-gb/0/backend/1", to: "\(out)/office-v3-hover-dark.png")
     }
     exit(0)
 }

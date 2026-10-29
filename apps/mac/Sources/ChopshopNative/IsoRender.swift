@@ -12,8 +12,6 @@ struct IsoRenderer {
     let selected: String?
     let hovered: String?
     let size: CGSize
-    /// Reloj (epoch, s) de la semivida de los ocupantes (oficina por escritorios). nil = sin desvanecer.
-    var epoch: Double? = nil
 
     // MARK: paleta (grafito en oscuro, papel cálido en claro)
 
@@ -38,13 +36,6 @@ struct IsoRenderer {
     private var ink: Color { dark ? .white : Color(red: 0.2, green: 0.18, blue: 0.15) }
 
     private func P(_ x: Double, _ y: Double, _ z: Double = 0) -> CGPoint { cam.pt(x, y, z) }
-
-    /// Opacidad del muñeco por semivida (0 en cuanto baja de 0.1: ya salió de la oficina).
-    private func fade(_ d: IsoDesk) -> Double {
-        guard d.person, let e = epoch else { return 1 }
-        let o = d.fade.opacity(at: e)
-        return o < HalfLife.fadeOut ? 0 : o
-    }
     private func poly(_ pts: [CGPoint]) -> Path {
         var p = Path(); p.move(to: pts[0]); for q in pts.dropFirst() { p.addLine(to: q) }; p.closeSubpath(); return p
     }
@@ -103,7 +94,7 @@ struct IsoRenderer {
 
     func draw(_ ctx: inout GraphicsContext) {
         guard !scene.desks.isEmpty else { return }
-        let near: Set<String>? = scene.focusFades ? (hovered ?? selected).map { scene.data.neighborhood(of: $0) } : nil
+        let near: Set<String>? = (hovered ?? selected).map { scene.data.neighborhood(of: $0) }
         func faded(_ id: String) -> Bool { near != nil && !near!.contains(id) }
 
         box.hits.removeAll(keepingCapacity: true); box.heads.removeAll(keepingCapacity: true)
@@ -144,7 +135,6 @@ struct IsoRenderer {
             let p = P(d.figX, d.cy + 25, d.floorZ)
             var g = ctx
             g.opacity = (faded(d.id) ? 0.25 : (d.visual == .done ? 0.7 : (d.visual == .skipped ? 0.45 : 1))) * min(1, (d.pop - 0.6) * 3) * min(1, (d.walk - 0.9) * 10)
-                * fade(d) * (d.retired ? 0.4 : 1)
             g.draw(s, at: CGPoint(x: p.x, y: p.y + 7), anchor: .top)
         }
         if let h = hovered, selected != h, let head = box.heads[h], let s = ctx.resolveSymbol(id: "tip") {
@@ -254,12 +244,10 @@ struct IsoRenderer {
             for d in scene.desks where d.pop > 0.01 {
                 let z = d.floorZ
                 let op = (faded(d.id) ? 0.4 : 1.0) * min(1, d.pop * 1.5)
-                if !d.standing {
-                    l.fill(castShadow(d.deskX, d.deskY, Iso.deskW, Iso.deskD, (Iso.deskH + 4) * max(0, d.pop), z: z, grow: 1.5), with: .color(.black.opacity((dark ? 0.55 : 0.24) * op)))
-                }
-                if d.visual != .skipped && d.person && fade(d) > 0 {
+                l.fill(castShadow(d.deskX, d.deskY, Iso.deskW, Iso.deskD, (Iso.deskH + 4) * max(0, d.pop), z: z, grow: 1.5), with: .color(.black.opacity((dark ? 0.55 : 0.24) * op)))
+                if d.visual != .skipped {
                     let e = ellipse(d.figX + 2.5, d.figY - 0.5, z, 7.5, n: 20)
-                    l.fill(e, with: .color(.black.opacity((dark ? 0.6 : 0.26) * op * min(1, d.walk * 4) * fade(d))))
+                    l.fill(e, with: .color(.black.opacity((dark ? 0.6 : 0.26) * op * min(1, d.walk * 4))))
                 }
             }
         }
@@ -274,8 +262,7 @@ struct IsoRenderer {
                 g.stroke(r, with: .color((tint ?? ink).opacity(d.id == selected ? 0.75 : 0.35)),
                          style: StrokeStyle(lineWidth: 1.1, lineJoin: .round, dash: d.id == selected ? [4, 3] : []))
             }
-            // anillos de estado en el suelo (solo bajo un muñeco que sigue en la oficina)
-            guard d.person && fade(d) > 0 else { continue }
+            // anillos de estado en el suelo
             let idx = Double(abs(d.id.hashValue) % 13)
             switch d.visual {
             case .needsYou, .stuck:
@@ -310,22 +297,10 @@ struct IsoRenderer {
         let dh = Iso.deskH * k
         let idx = Double(abs(d.id.hashValue) % 13)
         var g = ctx
-        let baseOp: Double = v == .skipped ? 0.5 : (d.retired ? 0.38 : 1)
+        let baseOp: Double = v == .skipped ? 0.5 : 1
         g.opacity = (dim ? 0.28 : 1) * baseOp * min(1, k * 3)
         let isHover = hovered == d.id, isSel = selected == d.id
         let lit = min(1, d.since / 0.6)             // la pantalla se enciende con un fundido
-        let fd = fade(d)
-
-        // vestíbulo: solo el muñeco, de pie
-        if d.standing {
-            var gf = g; gf.opacity = g.opacity * fd
-            if fd > 0 { figure(&gf, d, idx: idx) }
-            guard k > 0.6 else { return }
-            let pts = [P(d.figX, d.figY, z0 + 34), P(d.figX - 10, d.figY + 4, z0), P(d.figX + 10, d.figY + 4, z0)]
-            let minX = pts.map(\.x).min()!, maxX = pts.map(\.x).max()!, minY = pts.map(\.y).min()!, maxY = pts.map(\.y).max()!
-            box.hits.append((d.id, CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY), d.key))
-            return
-        }
 
         // escritorio
         let sil = prism(&g, d.deskX, d.deskY, z0, Iso.deskW, Iso.deskD, dh, top: deskTop, topEnd: deskTopEnd, left: deskL, right: deskR, edge: dark ? 0.28 : 0.95)
@@ -336,7 +311,7 @@ struct IsoRenderer {
         _ = prism(&g, d.cx - 10, my, zt, 20, 2.6, 13.5 * k, top: monBody, left: monBody.opacity(0.95), right: monBody.opacity(0.85), edge: dark ? 0.2 : 0.3)
         let sy = my + 2.6
         let scr = poly([P(d.cx - 9, sy, zt + 12.3 * k), P(d.cx + 9, sy, zt + 12.3 * k), P(d.cx + 9, sy, zt + 2.2 * k), P(d.cx - 9, sy, zt + 2.2 * k)])
-        let on = d.person && fd > 0 && (v == .running || v == .expanding || v == .waitingBot || v == .needsYou || v == .stuck)
+        let on = v == .running || v == .expanding || v == .waitingBot || v == .needsYou || v == .stuck
         g.fill(scr, with: .color(c(0.17, (0.46, 0.45, 0.44))))
         if on {
             var gl = g; gl.opacity = g.opacity * lit
@@ -346,18 +321,7 @@ struct IsoRenderer {
                 halo.fill(scr, with: .color(c(0.9, (0.99, 0.97, 0.9))))
             }
         }
-        if d.sleeping {
-            // escritorio permanente dormido: lámpara cálida encendida sobre la mesa
-            let lp = P(d.deskX + Iso.deskW - 7, d.deskY + 6, zt + 9 * k)
-            var lg = g; lg.addFilter(.blur(radius: 4 * cam.s))
-            let warm = Color(red: 1.0, green: 0.78, blue: 0.42)
-            lg.fill(Path(ellipseIn: CGRect(x: lp.x - 7 * cam.s, y: lp.y - 7 * cam.s, width: 14 * cam.s, height: 14 * cam.s)),
-                    with: .color(warm.opacity(0.55 + 0.15 * sin(t * 0.8 + idx))))
-            _ = prism(&g, d.deskX + Iso.deskW - 8.5, d.deskY + 4.5, zt, 3, 3, 9 * k, top: warm, left: monBody, right: monBody, edge: 0)
-        }
-        if !d.person || fd <= 0 {
-            // libre (o su ocupante ya se fue): pantalla apagada, sin muñeco
-        } else if v == .running {
+        if v == .running {
             var gl = g; gl.opacity = g.opacity * lit
             for i in 0..<3 {
                 let len = 4.5 + (sin(t * 2.4 + Double(i) * 1.7 + idx) + 1) * 4.2
@@ -384,10 +348,7 @@ struct IsoRenderer {
             g.stroke(sil, with: .color((v.tint ?? ink).opacity(isSel ? 0.95 : 0.7)), style: StrokeStyle(lineWidth: isSel ? 1.4 : 1.1, lineJoin: .round))
         }
 
-        if d.person && fd > 0 {
-            var gf = g; gf.opacity = g.opacity * fd
-            figure(&gf, d, idx: idx)
-        }
+        figure(&g, d, idx: idx)
 
         // zona de impacto
         guard k > 0.6 else { return }

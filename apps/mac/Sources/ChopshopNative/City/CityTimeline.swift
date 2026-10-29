@@ -89,11 +89,10 @@ public struct CityTimeline: Sendable {
         for bi in m.buildings.indices {
             for fi in m.buildings[bi].floors.indices {
                 let old = m.buildings[bi].floors[fi]
-                if var f = live.floor(id: old.id) { f.level = old.level; f.company = old.company; m.buildings[bi].floors[fi] = f }
+                if var f = live.floor(old.project) { f.level = old.level; f.company = old.company; m.buildings[bi].floors[fi] = f }
                 else {
-                    var f = old
-                    f.status = .neutral; f.activeThreads = []; f.running = 0; f.needsYou = 0; f.stuck = 0; f.alert = nil
-                    m.buildings[bi].floors[fi] = f
+                    m.buildings[bi].floors[fi] = CityFloor(project: old.project, company: old.company, level: old.level, status: .neutral,
+                                                           activeThreads: [], running: 0, needsYou: 0, stuck: 0, alert: nil)
                 }
             }
         }

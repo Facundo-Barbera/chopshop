@@ -14,15 +14,7 @@ struct RootView: View {
                 GlassBackdrop()
                 WebView()
                 if #available(macOS 26.0, *) {
-                    if let v = model.liveView {
-                        Group {
-                            switch v {
-                            case .city: LiveCityScreen(store: model.live)
-                            case .machineRoom: LiveMachineRoomScreen(store: model.live)
-                            }
-                        }
-                        .environment(\.attentionActions, model.attentionActions)
-                    } else if model.selection == .project, let p = model.project, !model.preferWeb {
+                    if model.selection == .project, let p = model.project, !model.preferWeb {
                         LiveProjectScreen(project: p, store: model.live) { PairingScreen() }
                             .environment(\.attentionActions, model.attentionActions)
                     }
@@ -50,7 +42,6 @@ struct RootView: View {
     }
 
     private var title: String {
-        if let v = model.liveView { return v.title }
         if model.selection == .project, let p = model.project { return p }
         return model.selection == .overview ? "Chopshop" : model.selection.title
     }
@@ -206,12 +197,6 @@ struct Sidebar: View {
                 Label(s.title, systemImage: s.symbol)
                     .badge(s == .questions || s == .reactions ? (model.counts[s] ?? 0) : 0)
                     .tag(NavItem.section(s))
-            }
-            // ciudad y sala de máquinas: solo nativas (stream en vivo, macOS 26)
-            if #available(macOS 26.0, *) {
-                ForEach(LiveView.allCases, id: \.self) { v in
-                    Label(v.title, systemImage: v.symbol).tag(NavItem.live(v))
-                }
             }
 
             SwiftUI.Section(header: header("Proyectos")) {

@@ -13,6 +13,9 @@ import Combine
 public final class LiveStore: ObservableObject {
     @Published public private(set) var status: StreamStatus = .idle
     @Published public private(set) var snapshot = MockSnapshot(projects: [], batches: [], graphs: [], events: [], machines: [])
+    /// v3: nombre de pila y subtítulo de cada hilo conocido (`LiveState.threadLabels`), al ritmo de `snapshot`. Las vistas de la
+    /// ciudad, la oficina y la sala de máquinas leen de aquí para que un hilo se llame igual en todas.
+    @Published public private(set) var threadLabels: [String: LiveState.ThreadLabel] = [:]
     /// Máquina del agente (del `hello`).
     @Published public private(set) var machine: String?
     public private(set) var state = LiveState()
@@ -74,7 +77,7 @@ public final class LiveStore: ObservableObject {
     /// Reconstruye `snapshot` ya (los tests y el cambio de proyecto no esperan al agrupado).
     public func flush() {
         flushTask?.cancel(); flushTask = nil
-        snapshot = SnapshotMapper.snapshot(state, now: clock())
+        publish()
     }
 
     // MARK: - Bucle
@@ -129,6 +132,12 @@ public final class LiveStore: ObservableObject {
         }
     }
 
+    private func publish() {
+        snapshot = SnapshotMapper.snapshot(state, now: clock())
+        let labels = state.threadLabels
+        if labels != threadLabels { threadLabels = labels }
+    }
+
     private func scheduleFlush() {
         guard flushTask == nil else { return }
         let wait = coalesceInterval
@@ -136,7 +145,7 @@ public final class LiveStore: ObservableObject {
             try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
             guard !Task.isCancelled, let self else { return }
             self.flushTask = nil
-            self.snapshot = SnapshotMapper.snapshot(self.state, now: self.clock())
+            self.publish()
         }
     }
 

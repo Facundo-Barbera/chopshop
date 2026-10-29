@@ -14,8 +14,6 @@ final class CityViewBox {
     var cityFrame: IsoFrame?
     var sceneKey: LiveSceneKey?
     var cachedScene: IsoScene?
-    var officeKey: OfficeSceneKey?
-    var cachedOffice: IsoScene?
     var zoomGen = 0
 
     func scene(graph: MockGraph, tasks: [String: MockTask]) -> IsoScene {
@@ -25,19 +23,9 @@ final class CityViewBox {
         cachedScene = s; sceneKey = k
         return s
     }
-
-    /// Piso de la oficina por escritorios (v3).
-    func scene(office plan: OfficePlan, floor: Int) -> IsoScene {
-        let k = OfficeSceneKey(plan: plan, floor: floor)
-        if let s = cachedOffice, officeKey == k { return s }
-        let s = IsoScene(office: plan, floor: floor)
-        cachedOffice = s; officeKey = k
-        return s
-    }
 }
 
-/// La flota como ciudad isométrica: un edificio por empresa, un piso por proyecto (v3: uno por piso de su oficina, con el vestíbulo
-/// en planta baja), una ventana encendida por hilo vivo.
+/// La flota como ciudad isométrica: un edificio por empresa, un piso por proyecto, una ventana encendida por hilo vivo.
 /// Pisos en ámbar (te necesita) o rojo (trabada), barra "Atención" y leyenda. Clic en un piso → zoom continuo hasta ese piso, que
 /// se convierte en la `IsoOfficeView` del proyecto (mismo encuadre, sin fundido). Esc o "Ciudad" vuelve.
 @available(macOS 26.0, *)
@@ -45,8 +33,6 @@ public struct CityView: View {
     let model: CityModel
     let lights: CityLights
     let snapshot: MockSnapshot
-    /// v3: oficinas por escritorios, por proyecto (los proyectos sin `office:` siguen con la oficina por rangos del grafo).
-    var offices: [String: OfficePlan] = [:]
     var frozenTime: Double?
     var growth: Double?
     var frozenZoom: CityFocus?
@@ -55,8 +41,6 @@ public struct CityView: View {
 
     @State private var box = CityViewBox()
     @State private var focus: String?
-    /// Piso elegido (`CityFloor.id`) del proyecto enfocado.
-    @State private var focusFloor: String?
     @State private var zoomFrom = 0.0
     @State private var zoomTo = 0.0
     @State private var zoomAt = -Double.infinity
@@ -71,12 +55,12 @@ public struct CityView: View {
     /// Ciudad desde una proyección viva y sus ventanas (`CityLights`, que el llamador va alimentando con `observe`).
     public init(state: LiveState, lights: CityLights, directory: CompanyDirectory = .standard, onSelectFloor: ((String) -> Void)? = nil) {
         self.init(model: CityModel.build(state, directory: directory), lights: lights, snapshot: SnapshotMapper.snapshot(state),
-                  offices: OfficePlan.all(state, directory: directory), onSelectFloor: onSelectFloor)
+                  onSelectFloor: onSelectFloor)
     }
 
-    init(model: CityModel, lights: CityLights, snapshot: MockSnapshot, offices: [String: OfficePlan] = [:], frozenTime: Double? = nil,
-         growth: Double? = nil, frozenZoom: CityFocus? = nil, flatChrome: Bool = false, onSelectFloor: ((String) -> Void)? = nil) {
-        self.model = model; self.lights = lights; self.snapshot = snapshot; self.offices = offices; self.frozenTime = frozenTime; self.growth = growth
+    init(model: CityModel, lights: CityLights, snapshot: MockSnapshot, frozenTime: Double? = nil, growth: Double? = nil,
+         frozenZoom: CityFocus? = nil, flatChrome: Bool = false, onSelectFloor: ((String) -> Void)? = nil) {
+        self.model = model; self.lights = lights; self.snapshot = snapshot; self.frozenTime = frozenTime; self.growth = growth
         self.frozenZoom = frozenZoom; self.flatChrome = flatChrome; self.onSelectFloor = onSelectFloor
     }
 
@@ -91,23 +75,8 @@ public struct CityView: View {
     }
 
     private var officeMounted: Bool {
-        if let z = frozenZoom { return z.p >= 1 && hasOffice(z.project) }
-        return mounted && (focus.map(hasOffice) ?? false)
-    }
-
-    /// El piso se puede abrir: tiene oficina por escritorios (v3) o grafo (oficina por rangos).
-    private func hasOffice(_ project: String) -> Bool { offices[project] != nil || graph(project) != nil }
-
-    /// Piso de la oficina que se abre (el elegido en la ciudad o el primero).
-    private func officeFloor(_ project: String) -> Int {
-        focusFloor.flatMap { model.floor(id: $0) }.flatMap { $0.project == project ? $0.officeFloor : nil }
-            ?? offices[project]?.floors.first?.index ?? 0
-    }
-
-    /// Escena de la oficina del proyecto (la misma que monta la vista al terminar el zoom).
-    private func sceneFor(_ project: String) -> IsoScene? {
-        if let plan = offices[project] { return box.scene(office: plan, floor: officeFloor(project)) }
-        return graph(project).map { box.scene(graph: $0, tasks: tasks(project)) }
+        if let z = frozenZoom { return z.p >= 1 && graph(z.project) != nil }
+        return mounted && focus.flatMap(graph) != nil
     }
 
     private func now() -> Double { frozenTime ?? Date().timeIntervalSinceReferenceDate }
@@ -122,13 +91,10 @@ public struct CityView: View {
         return d
     }
 
-    /// Clic en un piso (o en su aviso): `id` es el `CityFloor.id`; el vestíbulo abre la oficina del primer proyecto con oficina.
-    private func select(_ id: String) {
-        guard let project = model.project(ofFloor: id) else { return }
+    private func select(_ project: String) {
         onSelectFloor?(project)
-        guard frozenZoom == nil, hasOffice(project) else { return }
+        guard frozenZoom == nil, graph(project) != nil else { return }
         showGraph = false
-        focusFloor = model.floor(id: id).flatMap { $0.lobby ? nil : $0.id }
         zoomIn(project)
     }
 
@@ -154,7 +120,7 @@ public struct CityView: View {
         let gen = box.zoomGen
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: UInt64(Self.zoomDuration * cur * 1_000_000_000))
-            if box.zoomGen == gen { focus = nil; focusFloor = nil }
+            if box.zoomGen == gen { focus = nil }
         }
     }
 
@@ -195,8 +161,6 @@ public struct CityView: View {
                 // el grafo primero: con la oficina montada, "Grafo" también tiene que verse
                 if showGraph, let pr = graphProject, let g = graph(pr) {
                     GraphView(graph: g, tasks: tasks(pr), hostOf: hosts(pr), frozenTime: frozenTime, flatChrome: flatChrome)
-                } else if office, let pr = target, let plan = offices[pr] {
-                    DeskOfficeView(plan: plan, tasks: tasks(pr), floor: officeFloor(pr), frozenTime: frozenTime, flatChrome: flatChrome)
                 } else if office, let pr = target, let g = graph(pr) {
                     IsoOfficeView(graph: g, tasks: tasks(pr), hostOf: hosts(pr), frozenTime: frozenTime, flatChrome: flatChrome)
                 } else {
@@ -217,26 +181,21 @@ public struct CityView: View {
     }
 
     private func litCount(_ t: Double) -> Int {
-        model.floors.reduce(0) { $0 + lights.windows($1.id, t: t).filter { $0 > 0.5 }.count }
+        model.floors.reduce(0) { $0 + lights.windows($1.project, t: t).filter { $0 > 0.5 }.count }
     }
 
     private func header(t: Double, chrome ch: Double) -> some View {
-        let plan = target.flatMap { offices[$0] }
-        let g = plan == nil ? target.flatMap(graph) : nil
+        let g = target.flatMap(graph)
         return HStack(alignment: .firstTextBaseline) {
             ZStack(alignment: .leading) {
                 Text("Todas las empresas").opacity(CityTransition.chromeOut(ch))
-                if let plan { Text("\(plan.company) · \(plan.project)").opacity(CityTransition.chromeIn(ch)) }
-                else if let g { Text(g.goal).opacity(CityTransition.chromeIn(ch)) }
+                if let g { Text(g.goal).opacity(CityTransition.chromeIn(ch)) }
             }
             .font(.callout.weight(.medium))
             Spacer()
             ZStack(alignment: .trailing) {
                 Text("\(litCount(t)) de \(model.threadCount) hilos").opacity(CityTransition.chromeOut(ch))
-                if let plan {
-                    let alive = plan.people.filter { $0.state.alive }.count
-                    Text("\(alive) \(alive == 1 ? "hilo" : "hilos") · \(plan.floors.flatMap(\.desks).count) escritorios").opacity(CityTransition.chromeIn(ch))
-                } else if let g { Text("\(g.threads) de \(g.threadBudget) hilos").opacity(CityTransition.chromeIn(ch)) }
+                if let g { Text("\(g.threads) de \(g.threadBudget) hilos").opacity(CityTransition.chromeIn(ch)) }
             }
             .font(.caption).foregroundStyle(.secondary).padding(.trailing, 6)
             CitySwitch(first: ch > 0.5 ? "Oficina" : "Ciudad", graph: showGraph, zoomed: zoomed || mounted,
@@ -250,30 +209,30 @@ public struct CityView: View {
     // MARK: lienzo
 
     private func zoomData(p: Double, size: CGSize) -> (CityZoom, IsoFrame)? {
-        guard p > 0, let pr = target, let sc = sceneFor(pr), let b = model.building(of: pr) else { return nil }
-        let picked = focusFloor.flatMap { model.floor(id: $0) }.flatMap { $0.project == pr ? $0 : nil }
-        guard let f = picked ?? model.floor(pr), !sc.rooms.isEmpty else { return nil }
+        guard p > 0, let pr = target, let g = graph(pr), let b = model.building(of: pr), let f = model.floor(pr) else { return nil }
+        let sc = box.scene(graph: g, tasks: tasks(pr))
+        guard !sc.rooms.isEmpty else { return nil }
         var minX = Double.infinity, minY = Double.infinity, maxX = -Double.infinity, maxY = -Double.infinity
         for r in sc.rooms { minX = min(minX, r.x0); minY = min(minY, r.y0); maxX = max(maxX, r.x0 + r.w); maxY = max(maxY, r.y0 + r.d) }
         let emb = OfficeEmbedding(rooms: CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY), building: b, level: f.level)
         let office = OfficeFraming.frame(IsoBounds(minU: sc.minU, maxU: sc.maxU, minV: sc.minV, maxV: sc.maxV), size: size)
         let tr = CityTransition(city: CityFraming.frame(model.bounds, size: size), office: office, embedding: emb)
-        return (CityZoom(project: pr, p: p, transition: tr, scene: sc, floorID: f.id), tr.camera(p))
+        return (CityZoom(project: pr, p: p, transition: tr, scene: sc), tr.camera(p))
     }
 
     private func canvas(p: Double, t: Double) -> some View {
         let dark = scheme == .dark
-        let zoomScene: IsoScene? = (p > 0 ? target : nil).flatMap { sceneFor($0) }
+        let zoomScene: IsoScene? = (p > 0 ? target : nil).flatMap { pr in graph(pr).map { box.scene(graph: $0, tasks: tasks(pr)) } }
         return Canvas { ctx, size in
             guard !model.buildings.isEmpty else { return }
             let cityF = CityFraming.frame(model.bounds, size: size)
             box.cityFrame = cityF
             let z = zoomData(p: p, size: size)
             CityRenderer(model: model, lights: lights, cam: z?.1 ?? cityF, dark: dark, t: t, growth: growth,
-                         hovered: hovered, zoom: z?.0, size: size, epoch: frozenTime == nil ? Date().timeIntervalSince1970 : nil).draw(&ctx)
+                         hovered: hovered, zoom: z?.0, size: size).draw(&ctx)
         } symbols: {
             ForEach(model.floors) { f in
-                CityFloorPill(name: f.label, tint: lights.tint(f.id, t: t)).tag("cf:\(f.id)")
+                CityFloorPill(name: f.project, tint: lights.tint(f.project, t: t)).tag("cf:\(f.project)")
             }
             ForEach(model.buildings) { b in
                 CityCompanyTag(name: b.company, threads: b.floors.reduce(0) { $0 + $1.activeThreads.count }).tag("cb:\(b.company)")
@@ -281,15 +240,10 @@ public struct CityView: View {
             if let sc = zoomScene {
                 // mismas etiquetas que IsoOfficeView (el piso acaba siendo esa oficina)
                 ForEach(sc.desks) { d in
-                    if sc.focusFades {
-                        IsoDeskLabel(label: d.node.label, visual: d.visual).tag("d:\(d.id)")
-                    } else if d.person || d.sleeping {
-                        OfficePersonLabel(name: d.person ? d.node.label : "dormido", subtitle: d.person ? d.node.title : nil, visual: d.visual)
-                            .tag("d:\(d.id)")
-                    }
+                    IsoDeskLabel(label: d.node.label, visual: d.visual).tag("d:\(d.id)")
                 }
                 ForEach(sc.rooms, id: \.index) { r in
-                    IsoRoomLabel(text: r.label).tag("r:\(r.index)")
+                    IsoRoomLabel(index: r.index).tag("r:\(r.index)")
                 }
             }
         }
@@ -304,23 +258,16 @@ public struct CityView: View {
             }
         }
         .gesture(SpatialTapGesture().onEnded { e in
-            guard !zoomed, p == 0, let f = box.cityFrame, let id = CityHit.floor(at: e.location, in: model, frame: f) else { return }
-            select(id)
+            guard !zoomed, p == 0, let f = box.cityFrame, let pr = CityHit.floor(at: e.location, in: model, frame: f) else { return }
+            select(pr)
         })
     }
 
     private func overlay(p: Double, chrome ch: Double) -> some View {
         let cityAlerts = model.alerts.map {
-            IsoAlert(id: $0.id, label: model.floor(id: $0.id)?.label ?? $0.project, title: $0.title, visual: $0.status == .needsYou ? .needsYou : .stuck)
+            IsoAlert(id: $0.project, label: $0.project, title: $0.title, visual: $0.status == .needsYou ? .needsYou : .stuck)
         }
-        let officeAlerts: [IsoAlert]
-        if let pr = target, let plan = offices[pr] {
-            officeAlerts = plan.alerts(floor: officeFloor(pr)).map {
-                IsoAlert(id: $0.id, label: $0.person?.name ?? $0.role, title: $0.person?.subtitle ?? $0.id, visual: $0.state.visual)
-            }
-        } else {
-            officeAlerts = target.flatMap { pr in graph(pr).map { Self.officeAlerts(box.scene(graph: $0, tasks: tasks(pr)), tasks: tasks(pr)) } } ?? []
-        }
+        let officeAlerts = target.flatMap { pr in graph(pr).map { Self.officeAlerts(box.scene(graph: $0, tasks: tasks(pr)), tasks: tasks(pr)) } } ?? []
         return ZStack(alignment: .bottomLeading) {
             ZStack(alignment: .top) {
                 if !cityAlerts.isEmpty && ch < 1 {
@@ -476,10 +423,10 @@ struct IsoDeskLabel: View {
 /// Etiqueta de sala: el mismo estilo que los símbolos "r:" de IsoOfficeView.
 @available(macOS 26.0, *)
 struct IsoRoomLabel: View {
-    let text: String
+    let index: Int
     @Environment(\.colorScheme) private var scheme
     var body: some View {
-        Text(text)
+        Text("RANGO \(index + 1)")
             .font(.system(size: 9, weight: .medium, design: .monospaced)).tracking(1.3)
             .padding(.horizontal, 8).padding(.vertical, 3)
             .background(Capsule().fill(scheme == .dark ? Color(white: 0.11).opacity(0.92) : Color.white.opacity(0.9)))
@@ -499,7 +446,6 @@ public struct LiveCityScreen: View {
     let directory: CompanyDirectory
     let onSelectFloor: ((String) -> Void)?
     @State private var model = CityModel(buildings: [], groundX: 1, groundY: 1)
-    @State private var offices: [String: OfficePlan] = [:]
     @State private var lights = CityLights()
 
     public init(store: LiveStore, directory: CompanyDirectory = .standard, onSelectFloor: ((String) -> Void)? = nil) {
@@ -515,7 +461,7 @@ public struct LiveCityScreen: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                CityView(model: model, lights: lights, snapshot: store.snapshot, offices: offices, onSelectFloor: onSelectFloor)
+                CityView(model: model, lights: lights, snapshot: store.snapshot, onSelectFloor: onSelectFloor)
                     .padding(.horizontal, 26).padding(.vertical, 22)
             }
         }
@@ -531,8 +477,6 @@ public struct LiveCityScreen: View {
         let m = CityModel.build(store.state, directory: directory)
         lights.observe(m, at: Date().timeIntervalSinceReferenceDate)
         if m != model { model = m }
-        let o = OfficePlan.all(store.state, directory: directory)
-        if o != offices { offices = o }
     }
 }
 
