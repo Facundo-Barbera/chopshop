@@ -309,7 +309,7 @@ class TestProjectionFixture(unittest.TestCase):
         self.assertEqual(desks["awesome-gb/0/triage/0"]["notes_pending"], 1)
         self.assertEqual(desks["awesome-gb/0/backend/1"]["retired"], True)
         self.assertEqual(desks["awesome-gb/0/backend/1"]["lineage"][0]["reason"], "retired")
-        self.assertNotIn("lobby", st)
+        self.assertEqual([(x["thread_id"], x["waiting_role"]) for x in st["lobby"]], [("mcp:f2", "frontend"), ("mcp:b8", "backend")])
 
     def test_desk_golden_envelopes_apply(self):
         """Los sobres dorados de la fase 0 (fixtures/events/desk.*) se aplican sobre una oficina con la regla del contrato."""
@@ -323,7 +323,7 @@ class TestProjectionFixture(unittest.TestCase):
         a, r, w = load("desk.assigned"), load("desk.released"), load("desk.waiting")
         occ_prev = dict(a, seq=a["seq"] - 10, body=dict(a["body"], thread_id="mcp:a1", reason="start", inheritance=None))
         st = projection.fold([occ_prev, dict(r, seq=a["seq"] - 1), a, w], state=st)   # el agente libera antes de asignar
-        self.assertNotIn("lobby", st)                                            # desk.waiting lo pliega el vestíbulo
+        self.assertEqual([(x["thread_id"], x["waiting_role"]) for x in st["lobby"]], [("mcp:c9", "frontend")])  # lobby.py
         p = next(x for x in st["projects"] if x["name"] == "awesome-gb")
         d = projection._find_desk(p, "awesome-gb/0/backend/0")
         self.assertEqual((d["occupant"]["thread_id"], d["lineage"][0]["thread_id"]), ("mcp:b7", "mcp:a1"))
