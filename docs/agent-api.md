@@ -1,4 +1,8 @@
-# chopshop-agent: contrato de módulos y API (v0.6, api_version 1)
+# chopshop-agent: contrato de módulos y API (v0.6, api_version 1 + 2)
+
+`api_version 2` es **aditiva**: añade `GET /stream` (SSE), `GET /state` y el emparejamiento por dispositivo (`POST /pair`).
+`GET /snapshot`, `GET /events` y `GET /health` conservan su forma v1 (`api_version: 1`); la v2 se anuncia en el `hello` del stream,
+en `GET /state` y en la respuesta de `POST /pair`.
 
 Contexto: el agente corre en cada máquina como servicio de usuario (`systemd --user` en Linux, launchd en macOS). Escucha en
 `agent.bind`:`agent.port` (`~/.config/chopshop/config.toml`, ver `config.example.toml`): por defecto `127.0.0.1`; para otras máquinas,
@@ -20,6 +24,9 @@ si necesitas columnas, usa los campos `extra` JSON). `user_version` 2: la migrac
 | `t3watch.py` | hilo t3 | `T3(cfg, client=None, clock=None)`: adaptador fino sobre el cliente MCP nativo `t3mcp.Client` (el inyectado o uno construido desde `cfg.t3`: `origin`, `access`, `credential_file`, `t3_bin`); `.call(tool, args) -> obj` delega en él (errores → `T3Error` = `t3mcp.T3Error`); `.projects()`, `.threads()`, `.read()`; `poll(conn, cfg, t3, emit_fn) -> {"threads":n,"changes":[...]}` (lee `t3_thread_list` por proyecto + `t3_thread_read`/pending solo de los activos; upsert en `t3_threads` con project, worktree, status, settled, pending; emite `thread_started`, `thread_done`, `thread_failed`, `thread_settled`, `pending_question` por transición); `settle(t3, thread_id)` = `t3_thread_organize {action:"settle"}` (nunca archivar); `answer(t3, thread_id, choice, request=None)` (resuelve la opción con `chopshop/answers.py`, el mismo módulo que usa el motor). Debe tolerar T3 caído (error → evento `t3_unreachable` una vez, backoff). Detalles: `emit_fn(event, project, body)` (el integrador lo envuelve sobre `events.emit`); `T3` expone `.reachable`, `.failures`, `.backoff` (s) y `.retry_at` (`poll` no llama a T3 hasta entonces y devuelve `skipped:"backoff"`); `poll` devuelve también `errors`, `reachable`, `backoff`. Eventos extra: `t3_recovered` y `pending_approval` (permisos, solo aviso). La primera pasada siembra `t3_threads` en silencio (solo avisa preguntas pendientes). `project` = título del proyecto en T3. Archivar lo rechaza `t3mcp.Client` (solo `settle`/`unsettle`); el agente solo envía `settle`. `answer` devuelve `{request_id, answers, question}` y lanza `AnswerError` (subclase de `T3Error`, error del llamante → 400) si no hay pendientes, es ambigua o la opción no vale; con varias preguntas, `choice` es `{id_pregunta: elección}`. |
 | `../answers.py` | motor y agente | `resolve(q, choice)` (nº de opción, etiqueta, valor o texto libre; lista si `multiSelect`) y `resolve_all(questions, choice)` (`{id: valor}`; con varias preguntas `choice` es `{id: elección}`). Puro, sin I/O; lanza `InvalidChoice` (`ValueError`). |
 | `../t3.py`, `../t3mcp.py` | motor y agente | `t3mcp.Client(origin, access, credential_file, t3_bin, timeout)`: cliente MCP HTTP nativo (OAuth+PKCE con pairing local, credencial 0600 en `<CHOPSHOP_HOME>/t3-credential.json`). `t3.call(host_cfg, host_name, tool, args)` es la fachada del motor: un cliente cacheado por host (`origin`, `access`, `credential_file`), `t3.is_local(host_cfg)` (= sin `origin`), `t3.T3Error` (= `t3mcp.T3Error`), `t3.set_client_factory(fn)`/`t3.reset()` para tests. Sin `fleet` ni helper node. |
+| `stream.py` | integrador | `Bus` (`publish(seq)`, `wait(seq, timeout)`, `close()`; `AgentService.emit` publica) y `StreamHub` (`serve(handler, ident, query)`, `revoke(device_id)`, `close()`, `active`): ver «`GET /stream`». |
+| `projection.py` | integrador | `apply(state, envelope) -> state` (pura, idempotente por `seq`), `fold(envs)`, `state(conn, cfg)`, `Projector(conn, cfg).current()` (incremental), `to_envelope(row)` (usa `envelope.build` si existe; si no, traduce las filas viejas), `filter_project`. |
+| `pairing.py` | integrador | `Pairing(conn, clock)`: `create_code(name, ttl)`, `redeem(code, device_name, device_id, ip)`, `check(cred, ip)`, `active(id)`, `list()`, `revoke(id)`, `prune()`; CLI `chopshop pair create\|list\|revoke\|prune`. Tablas propias `pair_codes` y `devices` (`CREATE TABLE IF NOT EXISTS`, sin tocar `user_version`). |
 | `server.py`, `service.py` | integrador | `server.py`: `ThreadingHTTPServer`, `Authenticator` y las rutas (`AgentApp`). `service.py`: `AgentService` (ensambla módulos, hilos de fondo, parada limpia) y el CLI `chopshop agent run\|status\|token\|check-config\|print-unit`. |
 | `ui/` | hilo UI | cliente puro de la API (ver abajo). |
 
@@ -33,13 +40,39 @@ Orden de decisión por petición (`agent.auth`, por defecto `tailscale+token`):
 1. **Origen local** (loopback o la propia IP de escucha del agente: CLI de la misma máquina) → aceptado, lectura y escritura
    (`agent.trust_local = true`; con `false` también el origen local pasa por lo que sigue).
 2. `auth = "none-local"` → cualquier otro origen: 403.
-3. `auth = "token"` → hace falta `Authorization: Bearer <token>` (archivo `token_file`, 0600) en **toda** petición, lectura incluida.
+3. `auth = "token"` → hace falta `Authorization: Bearer <token>` (el de `token_file`, 0600, o una credencial de dispositivo) en
+   **toda** petición, lectura incluida.
 4. `auth = "tailscale+token"` → `tailscale whois --json <ip origen>` (cache 60 s; fallos 5 s) → `UserProfile.LoginName` (login completo,
-   sin distinguir mayúsculas) debe ser `owner_login` (lectura y escritura) o estar en `allowed_logins` (**solo lectura**). Las
-   **escrituras** (`POST`/`DELETE`) del propietario exigen además el bearer.
+   sin distinguir mayúsculas) debe ser `owner_login` (lectura y escritura) o estar en `allowed_logins` (**solo lectura**). Además
+   **toda** petición (lecturas incluidas, también `/stream`), salvo `GET /health` y `POST /pair`, exige
+   `Authorization: Bearer <credencial>`: la de un **dispositivo emparejado** (`cs1_…`, ver «Emparejamiento») o el bearer legado de
+   `token_file` (credencial de servicio para la CLI remota y bots). No hay modo sin credencial.
 
-Sin identidad válida, o sin permiso para escribir → **403** (también en rutas inexistentes: no se puede sondear sin identidad). El
-bearer se compara con `hmac.compare_digest`. No se confía en cabeceras `X-Forwarded-*`.
+Sin identidad válida, o sin permiso para escribir → **403** (también en rutas inexistentes: no se puede sondear sin identidad). Sin
+credencial, o con una inválida/revocada → **401** (`WWW-Authenticate: Bearer`). Las credenciales se comparan en tiempo constante
+(`hmac.compare_digest` el bearer legado; por SHA-256 las de dispositivo). No se confía en cabeceras `X-Forwarded-*`.
+
+**Defensas web** (en todos los modos, también el origen local; no son el control principal): se rechaza toda petición con cabecera
+`Origin` (navegadores) y toda petición cuyo `Host` no sea del agente (IPs de escucha, loopback, `localhost`, `machine_id`, hostname o
+`agent.allowed_hosts`; anti DNS-rebinding); las escrituras (`POST`, y `DELETE` con cuerpo) exigen `Content-Type: application/json`.
+Todo eso → **403**.
+
+### Emparejamiento por dispositivo
+
+- **Crear código** (solo en la máquina del agente, CLI local; no hay ruta HTTP): `chopshop pair create [--name "MacBook"] [--ttl 10m]`
+  imprime un código de un solo uso (`K7QM-93XD`: 8 símbolos base32 de Crockford, 40 bits; se muestra una vez) y su caducidad
+  (por defecto 10 min, máx. 1 h). En SQLite (`pair_codes`) solo queda `sha256(sal + código)`.
+- **Canjear**: `POST /pair {"code", "device_name"?, "device_id"?}` (sin credencial; con identidad Tailscale en `tailscale+token`) →
+  `{"device_id", "credential": "cs1_<43 car. base64url>", "api_version": 2}`. El código se consume en el primer canje: reusarlo,
+  caducado o invalidado → **410**; inválido → **401**; 5 fallos por minuto por IP → **429**; cada fallo cuenta contra todos los
+  códigos vivos y a los 20 se invalidan. `device_id` (opcional; si falta se genera un UUID) re-emparejado = credencial nueva, la
+  anterior deja de valer. En `devices` solo queda `sha256(credencial)`; el cliente la guarda (la app de Mac, en el Keychain).
+- **Uso**: `Authorization: Bearer cs1_…`; sin expiración automática; `last_seen_at`/`last_ip` se actualizan (máx. una vez por minuto).
+  El dispositivo hereda los permisos de la identidad Tailscale desde la que llega (propietario = escribe; `allowed_logins` = lee).
+- **Gestión** (CLI local, directo sobre la DB): `chopshop pair list [--json]` (dispositivos y códigos vivos: id, nombre, fechas,
+  último uso, IP; nunca hashes ni credenciales), `chopshop pair revoke <device_id|code_id>` (efecto inmediato: la siguiente petición
+  da 401 y el `/stream` abierto de ese dispositivo se cierra en ≤ 1 s), `chopshop pair prune` (borra códigos usados/caducados de más
+  de 7 días y dispositivos revocados).
 - Cuerpo máximo 64 KiB (413), `Content-Length` obligatorio (sin chunked: 411), JSON UTF-8 objeto (400), timeout de conexión 15 s.
 - Errores: `{"error": "mensaje"}` + código HTTP (400 petición inválida/`AnswerError`, 403, 404, 405, 413, 500 `error interno`, 502 T3 falló,
   503 T3 desactivado). Respuestas y logs **nunca** incluyen URLs de webhooks ni tokens (las suscripciones solo guardan RUTAS de archivo).
@@ -47,7 +80,10 @@ bearer se compara con `hmac.compare_digest`. No se confía en cabeceras `X-Forwa
 
 | Método y ruta | Descripción |
 |---|---|
-| `GET /health` | `{ok, api_version, version, machine_id, ts, uptime, whoami}` |
+| `GET /health` | `{ok, api_version, version, machine_id, ts, uptime, whoami}` (`whoami.device` si se usó una credencial de dispositivo). Sin credencial |
+| `POST /pair` | `{code, device_name?, device_id?}` → `{device_id, credential, api_version: 2}` (ver «Emparejamiento»). Sin credencial |
+| `GET /stream?after=&project=&types=` | Server-Sent Events (v2), ver abajo |
+| `GET /state?project=` | proyección completa (v2), lo mismo que el evento `state` del stream |
 | `GET /snapshot` | ver forma abajo (lo que pinta la UI) |
 | `GET /metrics?from=&to=&group=machine\|app\|project&step=` | series (ver `collector.query`) |
 | `GET /events?after=<seq>&limit=` | `{events:[sobre], last_seq, head_seq}` (sobre v1 de `docs/event-envelope.md`, + `event` y `machine_id` viejos): `last_seq` = cursor para la siguiente consulta (seq del último devuelto, o `after` si no hay), `head_seq` = último de la máquina |
@@ -84,6 +120,59 @@ Notas de `snapshot`:
 - `agent.t3_ok` es `null` si aún no hubo sondeo o `agent.t3_enabled = false`; `last_sample_age`/`last_poll_age` son `null` hasta la
   primera muestra/sondeo. Si algún hilo de fondo falla aparece `agent.errors: {hilo: "Tipo: mensaje"}`.
 - `orchestrator` es `chopshop.engine.snapshot()` (cache de 5 s) o `null` si no está disponible.
+
+## `GET /stream` (api_version 2)
+
+`text/event-stream` (`Cache-Control: no-store`, `X-Accel-Buffering: no`). Cursor: cabecera `Last-Event-ID` (manda) o `?after=<seq>`.
+Filtros: `project=<nombre exacto>` y `types=<glob,glob>` (p. ej. `task.*,question.*`); solo afectan a los `envelope`.
+```
+retry: 3000
+
+event: hello
+data: {"api_version":2,"machine":"host-b","head_seq":1842,"resume":"snapshot"}
+
+event: state
+id: 1842
+data: { ...lo mismo que GET /state... }
+
+event: envelope
+id: 1843
+data: { ...sobre (docs/event-envelope.md)... }
+
+: ping
+```
+- **Sin cursor**, cursor más viejo que el primer evento retenido, más de 2000 eventos atrás o mayor que `head_seq` → `hello` con
+  `resume: "snapshot"` + `state` (`id = head_seq`) + deltas con `seq > head_seq`. **Cursor válido** → `hello` con `resume: "events"` y
+  los sobres desde SQLite sin `state`: reconectar con el último `id` recibido no pierde ni duplica eventos.
+- Los deltas salen de SQLite (no hay buffer en memoria) y un `threading.Condition` despierta a los clientes en cada `emit`; además se
+  revisa la DB cada segundo (eventos escritos por otro proceso).
+- `: ping` cada 15 s. Máximo **8** conexiones SSE simultáneas (la 9.ª → **503** + `Retry-After: 3`; `/health` y el resto no cuentan).
+  Sin timeout de inactividad; una escritura bloqueada más de 10 s (cliente lento) cierra esa conexión sin afectar a las demás: el
+  cliente reconecta con `Last-Event-ID`. Revocar el dispositivo o parar el agente cierra el stream.
+- Cada sobre trae el estado completo de su sujeto: el cliente aplica `apply(state, sobre)` (la misma función que `projection.py`) y
+  obtiene exactamente `GET /state` (hay test de equivalencia).
+
+### Forma de `GET /state` (y del evento `state`)
+
+```json
+{"api_version": 2, "machine": "host-b", "head_seq": 1842, "ts": "2026-10-29T16:12:03.412Z",
+ "machine_health": {"state": "ok", "cpu_pct": 12, "ram_pct": 31, "disk_pct": 5, "t3_ok": true},
+ "projects": [{"name": "nuskills",
+   "counts": {"running": 2, "queued": 3, "waiting": 0, "stuck": 1, "needs_human": 1, "waiting_bot": 1, "done": 9, "failed": 0},
+   "batches": [{"id": "b-0007", "host": "host-b", "max_parallel": 3, "status": "running", "tasks": {"t-1": "done"}}],
+   "tasks": [{"id": "mcp:b7", "phase": "running", "attention": null, "...": "cuerpo de task.state", "severity": "info", "seq": 1840, "updated": "..."}],
+   "graphs": [{"id": "g-2", "goal": "...", "status": "running", "nodes": [{"id": "n-4", "phase": "running", "deps": ["n-2"]}]}],
+   "attention": [{"key": "task:mcp:b7", "id": "01JC9Z...", "seq": 1841, "type": "question.opened", "needs": "bot", "severity": "notice",
+                  "subject": {"kind": "task", "id": "mcp:b7"}, "since": "...", "summary": "¿Qué canal manda la fuente de verdad?"}]}],
+ "recent": [ ...últimos 50 sobres, el más nuevo primero... ]}
+```
+- `attention` = cola de lo que necesita acción: un elemento por sujeto (`key = kind:id`) cuyo último sobre trae `needs != null`; el
+  siguiente sobre del mismo sujeto con `needs: null` lo cierra. `since` = cuándo se abrió.
+- `counts`: `running` (running/preparing), `queued`, `waiting` (sin atención), `done` (done/settled), `failed`, `stuck` (último sobre
+  `warn`/`error` y sin terminar), `needs_human` (atención human/approval), `waiting_bot` (atención bot).
+- `machine_health` = último `machine.health`; los eventos sin proyecto solo cuentan para `machine_health` y `recent`.
+- Mientras el bus no guarde el sobre completo, las filas viejas (`thread_*`, `pending_question`, `pending_approval`, `t3_*`,
+  `agent_started`) se traducen al vuelo a `task.state`, `question.opened`, `approval.requested`, `machine.health` y `agent.started`.
 
 ## Decisiones de los módulos (resumen)
 
