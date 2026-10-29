@@ -1,6 +1,86 @@
 {
   "api_version": 2,
   "head_seq": 1843,
+  "lobby": [
+    {
+      "attention": null,
+      "company": null,
+      "ended_at": null,
+      "half_life_s": 1800,
+      "phase": "running",
+      "project": "bixku-utilities",
+      "since": "2026-10-29T16:01:18.000Z",
+      "thread_id": "mcp:x9",
+      "title": "Utilidades: exportar CSV",
+      "touched_at": null,
+      "waiting_role": null
+    },
+    {
+      "attention": null,
+      "company": null,
+      "ended_at": null,
+      "half_life_s": 1800,
+      "phase": "running",
+      "project": "chopshop",
+      "since": "2026-10-29T16:01:04.000Z",
+      "thread_id": "mcp:c41",
+      "title": "H DMG firmado",
+      "touched_at": null,
+      "waiting_role": null
+    },
+    {
+      "attention": null,
+      "company": null,
+      "ended_at": null,
+      "half_life_s": 1800,
+      "phase": "done",
+      "project": "chopshop",
+      "since": "2026-10-29T16:01:11.000Z",
+      "thread_id": "mcp:c42",
+      "title": "Docs del sobre de eventos",
+      "touched_at": null,
+      "waiting_role": null
+    },
+    {
+      "attention": null,
+      "company": null,
+      "ended_at": null,
+      "half_life_s": 1800,
+      "phase": "settled",
+      "project": "nuskills",
+      "since": "2026-10-29T16:00:22.000Z",
+      "thread_id": "mcp:a1",
+      "title": "BUG-1 · Racha no suma el domingo",
+      "touched_at": null,
+      "waiting_role": null
+    },
+    {
+      "attention": null,
+      "company": null,
+      "ended_at": null,
+      "half_life_s": 1800,
+      "phase": "failed",
+      "project": "nuskills",
+      "since": "2026-10-29T16:00:29.000Z",
+      "thread_id": "mcp:b7",
+      "title": "BUG-8 · Notificación push llega 2 veces",
+      "touched_at": null,
+      "waiting_role": null
+    },
+    {
+      "attention": null,
+      "company": null,
+      "ended_at": null,
+      "half_life_s": 1800,
+      "phase": "done",
+      "project": "nuskills",
+      "since": "2026-10-29T16:00:36.000Z",
+      "thread_id": "mcp:a036",
+      "title": "BUG-3 · Racha se reinicia",
+      "touched_at": null,
+      "waiting_role": null
+    }
+  ],
   "machine": "contabo-dev",
   "machine_health": {
     "agent_version": "0.6.0",
