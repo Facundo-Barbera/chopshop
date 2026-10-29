@@ -402,9 +402,30 @@ class AgentApp:
         if not ok:
             raise ApiError(400, "choice debe ser texto o un objeto {id_pregunta: elección}")
         thread = _ident(body, "thread_id", True)
+        by = _text(body, "by", False, 64)
         res = self._t3(t3watch.answer, thread, choice if isinstance(choice, dict) else str(choice), _text(body, "request", False, 128))
         log.info("respuesta enviada al hilo %s por %s", thread, ident.login or ident.via)
+        self._answered(thread, res, by or ident.login or "human")
         return dict(res, ok=True)
+
+    def _answered(self, thread, res, by):
+        """Emite `question.answered` (needs: null) tras responder; un fallo aquí no deshace la respuesta."""
+        if not self.emit_fn:
+            return
+        try:
+            rid = res.get("request_id")
+            with db.tx():
+                row = self.conn.execute("SELECT project, title FROM t3_threads WHERE thread_id=?", (thread,)).fetchone()
+                opened = self.conn.execute("SELECT ts, body FROM events WHERE type='question.opened' AND subject_id=?"
+                                           " ORDER BY seq DESC LIMIT 20", (thread,)).fetchall()
+            since = next((r["ts"] for r in opened if (db.jload(r["body"], {}) or {}).get("request_id") == rid), None)
+            vals = list((res.get("answers") or {}).values())
+            choice = vals[0] if len(vals) == 1 else vals
+            self.emit_fn("question.answered", row["project"] if row else None,
+                         {"thread_id": thread, "request_id": rid, "choice": choice, "by": by,
+                          "latency_s": round(time.time() - since) if since else None, "title": row["title"] if row else None})
+        except Exception:  # noqa: BLE001
+            log.exception("no pude registrar question.answered de %s", thread)
 
     def r_settle(self, ident, q, body):
         thread = _ident(body, "thread_id", True)

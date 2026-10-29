@@ -5,7 +5,7 @@ import os
 import sqlite3
 import threading
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS machine_samples (      -- crudo (retención raw_hours)
@@ -59,8 +59,44 @@ def migrate(conn):
     if v < 2:
         # v2: Chopshop deja de gestionar servers de prueba y puertos (eso es de T3); se borran las tablas de la v1
         conn.executescript("DROP TABLE IF EXISTS leases; DROP TABLE IF EXISTS ports;")
+    if v < 3:
+        _migrate_v3(conn)
     if v < SCHEMA_VERSION:
         conn.execute("PRAGMA user_version=%d" % SCHEMA_VERSION)
+
+
+# v3: columnas del sobre (agent/envelope.py) en `events`. Nulables; `event` (nombre viejo) se conserva.
+EVENT_COLUMNS = (("id", "TEXT"), ("type", "TEXT"), ("severity", "TEXT"), ("needs", "TEXT"), ("subject_kind", "TEXT"),
+                 ("subject_id", "TEXT"), ("subject", "TEXT"), ("cause_id", "TEXT"), ("cause_depth", "INTEGER"))
+
+
+def _migrate_v3(conn):
+    """Añade las columnas que falten y rellena las filas sin `id` traduciendo el nombre viejo (LEGACY_MAP).
+    Idempotente: se puede repetir (solo toca filas con `id` nulo)."""
+    from . import envelope
+    with _lock:
+        have = {r[1] for r in conn.execute("PRAGMA table_info(events)")}
+        for name, kind in EVENT_COLUMNS:
+            if name not in have:
+                conn.execute("ALTER TABLE events ADD COLUMN %s %s" % (name, kind))
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS events_id ON events(id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS events_subject ON events(subject_kind, subject_id)")
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            todo = conn.execute("SELECT seq, ts, machine_id, event, body FROM events WHERE id IS NULL ORDER BY seq").fetchall()
+            for r in todo:
+                seq, ts, machine, event, raw = tuple(r)
+                body = jload(raw, {})
+                f = envelope.from_legacy(event, body if isinstance(body, dict) else {}, machine)
+                s = f["subject"]
+                conn.execute("UPDATE events SET id=?, type=?, severity=?, needs=?, subject_kind=?, subject_id=?, subject=?,"
+                             " cause_id=NULL, cause_depth=0, body=? WHERE seq=?",
+                             (envelope.new_id(ts), f["type"], f["severity"], f["needs"], s["kind"], s["id"], jdump(s),
+                              jdump(f["body"]), seq))
+            conn.execute("COMMIT")
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
 
 
 def tx():

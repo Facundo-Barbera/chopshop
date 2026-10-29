@@ -1,0 +1,35 @@
+{
+  "v": 1,
+  "id": "01M646XHEM0W40J2GB1G6GW3S0",
+  "seq": 1858,
+  "ts": "2026-10-29T16:12:03.412Z",
+  "machine": "contabo-dev",
+  "project": "chopshop",
+  "type": "github.pr.merged",
+  "severity": "info",
+  "needs": null,
+  "subject": {
+    "kind": "pr",
+    "id": "Facundo-Barbera/chopshop#43",
+    "title": "Arregla la racha (BUG-3)",
+    "url": "https://github.com/Facundo-Barbera/chopshop/pull/43"
+  },
+  "cause": {
+    "id": null,
+    "depth": 0
+  },
+  "body": {
+    "repo": "Facundo-Barbera/chopshop",
+    "number": 43,
+    "title": "Arregla la racha (BUG-3)",
+    "url": "https://github.com/Facundo-Barbera/chopshop/pull/43",
+    "actor": "Facundo-Barbera",
+    "action": "merged",
+    "labels": [],
+    "head": "wt-3",
+    "base": "main",
+    "state": "merged",
+    "ci": "success",
+    "etag_source": "events"
+  }
+}
