@@ -33,30 +33,12 @@ enum Section: String, CaseIterable, Identifiable {
     }
 }
 
-/// Vistas solo nativas (macOS 26, stream en vivo): la UI web no las tiene, así que no cambian `selection` ni se avisan a React.
-enum LiveView: String, CaseIterable, Hashable {
-    case city = "city", machineRoom = "machine-room"
-    var title: String {
-        switch self {
-        case .city: return "Ciudad"
-        case .machineRoom: return "Sala de máquinas"
-        }
-    }
-    var symbol: String {
-        switch self {
-        case .city: return "building.2"
-        case .machineRoom: return "server.rack"
-        }
-    }
-}
-
 /// Elemento seleccionable de la barra lateral.
 enum NavItem: Hashable {
     case section(Section)
     case project(String)
     case machines
     case machine(String)
-    case live(LiveView)
 }
 
 /// Estado de la app + puente con React. La app es un cliente puro de la API de los agentes (docs/agent-api.md):
@@ -68,8 +50,6 @@ final class AppModel: ObservableObject {
     @Published var selection: Section = .overview { didSet { if oldValue != selection { pushSelection() } } }
     @Published var project: String? { didSet { if oldValue != project { pushSelection() } } }
     @Published var machine: String? { didSet { if oldValue != machine { pushSelection() } } }
-    /// Ciudad o sala de máquinas nativas (encima del WebView); nil = lo que diga `selection`.
-    @Published var liveView: LiveView?
     @Published var counts: [Section: Int] = [:]
     @Published var projects: [ProjectInfo] = []
     @Published var machines: [Machine] = []
@@ -115,7 +95,6 @@ final class AppModel: ObservableObject {
         if let s = value(after: "--select") {
             if s.hasPrefix("project:") { nav = .project(String(s.dropFirst(8))) }
             else if let sec = Section(rawValue: s) { nav = sec == .machines ? .machines : .section(sec) }
-            else if let v = LiveView(rawValue: s) { nav = .live(v) }
         }
         if args.contains("--capture") { Capture.watch(model: self) }
         startPolling()
@@ -140,7 +119,6 @@ final class AppModel: ObservableObject {
 
     var nav: NavItem {
         get {
-            if let v = liveView { return .live(v) }
             switch selection {
             case .project: return project.map { .project($0) } ?? .section(.batches)
             case .machines: return machine.map { .machine($0) } ?? .machines
@@ -148,10 +126,7 @@ final class AppModel: ObservableObject {
             }
         }
         set {
-            if case .live(let v) = newValue { liveView = v; return }
-            liveView = nil
             switch newValue {
-            case .live: break
             case .section(let s): project = nil; machine = nil; selection = s
             case .project(let p): project = p; machine = nil; selection = .project
             case .machines: project = nil; machine = nil; selection = .machines

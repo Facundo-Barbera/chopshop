@@ -68,12 +68,9 @@ public struct ProjectContent: View {
     let snapshot: MockSnapshot
     var frozenTime: Double?
     var selectedNode: String?
-    /// v3: oficina por escritorios. Con ella, "Oficina" son los escritorios y "Grafo" la oficina por rangos de dependencias.
-    var office: OfficePlan?
     @State private var mode: GraphMode
-    public init(project: String, snapshot: MockSnapshot, frozenTime: Double?, selectedNode: String? = nil, mode: GraphMode = .office,
-                office: OfficePlan? = nil) {
-        self.project = project; self.snapshot = snapshot; self.frozenTime = frozenTime; self.selectedNode = selectedNode; self.office = office
+    public init(project: String, snapshot: MockSnapshot, frozenTime: Double?, selectedNode: String? = nil, mode: GraphMode = .office) {
+        self.project = project; self.snapshot = snapshot; self.frozenTime = frozenTime; self.selectedNode = selectedNode
         _mode = State(initialValue: mode)
     }
 
@@ -124,9 +121,7 @@ public struct ProjectContent: View {
     }
 
     @ViewBuilder private var graphCard: some View {
-        if let plan = office {
-            officeCard(plan)
-        } else if let g = snapshot.graph(for: project) {
+        if let g = snapshot.graph(for: project) {
             let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
             VStack(spacing: 0) {
                 HStack(alignment: .firstTextBaseline) {
@@ -156,43 +151,6 @@ public struct ProjectContent: View {
             .clipShape(shape)
             .overlay(shape.strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5))
         }
-    }
-
-    private func officeCard(_ plan: OfficePlan) -> some View {
-        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
-        let g = snapshot.graph(for: project)
-        let alive = plan.people.filter { $0.state.alive }.count
-        return VStack(spacing: 0) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(plan.floors.count == 1 ? plan.company : "\(plan.company) · \(plan.floors.count) pisos").font(.callout.weight(.medium))
-                Spacer()
-                Text("\(alive) \(alive == 1 ? "hilo" : "hilos") · \(plan.lobby.count) en el vestíbulo").font(.caption).foregroundStyle(.secondary).padding(.trailing, 6)
-                ModeSwitch(mode: $mode, flat: frozenTime != nil)
-            }
-            .padding(.horizontal, 16).padding(.top, 10)
-            Group {
-                switch mode {
-                case .office:
-                    DeskOfficeView(plan: plan, tasks: taskByID, frozenTime: frozenTime, flatChrome: frozenTime != nil)
-                        .frame(height: 540)
-                case .graph:
-                    if let g {
-                        IsoOfficeView(graph: g, tasks: taskByID, hostOf: hostOf, frozenTime: frozenTime, selected: selectedNode, flatChrome: frozenTime != nil)
-                            .frame(height: g.nodes.count > 8 ? 600 : 460)
-                    } else {
-                        Text("Sin plan por rangos para este proyecto.").font(.callout).foregroundStyle(.secondary).frame(height: 200)
-                    }
-                }
-            }
-            HStack {
-                legend
-                Text(frozenTime == nil ? "clic en un escritorio · arrastra para mover la vista" : "").font(.caption).foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal, 16).padding(.bottom, 11)
-        }
-        .background(IsoBackdrop())
-        .clipShape(shape)
-        .overlay(shape.strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5))
     }
 
     private var legend: some View {

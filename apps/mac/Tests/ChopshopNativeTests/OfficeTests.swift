@@ -281,98 +281,35 @@ final class HumanNamesTests: XCTestCase {
     }
 }
 
-final class OfficePlanTests: XCTestCase {
-    func plan(now: Double? = nil) throws -> OfficePlan {
-        try XCTUnwrap(OfficePlan.build(project: "awesome-gb", state: OfficeFixture.state, now: now))
+/// Nombres y subtítulos que comparten todas las vistas.
+final class ThreadLabelTests: XCTestCase {
+    func testLabelsFromFixture() {
+        let s = OfficeFixture.state
+        XCTAssertEqual(s.knownThreads, ["mcp:a1", "mcp:b7", "mcp:b8", "mcp:b9", "mcp:c3", "mcp:c9", "mcp:d1", "mcp:f2", "mcp:k1"],
+                       "tareas, ocupantes, herencia, vestíbulo y origen de los runs")
+        let l = s.threadLabels
+        XCTAssertEqual(l["mcp:b7"], LiveState.ThreadLabel(threadID: "mcp:b7", name: "Elena", subtitle: "[be] login con passkeys"))
+        XCTAssertEqual(l["mcp:c9"]?.subtitle, "[fe] tabla de pedidos", "del vestíbulo")
+        XCTAssertEqual(l["mcp:a1"]?.subtitle, "[be] sesión", "el anterior: título guardado en la herencia")
+        XCTAssertEqual(l["mcp:k1"]?.subtitle, "Rediseño de la oficina", "proyecto sin office: de su task.state")
+        XCTAssertEqual(s.label(ofThread: "mcp:zz").subtitle, "mcp:zz", "desconocido: el id de subtítulo")
     }
 
-    func testFloorsRoomsAndPeople() throws {
-        let p = try plan()
-        XCTAssertEqual(p.company, "Awesome GB")
-        XCTAssertEqual(p.floors.map(\.title), ["Piso 1 · Producto", "Piso 2 · Docs"])
-        XCTAssertEqual(p.floors[0].rooms.map(\.role), ["triage", "backend", "frontend"])
-        let be = p.floors[0].rooms[1].desks
-        XCTAssertEqual(be.map(\.state), [.running, .needsYou, .done, .empty])
-        XCTAssertEqual(be[0].person?.name, "Elena")
-        XCTAssertEqual(be[0].person?.subtitle, "[be] login con passkeys")
-        XCTAssertEqual(be[0].inheritance?.name, HumanNames.name(for: "mcp:a1"))
-        XCTAssertEqual(be[0].inheritance?.pullRequests, 1)
-        XCTAssertEqual(be[1].person?.taskID, "mcp:b8")
-        XCTAssertEqual(try XCTUnwrap(be[2].person).fade.opacity(at: OfficeFixture.now), 0.5, accuracy: 1e-9, "terminó hace T½")
-        XCTAssertEqual(p.floors[0].rooms[2].desks.first?.state, .stuck)
-        let triage = try XCTUnwrap(p.desk("awesome-gb/0/triage/0"))
-        XCTAssertEqual(triage.state, .sleeping)
-        XCTAssertEqual(triage.notesPending, 2)
-        XCTAssertEqual(p.lobby.map(\.threadID), ["mcp:c3", "mcp:c9"])
-        XCTAssertEqual(p.lobby.map(\.waitingRole), [nil, "frontend"])
-        XCTAssertEqual(p.alerts().map(\.id), ["awesome-gb/0/backend/1", "awesome-gb/0/frontend/0"], "primero lo que te necesita")
-        XCTAssertNil(OfficePlan.build(project: "chopshop", state: OfficeFixture.state), "sin office: oficina por rangos")
+    func testOccupantTitleFollowsTaskState() {
+        var s = OfficeFixture.state
+        s.apply(Envelope(project: "awesome-gb", type: "task.state", subject: .init(kind: "task", id: "mcp:b7"),
+                         body: ["phase": "running", "attention": nil, "thread_id": "mcp:b7", "settled": false, "title": "[be] passkeys v2",
+                                "role": "backend"]))
+        XCTAssertEqual(s.threadLabels["mcp:b7"]?.subtitle, "[be] passkeys v2")
+        XCTAssertEqual(s.threadLabels["mcp:b7"]?.name, "Elena", "el nombre no cambia con el título")
     }
 
-    func testFadedPeopleLeaveWithNow() throws {
-        // a las 18:00: el terminado (16:00, 4 T½) ya salió; el fallido (16:25, T = 2 × 30 min) sigue a 0.33
-        let p = try plan(now: OfficeFixture.now + 5400)
-        let be = p.floors[0].rooms[1].desks
-        XCTAssertNil(be[2].person, "el terminado ya salió")
-        XCTAssertEqual(be[2].state, .empty)
-        XCTAssertNotNil(p.desk("awesome-gb/0/frontend/0")?.person, "el fallido dura el doble")
-        XCTAssertNotNil(be[0].person, "los activos no se desvanecen")
-        let late = try plan(now: OfficeFixture.now + 4 * 3600)
-        XCTAssertNil(late.desk("awesome-gb/0/frontend/0")?.person)
-    }
-}
-
-final class OfficeCityTests: XCTestCase {
-    func testOfficeFloorsAndLobby() throws {
-        let m = CityModel.build(OfficeFixture.state)
-        let b = try XCTUnwrap(m.buildings.first { $0.company == "Awesome GB" })
-        XCTAssertEqual(b.floors.map(\.id), ["lobby:Awesome GB", "awesome-gb#0", "awesome-gb#1"])
-        XCTAssertEqual(b.floors.map(\.level), [0, 1, 2])
-        XCTAssertEqual(b.floors.map(\.label), ["Vestíbulo", "awesome-gb · Producto", "awesome-gb · Docs"])
-        XCTAssertEqual(b.floors[0].activeThreads, ["mcp:c3", "mcp:c9"])
-        XCTAssertEqual(b.floors[1].activeThreads, ["mcp:b7", "mcp:b8"])
-        XCTAssertEqual(b.floors[1].status, .needsYou)
-        XCTAssertEqual(b.floors[1].needsYou, 1)
-        XCTAssertEqual(b.floors[1].stuck, 1)
-        XCTAssertEqual(b.floors[1].alert?.id, "awesome-gb#0")
-        XCTAssertEqual(b.floors[2].activeThreads, ["mcp:d1"])
-        XCTAssertEqual(b.floors[2].status, .neutral)
-        XCTAssertEqual(m.project(ofFloor: "lobby:Awesome GB"), "awesome-gb")
-        XCTAssertEqual(m.floor("awesome-gb")?.id, "awesome-gb#0", "primer piso del proyecto")
-        XCTAssertEqual(m.projectCount, 2)
-        // el proyecto sin office sigue con su piso clásico (id = nombre)
-        XCTAssertEqual(m.floor("chopshop")?.id, "chopshop")
-        XCTAssertEqual(m.building(of: "chopshop")?.floors.map(\.id), ["chopshop"])
-    }
-
-    func testLightsKeyedByFloor() throws {
-        let m = CityModel.build(OfficeFixture.state)
-        var l = CityLights()
-        l.observe(m, at: 0)
-        XCTAssertEqual(l.litCount("awesome-gb#0"), 2)
-        XCTAssertEqual(l.litCount("lobby:Awesome GB"), 2)
-        XCTAssertEqual(l.litCount("awesome-gb#1"), 1)
-    }
-}
-
-final class MachineRoomModelTests: XCTestCase {
-    func testFromFixture() throws {
-        let m = MachineRoomModel.build(OfficeFixture.state)
-        XCTAssertEqual(m.listeners.map(\.name), ["forge", "t3watch", "webhooks"])
-        XCTAssertEqual(m.listeners.first?.health, .degraded)
-        XCTAssertEqual(m.listeners.first?.backoff, 120)
-        XCTAssertEqual(m.automations.map(\.id), ["awesome-gb/triage"])
-        XCTAssertEqual(m.automations.first?.nextRun, "2026-10-30T08:30:00.000Z")
-        XCTAssertEqual(m.subscriptions.map(\.name), ["bots"])
-        XCTAssertEqual(m.troubleCount, 1, "solo el listener degradado")
-        XCTAssertEqual(m.rack.map(\.label), ["repo-principal", "Engine CX"], "main primero")
-        let main = m.rack[0]
-        XCTAssertEqual(main.light, .amber)
-        XCTAssertEqual(main.runs.map(\.runID), ["9002", "9001", "8990"], "en curso primero, luego lo más nuevo")
-        let fromThread = try XCTUnwrap(main.runs.first { $0.runID == "9001" }?.origin)
-        XCTAssertEqual(fromThread.person, "Elena", "el mismo nombre que en la oficina")
-        XCTAssertEqual(fromThread.text, "Elena · backend · awesome-gb/0/backend/0")
-        XCTAssertEqual(main.runs.first { $0.runID == "9002" }?.origin.text, "automatización triage")
-        XCTAssertEqual(m.rack[1].runs.first?.origin.text, "Grok · Juan Manuel")
+    @MainActor
+    func testStorePublishesLabels() async throws {
+        let store = LiveStore(coalesceInterval: 0)
+        store.connect(FixtureStream(envelopes: OfficeFixture.envelopes, speed: 0))
+        for _ in 0..<200 where store.threadLabels["mcp:d1"] == nil { try await Task.sleep(nanoseconds: 5_000_000) }
+        XCTAssertEqual(store.threadLabels["mcp:d1"]?.subtitle, "Guía de despliegue de Engine CX")
+        XCTAssertEqual(store.state.project("awesome-gb")?.office?.floors.count, 2)
     }
 }

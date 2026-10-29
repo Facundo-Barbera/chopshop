@@ -1,6 +1,6 @@
 import Foundation
 
-/// Escena fija de la oficina v3 (Previews, capturas y tests de vistas): `awesome-gb` con dos pisos (Producto con triage permanente,
+/// Estado v3 fijo (tests y, en sus hilos, Previews y capturas de la ciudad, la oficina y la sala de máquinas): `awesome-gb` con dos pisos (Producto con triage permanente,
 /// backend y frontend; Docs), ocupantes en todos los estados, vestíbulo con un hilo sin rol y otro esperando escritorio, y la sala de
 /// máquinas con listeners, una automatización y el rack (main + Engine CX). `chopshop` sigue sin bloque `office:` (piso clásico).
 /// Determinista: `now` es 2026-10-29T16:30:00Z.

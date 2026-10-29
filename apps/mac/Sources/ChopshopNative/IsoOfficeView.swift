@@ -157,7 +157,7 @@ public struct IsoOfficeView: View {
                     .tag("d:\(d.id)")
             }
             ForEach(scene.rooms, id: \.index) { r in
-                Text(r.label)
+                Text("RANGO \(r.index + 1)")
                     .font(.system(size: 9, weight: .medium, design: .monospaced)).tracking(1.3)
                     .padding(.horizontal, 8).padding(.vertical, 3)
                     .background(Capsule().fill(scheme == .dark ? Color(white: 0.11).opacity(0.92) : Color.white.opacity(0.9)))
