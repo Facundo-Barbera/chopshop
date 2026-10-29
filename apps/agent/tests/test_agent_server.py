@@ -11,7 +11,6 @@ import socket
 import sys
 import tempfile
 import time
-import types
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -51,18 +50,18 @@ class FakeTailscale:
 
 
 class FakeT3:
-    """Runner del helper de T3: hilos con preguntas pendientes; registra las llamadas."""
+    """Cliente MCP falso de T3 (como `t3mcp.Client`): hilos con preguntas pendientes; registra las llamadas."""
 
     def __init__(self):
         self.calls = []
         self.pending = {}                       # thread_id -> [request_id]
         self.down = False
 
-    def __call__(self, cmd, env=None, timeout=None):
-        tool, args = cmd[2], json.loads(cmd[3])
+    def call(self, tool, args=None):
+        args = args or {}
         self.calls.append((tool, args))
         if self.down:
-            return types.SimpleNamespace(returncode=1, stdout="ERROR: fetch failed", stderr="")
+            raise t3watch.T3Error("error de red con T3 (/mcp): Connection refused")
         if tool == "t3_pending_request":
             if args["action"] == "list":
                 out = {"requestIds": self.pending.get(args["threadId"], [])}
@@ -74,7 +73,7 @@ class FakeT3:
             out = {"projects": []}
         else:
             out = {"ok": True}
-        return types.SimpleNamespace(returncode=0, stdout=json.dumps(out), stderr="")
+        return out
 
 
 class ServerBase(unittest.TestCase):
@@ -111,12 +110,12 @@ class ServerBase(unittest.TestCase):
                    projects_root=os.path.join(self.tmp, "projects"), worktrees_root=os.path.join(self.tmp, "worktrees"),
                    bind="127.0.0.1", port=0, owner_login="yo@github", allowed_logins=["lector@github"], import_legacy=False)
         cfg["projects"] = {"proyecto-demo": {}}
-        cfg["t3"] = {"helper": "/nonexistente/t3mcp.mjs"}
+        cfg["t3"] = {"origin": "http://127.0.0.1:9", "t3_bin": "/nonexistente/t3"}
         cfg.update(over)
         conn = db.connect(cfg["db_path"])
         self.addCleanup(conn.close)
         coll = collector_mod.Collector(cfg, conn, proc_root=self.proc.root, clock=self.clock, clk_tck=100, page_size=4096)
-        self.svc = AgentService(cfg, conn=conn, collector=coll, t3=t3watch.T3(cfg, runner=self.t3calls), runner=self.ts,
+        self.svc = AgentService(cfg, conn=conn, collector=coll, t3=t3watch.T3(cfg, client=self.t3calls), runner=self.ts,
                                 poster=lambda url, data, timeout: self.posts.append((url, data)) or 200,
                                 orchestrator_fn=orchestrator or (lambda: None), clock=self.clock, **(svc_kw or {}))
         self.svc.start(background=background)

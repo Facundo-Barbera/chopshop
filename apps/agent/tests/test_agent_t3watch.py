@@ -1,14 +1,14 @@
-"""Pruebas de chopshop.agent.t3watch con un runner falso (sin node, sin T3, sin red). Fixtures: tests/fixtures/t3/."""
+"""Pruebas de chopshop.agent.t3watch con un cliente MCP falso (sin T3, sin red) y de chopshop.answers.
+Fixtures: tests/fixtures/t3/."""
 import copy
 import json
 import os
-import subprocess
 import sys
 import tempfile
-import types
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from chopshop import answers, t3mcp  # noqa: E402
 from chopshop.agent import config as agent_config, db, t3watch  # noqa: E402
 
 FIX = os.path.join(os.path.dirname(__file__), "fixtures", "t3")
@@ -20,7 +20,7 @@ def fixture(name):
 
 
 class FakeServer:
-    """Simula el helper t3mcp.mjs: `runner(cmd, env, timeout)` contesta según el estado en memoria."""
+    """Cliente MCP falso: `call(tool, args)` contesta según el estado en memoria (como `t3mcp.Client`)."""
 
     def __init__(self):
         self.projects = fixture("project_list")
@@ -28,10 +28,8 @@ class FakeServer:
         self.reads = {"t-run": fixture("thread_read")}
         self.pending = {}            # thread_id -> {request_id: respuesta de t3_pending_request read}
         self.down = False
-        self.raw = None              # fuerza una salida cruda (p. ej. truncada)
+        self.fail = {}               # tool -> mensaje: esa herramienta falla con T3Error
         self.calls = []              # (tool, args)
-        self.envs = []
-        self.cmds = []
         self.pages = None            # si se define: lista de páginas para t3_thread_list de p-0001
 
     def set(self, tid, **fields):
@@ -51,17 +49,17 @@ class FakeServer:
     def count(self, tool):
         return sum(1 for t, _ in self.calls if t == tool)
 
-    def runner(self, cmd, env=None, timeout=None):
-        self.cmds.append(cmd)
-        self.envs.append(env)
-        tool, args = cmd[2], json.loads(cmd[3])
+    def call(self, tool, args=None):
+        args = copy.deepcopy(args or {})
         self.calls.append((tool, args))
         if self.down:
-            return types.SimpleNamespace(returncode=1, stdout="ERROR: fetch failed", stderr="")
-        if self.raw is not None:
-            return types.SimpleNamespace(returncode=0, stdout=self.raw, stderr="")
+            raise t3mcp.T3Error("error de red con T3 (/mcp): Connection refused")
+        if tool in self.fail:
+            raise t3mcp.T3Error("%s falló: %s" % (tool, self.fail[tool]))
         out = getattr(self, "_" + tool)(args)
-        return types.SimpleNamespace(returncode=0, stdout=json.dumps(out), stderr="")
+        if isinstance(out, list) and out and "_tag" in out[0].get("text", "")[:20]:   # como hace t3mcp.Client
+            raise t3mcp.T3Error("%s: %s" % (tool, out[0]["text"]))
+        return copy.deepcopy(out)
 
     def _t3_project_list(self, a):
         return self.projects
@@ -101,7 +99,7 @@ class Base(unittest.TestCase):
         self.conn = db.connect(os.path.join(self.tmp.name, "agent.db"))
         self.srv = FakeServer()
         self.now = [1_800_000_000.0]
-        self.t3 = t3watch.T3(self.cfg, runner=self.srv.runner, clock=lambda: self.now[0])
+        self.t3 = t3watch.T3(self.cfg, client=self.srv, clock=lambda: self.now[0])
         self.events = []
 
     def emit(self, event, project, body=None):
@@ -121,50 +119,56 @@ class Base(unittest.TestCase):
 
 
 class TestCall(Base):
-    def test_comando_y_entorno(self):
-        self.cfg["t3"].update(helper="~/ayuda/t3mcp.mjs", t3_bin="~/bin/t3", access="full-access", node="nodo")
-        t3 = t3watch.T3(self.cfg, runner=self.srv.runner)
-        t3.call("t3_project_list", {"limit": 5})
-        cmd, env = self.srv.cmds[-1], self.srv.envs[-1]
-        self.assertEqual(cmd[0], "nodo")
-        self.assertEqual(cmd[1], os.path.expanduser("~/ayuda/t3mcp.mjs"))
-        self.assertEqual(cmd[2], "t3_project_list")
-        self.assertEqual(json.loads(cmd[3]), {"limit": 5})
-        self.assertEqual(env["T3MCP_ACCESS"], "full-access")
-        self.assertEqual(env["T3_BIN"], os.path.expanduser("~/bin/t3"))
+    def test_delega_en_el_cliente(self):
+        self.assertEqual(self.t3.call("t3_project_list", {"limit": 5}), self.srv.projects)
+        self.assertEqual(self.srv.calls, [("t3_project_list", {"limit": 5})])
+        self.t3.call("t3_project_list")
+        self.assertEqual(self.srv.calls[-1], ("t3_project_list", {}))
 
     def test_errores(self):
         self.srv.down = True
-        with self.assertRaises(t3watch.T3Error):
+        with self.assertRaisesRegex(t3watch.T3Error, "red"):
             self.t3.call("t3_project_list")
         self.srv.down = False
-        self.srv.raw = '{"projects": [{"id": "p-00'          # salida truncada
-        with self.assertRaisesRegex(t3watch.T3Error, "no es JSON"):
-            self.t3.call("t3_project_list")
-        self.srv.raw = json.dumps([{"type": "text", "text": '{"_tag":"OrchestratorMcpFailure","code":"target_required"}'}])
-        with self.assertRaisesRegex(t3watch.T3Error, "target_required"):
-            self.t3.call("t3_thread_list")
+        with self.assertRaisesRegex(t3watch.T3Error, "not_found"):
+            self.t3.read("t-nada")
 
-    def test_timeout_y_oserror(self):
-        def boom(cmd, env, timeout):
-            raise subprocess.TimeoutExpired(cmd, timeout)
+    def test_error_inesperado_del_cliente_es_t3error(self):
+        class Roto:
+            def call(self, tool, args):
+                raise ConnectionResetError("se cortó")
 
-        with self.assertRaisesRegex(t3watch.T3Error, "tiempo agotado"):
-            t3watch.T3(self.cfg, runner=boom).call("t3_project_list")
+        with self.assertRaisesRegex(t3watch.T3Error, "t3_project_list: se cortó"):
+            t3watch.T3(self.cfg, client=Roto()).call("t3_project_list")
 
-        def nonode(cmd, env, timeout):
-            raise FileNotFoundError("node")
+    def test_t3error_es_el_del_cliente_nativo(self):
+        self.assertIs(t3watch.T3Error, t3mcp.T3Error)
+        self.assertTrue(issubclass(t3watch.AnswerError, t3mcp.T3Error))
 
-        with self.assertRaisesRegex(t3watch.T3Error, "helper"):
-            t3watch.T3(self.cfg, runner=nonode).call("t3_project_list")
+    def test_cliente_por_defecto_desde_config(self):
+        self.cfg["t3"].update(origin="http://100.64.0.10:3773", t3_bin="~/bin/t3", access="full-access",
+                              credential_file="/tmp/no-existe/cred.json")
+        c = t3watch.T3(self.cfg).client
+        self.assertIsInstance(c, t3mcp.Client)
+        self.assertEqual(c.origin, "http://100.64.0.10:3773")
+        self.assertEqual(c.access, "full-access")
+        self.assertEqual(c.t3_bin, os.path.expanduser("~/bin/t3"))
+        self.assertEqual(c.credential_file, "/tmp/no-existe/cred.json")
+        d = t3watch.T3(dict(self.cfg, t3={})).client
+        self.assertEqual((d.access, d.t3_bin, d.credential_file), ("approval-required", "t3", None))
 
-    def test_organize_solo_settle(self):
+    def test_organize_archivar_lo_frena_el_cliente_nativo(self):
+        hits = []
+
+        def http(*a):
+            hits.append(a)
+            raise AssertionError("no debe llegar a la red")
+
+        t3 = t3watch.T3(self.cfg, client=t3mcp.Client(origin="http://127.0.0.1:9", http=http))
         for action in ("archive", "unarchive", "pin", None):
             with self.assertRaises(t3watch.T3Error):
-                self.t3.call("t3_thread_organize", {"threadId": "t-run", "action": action})
-        self.assertEqual(self.srv.calls, [])      # ni siquiera llega al helper
-        self.t3.call("t3_thread_organize", {"threadId": "t-run", "action": "settle"})
-        self.assertEqual(self.srv.count("t3_thread_organize"), 1)
+                t3.call("t3_thread_organize", {"threadId": "t-run", "action": action})
+        self.assertEqual(hits, [])
 
     def test_projects_omite_borrados(self):
         self.assertEqual([p["title"] for p in self.t3.projects()], ["proyecto-demo"])
@@ -373,7 +377,7 @@ class TestUnreachable(Base):
     def test_caida_persistente_no_repite_tras_reinicio(self):
         self.srv.down = True
         self.poll()
-        t3b = t3watch.T3(self.cfg, runner=self.srv.runner, clock=lambda: self.now[0])   # "reinicio" del agente
+        t3b = t3watch.T3(self.cfg, client=self.srv, clock=lambda: self.now[0])   # "reinicio" del agente
         self.now[0] += 60
         t3watch.poll(self.conn, self.cfg, t3b, self.emit)
         self.assertEqual(self.names(), ["t3_unreachable"])
@@ -386,16 +390,8 @@ class TestUnreachable(Base):
         self.assertEqual(self.names(), ["t3_unreachable", "t3_recovered"])     # los hilos se siembran en silencio
 
     def test_todos_los_listados_fallan_es_caida(self):
-        self.srv._t3_thread_list = lambda a: (_ for _ in ()).throw(AssertionError)
-        orig = self.srv.runner
-
-        def runner(cmd, env=None, timeout=None):
-            if cmd[2] == "t3_thread_list":
-                return types.SimpleNamespace(returncode=1, stdout="", stderr="boom")
-            return orig(cmd, env, timeout)
-
-        t3 = t3watch.T3(self.cfg, runner=runner, clock=lambda: self.now[0])
-        r = t3watch.poll(self.conn, self.cfg, t3, self.emit)
+        self.srv.fail["t3_thread_list"] = "boom"
+        r = t3watch.poll(self.conn, self.cfg, self.t3, self.emit)
         self.assertFalse(r["reachable"])
         self.assertEqual(self.names(), ["t3_unreachable"])
 
@@ -404,6 +400,12 @@ class TestSettle(Base):
     def test_settle(self):
         t3watch.settle(self.t3, "t-run")
         self.assertEqual(self.srv.calls, [("t3_thread_organize", {"threadId": "t-run", "action": "settle"})])
+
+    def test_settle_solo_envia_settle(self):
+        for tid in ("t-run", "t-otro"):
+            t3watch.settle(self.t3, tid)
+        self.assertEqual({t for t, _ in self.srv.calls}, {"t3_thread_organize"})
+        self.assertEqual({a["action"] for _, a in self.srv.calls}, {"settle"})
 
     def test_settle_vacio(self):
         for bad in ("", "  ", None):
@@ -470,3 +472,37 @@ class TestAnswer(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+class TestAnswers(unittest.TestCase):
+    Q = {"id": "q1", "options": [{"label": "main"}, {"label": "Desarrollo", "value": "develop"}]}
+
+    def test_resolve(self):
+        self.assertEqual(answers.resolve(self.Q, "2"), "develop")
+        self.assertEqual(answers.resolve(self.Q, "MAIN"), "main")
+        self.assertEqual(answers.resolve(self.Q, "desarrollo"), "develop")
+        self.assertEqual(answers.resolve(self.Q, "develop"), "develop")
+        self.assertEqual(answers.resolve(self.Q, "9"), "9")                 # fuera de rango = texto libre
+        self.assertEqual(answers.resolve(self.Q, "otra cosa"), "otra cosa")
+        with self.assertRaises(answers.InvalidChoice):
+            answers.resolve(dict(self.Q, allowCustomAnswer=False), "otra cosa")
+        self.assertEqual(answers.resolve({"id": "q", "allowCustomAnswer": False}, "libre"), "libre")   # sin opciones
+
+    def test_resolve_multiselect(self):
+        self.assertEqual(answers.resolve(dict(self.Q, multiSelect=True), "1, Desarrollo ,x"), ["main", "develop", "x"])
+
+    def test_resolve_all(self):
+        q2 = {"id": "q2", "options": [{"label": "sí"}, {"label": "no"}]}
+        self.assertEqual(answers.resolve_all([self.Q], 1), {"q1": "main"})
+        self.assertEqual(answers.resolve_all([self.Q, q2], {"q1": "2", "q2": "no"}), {"q1": "develop", "q2": "no"})
+        for qs, choice in (([], "1"), ([self.Q, q2], "1"), ([self.Q, q2], {"q1": "1"}), ([self.Q], {"zz": "1"})):
+            with self.assertRaises(answers.InvalidChoice):
+                answers.resolve_all(qs, choice)
+        self.assertTrue(issubclass(answers.InvalidChoice, ValueError))
+
+    def test_motor_usa_el_mismo_modulo(self):
+        from chopshop import engine, profile
+        self.assertEqual(engine._resolve_answer(self.Q, "2"), "develop")
+        with self.assertRaises(profile.ProfileError):
+            engine._resolve_answer(dict(self.Q, allowCustomAnswer=False), "nada")
