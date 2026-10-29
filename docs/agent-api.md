@@ -262,6 +262,19 @@ test de Python y `HalfLifeTests.swift`).
 | `POST /desks/<id>/notes` | `{from, text, ttl_s?}` (texto ≤ 2 KB; `ttl_s` por defecto 86400) → `desk.note` → `{ok, note_id, pending}` |
 | `POST /desks/<id>/assign` | `{thread_id}` → asigna un hilo del vestíbulo (o lo traslada) al escritorio: `desk.assigned reason: manual` |
 | `PUT /office/<proyecto>` | `{office: {...bloque office...}, rack?: {...}, by}` → valida como `profile check` (400 con la lista de problemas), reescribe esos bloques del perfil local, retira (nunca borra) los escritorios que ya no declara y emite `office.changed {by}` |
+| `GET /office/<proyecto>` | (lectura) `{project, rev, office, rack, structure, limits}`: bloques crudos del perfil, estructura con retirados y topes; base para un `PUT` |
+
+Detalle de `PUT /office/<proyecto>` (`agent/structure.py`, guía para los bots en `docs/office-bots.md`):
+- Cuerpo: `office` (obligatorio, el bloque completo), `rack` (opcional; si falta no se toca), `by` (obligatorio, ≤ 64),
+  `base_rev` (opcional: el `rev` de un `GET`; si el perfil cambió → 409) y `reactivate` (lista de ids retirados que vuelve a
+  declarar; sin ella → 409: reactivar lo pide un humano).
+- Respuesta: `{ok, project, rev, changed, seq, office: <estructura con retirados>, diff: {added, retired, reactivated}}`.
+  Sin cambios de contenido → `changed: false`, no se escribe ni se emite. Errores: `{error, problems?: [...]}`; 404 si no hay
+  perfil local (la ruta no crea perfiles).
+- Solo se reescriben los bloques `office:`/`rack:` (escritura atómica, mismo modo de archivo); el resto del perfil y sus
+  comentarios quedan igual. Si el texto no se puede releer idéntico (p. ej. comillas dobles seguidas de ` #`) → 400.
+- Los escritorios conocidos y retirados se recuerdan en `meta` (`office_desks:<proyecto>`; si falta, desde el último
+  `office.changed`).
 
 Todas exigen permiso de escritura (dueño, origen local o credencial de servicio/dispositivo). No hay `DELETE` de escritorios ni de
 pisos; ninguna ruta crea ni ejecuta scripts.
