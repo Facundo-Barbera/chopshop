@@ -42,7 +42,10 @@ DEFAULTS = {
         "owner_login": "",             # login Tailscale completo con permiso total (vacío = solo origen local)
         "allowed_logins": [],          # logins con acceso de solo lectura
         "t3_enabled": True,            # vigilar T3 (false = máquina solo sensor)
-        "import_legacy": True,         # al arrancar, importar <home>/events.jsonl del motor viejo si existe
+        "import_legacy": True,         # importar <home>/events.jsonl del motor viejo (al arrancar y cada legacy_interval s)
+        "legacy_interval": 5,
+        "engine_enabled": True,        # correr engine.tick en el agente cuando hay lotes en <home>/state.json
+        "engine_interval": 5,
         "service": {"read_write_paths": []},   # rutas extra de escritura para la unidad systemd (ProtectSystem=strict)
         "token_file": "~/.chopshop/agent/token",
         "db_path": "~/.chopshop/agent/agent.db",
