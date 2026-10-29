@@ -7,7 +7,7 @@ import time
 
 from . import engine, events, graph, home, inbox, integrate, metrics, miniyaml, profile, state, t3
 
-HELP_EPILOG = """comandos: profile list|show|check | fanout | run | poll | watch | status | snapshot | metrics | wait | gather | answer [--queue] | stop | settle | integrate | subscribe | graph new|run|status | agent run|status|token|check-config|print-unit"""
+HELP_EPILOG = """comandos: profile list|show|check | fanout | run | poll | watch | status | snapshot | metrics | wait | gather | answer [--queue] | stop | settle | integrate | subscribe | graph new|run|status | agent run|status|token|check-config|print-unit | pair create|list|revoke|prune"""
 
 
 def _load_tasks(args):
@@ -296,6 +296,9 @@ def main(argv):
     if argv and argv[0] == "agent":  # servicio chopshop-agent: tiene su propio parser (run|status|token|check-config|print-unit)
         from .agent import service
         return service.main(argv[1:])
+    if argv and argv[0] == "pair":   # emparejamiento de dispositivos con el agente local (create|list|revoke|prune)
+        from .agent import pairing
+        return pairing.main(argv[1:])
     a = build().parse_args(argv)
     if a.cmd == "profile" and a.action != "list" and not a.project:
         print("falta el proyecto", file=sys.stderr)

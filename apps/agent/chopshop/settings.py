@@ -41,6 +41,7 @@ DEFAULTS = {
         "tailscale_bin": "tailscale",  # CLI de Tailscale (whois / ip)
         "owner_login": "",             # login Tailscale completo con permiso total (vacío = solo origen local)
         "allowed_logins": [],          # logins con acceso de solo lectura
+        "allowed_hosts": [],           # nombres extra aceptados en la cabecera Host (p. ej. el nombre MagicDNS completo)
         "t3_enabled": True,            # vigilar T3 (false = máquina solo sensor)
         "import_legacy": True,         # importar <home>/events.jsonl del motor viejo (al arrancar y cada legacy_interval s)
         "legacy_interval": 5,
