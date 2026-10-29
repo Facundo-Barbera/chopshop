@@ -22,7 +22,7 @@ Requiere **macOS 26** y **Xcode 27** (usa Liquid Glass). Es un paquete aparte de
   (Keychain). Pruebas: `apps/mac/Tests/ChopshopNativeTests` (`cd apps/mac && swift test`).
 - Las vistas (`IsoOfficeView`, `GraphView`, `ProjectView`/`ProjectContent`, `LiveProjectScreen`, …) llevan `@available(macOS 26.0, *)`;
   la app las usa tras `if #available(macOS 26, *)` y en macOS < 26 se queda con la vista web. El vidrio (`glassEffect`) va tras
-  `#if compiler(>=6.2)`: con un Xcode anterior a 26 todo compila con un sustituto plano.
+  `#if compiler(>=6.2)`: con un Xcode anterior a 26 cae a un sustituto plano (no probado: solo se ha compilado con Xcode 27).
 - Acciones: `\.attentionActions` en el entorno (responder por `POST /answer`, abrir el hilo en T3). Sin ellas (aquí) los
   botones se ven pero no hacen nada.
 

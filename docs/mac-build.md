@@ -10,7 +10,8 @@ Todos los nombres, IPs y rutas de esta guía son de ejemplo (`host-a`, `100.64.0
   nativa en vivo** (ver «Oficina en vivo»); en versiones anteriores, un material translúcido y la vista web.
 - Xcode, o al menos las Command Line Tools con Swift 6 (`xcode-select --install`; compruébalo con `swift --version`). Para que el
   binario incluya la oficina con vidrio líquido hace falta el **SDK de macOS 26+ (Xcode ≥ 26)**; con un Xcode anterior la app
-  compila igual (el vidrio cae a un sustituto plano, `#if compiler(>=6.2)`), pero el release en CI debe usar Xcode ≥ 26
+  debería compilar igual (solo el vidrio, `glassEffect`, va tras `#if compiler(>=6.2)` con un sustituto plano; no se ha probado con
+  Xcode < 26), así que el release en CI debe usar Xcode ≥ 26
   (variable `XCODE_VERSION` del workflow, ver [`release.md`](release.md)).
 - Node.js 20+ y [pnpm](https://pnpm.io) (para construir la UI web que va dentro del `.app`).
 - Un agente de Chopshop corriendo en alguna máquina de tu red Tailscale, y Tailscale conectado en este Mac.
@@ -96,6 +97,8 @@ En macOS 26 o posterior el detalle de un **proyecto** es la vista nativa `Chopsh
 - Modo demo sin agente: `Chopshop.app/Contents/MacOS/Chopshop --demo-fixture apps/agent/tests/fixtures/events/ui-fixture.jsonl`
   (o `CHOPSHOP_DEMO_FIXTURE=…`): reproduce la secuencia acelerada.
 - Por ahora el stream es de un solo agente; los demás se ven por `/snapshot` en la vista web.
+- Requiere un agente con `api_version 2` (`/stream`, `/state`, `/pair`). Mientras el agente instalado sea anterior, el
+  emparejamiento responde «agente sin emparejamiento», las acciones dan 403 con un mensaje claro y los proyectos se ven en la web.
 
 Código: `apps/mac/Sources/ChopshopNative` (lógica pura en `Live/`, sin requisito de macOS 26; vistas con `@available(macOS 26.0, *)`).
 Banco de pruebas con Previews: `apps/mac/native` (ver su README).
