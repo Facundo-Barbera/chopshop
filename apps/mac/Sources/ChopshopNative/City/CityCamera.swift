@@ -157,7 +157,7 @@ public struct CityTransition: Equatable, Sendable {
     public static func upperAlpha(_ p: Double) -> Double { 1 - citySmooth((p - 0.45) / 0.3) }
     /// Distancia (z del mundo) que suben los pisos de arriba.
     public static let liftDistance = 300.0
-    /// Pisos de debajo del elegido (se hunden un poco y se apagan).
+    /// Pisos de debajo del elegido (se apagan).
     public static func lowerAlpha(_ p: Double) -> Double { 1 - citySmooth((p - 0.3) / 0.4) }
     /// Brillo ámbar/rojo del piso elegido.
     public static func glow(_ p: Double) -> Double { 1 - citySmooth((p - 0.286) / 0.16) }

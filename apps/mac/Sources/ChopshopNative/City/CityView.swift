@@ -13,14 +13,14 @@ public struct CityFocus: Equatable, Sendable {
 final class CityViewBox {
     var cityFrame: IsoFrame?
     var sceneKey: LiveSceneKey?
-    var scene: IsoScene?
+    var cachedScene: IsoScene?
     var zoomGen = 0
 
     func scene(graph: MockGraph, tasks: [String: MockTask]) -> IsoScene {
         let k = LiveSceneKey(graph: graph, tasks: tasks)
-        if let s = scene, sceneKey == k { return s }
+        if let s = cachedScene, sceneKey == k { return s }
         let s = IsoScene(graph: graph, tasks: tasks)
-        scene = s; sceneKey = k
+        cachedScene = s; sceneKey = k
         return s
     }
 }
@@ -158,10 +158,11 @@ public struct CityView: View {
             header(t: t, chrome: ch)
                 .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 4)
             ZStack(alignment: .top) {
-                if office, let pr = target, let g = graph(pr) {
-                    IsoOfficeView(graph: g, tasks: tasks(pr), hostOf: hosts(pr), frozenTime: frozenTime, flatChrome: flatChrome)
-                } else if showGraph, let pr = graphProject, let g = graph(pr) {
+                // el grafo primero: con la oficina montada, "Grafo" también tiene que verse
+                if showGraph, let pr = graphProject, let g = graph(pr) {
                     GraphView(graph: g, tasks: tasks(pr), hostOf: hosts(pr), frozenTime: frozenTime, flatChrome: flatChrome)
+                } else if office, let pr = target, let g = graph(pr) {
+                    IsoOfficeView(graph: g, tasks: tasks(pr), hostOf: hosts(pr), frozenTime: frozenTime, flatChrome: flatChrome)
                 } else {
                     canvas(p: p, t: t)
                     overlay(p: p, chrome: ch)
@@ -176,7 +177,7 @@ public struct CityView: View {
 
     /// Proyecto del grafo: el piso enfocado; si no, el primero que pide algo; si no, el primero.
     private var graphProject: String? {
-        target ?? model.alerts.first?.project ?? model.floors.first { graph($0.project) != nil }?.project
+        target ?? model.alerts.first { graph($0.project) != nil }?.project ?? model.floors.first { graph($0.project) != nil }?.project
     }
 
     private func litCount(_ t: Double) -> Int {
@@ -250,13 +251,14 @@ public struct CityView: View {
         .onContinuousHover(coordinateSpace: .local) { phase in
             switch phase {
             case .active(let pt):
-                let h = (zoomed || frozenTime != nil) ? nil : box.cityFrame.flatMap { CityHit.floor(at: pt, in: model, frame: $0) }
+                // solo con la ciudad quieta (p = 0): durante el zoom de vuelta el encuadre no es el de la ciudad
+                let h = (zoomed || p > 0 || frozenTime != nil) ? nil : box.cityFrame.flatMap { CityHit.floor(at: pt, in: model, frame: $0) }
                 if h != hovered { hovered = h }
             case .ended: hovered = nil
             }
         }
         .gesture(SpatialTapGesture().onEnded { e in
-            guard !zoomed, let f = box.cityFrame, let pr = CityHit.floor(at: e.location, in: model, frame: f) else { return }
+            guard !zoomed, p == 0, let f = box.cityFrame, let pr = CityHit.floor(at: e.location, in: model, frame: f) else { return }
             select(pr)
         })
     }
@@ -270,7 +272,7 @@ public struct CityView: View {
             ZStack(alignment: .top) {
                 if !cityAlerts.isEmpty && ch < 1 {
                     IsoAttentionBar(items: cityAlerts, selected: nil, flat: flatChrome) { id in select(id) }
-                        .padding(.top, 12).opacity(1 - ch)
+                        .padding(.top, 12).opacity(1 - ch).allowsHitTesting(p == 0)
                 }
                 // la barra que tendrá la oficina, en el mismo sitio (al montarse IsoOfficeView no cambia nada)
                 if !officeAlerts.isEmpty && ch > 0 {
@@ -467,7 +469,7 @@ public struct LiveCityScreen: View {
         .navigationTitle("Ciudad")
         .navigationSubtitle("\(model.buildings.count) empresas · \(model.projectCount) proyectos")
         .toolbar { ToolbarItem(placement: .primaryAction) { MachineStatusButton(machines: store.snapshot.machines) } }
-        .onAppear(perform: refresh)
+        .onAppear { refresh() }
         .onReceive(store.$snapshot) { _ in refresh() }
     }
 
