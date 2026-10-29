@@ -5,7 +5,7 @@ import os
 import sqlite3
 import threading
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS machine_samples (      -- crudo (retención raw_hours)
@@ -63,6 +63,8 @@ def migrate(conn):
         _migrate_v3(conn)
     if v < 4:
         _migrate_v4(conn)
+    if v < 5:
+        _migrate_v5(conn)
     if v < SCHEMA_VERSION:
         conn.execute("PRAGMA user_version=%d" % SCHEMA_VERSION)
 
@@ -111,13 +113,25 @@ V4_COLUMNS = {
 }
 
 
-def _migrate_v4(conn):
+def _add_columns(conn, spec):
     """Añade las columnas que falten (idempotente: no depende del orden respecto de otras migraciones)."""
-    for table, cols in V4_COLUMNS.items():
+    for table, cols in spec.items():
         have = {r[1] for r in conn.execute("PRAGMA table_info(%s)" % table)}
         for name, typ in cols:
             if name not in have:
                 conn.execute("ALTER TABLE %s ADD COLUMN %s %s" % (table, name, typ))
+
+
+def _migrate_v4(conn):
+    _add_columns(conn, V4_COLUMNS)
+
+
+# v5: cabeceras HTTP extra por suscripción (ruta a un archivo 0600 con líneas `Nombre: valor`; NULL = ninguna).
+V5_COLUMNS = {"subscriptions": (("headers_file", "TEXT"),)}
+
+
+def _migrate_v5(conn):
+    _add_columns(conn, V5_COLUMNS)
 
 
 def tx():
