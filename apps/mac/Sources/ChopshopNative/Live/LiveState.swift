@@ -24,6 +24,9 @@ public struct LiveState: Equatable, Sendable {
         public var tasks: [JSONValue.Object] = []
         public var graphs: [JSONValue.Object] = []
         public var attention: [Attention] = []
+        /// `office` del proyecto en `GET /state` v3 (docs/agent-api.md «api_version 3»), tal cual; nil con un agente v2 o sin
+        /// bloque `office` en el perfil. Lo lee la ciudad (`CityModel`) para los pisos y la empresa.
+        public var office: JSONValue.Object? = nil
     }
 
     public static let apiVersion = 2
@@ -229,6 +232,7 @@ public struct LiveState: Equatable, Sendable {
             p.batches = (pj["batches"]?.array ?? []).compactMap(\.object)
             p.tasks = (pj["tasks"]?.array ?? []).compactMap(\.object)
             p.graphs = (pj["graphs"]?.array ?? []).compactMap(\.object)
+            p.office = pj["office"]?.object
             p.attention = (pj["attention"]?.array ?? []).compactMap { a in
                 guard let key = a["key"]?.string, let needs = a["needs"]?.string else { return nil }
                 return Attention(key: key, id: a["id"]?.string, seq: a["seq"]?.int ?? 0, type: a["type"]?.string ?? "", needs: needs,

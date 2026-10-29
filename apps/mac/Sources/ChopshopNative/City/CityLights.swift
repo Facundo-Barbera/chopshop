@@ -5,7 +5,7 @@ import Foundation
 /// - Una ventana por hilo vivo. Se enciende UNA vez con una rampa ease-in-out de `ramp` s (con un pequeño retraso fijo por id
 ///   de hilo, para que no se enciendan todas a la vez) y se queda encendida mientras el hilo viva; al terminar se apaga con otra
 ///   rampa. Sin ruido por fotograma: el nivel solo depende de los instantes de encendido/apagado.
-/// - La ventana de cada hilo sale de una permutación fija de las del piso (por nombre de proyecto), así se reparten.
+/// - La ventana de cada hilo sale de una permutación fija de las del piso (por `CityFloor.id`), así se reparten.
 /// - El tinte ámbar/rojo del piso también entra y sale con una rampa.
 ///
 /// Se alimenta con `observe(_:at:)` cada vez que cambia el modelo (en vivo, con la hora del reloj; en la cronología, con la del sobre).
@@ -26,7 +26,7 @@ public struct CityLights: Equatable, Sendable {
     /// Retraso máximo por id de hilo.
     public static let maxDelay = 0.35
 
-    /// proyecto → hilo → ventana
+    /// piso (`CityFloor.id`) → hilo → ventana
     public private(set) var lights: [String: [String: Light]] = [:]
     var tints: [String: Tint] = [:]
     public var slots: Int
@@ -61,8 +61,8 @@ public struct CityLights: Equatable, Sendable {
     public mutating func observe(_ m: CityModel, at t: Double) {
         var seen = Set<String>()
         for f in m.floors {
-            seen.insert(f.project)
-            var ls = lights[f.project] ?? [:]
+            seen.insert(f.id)
+            var ls = lights[f.id] ?? [:]
             // apagados del todo: liberan su ventana
             ls = ls.filter { $0.value.offAt.map { t < $0 + Self.ramp + Self.maxDelay } ?? true }
             let alive = Set(f.activeThreads)
@@ -77,23 +77,23 @@ public struct CityLights: Equatable, Sendable {
                     continue
                 }
                 let used = Set(ls.values.map(\.slot))
-                guard let slot = Self.slotOrder(project: f.project, slots: slots).first(where: { !used.contains($0) }) else { continue }
+                guard let slot = Self.slotOrder(project: f.id, slots: slots).first(where: { !used.contains($0) }) else { continue }
                 ls[id] = Light(slot: slot, onAt: t, offAt: nil)
             }
-            lights[f.project] = ls
+            lights[f.id] = ls
 
-            if var tn = tints[f.project] {
+            if var tn = tints[f.id] {
                 if tn.status != f.status { tn = Tint(status: f.status, since: t, previous: tn.status) }
-                tints[f.project] = tn
+                tints[f.id] = tn
             } else {
                 // primer vistazo: el estado que traiga, sin rampa desde neutro salvo que sea un cambio posterior
-                tints[f.project] = Tint(status: f.status, since: -1e9, previous: f.status)
+                tints[f.id] = Tint(status: f.status, since: -1e9, previous: f.status)
             }
         }
         for k in lights.keys where !seen.contains(k) { lights[k] = nil; tints[k] = nil }
     }
 
-    /// Nivel de cada ventana del piso (índice = ventana).
+    /// Nivel de cada ventana del piso `project` (su `CityFloor.id`; índice = ventana).
     public func windows(_ project: String, t: Double) -> [Double] {
         var out = [Double](repeating: 0, count: slots)
         for (id, l) in lights[project] ?? [:] where l.slot < slots {

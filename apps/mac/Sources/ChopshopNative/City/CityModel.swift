@@ -1,9 +1,11 @@
 import Foundation
 
 // Ciudad: un edificio por empresa, un piso por proyecto. Puro (sin SwiftUI, macOS 13): sale del MISMO `LiveState` que la oficina.
+// Con `GET /state` v3 (docs/plans/office-redesign.md): la empresa sale de `office.company`, un proyecto con `office` ocupa un piso
+// por cada piso de su perfil (≤ 4) y la planta baja del edificio es el vestíbulo (hilos activos sin escritorio).
 
-/// Empresa de cada proyecto. La tabla por defecto es la de la flota de Facundo; más adelante puede venir de la config
-/// (`CompanyDirectory(table:order:)`). Lo que no está en la tabla va a "Otros".
+/// Empresa de cada proyecto. La tabla por defecto es la de la flota de Facundo; con un agente v3 manda `office.company` del perfil
+/// y la tabla queda de respaldo para los proyectos sin bloque `office`. Lo que no está en la tabla va a "Otros".
 public struct CompanyDirectory: Equatable, Sendable {
     public static let others = "Otros"
 
@@ -53,6 +55,8 @@ public struct CityAlert: Hashable, Sendable {
     public var project: String
     public var status: CityFloorStatus
     public var title: String
+    /// `CityFloor.id` del piso que lo pide (un proyecto con varios pisos puede tener un aviso en cada uno).
+    public var floor: String = ""
 }
 
 public struct CityFloor: Hashable, Sendable, Identifiable {
@@ -67,7 +71,15 @@ public struct CityFloor: Hashable, Sendable, Identifiable {
     public var needsYou: Int
     public var stuck: Int
     public var alert: CityAlert?
-    public var id: String { project }
+    /// v3: índice del piso en `office.floors` (nil = el proyecto entero en un piso, como con un agente v2).
+    public var floorIndex: Int? = nil
+    /// v3: nombre del piso del perfil, solo si el proyecto ocupa más de uno (va en la píldora).
+    public var floorName: String? = nil
+    /// Planta baja del edificio: el vestíbulo (`project` vacío; sus avisos llevan el proyecto del hilo).
+    public var isLobby = false
+    public var id: String { isLobby ? "lobby:\(company)" : floorIndex.map { "\(project)#\($0)" } ?? project }
+    /// Texto de la píldora.
+    public var label: String { isLobby ? "Vestíbulo" : floorName.map { "\(project) · \($0)" } ?? project }
 }
 
 public struct CityBuilding: Hashable, Sendable, Identifiable {
@@ -121,10 +133,12 @@ public struct CityModel: Equatable, Sendable {
     }
 
     public var floors: [CityFloor] { buildings.flatMap(\.floors) }
+    /// Piso más bajo del proyecto (al que entra el zoom).
     public func floor(_ project: String) -> CityFloor? { floors.first { $0.project == project } }
+    public func floor(id: String) -> CityFloor? { floors.first { $0.id == id } }
     public func building(of project: String) -> CityBuilding? { buildings.first { b in b.floors.contains { $0.project == project } } }
 
-    public var projectCount: Int { floors.count }
+    public var projectCount: Int { Set(floors.filter { !$0.isLobby }.map(\.project)).count }
     public var threadCount: Int { floors.reduce(0) { $0 + $1.activeThreads.count } }
     public var runningCount: Int { floors.reduce(0) { $0 + $1.running } }
     public var needsYouCount: Int { floors.reduce(0) { $0 + $1.needsYou } }
@@ -188,17 +202,40 @@ public struct CityModel: Equatable, Sendable {
                          running: running, needsYou: needsYou(p), stuck: stuck(p), alert: alert(p, status: st))
     }
 
-    /// Agrupa los proyectos por empresa (orden estable: el de la tabla, luego por nombre; pisos por nombre de proyecto)
-    /// y reparte los edificios en una cuadrícula.
+    /// Agrupa los proyectos por empresa (orden estable: el de la tabla, luego por nombre; pisos por nombre de proyecto y, dentro, por
+    /// índice de piso) y reparte los edificios en una cuadrícula. Un edificio con algún proyecto con `office` lleva el vestíbulo en la
+    /// planta baja; los proyectos sin `office` (agente v2 o perfil sin bloque) siguen en un piso con todos sus hilos.
     public static func build(_ s: LiveState, directory: CompanyDirectory = .standard) -> CityModel {
         var groups: [String: [LiveState.Project]] = [:]
-        for p in s.projects { groups[directory.company(of: p.name), default: []].append(p) }
+        var offices: [String: CityOffice] = [:]
+        for p in s.projects {
+            let o = CityOffice(p.office)
+            offices[p.name] = o
+            groups[o?.company ?? directory.company(of: p.name), default: []].append(p)
+        }
         let companies = groups.keys.sorted { directory.rank($0) < directory.rank($1) }
         let cols = max(1, Int(Double(companies.count).squareRoot().rounded(.up)))
         var buildings: [CityBuilding] = []
         for (i, c) in companies.enumerated() {
             let ps = groups[c]!.sorted { ($0.name.lowercased(), $0.name) < ($1.name.lowercased(), $1.name) }
-            let floors = ps.enumerated().map { makeFloor($0.element, company: c, level: $0.offset) }
+            var floors: [CityFloor] = []
+            var lobby: [LiveState.Project] = []
+            for p in ps {
+                guard let o = offices[p.name], !o.floors.isEmpty else {
+                    floors.append(makeFloor(p, company: c, level: 0)); continue
+                }
+                let parts = split(p, o)
+                lobby.append(parts.lobby)
+                for (k, f) in o.floors.enumerated() {
+                    var fl = makeFloor(parts.floors[k], company: c, level: 0)
+                    fl.floorIndex = f.index
+                    if o.floors.count > 1 { fl.floorName = f.name ?? "piso \(f.index + 1)" }
+                    floors.append(fl)
+                }
+            }
+            floors = Array(floors.prefix(CityOffice.maxFloorsPerBuilding))
+            if !lobby.isEmpty { floors.insert(lobbyFloor(lobby, company: c), at: 0) }
+            for k in floors.indices { floors[k].level = k; floors[k].alert?.floor = floors[k].id }
             let col = i % cols, row = i / cols
             buildings.append(CityBuilding(company: c, index: i, x0: CityGeo.margin + Double(col) * CityGeo.pitchX,
                                           y0: CityGeo.margin + Double(row) * CityGeo.pitchY,
@@ -208,6 +245,44 @@ public struct CityModel: Equatable, Sendable {
         let gx = 2 * CityGeo.margin + Double(cols - 1) * CityGeo.pitchX + CityGeo.footprintW
         let gy = 2 * CityGeo.margin + Double(rows - 1) * CityGeo.pitchY + CityGeo.footprintD
         return CityModel(buildings: buildings, groundX: gx, groundY: gy)
+    }
+
+    // MARK: - Oficina v3
+
+    /// Reparte las tareas (y su atención) de un proyecto con `office` entre sus pisos y el vestíbulo: la tarea cuyo hilo ocupa un
+    /// escritorio va a ese piso; la que no, al vestíbulo si sigue viva y al piso más bajo si ya terminó (como en un agente v2, el
+    /// piso guarda lo fallido). La atención que no es de una tarea va al piso más bajo. `floors[k]` = `o.floors[k]`.
+    static func split(_ p: LiveState.Project, _ o: CityOffice) -> (floors: [LiveState.Project], lobby: LiveState.Project) {
+        var floors = o.floors.map { _ in LiveState.Project(name: p.name) }
+        var lobby = LiveState.Project(name: p.name)
+        var place: [String: Int] = [:]          // id de tarea → índice en `floors` (−1 = vestíbulo)
+        for t in p.tasks {
+            guard let id = t["id"]?.string else { continue }
+            let thread = SnapshotMapper.nonEmpty(t["thread_id"]?.string) ?? id
+            let k: Int
+            if let fi = o.floor(ofThread: thread), let at = o.floors.firstIndex(where: { $0.index == fi }) { k = at }
+            else if let ph = t["phase"]?.string, alive.contains(ph) || ph == "queued" { k = -1 }
+            else { k = 0 }
+            place[id] = k
+            if k < 0 { lobby.tasks.append(t) } else { floors[k].tasks.append(t) }
+        }
+        for a in p.attention {
+            let k = (a.subjectKind == nil || a.subjectKind == "task") ? a.subjectID.flatMap { place[$0] } ?? 0 : 0
+            if k < 0 { lobby.attention.append(a) } else { floors[k].attention.append(a) }
+        }
+        for k in floors.indices { floors[k].counts = LiveState.counts(floors[k]) }
+        lobby.counts = LiveState.counts(lobby)
+        return (floors, lobby)
+    }
+
+    /// Vestíbulo: la parte "sin escritorio" de cada proyecto con oficina del edificio. Un aviso del vestíbulo lleva el proyecto del
+    /// hilo (el clic entra en su oficina).
+    static func lobbyFloor(_ parts: [LiveState.Project], company: String) -> CityFloor {
+        let fs = parts.map { makeFloor($0, company: company, level: 0) }
+        let st = fs.map(\.status).min() ?? .neutral
+        return CityFloor(project: "", company: company, level: 0, status: st, activeThreads: fs.flatMap(\.activeThreads).sorted(),
+                         running: fs.reduce(0) { $0 + $1.running }, needsYou: fs.reduce(0) { $0 + $1.needsYou },
+                         stuck: fs.reduce(0) { $0 + $1.stuck }, alert: fs.first { $0.status == st }?.alert, isLobby: true)
     }
 
     /// Límites (u, v) de la ciudad entera para encuadrar: el suelo y lo alto de cada edificio.
