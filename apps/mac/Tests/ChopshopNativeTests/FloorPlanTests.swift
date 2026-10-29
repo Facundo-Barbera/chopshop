@@ -100,4 +100,15 @@ final class FloorPlanTests: XCTestCase {
         XCTAssertEqual(FloorPlan.lobby(in: s, company: nil, projects: ["otro"]).lobby.map(\.threadID), ["mcp:z9"])
         XCTAssertEqual(FloorLayout(plan: l).spots.map(\.id), ["lobby:mcp:c3", "lobby:mcp:c4"])
     }
+
+    /// La app lee los pisos del `LiveState` tipado (CityView → FloorOfficeView): mismo resultado que desde el JSON de `/state`.
+    func testTypedLiveStateMatchesJSON() throws {
+        let json = try state()
+        let live = try XCTUnwrap(LiveState(json: json))
+        XCTAssertEqual(FloorPlan.floors(in: live, project: "awesome-gb"), FloorPlan.floors(in: json, project: "awesome-gb"))
+        XCTAssertEqual(FloorPlan.floor(in: live, project: "awesome-gb", index: 1)?.name, "Docs")
+        XCTAssertEqual(FloorPlan.lobby(in: live, company: "Awesome GB"), FloorPlan.lobby(in: json, company: "Awesome GB"))
+        XCTAssertEqual(FloorPlan.lobby(in: live, company: nil, projects: ["otro"]), FloorPlan.lobby(in: json, company: nil, projects: ["otro"]))
+        XCTAssertTrue(FloorPlan.floors(in: live, project: "otro").isEmpty)
+    }
 }

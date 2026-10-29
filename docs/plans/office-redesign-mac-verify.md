@@ -41,6 +41,8 @@ cp apps/agent/tests/fixtures/events/machine-room-fixture.jsonl apps/mac/Sources/
       automatización en cola). La vista calcula "hace X" con el reloj real: el texto relativo cambia entre capturas.
 - [ ] Ciudad con varios pisos por proyecto y vestíbulo en planta baja (escena de `CityOfficeTests`).
 - [ ] Previews de `Office/FloorOfficeView.swift` (piso Producto, triage seleccionado, vestíbulo).
+- [ ] Ciudad: clic en un piso de un proyecto con `office` → zoom continuo que acaba en `FloorOfficeView` de **ese** piso (etiquetas
+      y barra de atención iguales durante el zoom y al montarse); un proyecto sin `office` sigue abriendo la vista Grafo.
 
 ## 5. Comportamiento a mirar a ojo
 
@@ -53,7 +55,9 @@ cp apps/agent/tests/fixtures/events/machine-room-fixture.jsonl apps/mac/Sources/
 
 ## 6. Huecos conocidos (no son de compilar)
 
-- `FloorOfficeView` (rama or-mac-office) no está enganchada a la navegación: lee el `/state` crudo (`JSONValue`) y solo la usan
-  sus previews/fixtures. Falta montarla al hacer zoom a un piso desde la Ciudad (y alimentarla desde `LiveState`/`LiveStore`).
+- `FloorOfficeView` ya se monta al hacer zoom a un piso desde la Ciudad (rama fix/or-floor-view): `CityView` la alimenta con
+  `FloorPlan.floors(in: LiveState, …)` (el `office` tipado, sin JSON crudo), el zoom se encuadra con `FloorLayout` y el piso
+  elegido (no solo el primero del proyecto) se abre por su `CityFloor.id`. Proyectos sin `office` siguen abriendo `IsoOfficeView`.
+  `onInspect` (→ `POST /touch`) queda expuesto en `CityView(state:…)` pero nadie lo cablea aún. El vestíbulo no tiene zoom.
 - `IsoScene`/`IsoOfficeView` siguen con salas por rango de dependencias (modo Grafo); la oficina por departamentos vive en
   `Office/` aparte.
