@@ -9,7 +9,7 @@
 - Heartbeat `: ping` cada `heartbeat` s según el reloj inyectable. Límite `max_clients` (el siguiente recibe 503).
 - Sin timeout de inactividad (el `CONN_TIMEOUT` del resto de rutas no aplica); cada escritura tiene un tope de `write_timeout` s: un
   cliente lento o cerrado se descarta sin frenar al bus ni a los demás (cada cliente es su propio hilo y su propio cursor).
-- `close()` (desde `AgentService.stop`) despierta y corta todas las conexiones; `revoke(device_id)` corta las de un dispositivo, que
+- `close()` (desde `AgentService.stop`) despierta y corta todas las conexiones y espera (con tope) a que sus hilos las suelten; `revoke(device_id)` corta las de un dispositivo, que
   además se comprueba en cada vuelta (`auth.device_active`)."""
 import fnmatch
 import json
@@ -29,6 +29,7 @@ POLL = 1.0                       # s entre revisiones de la DB / del dispositivo
 MAX_BACKLOG = 2000
 RETRY_MS = 3000
 PAGE = 500
+CLOSE_WAIT = 5.0                 # s máx. que `close()` espera a que los hilos SSE salgan
 
 
 class Bus:
@@ -104,6 +105,7 @@ class StreamHub:
         self.sndbuf = sndbuf                     # tests: búfer de envío pequeño para provocar un cliente lento
         self.device_active = device_active       # fn(device_id) -> bool (revocación)
         self._lock = threading.Lock()
+        self._gone = threading.Condition(self._lock)   # avisa cuando un hilo suelta su cliente
         self._clients = set()
 
     @property
@@ -111,12 +113,14 @@ class StreamHub:
         with self._lock:
             return len(self._clients)
 
-    def close(self):
+    def close(self, wait=CLOSE_WAIT):
         self.bus.close()
         with self._lock:
             clients = list(self._clients)
         for c in clients:
             c.cut()
+        with self._gone:                         # al volver, `active == 0` (salvo hilos colgados más de `wait` s)
+            self._gone.wait_for(lambda: not self._clients, wait)
 
     def revoke(self, device_id):
         with self._lock:
@@ -156,8 +160,9 @@ class StreamHub:
         except (_Gone, OSError):
             pass
         finally:
-            with self._lock:
+            with self._gone:
                 self._clients.discard(client)
+                self._gone.notify_all()
         return 200
 
     def _write(self, client, wfile, text):

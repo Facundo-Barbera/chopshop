@@ -446,6 +446,7 @@ class TestStream(StreamBase):
         t0 = time.monotonic()
         self.svc.stop()
         self.assertLess(time.monotonic() - t0, 5)
+        self.assertEqual(self.svc.app.stream.active, 0)                 # stop() espera a que los hilos SSE suelten su cliente
         with self.assertRaises((EOFError, OSError)):
             for _ in range(5):
                 c.frame(timeout=3)
