@@ -1,15 +1,21 @@
 import SwiftUI
 
-/// Hoja de ajustes: conexión con un agente (`agent_url` de la sección `[app]` del config) y emparejamiento de este Mac con cada
-/// agente (credencial en el Keychain, nunca en el config). Guarda con `ConfigWriter` (preserva el resto del archivo, permisos 600)
-/// y recarga los agentes sin reiniciar.
+/// Hoja de ajustes: las máquinas (agentes) a las que se conecta la app, cada una con nombre, URL, interruptor de activada, estado de
+/// conexión y emparejamiento (credencial en el Keychain, nunca en el config). Se guardan como `[app.agents.<nombre>]` con
+/// `ConfigWriter` (preserva el resto del archivo, permisos 600) y la app reconecta sin reiniciar. Versión mínima: la interfaz
+/// multi-dispositivo buena llega en la siguiente versión.
 struct SettingsView: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
 
-    @State private var agentURL = ""
+    /// Lo que hay en el archivo (sin las variables de entorno): es lo que se edita y se guarda.
+    @State private var machines: [AgentSpec] = []
+    @State private var editing: Int?            // índice en `machines`; `machines.count` = máquina nueva
+    @State private var draftName = ""
+    @State private var draftURL = ""
+    @State private var formError: String?
     @State private var message: String?
-    @State private var info: String?
+    @State private var removing: AgentSpec?
 
     /// Variables de entorno que pisan al archivo (para avisar de que guardar puede no cambiar nada).
     private var envOverrides: Bool {
@@ -19,87 +25,187 @@ struct SettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Ajustes").font(.title2.weight(.semibold))
-            Text("Conexión con el agente de Chopshop (API por Tailscale).")
-                .font(.callout).foregroundStyle(.secondary)
+            Text("Máquinas con un agente de Chopshop (API por Tailscale). La app se conecta a todas las activadas a la vez y junta sus proyectos, hilos y métricas.")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text("URL del agente").font(.caption.weight(.medium))
-                TextField("http://100.64.0.10:3790", text: $agentURL)
-                    .textFieldStyle(.roundedBorder)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    if machines.isEmpty && editing == nil {
+                        Text("Todavía no hay máquinas. Añade la primera con la URL de su agente.")
+                            .font(.callout).foregroundStyle(.secondary).padding(.vertical, 8)
+                    }
+                    ForEach(Array(machines.enumerated()), id: \.element.name) { i, m in
+                        if editing == i { form } else { row(m, at: i) }
+                        Divider()
+                    }
+                    if editing == machines.count { form }
+                }
+            }
+            .frame(minHeight: 300, maxHeight: 460)
+
+            if editing == nil {
+                Button { startEditing(nil) } label: { Label("Añadir máquina", systemImage: "plus") }
             }
 
-            Text("Se guarda en \(AppConfig.configPath()) (solo agent_url de [app]; el resto del archivo no se toca).")
+            Text("Se guarda en \(AppConfig.configPath()) como [app.agents.<nombre>]; el resto del archivo no se toca. Las credenciales van al Llavero de este Mac.")
                 .font(.caption).foregroundStyle(.secondary)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
-
             if envOverrides {
                 Text("⚠︎ Hay variables CHOPSHOP_APP__* en el entorno de la app: tienen prioridad sobre el archivo.")
-                    .font(.caption).foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
             }
             if let message {
-                Text(message).font(.callout).foregroundStyle(.red)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Divider()
-            Text("Emparejamiento").font(.headline)
-            if model.agents.isEmpty {
-                Text("Guarda primero la URL del agente; después empareja este Mac con un código de `chopshop pair create`.")
-                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            } else {
-                ForEach(model.agents, id: \.name) { PairingView(agent: $0) }
-                Text("Cada agente da una credencial a este Mac; se guarda en el Llavero (nunca en config.toml).")
-                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
-            if let info {
-                Text(info).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text(message).font(.callout).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
             }
 
             HStack {
                 Spacer()
                 Button("Cerrar") { dismiss() }
                     .keyboardShortcut(.cancelAction)
-                Button("Guardar") { save() }
-                    .keyboardShortcut(.defaultAction)
             }
         }
         .padding(20)
-        .frame(width: 520)
+        .frame(width: 600)
         .preferredColorScheme(.dark)
-        .onAppear { load() }
+        .onAppear(perform: load)
+        .confirmationDialog("¿Quitar la máquina «\(removing?.name ?? "")»?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
+            Button("Quitar", role: .destructive) {
+                if let r = removing { save(machines.filter { $0.name != r.name }) }
+                removing = nil
+            }
+        } message: {
+            Text("Se borra de config.toml y su credencial del Llavero de este Mac. En el agente sigue hasta `chopshop pair revoke`.")
+        }
     }
 
-    /// Rellena el formulario con lo que ya hay en el archivo.
+    // MARK: - Fila
+
+    private func row(_ m: AgentSpec, at i: Int) -> some View {
+        let status = model.connectionStatus(m)
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                Toggle("Activada", isOn: Binding(get: { m.enabled }, set: { on in
+                    var next = machines
+                    next[i].enabled = on
+                    save(next)
+                }))
+                .toggleStyle(.switch).labelsHidden().controlSize(.small)
+                .help(m.enabled ? "Desactivar: la app deja de conectarse (la credencial se conserva)" : "Activar")
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(m.name).font(.callout.weight(.semibold))
+                    Text(m.url).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                }
+                Spacer(minLength: 8)
+                Circle().fill(color(status)).frame(width: 7, height: 7)
+                Text(status.label).font(.caption).foregroundStyle(.secondary).lineLimit(1).frame(maxWidth: 170, alignment: .leading)
+                Button("Editar") { startEditing(i) }.disabled(editing != nil)
+                Button("Quitar") { removing = m }.disabled(editing != nil)
+            }
+            PairingView(agent: m, compact: true)
+                .padding(.leading, 46)
+        }
+        .padding(.vertical, 8)
+        .opacity(m.enabled ? 1 : 0.6)
+    }
+
+    private func color(_ s: MachineConnection) -> Color {
+        switch s {
+        case .connected: return .green
+        case .connecting, .disabled: return .gray
+        case .failed(.unauthorized, _): return .orange
+        case .failed: return .red
+        }
+    }
+
+    // MARK: - Formulario (añadir / editar)
+
+    private var form: some View {
+        let old = editing.flatMap { $0 < machines.count ? machines[$0] : nil }
+        let urlChanged = old.map { AppConfig.normalizeURL(draftURL) != $0.url } ?? false
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(old == nil ? "Nueva máquina" : "Editar «\(old!.name)»").font(.headline)
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Nombre").font(.caption.weight(.medium))
+                    TextField("mini", text: $draftName).textFieldStyle(.roundedBorder).frame(width: 150)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("URL del agente").font(.caption.weight(.medium))
+                    TextField("http://100.64.0.10:3790", text: $draftURL).textFieldStyle(.roundedBorder)
+                        .onSubmit(commit)
+                }
+            }
+            if urlChanged, let o = old, model.isPaired(o.name) {
+                Text("Al cambiar la URL se borra la credencial guardada: habrá que emparejar de nuevo.")
+                    .font(.caption).foregroundStyle(.orange)
+            }
+            if let formError {
+                Text(formError).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+            }
+            HStack {
+                Spacer()
+                Button("Cancelar") { editing = nil; formError = nil }
+                Button("Guardar", action: commit).keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(.vertical, 10)
+    }
+
+    private func startEditing(_ i: Int?) {
+        let idx = i ?? machines.count
+        editing = idx
+        draftName = idx < machines.count ? machines[idx].name : ""
+        draftURL = idx < machines.count ? machines[idx].url : ""
+        formError = nil
+    }
+
+    private func commit() {
+        guard let idx = editing else { return }
+        let name = draftName.trimmingCharacters(in: .whitespaces)
+        let url = AppConfig.normalizeURL(draftURL)
+        let others = machines.enumerated().filter { $0.offset != idx }.map(\.element)
+        if let e = ConfigWriter.validateName(name, others: others.map(\.name)) ?? ConfigWriter.validateURL(url) {
+            formError = e
+            return
+        }
+        if others.contains(where: { $0.url.caseInsensitiveCompare(url) == .orderedSame }) {
+            formError = "Ya hay una máquina con esa URL."
+            return
+        }
+        var next = machines
+        if idx < next.count {
+            next[idx].name = name
+            next[idx].url = url
+        } else {
+            next.append(AgentSpec(name: name, url: url))
+        }
+        if save(next) {
+            editing = nil
+            formError = nil
+        }
+    }
+
+    // MARK: - Archivo
+
+    /// Rellena la lista con lo que hay en el archivo (la migración del formato viejo ya se hizo al arrancar).
     private func load() {
         var text = ""
         if let data = FileManager.default.contents(atPath: AppConfig.configPath()) {
             text = String(decoding: data, as: UTF8.self)
         }
-        agentURL = ConfigWriter.currentAgentURL(text: text)
+        machines = AppConfig.parse(text).agents
         message = nil
     }
 
-    private func save() {
-        let url = AppConfig.normalizeURL(agentURL)
-        if let problem = ConfigWriter.validateURL(url) {
-            message = problem
-            return
+    @discardableResult
+    private func save(_ next: [AgentSpec]) -> Bool {
+        if let err = model.saveMachines(next, previous: machines) {
+            message = err
+            return false
         }
-        do {
-            try ConfigWriter.save(path: AppConfig.configPath(), agentURL: url)
-        } catch {
-            message = "No pude guardar: \(error.localizedDescription)"
-            return
-        }
-        model.reloadConfig()
+        machines = next
         message = nil
-        // Sin emparejar no se puede leer nada del agente (api_version 2): la hoja se queda abierta para emparejar.
-        if let a = model.agents.first, !model.isPaired(a.name) {
-            info = "Guardado. Ahora empareja este Mac con el agente."
-        } else {
-            dismiss()
-        }
+        return true
     }
 }

@@ -88,7 +88,9 @@ enum Summarizer {
         var out = Summary()
         var projects: [String: (run: Int, q: Int, total: Int)] = [:]
         for r in results {
-            let name = r.machineId ?? labels[r.name] ?? r.name
+            var name = r.machineId ?? labels[r.name] ?? r.name
+            // Dos agentes con el mismo machine_id (p. ej. dos en el mismo host): cada uno su fila
+            if out.machines.contains(where: { $0.name == name }) { name += " · " + r.name }
             var m = previous.first(where: { $0.name == name }) ?? Machine(name: name)
             m.agent = r.name
             m.ok = r.isOK
@@ -143,5 +145,23 @@ enum Summarizer {
         out.projects = projects.map { ProjectInfo(name: $0.key, running: $0.value.run, questions: $0.value.q, total: $0.value.total) }
             .sorted { ($0.running + $0.questions > 0 ? 0 : 1, $0.name) < ($1.running + $1.questions > 0 ? 0 : 1, $1.name) }
         return out
+    }
+}
+
+/// Estado de conexión de una máquina configurada (fila de los ajustes).
+enum MachineConnection: Equatable {
+    case disabled
+    case connecting
+    case connected
+    case failed(AgentStatus, String)
+
+    var label: String {
+        switch self {
+        case .disabled: return "desactivada"
+        case .connecting: return "conectando…"
+        case .connected: return "conectada"
+        case .failed(.unauthorized, _): return "sin emparejar"
+        case .failed(_, let m): return m
+        }
     }
 }
