@@ -1,86 +1,163 @@
-# Revisión de vistas: Resumen, Preguntas, Actividad, Reacciones, Lotes, barra lateral y Ajustes
+# Revisión de vistas: qué conservar y cómo llevarlo a la oficina
 
-**Rama `fix/views-polish`.** Fuera de alcance: oficina, ciudad, piso y Grafo (otros hilos) y la lista de máquinas de Ajustes
-(otro hilo). Criterio: aspecto nativo y sobrio de macOS: colores neutros, color solo para lo que pide atención, vidrio
-real solo donde macOS lo usa (barra lateral, barra de herramientas), sin ruido y aprovechando ventanas grandes.
+**Rama `fix/views-polish`.** Cambio de alcance: la interfaz base se rediseña alrededor de la oficina (otro hilo), así que
+estas vistas **no se pulen en código**. Una primera pasada de pulido (paneles planos, color solo para atención, barra
+lateral y Ajustes) se subió y se revirtió en esta misma rama; queda en el historial (`18c485c`) por si algo sirve.
 
-## Arreglado en esta rama
+Fuera de alcance: oficina, ciudad, piso y Grafo (otros hilos) y la lista de máquinas de Ajustes (otro hilo).
 
-Vistas web (`apps/ui`, bundle regenerado en `apps/mac/Resources/web`):
+Criterio para el destino: macOS sobrio (colores neutros, color solo para lo que pide atención, vidrio real solo en
+barra lateral/barra de herramientas/superposiciones, sin ruido, aprovechando ventanas grandes). La oficina es la
+pantalla principal; lo demás se vuelve **panel** (inspector lateral), **superposición** (popover u hoja sobre la
+oficina) o **control dentro de la oficina** (algo en un escritorio, en la pared o en el vestíbulo).
 
-- **Sin vidrio falso en el contenido.** Los paneles eran `backdrop-filter` + sombra + brillo interior sobre un degradado;
-  ahora son planos (relleno blanco al 3,5 %, borde fino, radio 10 px).
-- **Color solo para atención.** Lo terminado (tareas, lotes, hilos, respondidas, «webhook entregado») va en gris; lo
-  que corre, en azul; pregunta, permiso y «necesita humano», en naranja (antes rosa/violeta/ámbar/naranja mezclados);
-  los fallos, en rojo. «Esperando al bot» va en gris (no es tarea del usuario). Los niveles N1/N2/N3 y las columnas de
-  Reacciones van en gris; el panel «Necesita humano» ya no tiene borde rosa.
-- **Chips sin cápsula**: punto + texto en gris; el texto solo toma color si el estado pide atención.
-- **Solo late lo que pide atención**; lo que corre ya no parpadea.
-- **Cabeceras al estilo macOS**: sin MAYÚSCULAS espaciadas (paneles, subtítulos, tablas, detalle).
-- **Sin título duplicado**: la vista ya no repite en grande el título que muestra la barra de la ventana; queda la línea
-  descriptiva y los controles.
-- **Sin animación de entrada** al cambiar de vista desde la barra lateral.
-- **Actividad**: la etiqueta de webhook solo aparece cuando falló; el icono de evento solo lleva color si es atención.
-- **Resumen**: las tarjetas compactas con opciones ya no muestran el campo de respuesta libre (está en Preguntas);
-  sin franja de color a la izquierda en las tarjetas.
-- **Detalle con ancho de lectura** (máx. 760 px) en ventanas grandes.
-- **Selección** como en las listas del sistema (relleno de acento, sin recuadro).
-- **Texto obsoleto**: la pantalla de conexión hablaba de `token_file`; ahora explica Ajustes… y el emparejamiento.
+Hoy cinco de estas vistas son HTML en un `WKWebView` (`apps/ui/src/App.jsx`) alimentado por `GET /snapshot`; la
+oficina nativa lee `GET /stream` (`LiveState`). Al migrar, todo debe salir de `LiveState` y la web puede retirarse.
 
-Shell SwiftUI (`apps/mac/Sources/ChopshopUI`):
+## Resumen (`overview`)
 
-- **Ventana opaca**: fuera `WindowGlass` (ventana transparente que dejaba ver el escritorio) y el degradado grafito;
-  el detalle usa `windowBackgroundColor`, como ya hacían la oficina y la sala de máquinas. La barra lateral conserva su
-  material del sistema.
-- **Barra lateral**: sin fila de logo (el título ya está en la ventana); cabeceras de sección del sistema (sin
-  mayúsculas forzadas); proyectos sin punto animado (naranja si hay preguntas, acento si corre); máquinas en **una
-  línea** (icono, nombre, minigráfica de CPU, %; RAM/disco en la ayuda) en lugar de tres; pie sin cápsula de vidrio y
-  con la **versión real del bundle** (decía «v0.6» fijo con la app en 0.8.0).
-- **Ajustes**: `Form` agrupado (secciones Conexión y Emparejamiento con pie explicativo), botones abajo fuera del
-  scroll, aviso de variables de entorno con icono en lugar de «⚠︎». La lista de emparejamiento (`PairingView` por
-  agente) queda igual.
-- `tools/screenshots/shoot.py`: fondo gris liso (el de ventana) en lugar del degradado azul/violeta.
+**Para qué:** de un vistazo, qué corre y qué necesita una decisión, en todos los proyectos.
 
-## Problemas mayores (sin arreglar)
+**Debe sobrevivir**
+- Cifras: corriendo (y en cola), preguntas, permisos, completadas.
+- La lista «necesita atención» con respuesta directa (opciones de la pregunta) y «abrir en T3» para permisos.
+- Lo último respondido (qué se respondió y quién: humano o bot).
 
-1. **Modo oscuro forzado.** `App.swift` y `SettingsView` fijan `.preferredColorScheme(.dark)` y el CSS solo tiene
-   colores para fondo oscuro (blancos con alfa). Una app nativa sigue la apariencia del sistema: hace falta un juego de
-   variables CSS para `prefers-color-scheme: light` y quitar el forzado.
-2. **Ajustes como hoja, no como ventana.** ⌘, debería abrir una escena `Settings` (ventana propia, con pestañas si
-   crece), no una hoja modal sobre la ventana principal.
-3. **Las cinco vistas son HTML en un `WKWebView`.** Selección, foco, flechas del teclado en listas, menús contextuales,
-   tamaño de texto y desplazamiento no se comportan como en macOS. La oficina ya es nativa; lo coherente es portar estas
-   vistas a SwiftUI (`List`/`Table` + inspector) y retirar la web.
-4. **Tres indicadores de estado**: pie de la barra lateral (agentes), `LiveIndicator` en la barra de herramientas
-   (stream, punto verde que late) y subtítulo «actualizado HH:mm:ss», más el botón Actualizar. Conviene uno solo
-   (p. ej. el subtítulo) y quitar el latido.
-5. **Detalle como inspector.** Preguntas, Actividad y Lotes usan rejillas fijas de 2–3 columnas proporcionales; en
-   ventanas muy anchas la lista y el detalle crecen sin control. Mejor: lista a ancho fijo y detalle como inspector
-   (`.inspector`) plegable.
-6. **Reacciones**: tres columnas iguales, casi siempre vacías salvo una. Una sola tabla (cuándo, tarea, disparador,
-   acción, nivel, resultado) aprovecha mejor el espacio.
-7. **Resumen denso**: cuatro tarjetas de cifras + tres paneles + tarjetas de pregunta completas duplican Preguntas y
-   Actividad. Propuesta: lista «Necesita atención» arriba y actividad reciente compacta; cifras en una sola línea.
-8. **Metadatos ruidosos**: casi cada fila repite `proyecto · lote · tarea · host`. Llevarlos al detalle/inspector y
-   dejar en la fila el título y el tiempo.
-9. **Iconos de texto** en Actividad (`? ! ✓ ⚡ ◆`): al portar a nativo, usar SF Symbols.
-10. **Vista web Máquinas** (al pulsar una máquina en la barra lateral): anillos de colores, gráficas azul/verde, puntos
-    que laten; no se tocó (no estaba en la lista). Merece la misma pasada o fundirse con la Sala de máquinas.
-11. **Estilos compartidos con el Grafo**: `.glass`, `.chip`, `.lvl` y `taskState` son comunes; el Grafo web hereda los
-    paneles planos y los chips sin cápsula. Sus colores propios (rosa/violeta de atención, verde de «listo») siguen ahí
-    y los decide el hilo del Grafo.
+**En la oficina**
+- La oficina *es* el resumen: corriendo = escritorios ocupados; atención = escritorios marcados. Las cifras pasan a una
+  línea en la barra de herramientas o al subtítulo de la ventana (sin tarjetas grandes).
+- «Necesita atención» → **bandeja de atención** como superposición (popover desde un botón de la barra con contador),
+  la misma lista de `AttentionButtons` que ya usa la oficina, con todos los proyectos.
+- En la ciudad, cada edificio/piso lleva el contador de atención.
+- Se elimina como vista propia.
 
-## Qué debe verificar el Mac
+## Preguntas (`questions`)
 
-- `swift build` y `swift test` (cambian `Views.swift` y `SettingsView.swift`; se borraron `WindowGlass`,
-  `GlassBackdrop` → `WindowBackdrop`, `VisualEffect`, `StatusCapsule`, `ChopLogo`/`ChopMark`, `LinkState.isLive` y
-  `Sidebar.header`). `pnpm --filter @chopshop/ui test` ya pasa aquí.
-- Ventana opaca: la barra lateral sigue translúcida (macOS 26 y 13–15), el detalle es gris de ventana, y la oficina y
-  la sala de máquinas se ven igual encima.
-- Barra lateral: cabeceras «Proyectos»/«Máquinas», filas de máquina de una línea con minigráfica legible, pie con
-  «v0.8.0» en el `.app` de `build.sh` (sin versión con `swift run`).
-- Ajustes: el formulario agrupado cabe en 560×460 con uno y con varios agentes; la fila de `PairingView` (campo de
-  código de 150 pt + botón) no se corta dentro del `Form`; Esc cierra, Intro guarda; el texto «Guardado. Ahora
-  empareja…» se ve junto a los botones.
-- Capturas: `python3 tools/screenshots/shoot.py` (regenera `assets/*.png` con el bundle nuevo) y capturas de la app
-  real con `--capture` de Resumen, Preguntas, Actividad, Reacciones, Lotes y Ajustes.
+**Para qué:** responder lo que preguntó un hilo; el hilo sigue al enviar (`POST /answer`).
+
+**Debe sobrevivir**
+- Pregunta, opciones, **respuesta libre** (texto propio), estado «en cola / enviada / falló» con el error.
+- Distinguir pregunta, permiso (solo «abrir en T3»: no hay API), «necesita humano» (escalada: a quién y por qué) y
+  «esperando al bot».
+- Contexto: tarea, proyecto, máquina, prompt resumido, tiempo esperando.
+- Historial de respondidas con la opción y quién respondió.
+
+**En la oficina**
+- Control en el escritorio: el agente con pregunta muestra un globo; al pulsarlo, popover con la pregunta, opciones y
+  campo libre (falta el campo libre en `AttentionButtons`).
+- El contexto y el historial de esa tarea van en el **inspector** del escritorio.
+- La lista global de pendientes es la bandeja de atención (ver Resumen). Historial global: sección plegable de la
+  bandeja o del vestíbulo («respondidas hoy»).
+- Notificación del sistema (`UNUserNotification`) con acciones para las opciones: responder sin abrir la app.
+
+## Actividad (`events`)
+
+**Para qué:** registro de lo que ocurrió (pregunta, permiso, tarea/lote/hilo terminado o fallido, reacciones, T3 caído,
+alertas de máquina) y si el webhook se entregó.
+
+**Debe sobrevivir**
+- Línea de tiempo con hora y «hace…», filtros (todo / preguntas / tareas / lotes).
+- Estado de entrega de webhooks por suscripción, sobre todo **los fallos**.
+- Del evento, saltar a su tarea (detalle) o lote.
+
+**En la oficina**
+- **Panel lateral** «Actividad» (inspector plegable a la derecha) con `LiveState.recent`; filtros como control
+  segmentado en su cabecera. Al seleccionar un evento, la cámara va al escritorio de la tarea.
+- Momentos breves en la escena: un evento nuevo hace un gesto en el escritorio (terminó, falló) sin texto.
+- Los fallos de webhook son configuración/infraestructura: van a la Sala de máquinas (panel de webhooks) con un
+  indicador; no hace falta mostrar «entregado» en cada fila.
+
+## Reacciones (`reactions`)
+
+**Para qué:** ver qué hicieron las reglas del perfil ante cada evento: nivel 1 (Chopshop solo: settle, reintento),
+nivel 2 (despertar al bot por webhook), nivel 3 (escalar a una persona), y si se resolvió.
+
+**Debe sobrevivir**
+- Escaladas abiertas a humano con respuesta directa (son preguntas con prioridad).
+- Por reacción: cuándo, tarea, disparador (tarea terminada/falló/sin progreso/pregunta), acción, nivel, resultado
+  («resuelta por …» o «esperando al bot»).
+
+**En la oficina**
+- Escaladas abiertas → bandeja de atención, primeras y con «a quién se escaló y por qué».
+- Esperando al bot → estado visible en el escritorio (el bot «está en la mesa»), sin color de atención.
+- El historial de reacciones de una tarea → sección del inspector del escritorio.
+- El historial global → filtro «Reacciones» del panel de Actividad (una tabla con el nivel como columna, no tres
+  columnas casi vacías).
+- Las reglas en sí (qué dispara qué) → Sala de máquinas, junto a automatizaciones y webhooks.
+
+## Lotes (`batches`) y Proyecto (`project`, vista web clásica)
+
+**Para qué:** lotes del orquestador (`fanout`) y lotes sintéticos de hilos sueltos; por lote, sus tareas con estado; por
+tarea, resultado, diff propuesto, respuestas, error, prompt y acciones.
+
+**Debe sobrevivir**
+- Progreso por lote (n/m) y estado por tarea (corriendo, pregunta, permiso, completada, falló, omitida, en cola).
+- Detalle de tarea: resultado, **diff**, preguntas respondidas, error, motivo de omisión, prompt.
+- Acciones: **cerrar hilo (settle)** y **abrir hilo en T3**.
+
+**En la oficina**
+- Tarea = escritorio; su detalle completo (resultado, diff, respuestas, settle, abrir en T3) → **inspector** del
+  escritorio. El diff, en una hoja propia si es largo.
+- Lote = agrupación visual en el piso (resaltar sus escritorios al elegirlo) y una lista compacta «Lotes» en el
+  inspector del piso con la barra de progreso.
+- Los lotes terminados salen de la escena; quedan en el inspector del piso («terminados»).
+- Se elimina como vista propia; «Proyecto» ya lo cubre `LiveProjectScreen` (la vista web clásica queda solo como
+  respaldo de agentes sin emparejar mientras existan).
+
+## Barra lateral: proyectos y máquinas
+
+**Para qué:** navegar entre vistas, proyectos y máquinas; ver de un vistazo qué proyecto pide atención y la carga de
+cada máquina; estado de la conexión con los agentes.
+
+**Debe sobrevivir**
+- Por proyecto: corriendo y preguntas pendientes (indicador de atención).
+- Por máquina: alcanzable o no (y por qué), CPU y RAM recientes.
+- Estado de la conexión (conectado / parcial / caído / sin configurar) y del stream en vivo.
+
+**En la oficina**
+- Proyectos → los pisos de la ciudad/edificio; la barra lateral se reduce a la lista de pisos (o desaparece si la
+  ciudad navega). El indicador de atención va en el piso.
+- Máquinas → la Sala de máquinas (ya muestra el rack); la carga, en un indicador pequeño por máquina allí o en la barra
+  de herramientas. Quitar la lista de máquinas de la barra lateral (duplicada).
+- Conexión y stream → **un solo** indicador en la barra de herramientas (hoy hay tres: pie de la barra lateral,
+  `LiveIndicator` y subtítulo «actualizado …»).
+- La versión de la app (hoy «v0.6» fijo en el pie, con la app en 0.8.0) → menú Acerca de.
+
+## Ajustes
+
+**Para qué:** URL del agente (`agent_url` de `[app]`) y emparejamiento de este Mac con cada agente (credencial en el
+Llavero).
+
+**Debe sobrevivir**
+- Campo de URL con validación y aviso si `CHOPSHOP_APP__*` pisa el archivo; ruta del config.
+- Emparejar/desemparejar por agente (lo rediseña otro hilo: lista de máquinas).
+- Apertura automática si no hay agente o con el primer 401.
+
+**En la oficina**
+- Escena `Settings` propia (⌘, abre una ventana, no una hoja) con `Form` agrupado: «Conexión» y «Emparejamiento».
+- El primer arranque sin agente o sin emparejar → superposición sobre la oficina vacía (ya existe `PairingScreen` en
+  el detalle del proyecto); no hace falta abrir Ajustes a la fuerza.
+
+## Problemas transversales
+
+1. **Modo oscuro forzado** (`.preferredColorScheme(.dark)` en `App.swift` y `SettingsView`; CSS solo oscuro). Lo nativo
+   sigue la apariencia del sistema.
+2. **Ventana transparente** (`WindowGlass` + degradado `GlassBackdrop`): el contenido deja ver el escritorio. La oficina
+   ya usa `windowBackgroundColor`; quitarlo al retirar la web.
+3. **Exceso de color** en la web: rosa, violeta, menta, ámbar, naranja, verde, azul para estados. En lo nuevo: naranja
+   = te necesita, rojo = falló, acento = corre, gris para el resto.
+4. **Animaciones constantes** (puntos que laten en filas que corren, barra lateral, barra de herramientas). Solo para
+   atención, y con moderación.
+5. **Metadatos repetidos** en cada fila (`proyecto · lote · tarea · host`): al inspector.
+6. **Iconos de texto** (`? ! ✓ ⚡ ◆`): SF Symbols.
+7. **Vista web Máquinas** (al pulsar una máquina): anillos y gráficas de colores; fundir con la Sala de máquinas.
+
+## Faltantes en la oficina para retirar la web
+
+- Respuesta libre en `AttentionButtons` (hoy solo opciones).
+- Settle de un hilo terminado (`POST /settle`) desde el inspector.
+- Diff y resultado completo de la tarea en el inspector.
+- Historial de respondidas y de reacciones por tarea (`LiveState.answered`; reacciones del stream).
+- Panel de Actividad sobre `LiveState.recent` con filtros y estado de webhooks.
+- Bandeja de atención global (todos los proyectos), con escaladas primero.
+- Lotes: agrupación y progreso en el piso.

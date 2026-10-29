@@ -24,24 +24,23 @@ const ago = (ts, now) => {
 const EVENT_META = {
   pending_question: { label: "Pregunta pendiente", tone: "amber", icon: "?" },
   pending_approval: { label: "Permiso pendiente", tone: "orange", icon: "!" },
-  task_done: { label: "Tarea terminada", tone: "done", icon: "✓" },
-  batch_done: { label: "Lote terminado", tone: "done", icon: "◆" },
-  reaction: { label: "Reacción", tone: "gray", icon: "⚡" },
+  task_done: { label: "Tarea terminada", tone: "green", icon: "✓" },
+  batch_done: { label: "Lote terminado", tone: "teal", icon: "◆" },
+  reaction: { label: "Reacción", tone: "violet", icon: "⚡" },
   // eventos del agente (por hilo de T3 y por máquina)
-  thread_started: { label: "Hilo iniciado", tone: "gray", icon: "▶" },
-  thread_done: { label: "Hilo terminado", tone: "done", icon: "✓" },
+  thread_started: { label: "Hilo iniciado", tone: "blue", icon: "▶" },
+  thread_done: { label: "Hilo terminado", tone: "green", icon: "✓" },
   thread_failed: { label: "Hilo falló", tone: "red", icon: "×" },
-  thread_settled: { label: "Hilo cerrado", tone: "done", icon: "◆" },
+  thread_settled: { label: "Hilo cerrado", tone: "teal", icon: "◆" },
   t3_unreachable: { label: "T3 no responde", tone: "orange", icon: "!" },
   machine_alert: { label: "Alerta de máquina", tone: "orange", icon: "!" },
 };
 
 // ---------- niveles de reacción ----------
-// El nivel es información (qué regla actuó), no atención: va en gris. La atención la marca el estado de la tarea.
 const LEVELS = {
-  auto: { n: 1, label: "Auto", tone: "gray", what: "Chopshop lo resuelve solo" },
-  bot: { n: 2, label: "Bot", tone: "gray", what: "despierta al bot por webhook" },
-  human: { n: 3, label: "Humano", tone: "gray", what: "escala a una persona" },
+  auto: { n: 1, label: "Auto", tone: "mint", what: "Chopshop lo resuelve solo" },
+  bot: { n: 2, label: "Bot", tone: "violet", what: "despierta al bot por webhook" },
+  human: { n: 3, label: "Humano", tone: "pink", what: "escala a una persona" },
 };
 const LevelBadge = ({ level, small }) => {
   const l = LEVELS[level];
@@ -60,18 +59,16 @@ const rxActionLabel = (a) => {
 
 const needsHuman = (t) => !!(t.escalation && t.escalation.status === "open");
 const waitingBot = (t) => !!(t.bot_wait && !t.bot_wait.done);
-// Color solo para lo que pide atención (naranja: pregunta, permiso, humano; rojo: fallo) y azul para lo que corre;
-// lo terminado, en cola o en manos del bot va en gris.
 function taskState(t) {
-  if (needsHuman(t)) return { label: "Necesita humano", tone: "orange", pulse: true };
-  if (waitingBot(t) && t.pending && t.pending.questions && t.pending.questions.length) return { label: "Esperando al bot", tone: "gray", pulse: true };
+  if (needsHuman(t)) return { label: "Necesita humano", tone: "pink", pulse: true };
+  if (waitingBot(t) && t.pending && t.pending.questions && t.pending.questions.length) return { label: "Esperando al bot", tone: "violet", pulse: true };
   if (t.pending && t.pending.questions && t.pending.questions.length) return { label: "Pregunta", tone: "amber", pulse: true };
   if (t.pending && t.pending.approvals) return { label: "Permiso", tone: "orange", pulse: true };
   if (t.status === "skipped") return { label: "Omitida", tone: "gray" };
   if (t.status === "launch_failed") return { label: "Falló", tone: "red" };
   if (t.status === "queued") return { label: "En cola", tone: "gray" };
   const s = t.t3status;
-  if (s === "completed") return { label: "Completada", tone: "done" };
+  if (s === "completed") return { label: "Completada", tone: "green" };
   if (s === "failed" || s === "rolled_back") return { label: "Falló", tone: "red" };
   if (s === "cancelled" || s === "interrupted") return { label: s === "cancelled" ? "Cancelada" : "Interrumpida", tone: "gray" };
   return { label: s === "preparing" ? "Preparando" : "Corriendo", tone: "blue", pulse: true };
@@ -149,7 +146,7 @@ function QuestionCard({ batch, task, q, onDone, since, queued, failed, watcher, 
   return (
     <article className={`card question ${bare ? "bare" : "boxed"} ${compact ? "compact" : ""}`}>
       <header className="card-head">
-        {needsHuman(task) ? <Chip tone="orange" pulse>Necesita humano</Chip> : waitingBot(task) ? <Chip tone="gray" pulse>Esperando al bot</Chip> : <Chip tone="amber" pulse>Pregunta pendiente</Chip>}
+        {needsHuman(task) ? <Chip tone="pink" pulse>Necesita humano</Chip> : waitingBot(task) ? <Chip tone="violet" pulse>Esperando al bot</Chip> : <Chip tone="amber" pulse>Pregunta pendiente</Chip>}
         {task.level && <LevelBadge level={task.level} small />}
         <span className="meta">
           {batch.project} · {batch.id} · {task.id} · {batch.host}{since ? ` · ${since}` : ""}
@@ -166,7 +163,7 @@ function QuestionCard({ batch, task, q, onDone, since, queued, failed, watcher, 
           </button>
         ))}
       </div>
-      {!(compact && (q.options || []).length > 0) && <form
+      <form
         className="custom"
         onSubmit={(e) => {
           e.preventDefault();
@@ -175,7 +172,7 @@ function QuestionCard({ batch, task, q, onDone, since, queued, failed, watcher, 
       >
         <input value={custom} onChange={(e) => setCustom(e.target.value)} placeholder="o escribe otra respuesta…" disabled={!!busy || !!queued} />
         <button className="pill primary" disabled={!custom.trim() || !!busy || !!queued}>Responder</button>
-      </form>}
+      </form>
       {queued && (
         <p className="note ok">
           <b>En cola:</b> «{queued.choice}» · la envía el agente en su próximo ciclo
@@ -269,11 +266,13 @@ const PaneEmpty = ({ mark = "✦", title, text }) => (
   </div>
 );
 
-/** Cabecera de vista: el título ya lo muestra la barra de la ventana (navigationTitle); aquí, una línea y los controles. */
-function ViewHead({ sub, children }) {
+function ViewHead({ title, sub, children }) {
   return (
     <header className="view-head">
-      <div>{sub && <p className="muted">{sub}</p>}</div>
+      <div>
+        <h1>{title}</h1>
+        {sub && <p className="muted">{sub}</p>}
+      </div>
       <div className="view-tools">{children}</div>
     </header>
   );
@@ -360,7 +359,7 @@ function BatchSummary({ b }) {
   return (
     <div className="detail">
       <header className="detail-head">
-        <Chip tone={isActive(b) ? "blue" : "done"} pulse={isActive(b)}>{isActive(b) ? "Activo" : "Terminado"}</Chip>
+        <Chip tone={isActive(b) ? "blue" : "green"} pulse={isActive(b)}>{isActive(b) ? "Activo" : "Terminado"}</Chip>
         <span className="meta">{b.project} · {b.host}</span>
       </header>
       <h3 className="detail-title">Lote {b.id}</h3>
@@ -386,7 +385,7 @@ function BatchRow({ b, now, selected, onSelect, showProject }) {
     <li>
       <button className={`row batch-row ${selected ? "sel" : ""} ${active ? "live" : ""}`} onClick={onSelect} aria-pressed={selected}>
         <div className="row-top">
-          <i className={`dot tone-${active ? "blue" : "done"}`} />
+          <i className={`dot tone-${active ? "blue" : "green"} ${active ? "pulse" : ""}`} />
           <b>{b.id}</b>
           {showProject && <span className="muted ell">{b.project}</span>}
           <span className="grow" />
@@ -434,7 +433,7 @@ function EventItem({ e, now, titles, selected, onSelect }) {
           <span className="ev-top"><b>{m.label}</b><span className="meta">{e.batch}{e.task ? ` · ${e.task}` : ""}</span></span>
           <span className="ell who">{who}</span>
           {e.summary && <span className="meta ell">“{e.summary}”</span>}
-          {dlBad && <span className="dl bad">webhook falló</span>}
+          {dl.length > 0 && <span className={`dl ${dlBad ? "bad" : "ok"}`}>webhook {dlBad ? "falló" : "entregado ✓"}</span>}
         </span>
         <time title={e.ts}>{clock(e.ts)}<small>{ago(e.ts, now)}</small></time>
       </button>
@@ -447,7 +446,7 @@ function HistoryItem({ h, selected, onSelect }) {
     <li>
       <button className={`row hist-row ${selected ? "sel" : ""}`} onClick={onSelect} aria-pressed={selected}>
         <div className="row-top">
-          <i className="dot tone-done" />
+          <i className="dot tone-green" />
           <span className="tag ok">{h.choice || "respondida"}</span>
           <span className="grow" />
           <span className="meta">{clock(h.ts)}</span>
@@ -529,12 +528,12 @@ function Overview({ snap, c, now, go, titles, nav }) {
   snap.batches.forEach((b) => b.tasks.forEach((t) => taskState(t).tone === "blue" && !t.done && running.push({ b, t })));
   return (
     <section className="view">
-      <ViewHead sub="Lo que está corriendo y lo que necesita una decisión" />
+      <ViewHead title="Resumen" sub="Lo que está corriendo y lo que necesita una decisión" />
       <div className="stats">
         <Stat label="corriendo" value={c.running} tone="blue" live hint={c.queued ? `${c.queued} en cola` : "nada en cola"} />
         <Stat label="preguntas" value={c.questions.length} tone="amber" live hint={c.questions.length ? "esperando respuesta" : "ninguna pendiente"} />
         <Stat label="permisos" value={c.approvals.length} tone="orange" live hint={c.approvals.length ? "se aprueban en T3" : "nada bloqueado"} />
-        <Stat label="completadas" value={c.completed} tone="done" hint={`en ${snap.batches.length} lotes${active.length ? ` · ${active.length} activos` : ""}`} />
+        <Stat label="completadas" value={c.completed} tone="green" hint={`en ${snap.batches.length} lotes${active.length ? ` · ${active.length} activos` : ""}`} />
       </div>
       <div className="panes overview">
         <Pane title="Necesita atención" count={attn || null} action={attn ? <button className="link" onClick={() => go("questions")}>abrir</button> : null}>
@@ -557,7 +556,7 @@ function Overview({ snap, c, now, go, titles, nav }) {
                 {c.history.slice(0, 4).map((h, i) => (
                   <li key={i}>
                     <button className="row hist-row" onClick={() => go("questions")}>
-                      <div className="row-top"><i className="dot tone-done" /><span className="ell grow">{h.summary || "(sin texto)"}</span><span className="tag ok">{h.choice || "respondida"}</span></div>
+                      <div className="row-top"><i className="dot tone-green" /><span className="ell grow">{h.summary || "(sin texto)"}</span><span className="tag ok">{h.choice || "respondida"}</span></div>
                     </button>
                   </li>
                 ))}
@@ -619,7 +618,7 @@ function Questions({ c, now }) {
   const hist = items.filter((i) => i.kind === "h");
   return (
     <section className="view">
-      <ViewHead sub="Responde aquí lo que un hilo preguntó; el hilo sigue en cuanto envías la respuesta" />
+      <ViewHead title="Preguntas" sub="Responde aquí lo que un hilo preguntó; el hilo sigue en cuanto envías la respuesta" />
       <div className="panes split-list">
         <Pane title="Pendientes" count={pend.length || null} flush>
           <ul className="list">
@@ -630,7 +629,7 @@ function Questions({ c, now }) {
               return (
                 <li key={i.key}>
                   <button className={`row ${cur && cur.key === i.key ? "sel" : ""}`} onClick={() => setSel(i.key)} aria-pressed={cur && cur.key === i.key}>
-                    <div className="row-top"><Chip tone={amber ? (needsHuman(t) ? "orange" : waitingBot(t) ? "gray" : "amber") : "orange"} pulse>{amber ? (needsHuman(t) ? "Necesita humano" : waitingBot(t) ? "Esperando al bot" : "Pregunta") : "Permiso"}</Chip>{t.level && <LevelBadge level={t.level} small />}<span className="grow" /><span className="meta">{t.id}</span></div>
+                    <div className="row-top"><Chip tone={amber ? (needsHuman(t) ? "pink" : waitingBot(t) ? "violet" : "amber") : "orange"} pulse>{amber ? (needsHuman(t) ? "Necesita humano" : waitingBot(t) ? "Esperando al bot" : "Pregunta") : "Permiso"}</Chip>{t.level && <LevelBadge level={t.level} small />}<span className="grow" /><span className="meta">{t.id}</span></div>
                     <div className="row-title">{amber ? i.x.q.summary : cleanTitle(t)}</div>
                   </button>
                 </li>
@@ -699,10 +698,10 @@ function ProjectView({ snap, c, now, project }) {
   };
   return (
     <section className="view">
-      <ViewHead sub={all ? `${snap.batches.length} lotes · lotes del orquestador y hilos de los agentes` :`${batches.length} lotes · ${tasks.length} tareas`}>
-        <span className={`chip tone-${cnt.run ? "blue" : "gray"}`}><i className="dot" />{cnt.run} corriendo</span>
-        <span className={`chip tone-${cnt.q ? "amber" : "gray"}`}><i className="dot" />{cnt.q} esperan</span>
-        <span className="chip tone-done"><i className="dot" />{cnt.done} completadas</span>
+      <ViewHead title={all ? "Lotes" : project} sub={all ? `${snap.batches.length} lotes · lotes del orquestador y hilos de los agentes` :`${batches.length} lotes · ${tasks.length} tareas`}>
+        <span className="chip tone-blue"><i className={`dot ${cnt.run ? "pulse" : ""}`} />{cnt.run} corriendo</span>
+        <span className="chip tone-amber"><i className="dot" />{cnt.q} esperan</span>
+        <span className="chip tone-green"><i className="dot" />{cnt.done} completadas</span>
       </ViewHead>
       {batches.length === 0 ? (
         <div className="panes"><Pane title="Lotes"><PaneEmpty title="Sin lotes" text="Aún no hay lotes en este proyecto." /></Pane></div>
@@ -753,7 +752,7 @@ function Events({ snap, c, now, titles }) {
   const dl = e ? Object.entries(e.delivery || {}) : [];
   return (
     <section className="view">
-      <ViewHead sub="Lo que Chopshop emitió y si el webhook llegó">
+      <ViewHead title="Actividad" sub="Lo que Chopshop emitió y si el webhook llegó. Las URLs nunca se muestran">
         <div className="seg-ctl" role="tablist">
           {EV_FILTERS.map(([k, l]) => (
             <button key={k} role="tab" aria-selected={f === k} className={f === k ? "on" : ""} onClick={() => { setF(k); setSel(null); }}>{l}</button>
@@ -829,7 +828,7 @@ function Reactions({ snap, now }) {
   snap.batches.forEach((b) => b.tasks.forEach((t) => t.escalation && t.escalation.status === "resolved" && resolvedH.push({ b, t })));
   return (
     <section className="view">
-      <ViewHead sub="Cada evento sigue las reglas del perfil: Chopshop actúa solo, despierta al bot o escala a una persona" />
+      <ViewHead title="Reacciones" sub="Cada evento sigue las reglas del perfil: Chopshop actúa solo, despierta al bot o escala a una persona" />
       <div className="rx">
         {(open.length > 0 || resolvedH.length > 0) && (
           <Pane title="Necesita humano" count={open.length || null} className="rx-esc">
@@ -842,7 +841,7 @@ function Reactions({ snap, now }) {
                   <QuestionCard key={t.id} batch={b} task={t} q={q} since={waited(e.since, now)} by="humano" compact />
                 ) : (
                   <article key={t.id} className="card question boxed compact">
-                    <header className="card-head"><Chip tone="orange" pulse>Necesita humano</Chip><LevelBadge level="human" small /><span className="meta">{b.project} · {t.id}</span></header>
+                    <header className="card-head"><Chip tone="pink" pulse>Necesita humano</Chip><LevelBadge level="human" small /><span className="meta">{b.project} · {t.id}</span></header>
                     <h3 className="q-text">{e.summary}</h3>
                     <p className="note esc">{e.reason} · escalada a {e.notify}</p>
                   </article>
@@ -1306,7 +1305,7 @@ function Connecting({ agents, configPath }) {
     return (
       <>
         <h3>Ningún agente configurado</h3>
-        <p className="muted">Abre Ajustes… (⌘,), escribe la URL del agente y empareja este Mac con un código de <code>chopshop pair create</code>. También puedes definir <code>agent_url</code> en <code>[app]</code> de <code>{configPath || "~/.config/chopshop/config.toml"}</code>.</p>
+        <p className="muted">Crea <code>{configPath || "~/.config/chopshop/config.toml"}</code> a partir de <code>config.example.toml</code> y define en <code>[app]</code> el <code>agent_url</code> y el <code>token_file</code> de tu agente (o varios en <code>[app.agents.&lt;nombre&gt;]</code>). Después reabre la app.</p>
       </>
     );
   }
@@ -1316,7 +1315,7 @@ function Connecting({ agents, configPath }) {
       <>
         <h3>No pude conectar con el agente</h3>
         {bad.map((a) => <p key={a.name} className="note err"><b>{a.label}</b>: {a.message}</p>)}
-        <p className="muted">Reintento automático en cada ciclo. Comprueba que el agente corre, que Tailscale está conectado, que <code>agent_url</code> es correcta y que este Mac está emparejado (Ajustes…, ⌘,).</p>
+        <p className="muted">Reintento automático en cada ciclo. Comprueba que el agente corre, que Tailscale está conectado y que <code>agent_url</code> y <code>token_file</code> son correctos.</p>
       </>
     );
   }
