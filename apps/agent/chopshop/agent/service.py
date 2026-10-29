@@ -268,7 +268,7 @@ class AgentService:
         return seq
 
     def emit_office(self, type, project, body, **kw):
-        """Sobre de la oficina (`desk.*`, `office.changed`, `task.state` de un toque) -> bus + `/stream`."""
+        """Sobre de la oficina (`desk.*`, `office.changed`) -> bus + `/stream`."""
         env = events.emit_envelope(self.conn, self.cfg, type, project, body, poster=self.poster, ts=self.clock(), **kw)
         if env:
             self.app.stream.bus.publish(env["seq"])

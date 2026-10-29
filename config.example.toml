@@ -101,10 +101,10 @@ bot = "~/.config/chopshop/webhooks/bot.url"
 enabled = true                            # interruptor global: false = el hilo `automations` no ejecuta nada
 interval = 2                              # s entre pasadas (sobres nuevos del bus + horarios)
 
-# Oficina por escritorios (bloque `office:` del perfil; ver docs/plans/office-redesign.md): asignación, vestíbulo, semivida.
+# Oficina por escritorios (bloque `office:` del perfil; ver docs/plans/office-redesign.md): asignación por rol y herencia.
 [agent.office]
-enabled = true                            # false = el hilo `office` no asigna escritorios ni saca a los desvanecidos
-interval = 2                              # s entre pasadas (task.state nuevos del bus + temporizador de semivida)
+enabled = true                            # false = el hilo `office` no asigna escritorios
+interval = 2                              # s entre pasadas (task.state nuevos del bus)
 
 # Ingreso de GitHub por polling con ETag (eventos github.*; ver docs/agent-service.md). Usa el `gh` ya autenticado de esta
 # máquina (`gh auth login`); el token nunca va aquí ni se lee. El proyecto de cada repo sale de `repo` en el perfil

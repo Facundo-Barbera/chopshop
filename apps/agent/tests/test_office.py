@@ -1,6 +1,6 @@
-"""Pruebas de la oficina por escritorios (agent/office.py, agent/halflife.py y la regla `apply` de la v3 en projection.py):
-asignación, herencia, rol lleno -> vestíbulo, semivida (desvanece, tocar reinicia, con atención no sale), retiro, asignación
-manual y la equivalencia `state(conn) == fold(apply, sobres)`. Fixtures: tests/fixtures/office/."""
+"""Pruebas de los escritorios por rol (agent/office.py y la regla `apply` de los escritorios en projection.py): asignación,
+herencia, rol lleno -> espera, con atención no se hereda, retiro, asignación manual y la equivalencia
+`state(conn) == fold(apply, sobres)`. Fixtures: tests/fixtures/office/."""
 import copy
 import json
 import os
@@ -10,7 +10,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from chopshop.agent import config as agent_config, db, envelope, events, halflife, office, projection, server, t3watch  # noqa: E402
+from chopshop.agent import config as agent_config, db, envelope, events, office, projection, server, t3watch  # noqa: E402
 
 FIX = os.path.join(os.path.dirname(__file__), "fixtures", "office")
 T0 = 1_800_000_000.0
@@ -80,25 +80,6 @@ class Base(unittest.TestCase):
         return {d["id"]: (d["occupant"] or {}).get("thread_id") for d in projection._desks(p["office"])}
 
 
-class TestHalfLife(unittest.TestCase):
-    def test_shared_table(self):
-        with open(os.path.join(FIX, "halflife.json"), encoding="utf-8") as f:
-            table = json.load(f)
-        self.assertEqual((table["fade_out"], table["failed_factor"]), (halflife.FADE_OUT, halflife.FAILED_FACTOR))
-        for c in table["cases"]:
-            args = (c["phase"], c["attention"], c["ended_at"], c["touched_at"], c["half_life_s"])
-            self.assertAlmostEqual(halflife.opacity(*args, c["now"]), c["opacity"], places=6, msg=c["name"])
-            self.assertEqual(halflife.gone(*args, c["now"]), c["gone"], c["name"])
-            ex = halflife.exit_at(*args)
-            if c["exit_at"] is None:
-                self.assertIsNone(ex, c["name"])
-            else:
-                self.assertAlmostEqual(ex, c["exit_at"], places=2, msg=c["name"])
-
-    def test_iso_dates(self):
-        self.assertAlmostEqual(halflife.opacity("done", None, envelope.iso(T0), None, 1800, T0 + 1800), 0.5)
-
-
 class TestStructure(Base):
     def test_office_changed_once_and_retire(self):
         self.step()
@@ -143,10 +124,10 @@ class TestDesks(Base):
         self.now += 60
         self.end("a1", "[be] sesión")
         self.step(60)
-        self.assertEqual(self.seat("a1"), "awesome-gb/0/backend/0")             # en semivida, sigue sentado
+        self.assertEqual(self.seat("a1"), "awesome-gb/0/backend/0")             # terminado, sigue sentado
         self.thread("b7", "[be] login", role="backend")
         self.step(60)
-        self.assertEqual(self.seat("b7"), "awesome-gb/0/backend/0")             # hereda el que se desvanece (no el libre)
+        self.assertEqual(self.seat("b7"), "awesome-gb/0/backend/0")             # hereda el terminado (no el libre)
         self.assertIsNone(self.seat("a1"))
         evs = self.desk_events()
         self.assertEqual(evs, [("desk.assigned", "awesome-gb/0/backend/0", "a1", "start"),
@@ -163,102 +144,64 @@ class TestDesks(Base):
                          ("b7", "a1", "inherited"))
         self.assertEqual(occ["occupant"]["half_life_s"], HL)
 
-    def test_inheritance_from_lineage_after_fade(self):
+    def test_inheritance_from_lineage_after_release(self):
         self.step()
         self.thread("t1", "triage lunes", role="triage")
         self.step()
         self.end("t1", "triage lunes", role="triage")
-        self.step(HL * 4)                                                       # se desvaneció del todo
+        self.step()
+        self.assertEqual(self.office.release("awesome-gb/0/triage/0", "faded"), "t1")   # p. ej. la semivida
         self.assertIsNone(self.seat("t1"))
+        self.assertEqual(self.office.desk("awesome-gb/0/triage/0")["lineage"][0]["reason"], "faded")
         self.thread("t2", "triage martes", role="triage")
         self.step()
         a = self.envs(types=("desk.assigned",))[-1]["body"]
         self.assertEqual((a["reason"], a["inheritance"]["thread_id"]), ("start", "t1"))
 
-    def test_role_full_waits_in_lobby_then_promoted(self):
+    def test_role_full_waits_then_promoted(self):
         self.step()
         self.thread("f1", "[fe] tema", role="frontend")
         self.thread("f2", "[fe] modo oscuro", role="frontend")
         self.step()
         self.assertEqual(self.seat("f1"), "awesome-gb/1/frontend/0")
         self.assertIsNone(self.seat("f2"))
-        st = self.state()
-        self.assertEqual([(x["thread_id"], x["waiting_role"], x["company"]) for x in st["lobby"]],
-                         [("f2", "frontend", "Awesome GB")])
+        self.assertEqual(self.office._waiting("f2")["role"], "frontend")
         self.thread("f2", "[fe] modo oscuro", role="frontend")                   # un task.state más: no repite desk.waiting
         self.step()
         self.assertEqual(len(self.envs(types=("desk.waiting",))), 1)
         self.end("f1", "[fe] tema", role="frontend")
         self.step()
-        # el que espera está activo: hereda el escritorio en semivida
+        # f1 terminó: el que espera lo hereda
         self.assertEqual(self.seat("f2"), "awesome-gb/1/frontend/0")
-        self.assertEqual(self.state()["lobby"], [])
+        self.assertIsNone(self.office._waiting("f2"))
 
-    def test_waiting_promoted_when_desk_fades(self):
+    def test_attention_blocks_inheritance(self):
         self.step()
         self.thread("f1", "[fe] uno", role="frontend")
         self.step()
         self.thread("f1", "[fe] uno", "completed", role="frontend", ended_at=self.now)
-        # f1 terminó pero tiene una pregunta abierta: no está en semivida, no se hereda
+        # f1 terminó pero tiene una pregunta abierta: no se hereda
         events.emit(self.conn, self.cfg, "pending_question", "awesome-gb",
                     {"thread_id": "f1", "title": "[fe] uno", "request_id": "r1", "questions": [{"question": "¿Sigo?"}]},
                     ts=self.now)
         self.thread("q1", "nuevo", role="frontend")
         self.step()
         self.assertIsNone(self.seat("q1"))
-        self.step(HL * 10)
-        self.assertEqual(self.seat("f1"), "awesome-gb/1/frontend/0")             # con atención no se desvanece
+        self.assertEqual(self.seat("f1"), "awesome-gb/1/frontend/0")
         events.emit(self.conn, self.cfg, "thread_done", "awesome-gb",
                     {"thread_id": "f1", "title": "[fe] uno", "status": "completed", "role": "frontend",
                      "ended_at": envelope.iso(self.now)}, ts=self.now)
         self.step()
         self.assertEqual(self.seat("q1"), "awesome-gb/1/frontend/0")             # heredó al cerrarse la atención
 
-    def test_no_role_goes_to_lobby_and_fades(self):
+    def test_no_role_not_seated_unknown_role_waits(self):
         self.step()
         self.thread("x1", "explorar algo")
         self.thread("x9", "rol sin escritorios", role="ops")
         self.step()
-        self.assertIsNone(self.seat("x1"))
-        st = self.state()
-        self.assertEqual(sorted((x["thread_id"], x["waiting_role"]) for x in st["lobby"]), [("x1", None), ("x9", "ops")])
-        self.end("x1", "explorar algo", role=None)
-        self.step(HL * 3)
-        self.assertEqual(len(self.state()["lobby"]), 2)                         # 0.125 > 0.1: sigue
-        self.step(HL * 0.5)
-        lobby = self.state()["lobby"]
-        self.assertEqual([x["thread_id"] for x in lobby], ["x9"])
-        self.assertIn(("desk.released", None, "x1", "faded"), self.desk_events())
-
-    def test_fade_failed_double_and_touch_resets(self):
-        self.step()
-        self.thread("b1", "[be] uno", role="backend")
-        self.step()
-        self.end("b1", "[be] uno", status="failed")
-        self.step(HL * 4)
-        self.assertEqual(self.seat("b1"), "awesome-gb/0/backend/0")             # fallido: 2 × T½ (0.25)
-        touched = self.office.touch("b1")
-        self.assertEqual(touched, envelope.iso(self.now))
-        ts = self.envs(types=("task.state",))[-1]
-        self.assertEqual((ts["body"]["touched_at"], ts["body"]["phase"], ts["severity"]), (touched, "failed", "error"))
-        self.step(HL * 6)
-        self.assertEqual(self.seat("b1"), "awesome-gb/0/backend/0")             # 0.125 desde el toque
-        self.step(HL * 1)
-        self.assertIsNone(self.seat("b1"))
-        self.assertEqual(self.desk_events()[-1], ("desk.released", "awesome-gb/0/backend/0", "b1", "faded"))
-        occ = self.occupants()
-        self.assertIsNone(occ["awesome-gb/0/backend/0"])
-
-    def test_touch_keeps_attention_open(self):
-        self.step()
-        self.thread("b1", "[be] uno", role="backend")
-        events.emit(self.conn, self.cfg, "pending_question", "awesome-gb",
-                    {"thread_id": "b1", "title": "[be] uno", "request_id": "r1", "questions": [{"question": "¿Sigo?"}]},
-                    ts=self.now)
-        self.step()
-        self.office.touch("b1")
-        st = self.state()
-        self.assertEqual([a["key"] for a in st["projects"][0]["attention"]], ["task:b1"])
+        self.assertEqual((self.seat("x1"), self.seat("x9")), (None, None))
+        self.assertIsNone(self.office._waiting("x1"))
+        self.assertEqual(self.desk_events(), [("desk.waiting", None, "x9", "ops")])
 
     def test_manual_assign_and_move(self):
         self.step()
@@ -273,7 +216,6 @@ class TestDesks(Base):
         self.assertEqual(e.exception.status, 404)
         self.office.assign("awesome-gb/0/backend/1", "x1")
         self.assertEqual(self.seat("x1"), "awesome-gb/0/backend/1")
-        self.assertEqual(self.state()["lobby"], [])
         self.assertEqual(self.desk_events()[-1], ("desk.assigned", "awesome-gb/0/backend/1", "x1", "manual"))
         # el rol queda fijado: un task.state posterior sin rol no lo baja al vestíbulo
         self.thread("x1", "sin rol")
@@ -289,10 +231,8 @@ class TestDesks(Base):
     def test_bootstrap_seats_only_active(self):
         self.thread("old", "[be] viejo", "completed", role="backend", ended_at=T0 - 86400)
         self.thread("run", "[be] vivo", role="backend")
-        self.thread("lob", "sin rol")
         self.step()
         self.assertEqual((self.seat("run"), self.seat("old")), ("awesome-gb/0/backend/0", None))
-        self.assertEqual([x["thread_id"] for x in self.state()["lobby"]], ["lob"])
         self.assertIsNotNone(self.office._meta(office.CURSOR))
 
     def test_equivalence_state_fold(self):
@@ -304,23 +244,20 @@ class TestDesks(Base):
             self.step(10)
         self.end("a", "hilo a")
         self.end("f", "hilo f", role="frontend")
-        self.end("x", "hilo x", role=None)
         self.step(30)
-        self.office.touch("x")
-        self.step(HL * 5)
+        self.thread("d", "hilo d", role="backend")
+        self.step(30)
         envs = self.envs()
         st = self.state()
         self.assertEqual(st, projection.fold(envs, "contabo-dev"))
         db_occ = {r["id"]: self.office._occupant(r["id"]) for r in self.office._q("SELECT id FROM desks")}
         self.assertEqual(self.occupants(st), {k: (v or {}).get("thread_id") for k, v in db_occ.items()})
-        self.assertEqual(sorted(x["thread_id"] for x in st["lobby"]),
-                         sorted(r["thread_id"] for r in self.office._q("SELECT thread_id FROM office_lobby")))
         for e in envs:
             self.assertEqual(envelope.errors(e), [], e["type"])
 
 
 class TestProjectionFixture(unittest.TestCase):
-    """fold(office-fixture.jsonl) == office-fixture.state.json (herencia, rol lleno, vestíbulo, nota, salida por semivida).
+    """fold(office-fixture.jsonl) == office-fixture.state.json (herencia, rol lleno, nota, retiro).
     Con CHOPSHOP_UPDATE_GOLDEN=1 regenera ambos desde el escenario (la app de Mac usa el par para su test de equivalencia)."""
 
     JSONL = os.path.join(FIX, "office-fixture.jsonl")
@@ -334,16 +271,17 @@ class TestProjectionFixture(unittest.TestCase):
             b.thread("mcp:a1", "[be] sesión", role="backend")
             b.thread("mcp:f1", "[fe] tema", role="frontend")
             b.thread("mcp:f2", "[fe] modo oscuro", role="frontend")
-            b.thread("mcp:x1", "explorar")
             b.step(60)
             b.end("mcp:a1", "[be] sesión")
-            b.end("mcp:x1", "explorar", role=None)
             b.step(60)
             b.thread("mcp:b7", "[be] login con passkeys", role="backend")
             b.step(60)
             b.emit("desk.note", "awesome-gb", {"desk": "awesome-gb/0/triage/0", "from": "grok-facundo",
                                                "text": "Revisar issues sin triage", "pending": 1})
-            b.step(HL * 4)
+            b.thread("mcp:b8", "[be] segundo", role="backend")
+            b.step()
+            b.prof = profile(backend=1)
+            b.office.reload()
             return b.envs()
         finally:
             b.doCleanups()
@@ -369,7 +307,9 @@ class TestProjectionFixture(unittest.TestCase):
         self.assertEqual(desks["awesome-gb/0/backend/0"]["lineage"][0]["reason"], "inherited")
         self.assertEqual(desks["awesome-gb/1/frontend/0"]["occupant"]["thread_id"], "mcp:f1")
         self.assertEqual(desks["awesome-gb/0/triage/0"]["notes_pending"], 1)
-        self.assertEqual([(x["thread_id"], x["waiting_role"]) for x in st["lobby"]], [("mcp:f2", "frontend")])
+        self.assertEqual(desks["awesome-gb/0/backend/1"]["retired"], True)
+        self.assertEqual(desks["awesome-gb/0/backend/1"]["lineage"][0]["reason"], "retired")
+        self.assertNotIn("lobby", st)
 
     def test_desk_golden_envelopes_apply(self):
         """Los sobres dorados de la fase 0 (fixtures/events/desk.*) se aplican sobre una oficina con la regla del contrato."""
@@ -383,10 +323,10 @@ class TestProjectionFixture(unittest.TestCase):
         a, r, w = load("desk.assigned"), load("desk.released"), load("desk.waiting")
         occ_prev = dict(a, seq=a["seq"] - 10, body=dict(a["body"], thread_id="mcp:a1", reason="start", inheritance=None))
         st = projection.fold([occ_prev, dict(r, seq=a["seq"] - 1), a, w], state=st)   # el agente libera antes de asignar
+        self.assertNotIn("lobby", st)                                            # desk.waiting lo pliega el vestíbulo
         p = next(x for x in st["projects"] if x["name"] == "awesome-gb")
         d = projection._find_desk(p, "awesome-gb/0/backend/0")
         self.assertEqual((d["occupant"]["thread_id"], d["lineage"][0]["thread_id"]), ("mcp:b7", "mcp:a1"))
-        self.assertEqual([(x["thread_id"], x["waiting_role"]) for x in st["lobby"]], [("mcp:c9", "frontend")])
 
 
 class TestRoutes(Base):
@@ -395,7 +335,7 @@ class TestRoutes(Base):
         ident = server.Identity("local", None, True)
         return lambda m, p, body=None: a.call(m, p, ident, {}, body or {})
 
-    def test_desk_touch_assign(self):
+    def test_desk_and_assign(self):
         call = self.app()
         self.step()
         self.thread("x1", "sin rol")
@@ -411,21 +351,19 @@ class TestRoutes(Base):
         with self.assertRaises(server.ApiError) as e:
             call("POST", "/desks/awesome-gb/0/backend/0")
         self.assertEqual(e.exception.status, 405)
-        code, t = call("POST", "/touch", {"thread_id": "x1"})
-        self.assertEqual((code, t["touched_at"]), (200, envelope.iso(self.now)))
         with self.assertRaises(server.ApiError) as e:
-            call("POST", "/touch", {})
+            call("POST", "/desks/awesome-gb/0/backend/1/assign", {})
         self.assertEqual(e.exception.status, 400)
 
     def test_without_office_503(self):
         a = server.AgentApp(self.cfg, self.conn, collector=None, t3=None, auth=None)
         with self.assertRaises(server.ApiError) as e:
-            a.call("POST", "/touch", server.Identity("local", None, True), {}, {"thread_id": "x"})
+            a.call("GET", "/desks/awesome-gb/0/backend/0", server.Identity("local", None, True), {}, {})
         self.assertEqual(e.exception.status, 503)
 
 
 class TestT3watchRole(unittest.TestCase):
-    """t3watch pone `role` (reglas `match` del perfil), `ended_at` y `touched_at` en el cuerpo de los hilos."""
+    """t3watch pone `role` (reglas `match` del perfil) y `ended_at` en el cuerpo de los hilos."""
 
     def setUp(self):
         from test_agent_t3watch import FakeServer
@@ -451,15 +389,12 @@ class TestT3watchRole(unittest.TestCase):
         self.now[0] += advance
         t3watch.poll(self.conn, self.cfg, self.t3, lambda e, p, b: self.events.append((e, p, b)) or len(self.events))
 
-    def test_role_ended_touched(self):
+    def test_role_and_ended_at(self):
         self.poll()
-        with db.tx():
-            self.conn.execute("INSERT INTO thread_touch(thread_id, touched_at) VALUES('t-run', ?)", (T0,))
         self.srv.set("t-run", status="completed", updatedAt="2026-10-28T11:00:00.000Z")
         self.poll()
         ev, project, body = self.events[-1]
-        self.assertEqual((ev, body["role"], body["ended_at"], body["touched_at"]),
-                         ("thread_done", "demo", envelope.iso(self.now[0]), envelope.iso(T0)))
+        self.assertEqual((ev, body["role"], body["ended_at"]), ("thread_done", "demo", envelope.iso(self.now[0])))
         self.assertEqual(body["summary"], body["result"])
         row = self.conn.execute("SELECT role, ended_at FROM t3_threads WHERE thread_id='t-run'").fetchone()
         self.assertEqual((row["role"], row["ended_at"]), ("demo", self.now[0]))

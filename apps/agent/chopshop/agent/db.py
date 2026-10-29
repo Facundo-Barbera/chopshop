@@ -122,9 +122,9 @@ def _migrate_v4(conn):
                 conn.execute("ALTER TABLE %s ADD COLUMN %s %s" % (table, name, typ))
 
 
-# v5: oficina por escritorios (agent/office.py, docs/plans/office-redesign.md). `desk_occupancy` con `until` nulo = ocupante
-# actual; el resto es linaje (se poda a OFFICE_LINEAGE por escritorio). `office_threads` = última `task.state` de cada hilo
-# (la misma que ve la proyección); `office_lobby` = hilos en el vestíbulo (`role` = rol que esperan, o nulo).
+# v5: escritorios por rol (agent/office.py, docs/plans/office-redesign.md). `desk_occupancy` con `until` nulo = ocupante
+# actual; el resto es linaje (se poda a office.LINEAGE por escritorio). `office_threads` = última `task.state` de cada hilo
+# (la misma que ve la proyección); `desk_waiting` = hilos con rol que esperan escritorio.
 OFFICE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS desks (
   id TEXT PRIMARY KEY, project TEXT NOT NULL, floor INTEGER NOT NULL, role TEXT NOT NULL, slot INTEGER NOT NULL,
@@ -135,9 +135,8 @@ CREATE TABLE IF NOT EXISTS desk_occupancy (
   reason TEXT, inheritance TEXT);
 CREATE INDEX IF NOT EXISTS desk_occupancy_desk ON desk_occupancy(desk_id, until);
 CREATE INDEX IF NOT EXISTS desk_occupancy_thread ON desk_occupancy(thread_id, until);
-CREATE TABLE IF NOT EXISTS thread_touch (thread_id TEXT PRIMARY KEY, touched_at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS office_threads (thread_id TEXT PRIMARY KEY, project TEXT, body TEXT NOT NULL, updated REAL);
-CREATE TABLE IF NOT EXISTS office_lobby (thread_id TEXT PRIMARY KEY, project TEXT, role TEXT, since REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS desk_waiting (thread_id TEXT PRIMARY KEY, project TEXT, role TEXT NOT NULL, since REAL NOT NULL);
 """
 V5_COLUMNS = {"t3_threads": (("role", "TEXT"), ("ended_at", "REAL"))}
 
