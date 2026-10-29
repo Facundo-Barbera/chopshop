@@ -1,7 +1,8 @@
 """Servicio chopshop-agent: arranque, hilos de fondo y subcomandos `chopshop agent run|status|token|check-config|print-unit`.
 
 `AgentService` ensambla los módulos (colector, T3, eventos) y el servidor HTTP (`server.py`):
-  hilos: muestreo (+ compactación) · sondeo de T3 · mantenimiento (retención de eventos, checkpoint WAL).
+  hilos: muestreo (+ compactación) · sondeo de T3 · motor (`engine.tick` con el bus inyectado, solo si hay lotes en
+  state.json) · importación periódica de events.jsonl (CLI externa) · mantenimiento (retención, checkpoint WAL).
   Un fallo en un hilo se registra (sin repetirlo cada ciclo) y el hilo sigue; `stop()` los para a todos de forma ordenada.
 `run` instala SIGTERM/SIGINT para la parada limpia. Nada aquí habla con systemd salvo `status` (solo lectura, inyectable) y
 `print-unit` solo IMPRIME la unidad: no escribe, no habilita y no arranca nada.
@@ -19,8 +20,8 @@ import sys
 import threading
 import time
 
-from .. import home, settings
-from . import __version__, collector as collector_mod, config, db, events, server, t3watch
+from .. import engine as engine_mod, events as legacy_events, graph, home, settings, state
+from . import __version__, collector as collector_mod, config, db, envelope, events, server, t3watch
 
 log = logging.getLogger("chopshop.agent")
 
@@ -188,14 +189,41 @@ def prune_events(conn, days, now=None):
     return max(0, n)
 
 
+# ---------------------------------------------------------------- puente del motor
+
+def engine_emitter(conn, cfg, poster=None):
+    """`emit_fn` para el motor dentro del agente (misma firma y resultado que `chopshop.events.emit`): primero guarda el
+    sobre en el bus (con el mismo `ts` en segundos que la línea de events.jsonl, así `import_legacy` la reconoce y no la
+    duplica) y después hace lo de siempre (events.jsonl + suscripciones de state.json, p. ej. el `notify` de reacciones)."""
+    def emit_fn(st, event, project, body, adhoc_files=None, log=True, only=None):
+        ts = state.now()
+        try:
+            events.emit(conn, cfg, event, project, body, poster=poster, ts=envelope.epoch(ts))
+        except Exception:  # noqa: BLE001 - el bus no debe frenar al motor
+            logging.getLogger("chopshop.agent").exception("no pude registrar %s en el bus", event)
+        return legacy_events.emit(st, event, project, body, adhoc_files, log=log, only=only, ts=ts)
+    return emit_fn
+
+
+def engine_has_work(st=None):
+    """Hay algún lote que `engine.tick` todavía procesaría (mismo criterio con el que tick los salta)."""
+    st = st if st is not None else state.read()
+    for b in st.get("batches", {}).values():
+        if not (all(t["done"] for t in b["tasks"]) and (b.get("done_notified") or (b.get("graph") and graph.finished(st, b)))):
+            return True
+    return False
+
+
 # ---------------------------------------------------------------- servicio
 
 class AgentService:
     """Ensambla módulos + servidor + hilos. `start()` → escucha y trabaja; `stop()` → parada ordenada (idempotente)."""
 
     def __init__(self, cfg, conn=None, collector=None, t3=None, runner=None, poster=None,
-                 orchestrator_fn=None, clock=time.time, maint_interval=MAINT_INTERVAL, maint_first=MAINT_FIRST, compact_every=COMPACT_EVERY):
+                 orchestrator_fn=None, clock=time.time, maint_interval=MAINT_INTERVAL, maint_first=MAINT_FIRST, compact_every=COMPACT_EVERY,
+                 engine_tick=None):
         self.cfg, self.clock, self.runner, self.poster = cfg, clock, runner, poster
+        self.engine_tick = engine_tick or engine_mod.tick
         self.owns_conn = conn is None
         self.conn = conn if conn is not None else db.connect(cfg["db_path"])
         self.collector = collector or collector_mod.Collector(cfg, self.conn)
@@ -204,6 +232,7 @@ class AgentService:
         self.auth = server.Authenticator(cfg, runner)
         self.app = server.AgentApp(cfg, self.conn, self.collector, self.t3, self.auth, self.runtime,
                                    self.emit, orchestrator_fn, clock)
+        self.engine_emit = engine_emitter(self.conn, cfg, poster)
         self.maint_interval, self.maint_first = maint_interval, maint_first
         self.compact_every = compact_every
         self.stop_event = threading.Event()
@@ -239,6 +268,10 @@ class AgentService:
             self._spawn("sampler", self._run_sampler)
             if self.cfg.get("t3_enabled", True):
                 self._spawn("t3", self._loop, "t3", self._poll_once, lambda: self.cfg.get("t3_poll_interval") or 5)
+            if self.cfg.get("engine_enabled", True):
+                self._spawn("engine", self._loop, "engine", self.engine_once, lambda: self.cfg.get("engine_interval") or 5)
+            if self.cfg.get("import_legacy", True):
+                self._spawn("legacy", self._loop, "legacy", self.import_legacy_once, lambda: self.cfg.get("legacy_interval") or 5)
             self._spawn("maintenance", self._maintenance)
         for s in self.servers:
             self._serving.append(s)
@@ -260,11 +293,22 @@ class AgentService:
         if not self.cfg.get("import_legacy", True):
             return
         try:
-            res = events.import_legacy(self.conn, home.events_log(), self.cfg.get("machine_id"))
-            if res["imported"]:
-                log.info("importados %d eventos de events.jsonl (%d omitidos)", res["imported"], res["skipped"])
+            self.import_legacy_once()
         except Exception:  # noqa: BLE001 - la migración es opcional
             log.exception("no pude importar events.jsonl")
+
+    def import_legacy_once(self):
+        """Importa lo añadido a events.jsonl desde la última vez (idempotente por desplazamiento + deduplicación)."""
+        res = events.import_legacy(self.conn, home.events_log(), self.cfg.get("machine_id"))
+        if res["imported"]:
+            log.info("importados %d eventos de events.jsonl (%d omitidos)", res["imported"], res["skipped"])
+        return res
+
+    def engine_once(self):
+        """Una pasada del motor con el bus inyectado; nada si no hay lotes con trabajo en state.json."""
+        if not os.path.exists(home.state_path()) or not engine_has_work():
+            return None
+        return self.engine_tick(None, None, lambda m: log.info("motor: %s", m), emit_fn=self.engine_emit)
 
     # -- hilos
     def _loop(self, name, fn, interval):

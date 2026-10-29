@@ -290,10 +290,10 @@ def from_legacy(event, body=None, machine=None):
         nb.setdefault("notes", [])
         nb.setdefault("max_parallel", None)
     elif event == "graph_exception":
-        nb = dict(b, phase="failed")
+        nb = dict(b, phase=b.get("phase") if b.get("phase") in PHASES else "failed")
         nb.setdefault("deps", [])
         nb.setdefault("task", None)
-        sev = "error"
+        sev = "error" if nb["phase"] == "failed" else "warn"
     elif event == "graph_done":
         sev = "error" if b.get("status") == "failed" else "info"
     elif event == "reaction":

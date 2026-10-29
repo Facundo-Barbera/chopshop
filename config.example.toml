@@ -61,7 +61,10 @@ owner_login = "usuario@"                  # login Tailscale COMPLETO con permiso
                                           # esto es un marcador. Vacío = solo origen local
 allowed_logins = ["invitado@"]            # logins con acceso de solo lectura (mismo formato)
 t3_enabled = true                         # false = máquina solo sensor: no se vigila T3
-import_legacy = true                      # al arrancar, importa <home>/events.jsonl del motor viejo si existe
+import_legacy = true                      # importa <home>/events.jsonl del motor viejo (al arrancar y cada legacy_interval s)
+legacy_interval = 5                       # segundos entre importaciones de events.jsonl (CLI externa)
+engine_enabled = true                     # correr engine.tick dentro del agente cuando hay lotes en <home>/state.json
+engine_interval = 5                       # segundos entre pasadas del motor
 token_file = "~/.chopshop/agent/token"    # bearer (0600); se crea con `chopshop agent token`
 db_path = "~/.chopshop/agent/agent.db"
 sample_interval = 10                      # segundos entre muestras de métricas
