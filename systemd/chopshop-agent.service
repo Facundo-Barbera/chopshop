@@ -27,8 +27,9 @@ SyslogIdentifier=chopshop-agent
 Slice=chopshop.slice
 Nice=10
 CPUQuota=30%
-MemoryHigh=192M
-MemoryMax=384M
+# El agente lanza el CLI de T3 (`t3 auth pairing create`, ~300-500 MB) dentro de esta unidad: con topes menores queda ahogado en estado D.
+MemoryHigh=1G
+MemoryMax=1500M
 
 # Endurecimiento: sistema de archivos de solo lectura salvo lo que el agente necesita escribir.
 NoNewPrivileges=yes
