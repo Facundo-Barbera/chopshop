@@ -1,8 +1,8 @@
-"""Cliente HTTP mínimo (urllib) hacia la API del chopshop-agent: lo usan `chopshop mcp` y `chopshop release`.
+"""Cliente HTTP mínimo (urllib) hacia la API del chopshop-agent: lo usa `chopshop agent status`.
 
     c = AgentClient(url=None, token_file=None, timeout=10)   # None = resolver desde entorno/config
-    c.get("/leases")                       -> dict (JSON)
-    c.post("/leases/request", {...})       -> dict (JSON)
+    c.get("/snapshot")                     -> dict (JSON)
+    c.post("/settle", {...})               -> dict (JSON)
 
 - URL: argumento `url` > variable `CHOPSHOP_AGENT_URL` > `http://127.0.0.1:<agent.port>` (puerto de config.toml).
 - Auth: `Authorization: Bearer <contenido de token_file>` si el archivo existe (el origen local también se acepta sin token).

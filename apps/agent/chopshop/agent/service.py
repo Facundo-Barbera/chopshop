@@ -1,7 +1,7 @@
 """Servicio chopshop-agent: arranque, hilos de fondo y subcomandos `chopshop agent run|status|token|check-config|print-unit`.
 
-`AgentService` ensambla los módulos (colector, T3, recursos, eventos) y el servidor HTTP (`server.py`):
-  hilos: muestreo (+ compactación) · sondeo de T3 · `Resources.tick` · mantenimiento (retención de eventos, checkpoint WAL).
+`AgentService` ensambla los módulos (colector, T3, eventos) y el servidor HTTP (`server.py`):
+  hilos: muestreo (+ compactación) · sondeo de T3 · mantenimiento (retención de eventos, checkpoint WAL).
   Un fallo en un hilo se registra (sin repetirlo cada ciclo) y el hilo sigue; `stop()` los para a todos de forma ordenada.
 `run` instala SIGTERM/SIGINT para la parada limpia. Nada aquí habla con systemd salvo `status` (solo lectura, inyectable) y
 `print-unit` solo IMPRIME la unidad: no escribe, no habilita y no arranca nada.
@@ -21,7 +21,6 @@ import time
 
 from .. import home, settings
 from . import __version__, collector as collector_mod, config, db, events, server, t3watch
-from . import resources as resources_mod
 
 log = logging.getLogger("chopshop.agent")
 
@@ -29,7 +28,6 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..",
 AGENT_DIR = os.path.join(ROOT, "apps", "agent")
 UNIT_TEMPLATE = os.path.join(ROOT, "systemd", "chopshop-agent.service")
 UNIT_NAME = "chopshop-agent"
-TICK_INTERVAL = 5.0               # s entre Resources.tick (el barrido de huérfanos sigue su propio sweep.interval)
 COMPACT_EVERY = 300.0             # s entre compactaciones de métricas
 MAINT_INTERVAL = 3600.0           # s entre tareas de mantenimiento
 MAINT_FIRST = 60.0                # primera pasada de mantenimiento tras arrancar
@@ -68,7 +66,7 @@ def resolve_bind(cfg, runner=None):
 
 
 def plan_listeners(host, port, local_listener=True):
-    """[(host, port)] a abrir: la IP configurada y, si no es loopback, también 127.0.0.1 (MCP/CLI locales)."""
+    """[(host, port)] a abrir: la IP configurada y, si no es loopback, también 127.0.0.1 (CLI local)."""
     out = [(host, port)]
     if local_listener and not _is_loopback(host):
         out.append(("127.0.0.1", port))
@@ -170,11 +168,6 @@ def check_config(cfg, runner=None, which=shutil.which):
             warns.append("el helper de T3 no existe (agent.t3.helper = %r): el sondeo de T3 avisará t3_unreachable" % helper)
     if not os.path.isdir(cfg.get("projects_root") or ""):
         warns.append("projects_root no existe: %s" % cfg.get("projects_root"))
-    scopes = (cfg.get("sweep") or {}).get("agent_scopes")
-    if scopes not in ("report", "kill"):
-        warns.append("sweep.agent_scopes = %r no es válido: se usará \"report\"" % (scopes,))
-    elif scopes == "kill":
-        warns.append("sweep.agent_scopes = \"kill\": el barrido enviará SIGTERM/SIGKILL a PIDs exactos de hilos ya settled")
     for k, v in (cfg.get("retention") or {}).items():
         if isinstance(v, bool) or not isinstance(v, (int, float)) or v <= 0:
             errs.append("retention.%s debe ser un número > 0 (es %r)" % (k, v))
@@ -197,20 +190,18 @@ def prune_events(conn, days, now=None):
 class AgentService:
     """Ensambla módulos + servidor + hilos. `start()` → escucha y trabaja; `stop()` → parada ordenada (idempotente)."""
 
-    def __init__(self, cfg, conn=None, collector=None, resources=None, t3=None, runner=None, resources_runner=None,
-                 poster=None, orchestrator_fn=None, clock=time.time, tick_interval=TICK_INTERVAL,
-                 maint_interval=MAINT_INTERVAL, maint_first=MAINT_FIRST, compact_every=COMPACT_EVERY):
+    def __init__(self, cfg, conn=None, collector=None, t3=None, runner=None, poster=None,
+                 orchestrator_fn=None, clock=time.time, maint_interval=MAINT_INTERVAL, maint_first=MAINT_FIRST, compact_every=COMPACT_EVERY):
         self.cfg, self.clock, self.runner, self.poster = cfg, clock, runner, poster
         self.owns_conn = conn is None
         self.conn = conn if conn is not None else db.connect(cfg["db_path"])
         self.collector = collector or collector_mod.Collector(cfg, self.conn)
         self.t3 = t3 or t3watch.T3(cfg)
-        self.resources = resources or resources_mod.Resources(cfg, self.conn, self.emit, self.collector, runner=resources_runner)
         self.runtime = server.Runtime(clock)
         self.auth = server.Authenticator(cfg, runner)
-        self.app = server.AgentApp(cfg, self.conn, self.collector, self.resources, self.t3, self.auth, self.runtime,
+        self.app = server.AgentApp(cfg, self.conn, self.collector, self.t3, self.auth, self.runtime,
                                    self.emit, orchestrator_fn, clock)
-        self.tick_interval, self.maint_interval, self.maint_first = tick_interval, maint_interval, maint_first
+        self.maint_interval, self.maint_first = maint_interval, maint_first
         self.compact_every = compact_every
         self.stop_event = threading.Event()
         self.servers, self.threads, self._serving = [], [], []
@@ -236,7 +227,7 @@ class AgentService:
                 except OSError as e:
                     if i == 0:
                         raise ServiceError("no pude escuchar en %s:%s: %s" % (h, p, e))
-                    log.warning("no pude abrir el listener local %s:%s (%s); el MCP/CLI local usará %s", h, p, e, host)
+                    log.warning("no pude abrir el listener local %s:%s (%s); el CLI local usará %s", h, p, e, host)
         except BaseException:
             self._close_servers()
             raise
@@ -245,7 +236,6 @@ class AgentService:
             self._spawn("sampler", self._run_sampler)
             if self.cfg.get("t3_enabled", True):
                 self._spawn("t3", self._loop, "t3", self._poll_once, lambda: self.cfg.get("t3_poll_interval") or 5)
-            self._spawn("resources", self._loop, "resources", self._tick_once, lambda: self.tick_interval)
             self._spawn("maintenance", self._maintenance)
         for s in self.servers:
             self._serving.append(s)
@@ -293,9 +283,6 @@ class AgentService:
         if not res.get("skipped"):
             self.runtime.last_poll = self.clock()
         return res
-
-    def _tick_once(self):
-        return self.resources.tick()
 
     def _maintenance(self):
         if self.stop_event.wait(self.maint_first):
@@ -495,15 +482,14 @@ def cmd_status(a, out, err, runner):
                          ensure_ascii=False), file=out)
         return code
     if health:
-        ag, leases = snap["agent"], snap["leases"]
+        ag = snap["agent"]
         print("chopshop-agent %s en %s (api %s) — activo %s" % (health["version"], health["machine_id"], health["api_version"],
                                                                  _dur(health["uptime"])), file=out)
         age = lambda v: "-" if v is None else "%.1fs" % v  # noqa: E731
         print("  T3: %s · última muestra: %s · último sondeo: %s" % (
             {True: "ok", False: "caído", None: "sin datos"}[ag["t3_ok"]], age(ag["last_sample_age"]), age(ag["last_poll_age"])),
             file=out)
-        print("  hilos: %d (%d preguntas pendientes) · leases: %d activos, %d en cola" % (
-            len(snap["threads"]), len(snap["pending_questions"]), len(leases["active"]), len(leases["queued"])), file=out)
+        print("  hilos: %d (%d preguntas pendientes)" % (len(snap["threads"]), len(snap["pending_questions"])), file=out)
         for name, msg in (ag.get("errors") or {}).items():
             print("  aviso (%s): %s" % (name, msg), file=out)
     if unit is not None:
@@ -554,7 +540,7 @@ def cmd_print_unit(a, out, err, runner):
 
 
 def build_parser():
-    p = argparse.ArgumentParser(prog="chopshop agent", description="Servicio chopshop-agent (métricas, T3, recursos, API HTTP)")
+    p = argparse.ArgumentParser(prog="chopshop agent", description="Servicio chopshop-agent (métricas, T3, eventos, API HTTP)")
     sp = p.add_subparsers(dest="cmd", required=True)
     x = sp.add_parser("run", help="arranca el agente en primer plano (SIGTERM/SIGINT lo paran con limpieza)")
     x.add_argument("--bind", help="sustituye agent.bind")

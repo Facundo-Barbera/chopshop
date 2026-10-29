@@ -57,8 +57,8 @@ ratio = 1.5
 [agent]
 port = 4000
 allowed_logins = ["a@", "b@"]
-[agent.ports]
-range = [41000, 45999]
+[agent.service]
+read_write_paths = ["/srv/a", "/srv/b"]
 '''
 
 
@@ -110,7 +110,7 @@ class TestSettings(unittest.TestCase):
         c = settings.load()
         self.assertEqual(list(c["hosts"]), ["uno"])           # [hosts.*] reemplaza al host genérico
         self.assertEqual(c["agent"]["port"], 4000)
-        self.assertEqual(c["agent"]["capacity"]["max_servers"], 4)   # el resto, por defecto
+        self.assertEqual(c["agent"]["sample_interval"], 10)       # el resto, por defecto
         os.environ["CHOPSHOP_AGENT__PORT"] = "4100"
         os.environ["CHOPSHOP_HOSTS__UNO__CAP"] = "9"
         os.environ["CHOPSHOP_AGENT__ALLOWED_LOGINS"] = '["z@"]'

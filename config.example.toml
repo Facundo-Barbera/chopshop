@@ -50,13 +50,12 @@ bind = "127.0.0.1"                        # solo local por defecto. Para otras m
 port = 3790
 auth = "tailscale+token"                  # "tailscale+token": identidad Tailscale (+ bearer para escribir) | "token": solo bearer
                                           # | "none-local": nada de red, solo el origen local
-trust_local = true                        # el origen local (MCP / CLI de esta máquina) no necesita identidad ni bearer
-local_listener = true                     # si bind no es loopback, escucha además en 127.0.0.1:<port> para el MCP/CLI locales
+trust_local = true                        # el origen local (CLI de esta máquina) no necesita identidad ni bearer
+local_listener = true                     # si bind no es loopback, escucha además en 127.0.0.1:<port> para el CLI local
 tailscale_bin = "tailscale"               # CLI de Tailscale (para `whois` y bind = "auto")
 owner_login = "usuario@"                  # login Tailscale COMPLETO con permiso total (como lo muestra `tailscale whois`);
                                           # esto es un marcador. Vacío = solo origen local
 allowed_logins = ["invitado@"]            # logins con acceso de solo lectura (mismo formato)
-allow_request_cmd = false                 # true = POST /leases/request puede traer su propio `cmd` (por defecto solo el de la config)
 t3_enabled = true                         # false = máquina solo sensor: no se vigila T3
 import_legacy = true                      # al arrancar, importa <home>/events.jsonl del motor viejo si existe
 token_file = "~/.chopshop/agent/token"    # bearer (0600); se crea con `chopshop agent token`
@@ -73,40 +72,11 @@ helper = "~/.local/share/fleet/t3mcp.mjs"
 t3_bin = "~/.local/bin/t3"
 access = "full-access"
 
-# Proyectos conocidos por el agente: nombre -> raíz, id de T3 y servidor de pruebas (opcional).
+# Proyectos conocidos por el agente: nombre -> raíz, worktrees e id de T3 (para atribuir métricas e hilos).
 [agent.projects.proyecto-demo]
 root = "~/projects/proyecto-demo"
 worktrees = "~/.t3/worktrees/proyecto-demo"
 t3_project_id = "00000000-0000-0000-0000-000000000000"
-
-[agent.projects.proyecto-demo.test_server]
-cmd = "pnpm dev"
-cwd = "."
-port_env = "PORT"                         # variable de entorno por la que se pasa el puerto asignado
-idle_seconds = 900
-cpu_quota = "200%"
-mem_max = "2G"
-
-# Puertos asignados a los worktrees (bloques deterministas de `per_worktree` puertos dentro del rango).
-[agent.ports]
-range = [41000, 45999]
-per_worktree = 10
-
-# Cola por capacidad de servidores de prueba.
-[agent.capacity]
-max_servers = 4                           # simultáneos en la máquina
-max_per_project = 1
-max_cpu_pct = 700                         # suma de CPU% (100 = 1 núcleo) permitida antes de encolar
-min_ram_avail_mb = 6000
-default_idle_seconds = 900
-queue_ttl_seconds = 1800
-
-# Barrido de procesos huérfanos.
-[agent.sweep]
-interval = 60
-agent_scopes = "report"                   # "report" (solo informar) o "kill" (PIDs exactos de un scope ya settled)
-grace_seconds = 120                       # un hilo settled debe llevar al menos esto antes de que "kill" toque sus procesos
-agent_cgroup = ""                         # ruta del slice de agentes de T3 (vacío = app-t3code-agents.slice del usuario actual)
 
 # Webhooks: nombre -> RUTA a un archivo (0600) cuyo contenido es la URL. Nunca pongas la URL aquí.
 [agent.webhook_files]

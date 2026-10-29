@@ -26,7 +26,6 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import API_VERSION, __version__, collector as collector_mod, db, events, t3watch
-from . import resources as resources_mod
 
 log = logging.getLogger("chopshop.agent")
 
@@ -36,7 +35,6 @@ CONN_TIMEOUT = 15                 # s de inactividad de una conexión (lectura d
 WHOIS_TTL = 60.0                  # s de cache de identidades de Tailscale
 WHOIS_FAIL_TTL = 5.0              # s de cache de un whois fallido (evita martillar al CLI)
 WHOIS_MAX = 256                   # entradas máximas del cache
-MAX_WAIT = 300                    # tope de wait_seconds en /leases/request
 SNAPSHOT_EVENTS = 80
 SNAPSHOT_THREADS = 200
 ORCHESTRATOR_TTL = 5.0            # s de cache del snapshot del orquestador
@@ -255,17 +253,15 @@ class AgentApp:
 
     ROUTES = {
         ("GET", "/health"): "health", ("GET", "/snapshot"): "snapshot", ("GET", "/metrics"): "metrics",
-        ("GET", "/events"): "events", ("GET", "/threads"): "threads", ("GET", "/leases"): "leases",
-        ("GET", "/ports"): "ports", ("GET", "/subscriptions"): "subscriptions",
-        ("POST", "/leases/request"): "lease_request", ("POST", "/leases/release"): "lease_release",
-        ("POST", "/leases/touch"): "lease_touch", ("POST", "/answer"): "answer", ("POST", "/settle"): "settle",
-        ("POST", "/subscriptions"): "subscribe", ("POST", "/sweep"): "sweep",
+        ("GET", "/events"): "events", ("GET", "/threads"): "threads",
+        ("GET", "/subscriptions"): "subscriptions", ("POST", "/answer"): "answer", ("POST", "/settle"): "settle",
+        ("POST", "/subscriptions"): "subscribe",
     }
 
-    def __init__(self, cfg, conn, collector, resources, t3, auth, runtime=None, emit_fn=None, orchestrator_fn=None,
+    def __init__(self, cfg, conn, collector, t3, auth, runtime=None, emit_fn=None, orchestrator_fn=None,
                  clock=time.time):
         self.cfg, self.conn = cfg, conn
-        self.collector, self.resources, self.t3, self.auth = collector, resources, t3, auth
+        self.collector, self.t3, self.auth = collector, t3, auth
         self.runtime = runtime or Runtime(clock)
         self.clock = clock
         self.machine_id = cfg.get("machine_id") or socket.gethostname()
@@ -325,11 +321,6 @@ class AgentApp:
             rows = db.rows(self.conn.execute(sql, args))
         return {"threads": [_thread(r) for r in rows]}
 
-    def r_leases(self, ident, q, body):
-        return self.resources.status()
-
-    r_ports = r_leases
-
     def r_subscriptions(self, ident, q, body):
         return {"subscriptions": events.list_subscriptions(self.conn)}
 
@@ -360,18 +351,14 @@ class AgentApp:
         now = self.clock()
         latest = self.collector.latest()
         threads, with_pending = self._thread_rows()
-        status = self.resources.status()
         projects = {p["name"]: dict(p) for p in latest.get("projects", [])}
         names = {t["project"] for t in threads if t["project"]} | set((self.cfg.get("projects") or {}))
-        names |= {x["project"] for x in status["active"] + status["queued"] if x.get("project")}
         for n in names:
             projects.setdefault(n, {"name": n, "cpu_pct": 0.0, "rss_mb": 0.0, "procs": 0, "cgroups": []})
         for p in projects.values():
             mine = [t for t in threads if t["project"] == p["name"]]
             p["threads_running"] = sum(1 for t in mine if t["status"] in ("running", "starting"))
             p["threads_pending"] = sum(len(t["pending"]) for t in mine)
-            p["leases_active"] = sum(1 for x in status["active"] if x.get("project") == p["name"])
-            p["leases_queued"] = sum(1 for x in status["queued"] if x.get("project") == p["name"])
         t3_ok = self.t3.reachable if self.t3_enabled else None
         last_ts = getattr(self.collector, "last_ts", None)
         poll = self.runtime.last_poll
@@ -388,67 +375,12 @@ class AgentApp:
             "threads": threads,
             "pending_questions": [{"thread_id": t["thread_id"], "project": t["project"], "request_id": r.get("request_id"),
                                    "questions": r.get("questions", [])} for t in with_pending for r in t["pending"]],
-            "leases": {"active": status["active"], "queued": status["queued"], "capacity": status["capacity"]},
             "events": events.recent(self.conn, SNAPSHOT_EVENTS),
             "subscriptions": {n: {"project": s["project"], "events": s["events"]}
                               for n, s in events.list_subscriptions(self.conn).items()},
             "orchestrator": self._orchestrator(),
             "agent": agent,
         }
-
-    # -- leases
-    def _check_worktree(self, worktree):
-        """El worktree debe colgar de projects_root, worktrees_root o de un proyecto configurado."""
-        cfg = self.cfg
-        roots = [cfg.get("projects_root"), cfg.get("worktrees_root")]
-        for p in (cfg.get("projects") or {}).values():
-            if isinstance(p, dict):
-                roots += [p.get("root"), p.get("worktrees")]
-        path = os.path.realpath(os.path.expanduser(worktree))
-        for r in filter(None, roots):
-            root = os.path.realpath(os.path.expanduser(r))
-            if path == root or path.startswith(root.rstrip(os.sep) + os.sep):
-                return
-        raise ApiError(400, "worktree fuera de projects_root / worktrees_root / proyectos configurados")
-
-    def r_lease_request(self, ident, q, body):
-        project = _text(body, "project", True, 128)
-        worktree = _text(body, "worktree", False, 1024)
-        if worktree:
-            self._check_worktree(worktree)
-        cmd = _text(body, "cmd", False, 1024)
-        if cmd and not self.cfg.get("allow_request_cmd"):
-            raise ApiError(400, "cmd no permitido: define test_server.cmd del proyecto en la config (agent.allow_request_cmd)")
-        wait = body.get("wait_seconds")
-        if wait is not None and (isinstance(wait, bool) or not isinstance(wait, (int, float)) or not 0 <= wait <= MAX_WAIT):
-            raise ApiError(400, "wait_seconds debe ser un número entre 0 y %d" % MAX_WAIT)
-        try:
-            return self.resources.request(project, worktree, _ident(body, "thread_id"), body.get("kind") or "test_server",
-                                          cmd, wait_seconds=wait or None)
-        except (ValueError, resources_mod.ResourcesError) as e:
-            raise ApiError(400, str(e))
-
-    def r_lease_release(self, ident, q, body):
-        try:
-            released = self.resources.release(_ident(body, "lease_id"), _text(body, "worktree", False, 1024),
-                                              _ident(body, "thread_id"), _text(body, "project", False, 128))
-        except resources_mod.LeaseNotFound as e:
-            raise ApiError(404, "lease desconocido: %s" % e)
-        except (ValueError, resources_mod.ResourcesError) as e:
-            raise ApiError(400, str(e))
-        return {"released": released}
-
-    def r_lease_touch(self, ident, q, body):
-        try:
-            return self.resources.touch(_ident(body, "lease_id", True))
-        except resources_mod.LeaseNotFound as e:
-            raise ApiError(404, "lease desconocido: %s" % e)
-
-    def r_sweep(self, ident, q, body):
-        dry = body.get("dry_run", False)
-        if not isinstance(dry, bool):
-            raise ApiError(400, "dry_run debe ser booleano")
-        return self.resources.sweep(dry)
 
     # -- T3
     def _t3(self, fn, *args):

@@ -200,12 +200,6 @@ class TestCheckConfig(TmpCase):
         self.assertTrue(any("chmod 600" in w and hook in w for w in warns))
         self.assertNotIn("secreto", "\n".join(warns))
 
-    def test_kill_mode_is_called_out(self):
-        warns = service.check_config(self.cfg(sweep={"agent_scopes": "kill"}))[1]
-        self.assertTrue(any("kill" in w for w in warns))
-        warns = service.check_config(self.cfg(sweep={"agent_scopes": "x"}))[1]
-        self.assertTrue(any("no es válido" in w for w in warns))
-
     def test_cli_check_config(self):
         self.write_config('[agent]\nauth = "nada"\n')
         out = io.StringIO()
@@ -325,7 +319,7 @@ class TestLifecycle(ServerBase):
         over.setdefault("sample_interval", 0.05)
         over.setdefault("t3_poll_interval", 0.05)
         over.setdefault("t3_enabled", True)
-        return self.start(background=True, svc_kw={"tick_interval": 0.05, "maint_first": 0.05, "maint_interval": 0.05}, **over)
+        return self.start(background=True, svc_kw={"maint_first": 0.05, "maint_interval": 0.05}, **over)
 
     def our_threads(self):
         return [t for t in threading.enumerate() if t.name.startswith("chopshop-") and t.name != "chopshop-webhook"]
@@ -334,10 +328,9 @@ class TestLifecycle(ServerBase):
         self.proc.add(10, "node", ticks=0)
         self.start_bg()
         names = {t.name for t in self.svc.threads}
-        self.assertTrue({"chopshop-sampler", "chopshop-t3", "chopshop-resources", "chopshop-maintenance"} <= names)
+        self.assertTrue({"chopshop-sampler", "chopshop-t3", "chopshop-maintenance"} <= names)
         svc = self.svc
-        self.assertTrue(wait_for(lambda: svc.collector.last_ts is not None and svc.runtime.last_poll is not None
-                                 and any(c[:3] == ["systemctl", "--user", "list-units"] for c in self.sd.calls)))
+        self.assertTrue(wait_for(lambda: svc.collector.last_ts is not None and svc.runtime.last_poll is not None))
         st, snap, _ = self.get("/snapshot")
         self.assertEqual(st, 200)
         self.assertIs(snap["agent"]["t3_ok"], True)
