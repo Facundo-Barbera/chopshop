@@ -211,8 +211,11 @@ public struct CityView: View {
                 // el grafo primero: con la oficina montada, "Grafo" también tiene que verse
                 if showGraph, let pr = graphProject, let g = graph(pr) {
                     GraphView(graph: g, tasks: tasks(pr), hostOf: hosts(pr), frozenTime: frozenTime, flatChrome: flatChrome)
-                } else if office, let pr = target, case let all = floors(pr), let i = floorIndex(pr, floor: targetFloor, in: all) {
-                    ProjectOfficeView(floors: all, initial: i, frozenNow: officeNow, flatChrome: flatChrome, onInspect: onInspect)
+                } else if office, let pr = target, let state, let plan = targetPlan {
+                    // el mundo entero del proyecto, encuadrado al principio igual que el final del zoom (el piso pulsado)
+                    OfficeWorldView(state: state, project: pr, now: officeNow,
+                                    focusRegion: plan.kind == .lobby ? "lobby:\(plan.name ?? "")" : "floor:\(plan.floorIndex)",
+                                    onSelect: { tid in if let tid { onInspect?(tid) } })
                 } else if office, let pr = target, let g = graph(pr) {
                     IsoOfficeView(graph: g, tasks: tasks(pr), hostOf: hosts(pr), frozenTime: frozenTime, flatChrome: flatChrome)
                 } else {
@@ -356,12 +359,9 @@ public struct CityView: View {
             return IsoAlert(id: a.floor.isEmpty ? a.project : a.floor, label: label, title: a.title,
                             visual: a.status == .needsYou ? .needsYou : .stuck)
         }
-        let officeAlerts: [IsoAlert]
-        if let plan = targetPlan {
-            officeAlerts = FloorOfficeView.alerts(plan, layout: FloorLayout(plan: plan), now: officeNow ?? Date())
-        } else {
-            officeAlerts = target.flatMap { pr in graph(pr).map { Self.officeAlerts(box.scene(graph: $0, tasks: tasks(pr)), tasks: tasks(pr)) } } ?? []
-        }
+        // dentro de una oficina no hay barra encima (visualizador puro); solo en la vista Grafo del proyecto sin pisos
+        let officeAlerts: [IsoAlert] = targetPlan != nil ? [] :
+            target.flatMap { pr in graph(pr).map { Self.officeAlerts(box.scene(graph: $0, tasks: tasks(pr)), tasks: tasks(pr)) } } ?? []
         return ZStack(alignment: .bottomLeading) {
             ZStack(alignment: .top) {
                 if !cityAlerts.isEmpty && ch < 1 {
@@ -559,7 +559,7 @@ public struct LiveCityScreen: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 CityView(model: model, lights: lights, snapshot: store.snapshot, state: store.state, onSelectFloor: onSelectFloor)
-                    .padding(.horizontal, 26).padding(.vertical, 22)
+                    .padding(10)
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))

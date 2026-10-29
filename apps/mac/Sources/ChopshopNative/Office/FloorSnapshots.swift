@@ -6,12 +6,12 @@ import AppKit
 @available(macOS 26.0, *)
 @MainActor
 public extension Snapshots {
-    /// Piso Producto (oscuro/claro), triage dormido seleccionado y vestíbulo: `floor-*.png`.
+    /// Piso Producto (oscuro/claro), un hilo elegido y vestíbulo: `floor-*.png`.
     static func renderFloors(to out: String) {
         let shots: [(String, FloorPlan, Bool, String?, CGSize)] = [
             ("floor-producto-dark", FloorFixture.floor, true, nil, CGSize(width: 1100, height: 620)),
             ("floor-producto-light", FloorFixture.floor, false, nil, CGSize(width: 1100, height: 620)),
-            ("floor-triage-selected", FloorFixture.floor, true, "awesome-gb/0/triage/0", CGSize(width: 1100, height: 620)),
+            ("floor-backend-selected", FloorFixture.floor, true, "mcp:b7", CGSize(width: 1100, height: 620)),
             ("floor-lobby-dark", FloorFixture.lobby, true, nil, CGSize(width: 1000, height: 480)),
         ]
         for (name, plan, dark, sel, size) in shots {
@@ -19,14 +19,19 @@ public extension Snapshots {
                 .background(IsoBackdrop())
             write(v, dark: dark, size: size, to: "\(out)/\(name).png")
         }
-        // La pestaña «Oficina» de un proyecto con 46 hilos (1 corriendo), con perfil y sin él: `floor-proyecto-46-*.png`.
-        for (name, office, dark) in [("perfil-dark", true, true), ("perfil-light", true, false), ("sin-perfil-dark", false, true)] {
+        // El proyecto con 46 hilos (1 corriendo) a pantalla completa, con perfil y sin él, a 1440×900 y 2560×1440, y con un hilo
+        // elegido (panel lateral con su detalle): `floor-proyecto-46-*.png`.
+        let sizes: [(String, CGSize)] = [("1440x900", CGSize(width: 1440, height: 900)), ("2560x1440", CGSize(width: 2560, height: 1440))]
+        let cases: [(String, Bool, Bool, String?)] = [("perfil", true, true, nil), ("perfil-claro", true, false, nil),
+                                                     ("sin-perfil", false, true, nil), ("perfil-elegido", true, true, "mcp:k00")]
+        for (name, office, dark, sel) in cases {
             let st = ProjectOfficeFixture.state(office: office)
-            let v = ProjectContent(project: ProjectOfficeFixture.project, snapshot: SnapshotMapper.snapshot(st, now: ProjectOfficeFixture.now),
-                                   frozenTime: 2, state: st, frozenNow: ProjectOfficeFixture.now)
-                .padding(.horizontal, 26).padding(.vertical, 22)
-                .background(Color(nsColor: .windowBackgroundColor))
-            write(v, dark: dark, size: CGSize(width: 1100, height: 1240), to: "\(out)/floor-proyecto-46-\(name).png")
+            for (sz, size) in sizes where sz == "1440x900" || name == "perfil" || name == "sin-perfil" {
+                let v = ProjectWorkspace(project: ProjectOfficeFixture.project, snapshot: SnapshotMapper.snapshot(st, now: ProjectOfficeFixture.now),
+                                         state: st, mode: .constant(.office), frozenNow: ProjectOfficeFixture.now, selected: sel)
+                    .background(Color(nsColor: .windowBackgroundColor))
+                write(v, dark: dark, size: size, to: "\(out)/floor-proyecto-46-\(name)-\(sz).png")
+            }
         }
     }
 
@@ -38,7 +43,7 @@ public extension Snapshots {
         var lights = CityLights()
         lights.observe(model, at: 0)
         let snap = SnapshotMapper.snapshot(state, now: FloorFixture.now)
-        let size = CGSize(width: 1400, height: 900)
+        let size = CGSize(width: 1440, height: 900)
         func city(_ zoom: CityFocus?) -> some View {
             CityView(model: model, lights: lights, snapshot: snap, state: state, frozenTime: 10, frozenNow: FloorFixture.now,
                      frozenZoom: zoom, flatChrome: true)
@@ -59,12 +64,14 @@ public extension Snapshots {
         func city46(_ zoom: CityFocus?) -> some View {
             CityView(model: m46, lights: l46, snapshot: SnapshotMapper.snapshot(st46, now: ProjectOfficeFixture.now), state: st46,
                      frozenTime: 10, frozenNow: ProjectOfficeFixture.now, frozenZoom: zoom, flatChrome: true)
-                .padding(.horizontal, 26).padding(.vertical, 22)
+                .padding(10)
                 .background(Color(nsColor: .windowBackgroundColor))
         }
-        write(city46(nil), dark: true, size: size, to: "\(out)/city-office-46-ciudad.png")
-        write(city46(CityFocus(project: ProjectOfficeFixture.project, p: 1, floor: "\(ProjectOfficeFixture.project)#0")), dark: true, size: size,
-              to: "\(out)/city-office-46-piso.png")
+        for (sz, s46) in [("1440x900", size), ("2560x1440", CGSize(width: 2560, height: 1440))] {
+            write(city46(nil), dark: true, size: s46, to: "\(out)/city-office-46-ciudad-\(sz).png")
+            write(city46(CityFocus(project: ProjectOfficeFixture.project, p: 1, floor: "\(ProjectOfficeFixture.project)#0")), dark: true, size: s46,
+                  to: "\(out)/city-office-46-piso-\(sz).png")
+        }
         if let docs = FloorPlan.floor(in: state, project: "awesome-gb", index: 1) {
             write(FloorOfficeView(plan: docs, frozenNow: FloorFixture.now, flatChrome: true).background(IsoBackdrop()),
                   dark: true, size: CGSize(width: 1100, height: 620), to: "\(out)/city-office-piso-docs.png")

@@ -107,6 +107,10 @@ struct FloorRenderer {
     let now: Date
     let selected: String?
     let hovered: String?
+    /// Prefijo de los símbolos de etiquetas (el mundo pinta varios pisos en un mismo lienzo).
+    var prefix = ""
+    /// Sala de máquinas: cada hueco es un armario con su luz (`green`, `amber`, `red`, `gray`) en vez de un escritorio.
+    var lights: [String: String]?
 
     // MARK: paleta (la de IsoRenderer)
 
@@ -180,31 +184,57 @@ struct FloorRenderer {
 
     func draw(_ ctx: inout GraphicsContext) {
         box.hits.removeAll(keepingCapacity: true); box.heads.removeAll(keepingCapacity: true)
-        let looks = Dictionary(layout.spots.map { ($0.id, plan.look($0.id, now: now)) }, uniquingKeysWith: { a, _ in a })
-
+        let looks = self.looks()
         // 1· sombras de las losas
         ctx.drawLayer { l in
             l.addFilter(.blur(radius: 9 * cam.s))
-            for r in layout.rooms {
-                l.fill(castShadow(r.x0 - 2, r.y0 - 2, r.w + 4, r.d + 4, Iso.slabH + 14, z: 0), with: .color(.black.opacity(dark ? 0.55 : 0.20)))
-            }
+            slabShadows(&l)
         }
-        // 2· salas (de atrás hacia delante)
+        // 2· salas · 3· suelo · 4· escritorios y muñecos · 5· etiquetas
+        drawRooms(&ctx, looks: looks)
+        ctx.drawLayer { l in
+            l.addFilter(.blur(radius: 2.4 * cam.s))
+            contactShadows(&l, looks: looks)
+        }
+        drawContents(&ctx, looks: looks)
+        drawLabels(&ctx, looks: looks)
+    }
+
+    /// Aspecto de cada hueco en `now` (lo comparten las fases).
+    func looks() -> [String: FloorLook?] {
+        Dictionary(layout.spots.map { ($0.id, lights != nil ? FloorLook.free : plan.look($0.id, now: now)) }, uniquingKeysWith: { a, _ in a })
+    }
+
+    /// Fase 1 (en una capa con desenfoque que puede compartir varios pisos): sombras de las losas de las salas.
+    func slabShadows(_ l: inout GraphicsContext) {
+        for r in layout.rooms {
+            l.fill(castShadow(r.x0 - 2, r.y0 - 2, r.w + 4, r.d + 4, Iso.slabH + 14, z: 0), with: .color(.black.opacity(dark ? 0.55 : 0.20)))
+        }
+    }
+
+    /// Fase 2: salas, de atrás hacia delante.
+    func drawRooms(_ ctx: inout GraphicsContext, looks: [String: FloorLook?]) {
         for r in layout.rooms.sorted(by: { ($0.x0 + $0.y0) < ($1.x0 + $1.y0) }) {
             let ids = layout.spots.filter { $0.room == r.index }.map(\.id)
             let vs = ids.compactMap { looks[$0]??.visual }
             drawRoom(&ctx, r, needs: vs.contains(.needsYou), stuck: vs.contains(.stuck))
         }
-        // 3· suelo
-        drawFloor(&ctx, looks: looks)
-        // 4· escritorios y muñecos
+    }
+
+    /// Fases 3 y 4: marcas del suelo, escritorios (o armarios) y muñecos por profundidad.
+    func drawContents(_ ctx: inout GraphicsContext, looks: [String: FloorLook?]) {
+        drawFloorMarks(&ctx, looks: looks)
         for sp in layout.spots.sorted(by: { ($0.cx + $0.cy) < ($1.cx + $1.cy) }) {
             guard let lk = looks[sp.id] ?? nil else { continue }
-            if isLobby { drawGuest(&ctx, sp, lk) } else { drawDesk(&ctx, sp, lk) }
+            if let lights { drawRack(&ctx, sp, light: lights[sp.id] ?? "gray") }
+            else if isLobby { drawGuest(&ctx, sp, lk) } else { drawDesk(&ctx, sp, lk) }
         }
-        // 5· etiquetas
+    }
+
+    /// Fase 5: etiquetas de salas y huecos (símbolos `<prefijo>r:<i>` y `<prefijo>d:<id>`).
+    func drawLabels(_ ctx: inout GraphicsContext, looks: [String: FloorLook?]) {
         for r in layout.rooms {
-            guard let s = ctx.resolveSymbol(id: "r:\(r.index)") else { continue }
+            guard let s = ctx.resolveSymbol(id: "\(prefix)r:\(r.index)") else { continue }
             var g = ctx; g.opacity = 0.9
             g.draw(s, at: P(r.x0 + r.w * 0.5, r.y0, Iso.slabH + Iso.wallH + 16), anchor: .center)
         }
@@ -212,8 +242,8 @@ struct FloorRenderer {
         // el ratón. Así las etiquetas no se pisan.
         let crowded = cam.s < 0.62
         for sp in layout.spots {
-            guard let lk = looks[sp.id] ?? nil, let s = ctx.resolveSymbol(id: "d:\(sp.id)") else { continue }
-            if crowded && sp.id != hovered && sp.id != selected {
+            guard let lk = looks[sp.id] ?? nil, let s = ctx.resolveSymbol(id: "\(prefix)d:\(sp.id)") else { continue }
+            if crowded && sp.id != hovered && sp.id != selected && lights == nil {
                 switch lk.visual {
                 case .running?, .needsYou?, .stuck?, .waitingBot?: break
                 default: continue
@@ -272,22 +302,24 @@ struct FloorRenderer {
 
     // Suelo: sombras de contacto, marcas de selección, anillos de estado ---------
 
-    private func drawFloor(_ ctx: inout GraphicsContext, looks: [String: FloorLook?]) {
+    /// Sombras de contacto de escritorios y muñecos (en una capa con desenfoque que puede compartir varios pisos).
+    func contactShadows(_ l: inout GraphicsContext, looks: [String: FloorLook?]) {
         let z = floorZ
-        ctx.drawLayer { l in
-            l.addFilter(.blur(radius: 2.4 * cam.s))
-            for sp in layout.spots {
-                guard let lk = looks[sp.id] ?? nil else { continue }
-                let op = lk == .retired ? 0.35 : 1
-                if !isLobby {
-                    l.fill(castShadow(sp.cx - Iso.deskW / 2 - 1.5, sp.cy - 21.5, Iso.deskW + 3, Iso.deskD + 3, Iso.deskH + 4, z: z),
-                           with: .color(.black.opacity((dark ? 0.55 : 0.24) * op)))
-                }
-                if lk.visual != nil && lk.visual != .skipped {
-                    l.fill(ellipse(sp.cx + 2.5, sp.cy + 12.5, z, 7.5, n: 20), with: .color(.black.opacity((dark ? 0.6 : 0.26) * lk.fade)))
-                }
+        for sp in layout.spots {
+            guard let lk = looks[sp.id] ?? nil else { continue }
+            let op = lk == .retired ? 0.35 : 1
+            if !isLobby {
+                l.fill(castShadow(sp.cx - Iso.deskW / 2 - 1.5, sp.cy - 21.5, Iso.deskW + 3, Iso.deskD + 3, (lights != nil ? 30 : Iso.deskH) + 4, z: z),
+                       with: .color(.black.opacity((dark ? 0.55 : 0.24) * op)))
+            }
+            if lk.visual != nil && lk.visual != .skipped {
+                l.fill(ellipse(sp.cx + 2.5, sp.cy + 12.5, z, 7.5, n: 20), with: .color(.black.opacity((dark ? 0.6 : 0.26) * lk.fade)))
             }
         }
+    }
+
+    private func drawFloorMarks(_ ctx: inout GraphicsContext, looks: [String: FloorLook?]) {
+        let z = floorZ
         for sp in layout.spots {
             guard let lk = looks[sp.id] ?? nil else { continue }
             let tint = lk.visual?.tint
@@ -399,6 +431,38 @@ struct FloorRenderer {
         let pts = [P(dx, dy, z0 + Iso.deskH + 14), P(dx + Iso.deskW, dy, z0 + Iso.deskH + 14), P(dx, dy + Iso.deskD, z0), P(dx + Iso.deskW, dy + Iso.deskD, z0),
                    P(sp.cx, sp.cy + 13, z0 + 34), P(sp.cx - 8, sp.cy + 17, z0), P(sp.cx + 8, sp.cy + 17, z0)]
         hit(sp, pts)
+    }
+
+    // Armario de la sala de máquinas ---------------------------------------------
+
+    private func drawRack(_ ctx: inout GraphicsContext, _ sp: FloorLayout.Spot, light: String) {
+        let z0 = floorZ, w = 30.0, d = 22.0, h = 30.0
+        let x = sp.cx - w / 2, y = sp.cy - 20
+        let idx = Double(abs(sp.id.hashValue) % 13)
+        let sil = prism(&ctx, x, y, z0, w, d, h, top: deskTop, topEnd: deskTopEnd, left: monBody, right: monBody.opacity(0.85), edge: dark ? 0.25 : 0.6)
+        // ranuras en el frente izquierdo (cara +y)
+        for k in 0..<4 {
+            let zz = z0 + 6 + Double(k) * 6
+            var l = Path(); l.move(to: P(x + 4, y + d, zz)); l.addLine(to: P(x + w - 10, y + d, zz))
+            ctx.stroke(l, with: .color(.white.opacity(dark ? 0.10 : 0.25)), lineWidth: max(0.6, 0.8 * cam.s))
+        }
+        let col: Color
+        switch light {
+        case "green": col = Color(red: 0.30, green: 0.85, blue: 0.45)
+        case "amber": col = Attention.needsYou
+        case "red": col = Attention.stuck
+        default: col = Color(white: 0.55)
+        }
+        let on = light == "amber" ? 0.35 + 0.65 * (sin(t * 4 + idx) > 0 ? 1 : 0) : 1
+        let led = P(x + w - 5, y + d, z0 + h - 6), r = 2.2 * cam.s
+        var glow = ctx; glow.opacity = on * (light == "gray" ? 0.2 : 0.7); glow.addFilter(.blur(radius: 4 * cam.s))
+        glow.fill(Path(ellipseIn: CGRect(x: led.x - r * 2, y: led.y - r * 2, width: r * 4, height: r * 4)), with: .color(col))
+        var g = ctx; g.opacity = 0.4 + 0.6 * on
+        g.fill(Path(ellipseIn: CGRect(x: led.x - r, y: led.y - r, width: r * 2, height: r * 2)), with: .color(col))
+        if hovered == sp.id || selected == sp.id {
+            ctx.stroke(sil, with: .color(ink.opacity(selected == sp.id ? 0.9 : 0.5)), style: StrokeStyle(lineWidth: 1.1, lineJoin: .round))
+        }
+        hit(sp, [P(x, y, z0 + h), P(x + w, y + d, z0), P(x, y + d, z0), P(x + w, y, z0 + h)])
     }
 
     // Invitado del vestíbulo ---------------------------------------------------
