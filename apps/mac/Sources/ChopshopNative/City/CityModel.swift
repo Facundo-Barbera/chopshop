@@ -69,7 +69,7 @@ public struct CityFloor: Hashable, Sendable, Identifiable {
     /// 0 = planta baja
     public var level: Int
     public var status: CityFloorStatus
-    /// Hilos vivos (corriendo, preparándose o esperando algo): una ventana por hilo. Ordenados.
+    /// Hilos vivos (corriendo, preparándose o esperando algo) que pinta `ThreadVisibility`: una ventana por hilo. Ordenados.
     public var activeThreads: [String]
     public var running: Int
     public var needsYou: Int
@@ -223,10 +223,12 @@ public struct CityModel: Equatable, Sendable {
     private static let running: Set<String> = ["running", "preparing"]
     private static let finished: Set<String> = ["done", "settled", "failed", "skipped"]
 
-    /// Hilos vivos de un proyecto (sin terminar: corriendo, preparándose o esperando).
-    public static func activeThreads(_ p: LiveState.Project) -> [String] {
+    /// Hilos vivos de un proyecto (sin terminar: corriendo, preparándose o esperando) que se pintan en `now`
+    /// (`ThreadVisibility`: la misma regla que los escritorios de la oficina).
+    public static func activeThreads(_ p: LiveState.Project, now: Date) -> [String] {
         p.tasks.compactMap { t -> String? in
             guard let id = t["id"]?.string, let ph = t["phase"]?.string, alive.contains(ph) else { return nil }
+            guard ThreadVisibility.isVisible(t, in: p, now: now) else { return nil }
             return id
         }.sorted()
     }
@@ -263,20 +265,20 @@ public struct CityModel: Equatable, Sendable {
         }
     }
 
-    public static func makeFloor(_ p: LiveState.Project, company: String, level: Int) -> CityFloor {
+    public static func makeFloor(_ p: LiveState.Project, company: String, level: Int, now: Date) -> CityFloor {
         let st = status(p)
         let running: Int = p.tasks.filter { t in
             guard let ph: String = t["phase"]?.string else { return false }
             return Self.running.contains(ph)
         }.count
-        return CityFloor(project: p.name, company: company, level: level, status: st, activeThreads: activeThreads(p),
+        return CityFloor(project: p.name, company: company, level: level, status: st, activeThreads: activeThreads(p, now: now),
                          running: running, needsYou: needsYou(p), stuck: stuck(p), alert: alert(p, status: st))
     }
 
     /// Agrupa los proyectos por empresa (orden estable: el de la tabla, luego por nombre). Un edificio con algún proyecto con `office` lleva el vestíbulo en la
     /// planta baja; los proyectos sin `office` (agente v2 o perfil sin bloque) siguen en un piso con todos sus hilos.
     public static func build(_ s: LiveState, directory: CompanyDirectory = .standard, perProject: Bool = false,
-                             seed: UInt64 = WorldSeed.current, workspaces: CityWorkspaceMap? = nil) -> CityModel {
+                             seed: UInt64 = WorldSeed.current, workspaces: CityWorkspaceMap? = nil, now: Date = Date()) -> CityModel {
         var groups: [String: [LiveState.Project]] = [:]
         var offices: [String: CityOffice] = [:]
         var projects = s.projects
@@ -310,7 +312,7 @@ public struct CityModel: Equatable, Sendable {
                     let declared = o.floors.filter { !$0.temporary }.count
                     var temporaries = 0
                     for (k, f) in o.floors.enumerated() {
-                        var fl = makeFloor(parts.floors[k], company: p.name, level: 0)
+                        var fl = makeFloor(parts.floors[k], company: p.name, level: 0, now: now)
                         fl.floorIndex = f.index
                         fl.temporary = f.temporary
                         if f.temporary { temporaries += 1; fl.floorName = "en obra · \(temporaries)" }
@@ -318,9 +320,9 @@ public struct CityModel: Equatable, Sendable {
                         floors.append(fl)
                     }
                     floors = Array(floors.prefix(CityOffice.maxFloorsPerBuilding + CityOffice.maxExtraFloors))
-                    floors.insert(lobbyFloor([parts.lobby], company: p.name), at: 0)
+                    floors.insert(lobbyFloor([parts.lobby], company: p.name, now: now), at: 0)
                     for (k, f) in o.outsourced.enumerated() where parts.outsourced.indices.contains(k) {
-                        var fl = makeFloor(parts.outsourced[k], company: p.name, level: 0)
+                        var fl = makeFloor(parts.outsourced[k], company: p.name, level: 0, now: now)
                         fl.floorIndex = FloorPlan.outsourcedBase + f.index
                         fl.outsourced = true
                         fl.floorName = "\(o.outsourcedLabel.lowercased()) · \(k + 1)"
@@ -328,7 +330,7 @@ public struct CityModel: Equatable, Sendable {
                     }
                     if !contracted.isEmpty { annexes[contractorKey(p.name)] = (host: p.name, title: "\(o.outsourcedLabel) · \(p.name)") }
                 } else {
-                    floors.append(makeFloor(p, company: p.name, level: 0))
+                    floors.append(makeFloor(p, company: p.name, level: 0, now: now))
                 }
                 entries.append((company: c, project: p.name, floors: floors))
                 if !contracted.isEmpty { entries.append((company: c, project: contractorKey(p.name), floors: contracted)) }
@@ -403,8 +405,8 @@ public struct CityModel: Equatable, Sendable {
 
     /// Vestíbulo: la parte "sin escritorio" de cada proyecto con oficina del edificio. Un aviso del vestíbulo lleva el proyecto del
     /// hilo (el clic entra en su oficina).
-    static func lobbyFloor(_ parts: [LiveState.Project], company: String) -> CityFloor {
-        let fs = parts.map { makeFloor($0, company: company, level: 0) }
+    static func lobbyFloor(_ parts: [LiveState.Project], company: String, now: Date) -> CityFloor {
+        let fs = parts.map { makeFloor($0, company: company, level: 0, now: now) }
         let st = fs.map(\.status).min() ?? .neutral
         return CityFloor(project: "", company: company, level: 0, status: st, activeThreads: fs.flatMap(\.activeThreads).sorted(),
                          running: fs.reduce(0) { $0 + $1.running }, needsYou: fs.reduce(0) { $0 + $1.needsYou },
