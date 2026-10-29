@@ -1,5 +1,10 @@
 """Paso 3: eventos. Se registran en ~/.chopshop/events.jsonl y se mandan por POST a webhooks.
-La URL del webhook se lee SIEMPRE de un archivo local (--webhook-file); nunca se imprime ni se registra."""
+La URL del webhook se lee SIEMPRE de un archivo local (--webhook-file); nunca se imprime ni se registra.
+
+El motor (engine/reactions/graph) emite con `send(...)`, que usa la función inyectada con `using(emit_fn)` (misma firma que
+`emit`) o, por defecto, `emit`. Dentro del agente se inyecta el puente al bus (`agent/service.py::engine_emitter`)."""
+import contextlib
+import contextvars
 import json
 import os
 import urllib.error
@@ -48,9 +53,9 @@ def recipients(st, event, project, adhoc_files, only=None):
     return out
 
 
-def emit(st, event, project, body, adhoc_files=None, log=True, only=None):
-    """Registra y entrega. Devuelve (entregado_a_todos, hubo_destinatarios, resultados)."""
-    payload = {"event": event, "project": project, "ts": state.now()}
+def emit(st, event, project, body, adhoc_files=None, log=True, only=None, ts=None):
+    """Registra y entrega. Devuelve (entregado_a_todos, hubo_destinatarios, resultados). `ts` = ISO (por defecto ahora)."""
+    payload = {"event": event, "project": project, "ts": ts or state.now()}
     payload.update(body)
     rcpts = recipients(st, event, project, adhoc_files, only)
     results = {}
@@ -66,3 +71,22 @@ def emit(st, event, project, body, adhoc_files=None, log=True, only=None):
         except OSError:
             pass
     return (all(v == "ok" for v in results.values()), bool(rcpts), results)
+
+
+_current = contextvars.ContextVar("chopshop_emit_fn", default=None)
+
+
+@contextlib.contextmanager
+def using(emit_fn):
+    """Durante el bloque, `send` usa `emit_fn(st, event, project, body, adhoc_files=None, log=True, only=None)`."""
+    tok = _current.set(emit_fn) if emit_fn is not None else None
+    try:
+        yield
+    finally:
+        if tok is not None:
+            _current.reset(tok)
+
+
+def send(st, event, project, body, adhoc_files=None, log=True, only=None):
+    """Emite con la función inyectada (`using`) o con `emit`. Mismo resultado que `emit`."""
+    return (_current.get() or emit)(st, event, project, body, adhoc_files, log=log, only=only)

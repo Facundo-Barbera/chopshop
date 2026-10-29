@@ -1,0 +1,43 @@
+{
+  "v": 1,
+  "id": "01M646XHEM0W40J2GB1G6GW3RP",
+  "seq": 1848,
+  "ts": "2026-10-29T16:12:03.412Z",
+  "machine": "contabo-dev",
+  "project": "nuskills",
+  "type": "graph.state",
+  "severity": "info",
+  "needs": null,
+  "subject": {
+    "kind": "graph",
+    "id": "g-2",
+    "title": "Cerrar los bugs de rachas"
+  },
+  "cause": {
+    "id": null,
+    "depth": 0
+  },
+  "body": {
+    "graph": "g-2",
+    "goal": "Cerrar los bugs de rachas",
+    "status": "running",
+    "nodes": [
+      {
+        "id": "n-2",
+        "label": "BUG-1",
+        "phase": "done",
+        "deps": [],
+        "task": "t-0052"
+      },
+      {
+        "id": "n-4",
+        "label": "BUG-3",
+        "phase": "running",
+        "deps": [
+          "n-2"
+        ],
+        "task": "t-0054"
+      }
+    ]
+  }
+}

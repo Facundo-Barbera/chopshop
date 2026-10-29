@@ -1,0 +1,34 @@
+{
+  "v": 1,
+  "id": "01M646XHEM0W40J2GB1G6GW3RT",
+  "seq": 1852,
+  "ts": "2026-10-29T16:12:03.412Z",
+  "machine": "contabo-dev",
+  "project": null,
+  "type": "machine.health",
+  "severity": "info",
+  "needs": null,
+  "subject": {
+    "kind": "machine",
+    "id": "contabo-dev"
+  },
+  "cause": {
+    "id": null,
+    "depth": 0
+  },
+  "body": {
+    "state": "ok",
+    "cpu_pct": 12,
+    "ram_pct": 31,
+    "disk_pct": 5,
+    "load": [
+      0.3,
+      0.2,
+      0.2
+    ],
+    "threads_running": 2,
+    "t3_ok": true,
+    "agent_version": "0.6.0",
+    "down_seconds": null
+  }
+}

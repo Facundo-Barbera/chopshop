@@ -80,6 +80,10 @@ class ServerBase(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="chopshop-srv-")
         self.addCleanup(shutil.rmtree, self.tmp, True)
+        old_home = os.environ.get("CHOPSHOP_HOME")           # el hilo del motor y la importación leen <home>: nunca el real
+        os.environ["CHOPSHOP_HOME"] = os.path.join(self.tmp, "home")
+        self.addCleanup(lambda: os.environ.__setitem__("CHOPSHOP_HOME", old_home) if old_home is not None
+                        else os.environ.pop("CHOPSHOP_HOME", None))
         self.clock = Clock()
         self.ts, self.t3calls, self.posts = FakeTailscale(), FakeT3(), []
         self.token_file = os.path.join(self.tmp, "token")
@@ -247,7 +251,9 @@ class TestRoutes(ServerBase):
         self.assertEqual([e["body"]["i"] for e in body["events"]], [3, 4])
         self.assertEqual(self.get("/events?after=%d" % head)[1], {"events": [], "last_seq": head, "head_seq": head})
         self.assertEqual(self.get("/events?after=x")[0], 400)
-        self.assertEqual(set(body["events"][0]), {"seq", "ts", "machine_id", "event", "project", "body"})
+        self.assertEqual(set(body["events"][0]), {"v", "id", "seq", "ts", "machine", "project", "type", "severity", "needs",
+                                                  "subject", "cause", "body", "event", "machine_id"})
+        self.assertEqual((body["events"][0]["event"], body["events"][0]["type"]), ("prueba", "legacy.prueba"))
 
     def test_threads_utf8(self):
         self.add_thread("t-1")

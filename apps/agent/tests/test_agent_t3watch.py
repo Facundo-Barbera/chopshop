@@ -9,7 +9,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from chopshop import answers, t3mcp  # noqa: E402
-from chopshop.agent import config as agent_config, db, t3watch  # noqa: E402
+from chopshop.agent import config as agent_config, db, envelope, events, t3watch  # noqa: E402
 
 FIX = os.path.join(os.path.dirname(__file__), "fixtures", "t3")
 
@@ -339,6 +339,87 @@ class TestPoll(Base):
         self.assertEqual(self.row("t-run")["status"], "running")    # no avanzó: se reintenta
         self.poll()
         self.assertEqual(self.names(), ["thread_failed"])
+
+
+class TestEnvelopes(Base):
+    """t3watch emitiendo por el bus real: cada transición queda como sobre con sujeto, needs y severidad."""
+
+    def setUp(self):
+        super().setUp()
+        self.cfg["machine_id"] = "host-a"
+        self.addCleanup(events.flush)
+        self.level = (None, None)
+
+    def bus_poll(self, advance=60):
+        self.now[0] += advance
+        return t3watch.poll(self.conn, self.cfg, self.t3, lambda e, pr, b: events.emit(self.conn, self.cfg, e, pr, b),
+                            level_fn=lambda project, text: self.level)
+
+    def envs(self, after=0):
+        out = events.list_after(self.conn, after)
+        for e in out:
+            envelope.validate(e)
+        return out
+
+    def test_task_state_question_approval(self):
+        self.bus_poll()
+        self.srv.set("t-run", status="failed", updatedAt="2026-10-28T11:00:00.000Z")
+        self.bus_poll()
+        e = self.envs()[-1]
+        self.assertEqual((e["type"], e["severity"], e["needs"], e["body"]["phase"], e["body"]["legacy"]),
+                         ("task.state", "error", None, "failed", "thread_failed"))
+        self.assertEqual((e["subject"]["kind"], e["subject"]["id"], e["project"]), ("task", "t-run", "proyecto-demo"))
+        self.srv.set("t-run", status="running", updatedAt="2026-10-28T12:00:00.000Z")
+        self.bus_poll()
+        head = events.last_seq(self.conn)
+        self.srv.add_pending("t-run", approvals=1)
+        self.bus_poll()
+        got = [(e["type"], e["needs"], e["body"].get("attention")) for e in self.envs(head)]
+        self.assertEqual(got, [("task.state", "human", "ask"), ("question.opened", "human", None),
+                               ("task.state", "approval", "approval"), ("approval.requested", "approval", None)])
+        q = self.envs(head)[1]
+        self.assertEqual((q["body"]["request_id"], q["body"]["summary"], q["body"]["options"], q["severity"]),
+                         ("req-0001", "¿Qué rama uso?", ["main", "dev"], "notice"))
+
+    def test_question_for_bot_by_reaction(self):
+        self.bus_poll()
+        self.level = ("bot", "bot-demo")
+        self.srv.add_pending("t-run")
+        self.bus_poll()
+        ts, q = self.envs()[-2:]
+        self.assertEqual((q["type"], q["needs"], q["body"]["level"], q["body"]["notify"]), ("question.opened", "bot", "bot", "bot-demo"))
+        self.assertEqual((ts["type"], ts["needs"], ts["body"]["attention"], ts["body"]["phase"]), ("task.state", "bot", "bot", "waiting"))
+
+    def test_reaction_level_reads_profile(self):
+        with tempfile.TemporaryDirectory() as home:
+            os.makedirs(os.path.join(home, "profiles"))
+            with open(os.path.join(home, "profiles", "proyecto-demo.yaml"), "w") as f:
+                f.write("project: proyecto-demo\nreactions:\n  - on: pending_question\n    match: rama\n    level: bot\n"
+                        "    notify: bot-demo\n")
+            old = os.environ.get("CHOPSHOP_HOME")
+            os.environ["CHOPSHOP_HOME"] = home
+            try:
+                self.assertEqual(t3watch.reaction_level("proyecto-demo", "¿Qué rama uso?"), ("bot", "bot-demo"))
+                self.assertEqual(t3watch.reaction_level("proyecto-demo", "¿Borro la base?"), (None, None))
+                self.assertEqual(t3watch.reaction_level("otro", "rama"), (None, None))
+            finally:
+                if old is None:
+                    os.environ.pop("CHOPSHOP_HOME")
+                else:
+                    os.environ["CHOPSHOP_HOME"] = old
+
+    def test_machine_health_down_and_recovered(self):
+        self.bus_poll()
+        self.srv.down = True
+        self.bus_poll()
+        self.srv.down = False
+        self.bus_poll(advance=t3watch.BACKOFF_MAX + 1)
+        down, up = self.envs()[-2:]
+        self.assertEqual((down["type"], down["body"]["state"], down["body"]["t3_ok"], down["severity"], down["subject"]["kind"]),
+                         ("machine.health", "degraded", False, "warn", "machine"))
+        self.assertEqual((up["type"], up["body"]["state"], up["body"]["t3_ok"], up["severity"]), ("machine.health", "ok", True, "info"))
+        self.assertGreater(up["body"]["down_seconds"], 0)
+        self.assertEqual(down["subject"]["id"], "host-a")
 
 
 class TestUnreachable(Base):

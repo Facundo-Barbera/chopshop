@@ -1,0 +1,29 @@
+{
+  "v": 1,
+  "id": "01M646XHEM0W40J2GB1G6GW3RM",
+  "seq": 1846,
+  "ts": "2026-10-29T16:12:03.412Z",
+  "machine": "contabo-dev",
+  "project": "nuskills",
+  "type": "batch.created",
+  "severity": "info",
+  "needs": null,
+  "subject": {
+    "kind": "batch",
+    "id": "b-0007"
+  },
+  "cause": {
+    "id": null,
+    "depth": 0
+  },
+  "body": {
+    "batch": "b-0007",
+    "host": "contabo-dev",
+    "max_parallel": 3,
+    "tasks": {
+      "t-0007-1": "queued",
+      "t-0007-2": "queued"
+    },
+    "notes": []
+  }
+}

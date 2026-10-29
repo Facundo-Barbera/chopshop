@@ -1,0 +1,34 @@
+{
+  "v": 1,
+  "id": "01M646XHEM0W40J2GB1G6GW3S3",
+  "seq": 1861,
+  "ts": "2026-10-29T16:12:03.412Z",
+  "machine": "contabo-dev",
+  "project": "chopshop",
+  "type": "github.push",
+  "severity": "info",
+  "needs": null,
+  "subject": {
+    "kind": "pr",
+    "id": "Facundo-Barbera/chopshop@main",
+    "title": "push a main"
+  },
+  "cause": {
+    "id": null,
+    "depth": 0
+  },
+  "body": {
+    "repo": "Facundo-Barbera/chopshop",
+    "number": null,
+    "title": null,
+    "url": "https://github.com/Facundo-Barbera/chopshop/compare/3fd64f1...a1b2c3d",
+    "actor": "Facundo-Barbera",
+    "action": "push",
+    "labels": [],
+    "head": "main",
+    "base": null,
+    "state": null,
+    "ci": null,
+    "etag_source": "events"
+  }
+}
