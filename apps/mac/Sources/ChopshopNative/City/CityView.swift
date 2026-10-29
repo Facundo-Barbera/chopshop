@@ -1001,16 +1001,13 @@ public struct LiveCityScreen: View {
     }
 
     public var body: some View {
-        Group {
-            if model.buildings.isEmpty {
-                VStack(spacing: 8) {
-                    if case .connecting = store.status { ProgressView().controlSize(.small) }
-                    Text("La ciudad se levanta sola cuando lleguen proyectos.").font(.headline).foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
+        let phase = LivePhase.of(store.status, hasData: store.hasData, hasContent: !model.buildings.isEmpty)
+        return Group {
+            if phase == .content {
                 CityView(model: model, lights: lights, snapshot: store.snapshot, state: store.state, onSelectFloor: onSelectFloor)
                     .padding(10)
+            } else {
+                placeholder(phase)
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
@@ -1020,6 +1017,27 @@ public struct LiveCityScreen: View {
         .onAppear { refresh() }
         .onReceive(store.$snapshot) { _ in refresh() }
         .hotReload()
+    }
+
+    @ViewBuilder private func placeholder(_ phase: LivePhase) -> some View {
+        VStack(spacing: 8) {
+            if case .connecting = store.status { ProgressView().controlSize(.small) }
+            Text(headline(phase)).font(.headline).foregroundStyle(.secondary)
+            if case .reconnecting(let why) = store.status {
+                Text("Reconectando: \(why)").font(.callout).foregroundStyle(.tertiary)
+            } else if phase == .offline {
+                Text("La ciudad necesita el stream en vivo del agente: configúralo y empareja en Ajustes… (⌘,).")
+                    .font(.callout).foregroundStyle(.tertiary)
+            } else {
+                Text("La ciudad se levanta sola cuando lleguen proyectos.").font(.callout).foregroundStyle(.tertiary)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func headline(_ phase: LivePhase) -> String {
+        if phase == .offline { return "Sin stream en vivo del agente" }
+        return store.status == .live ? "Sin proyectos en vivo todavía" : "Conectando con el agente…"
     }
 
     private func refresh() {

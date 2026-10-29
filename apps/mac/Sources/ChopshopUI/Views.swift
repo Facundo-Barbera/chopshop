@@ -213,6 +213,8 @@ struct LiveIndicator: View {
 /// Detalle de proyecto sin credencial: emparejar aquí mismo, sin ir a Ajustes.
 struct PairingScreen: View {
     @EnvironmentObject var model: AppModel
+    /// Ofrecer la vista clásica (web). La ciudad no la tiene.
+    var offersWeb = true
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Empareja este Mac").font(.title2.weight(.semibold))
@@ -223,9 +225,11 @@ struct PairingScreen: View {
             } else {
                 Text("Primero configura la URL del agente en Ajustes… (⌘,).").font(.callout)
             }
-            Button("Seguir con la vista clásica") { model.preferWeb = true }
-                .buttonStyle(.link)
-                .help("Para agentes sin emparejamiento (anteriores a api_version 2). Vuelve a la oficina al reabrir la app.")
+            if offersWeb {
+                Button("Seguir con la vista clásica") { model.preferWeb = true }
+                    .buttonStyle(.link)
+                    .help("Para agentes sin emparejamiento (anteriores a api_version 2). Vuelve a la oficina al reabrir la app.")
+            }
         }
         .padding(24)
         .frame(maxWidth: 520)
@@ -523,7 +527,7 @@ private struct LiveCityRoot: View {
     var body: some View {
         switch store.status {
         case .noCredential, .unauthorized:
-            PairingScreen().frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(nsColor: .windowBackgroundColor))
+            PairingScreen(offersWeb: false).frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(nsColor: .windowBackgroundColor))
         default:
             LiveCityScreen(store: store, perProject: true)
                 .saturation(store.status.isDimmed ? 0.2 : 1)

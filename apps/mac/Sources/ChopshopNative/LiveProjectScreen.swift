@@ -18,35 +18,25 @@ public struct LiveProjectScreen<Unpaired: View>: View {
     }
 
     /// Con el stream caído y sin datos (p. ej. un agente anterior a api_version 2, sin `/stream`) no se tapa la vista web.
-    private var showsWeb: Bool {
-        switch store.status {
-        case .idle: return true
-        case .reconnecting, .disconnected: return !store.hasData
-        default: return false
-        }
-    }
-
     public var body: some View {
-        if showsWeb {
+        let phase = LivePhase.of(store.status, hasData: store.hasData, hasContent: store.snapshot.projects.contains(project))
+        if phase == .offline {
             Color.clear.allowsHitTesting(false)
         } else {
-            screen
+            screen(phase)
         }
     }
 
-    private var screen: some View {
+    private func screen(_ phase: LivePhase) -> some View {
         Group {
-            switch store.status {
-            case .noCredential, .unauthorized:
+            switch phase {
+            case .unpaired:
                 unpaired.frame(maxWidth: .infinity, maxHeight: .infinity)
-            default:
-                if store.snapshot.projects.contains(project) {
-                    // a pantalla completa: la oficina escala con la ventana; el detalle, en el panel lateral
-                    ProjectWorkspace(project: project, snapshot: store.snapshot, state: store.state)
-                        .id(project)
-                } else {
-                    placeholder
-                }
+            case .content:
+                ProjectWorkspace(project: project, snapshot: store.snapshot, state: store.state)
+                    .id(project)
+            case .waiting, .offline:
+                placeholder
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
@@ -67,6 +57,29 @@ public struct LiveProjectScreen<Unpaired: View>: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// Qué enseña una pantalla en vivo (oficina o ciudad) según el stream. Puro: lo comparten `LiveProjectScreen` y `LiveCityScreen`.
+public enum LivePhase: Equatable, Sendable {
+    /// Sin stream, o caído sin datos (p. ej. un agente anterior a api_version 2): la oficina deja ver la vista web; la ciudad,
+    /// que no tiene versión web, un aviso.
+    case offline
+    /// Sin credencial o revocada: la pantalla de emparejar.
+    case unpaired
+    /// Conectando, o en vivo sin nada que pintar todavía.
+    case waiting
+    case content
+
+    /// `hasData`: ya llegó algo del agente (`LiveStore.hasData`); `hasContent`: hay algo que pintar en esta pantalla.
+    public static func of(_ status: StreamStatus, hasData: Bool, hasContent: Bool) -> LivePhase {
+        switch status {
+        case .idle: return .offline
+        case .reconnecting, .disconnected: if !hasData { return .offline }
+        case .noCredential, .unauthorized: return .unpaired
+        case .connecting, .live: break
+        }
+        return hasContent ? .content : .waiting
     }
 }
 
