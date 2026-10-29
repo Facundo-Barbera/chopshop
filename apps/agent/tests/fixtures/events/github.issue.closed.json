@@ -1,0 +1,37 @@
+{
+  "v": 1,
+  "id": "01M646XHEM0W40J2GB1G6GW3RX",
+  "seq": 1855,
+  "ts": "2026-10-29T16:12:03.412Z",
+  "machine": "contabo-dev",
+  "project": "chopshop",
+  "type": "github.issue.closed",
+  "severity": "info",
+  "needs": null,
+  "subject": {
+    "kind": "issue",
+    "id": "Facundo-Barbera/chopshop#42",
+    "title": "La racha se reinicia al cambiar de zona horaria",
+    "url": "https://github.com/Facundo-Barbera/chopshop/issues/42"
+  },
+  "cause": {
+    "id": null,
+    "depth": 0
+  },
+  "body": {
+    "repo": "Facundo-Barbera/chopshop",
+    "number": 42,
+    "title": "La racha se reinicia al cambiar de zona horaria",
+    "url": "https://github.com/Facundo-Barbera/chopshop/issues/42",
+    "actor": "Facundo-Barbera",
+    "action": "closed",
+    "labels": [
+      "bug"
+    ],
+    "head": null,
+    "base": null,
+    "state": "closed",
+    "ci": null,
+    "etag_source": "events"
+  }
+}

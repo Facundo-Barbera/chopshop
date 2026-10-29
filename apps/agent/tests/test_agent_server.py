@@ -247,7 +247,9 @@ class TestRoutes(ServerBase):
         self.assertEqual([e["body"]["i"] for e in body["events"]], [3, 4])
         self.assertEqual(self.get("/events?after=%d" % head)[1], {"events": [], "last_seq": head, "head_seq": head})
         self.assertEqual(self.get("/events?after=x")[0], 400)
-        self.assertEqual(set(body["events"][0]), {"seq", "ts", "machine_id", "event", "project", "body"})
+        self.assertEqual(set(body["events"][0]), {"v", "id", "seq", "ts", "machine", "project", "type", "severity", "needs",
+                                                  "subject", "cause", "body", "event", "machine_id"})
+        self.assertEqual((body["events"][0]["event"], body["events"][0]["type"]), ("prueba", "legacy.prueba"))
 
     def test_threads_utf8(self):
         self.add_thread("t-1")
