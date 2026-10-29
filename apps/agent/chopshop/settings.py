@@ -27,9 +27,9 @@ DEFAULTS = {
     },
     "app": {                           # la app de macOS
         "agent_url": "",               # URL del chopshop-agent remoto (p. ej. http://<ip-tailscale>:3790)
-        "token_file": "",              # archivo con el bearer del agente (nunca el token en sí)
+        # sin token_file: la app se empareja (POST /pair) y guarda la credencial en el Keychain; uno viejo se ignora
         "refresh_seconds": 3,          # segundos entre sondeos de /snapshot (1-300)
-        "agents": {},                  # varias máquinas: [app.agents.<nombre>] con url y token_file
+        "agents": {},                  # varias máquinas: [app.agents.<nombre>] con url
     },
     "agent": {
         "machine_id": "",              # vacío = hostname

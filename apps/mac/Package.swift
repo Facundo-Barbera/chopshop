@@ -22,7 +22,7 @@ let package = Package(
             exclude: ["Resources"]
         ),
         // Pruebas de la lógica pura (config, cliente con transporte falso, resumen): `swift test` (requiere Xcode, no solo las CLT)
-        .testTarget(name: "ChopshopUITests", dependencies: ["ChopshopUI"], path: "Tests/ChopshopUITests"),
+        .testTarget(name: "ChopshopUITests", dependencies: ["ChopshopUI", "ChopshopNative"], path: "Tests/ChopshopUITests"),
         // Contrato del bus (sobres dorados, equivalencia del reductor con projection.py), SSE, stream, emparejamiento y mapeo a la oficina
         .testTarget(
             name: "ChopshopNativeTests",

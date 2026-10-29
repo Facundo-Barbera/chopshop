@@ -1,4 +1,5 @@
 import SwiftUI
+import ChopshopNative
 
 struct RootView: View {
     @EnvironmentObject var model: AppModel
@@ -8,13 +9,21 @@ struct RootView: View {
             Sidebar()
                 .navigationSplitViewColumnWidth(min: 220, ideal: 248, max: 300)
         } detail: {
+            // El WebView no se destruye nunca (se reconstruiría la UI web entera): en macOS 26 la oficina nativa se pone encima.
             ZStack {
                 GlassBackdrop()
                 WebView()
+                if #available(macOS 26.0, *) {
+                    if model.selection == .project, let p = model.project, !model.preferWeb {
+                        LiveProjectScreen(project: p, store: model.live) { PairingScreen() }
+                            .environment(\.attentionActions, model.attentionActions)
+                    }
+                }
             }
             .navigationTitle(title)
             .navigationSubtitle(subtitle)
             .toolbar {
+                ToolbarItem(placement: .navigation) { LiveIndicator(store: model.live) }
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button {
                         Task { await model.refresh() }
@@ -43,6 +52,50 @@ struct RootView: View {
         guard let d = model.lastUpdate else { return "cargando…" }
         let f = DateFormatter(); f.dateFormat = "HH:mm:ss"
         return "actualizado " + f.string(from: d)
+    }
+}
+
+/// Estado del stream en vivo (en vivo / reconectando / sin emparejar). Sin stream (macOS < 26, sin agente) no se ve.
+struct LiveIndicator: View {
+    @ObservedObject var store: LiveStore
+    var body: some View {
+        if let label = store.status.label {
+            HStack(spacing: 6) {
+                PulseDot(color: color, live: store.status == .live)
+                Text(label).font(.caption.weight(.medium)).foregroundStyle(.secondary)
+            }
+            .help(store.status.detail ?? "Stream de eventos del agente (GET /stream)")
+        }
+    }
+    private var color: Color {
+        switch store.status {
+        case .live: return .green
+        case .connecting, .idle: return .gray
+        case .reconnecting: return .orange
+        case .noCredential, .unauthorized: return .red
+        }
+    }
+}
+
+/// Detalle de proyecto sin credencial: emparejar aquí mismo, sin ir a Ajustes.
+struct PairingScreen: View {
+    @EnvironmentObject var model: AppModel
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Empareja este Mac").font(.title2.weight(.semibold))
+            Text("La oficina en vivo necesita una credencial de dispositivo del agente. Se guarda en el Llavero de este Mac.")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if let a = model.agents.first {
+                PairingView(agent: a)
+            } else {
+                Text("Primero configura la URL del agente en Ajustes… (⌘,).").font(.callout)
+            }
+            Button("Seguir con la vista clásica") { model.preferWeb = true }
+                .buttonStyle(.link)
+                .help("Para agentes sin emparejamiento (anteriores a api_version 2). Vuelve a la oficina al reabrir la app.")
+        }
+        .padding(24)
+        .frame(maxWidth: 520)
     }
 }
 

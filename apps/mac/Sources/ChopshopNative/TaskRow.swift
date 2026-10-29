@@ -23,15 +23,16 @@ struct AttentionRow: View {
                 case .needsYou:
                     if let q = task.question {
                         Text(q.summary).font(.callout).foregroundStyle(.secondary)
-                        HStack(spacing: 6) { ForEach(q.options, id: \.self) { o in Button(o) {}.buttonStyle(.bordered).controlSize(.small) } }
+                        AttentionButtons(task: task)
                         if let r = task.escalationReason { Text("Escalada: \(r)").font(.caption).foregroundStyle(.tertiary) }
                     } else {
-                        Text("Pide permiso para continuar").font(.callout).foregroundStyle(.secondary)
-                        HStack(spacing: 6) { Button("Permitir") {}.buttonStyle(.bordered).controlSize(.small); Button("Denegar") {}.buttonStyle(.bordered).controlSize(.small) }
+                        Text(task.kind == .approval ? "Pide permiso para continuar" : (task.escalationReason ?? "Te necesita en el hilo"))
+                            .font(.callout).foregroundStyle(.secondary)
+                        AttentionButtons(task: task)
                     }
                 default:
                     Text(task.lastError ?? "falló").font(.callout).foregroundStyle(.secondary)
-                    HStack(spacing: 6) { Button("Reintentar") {}.buttonStyle(.bordered).controlSize(.small); Button {} label: { Text("Abrir en T3").font(.caption).foregroundStyle(.secondary) }.buttonStyle(.plain) }
+                    AttentionButtons(task: task)
                 }
             }
         }

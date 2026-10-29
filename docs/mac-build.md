@@ -6,8 +6,12 @@ Todos los nombres, IPs y rutas de esta guía son de ejemplo (`host-a`, `100.64.0
 
 ## Requisitos
 
-- macOS 13 (Ventura) o posterior. En macOS 26 la barra lateral usa vidrio líquido; en versiones anteriores, un material translúcido.
-- Xcode, o al menos las Command Line Tools con Swift 6 (`xcode-select --install`; compruébalo con `swift --version`).
+- macOS 13 (Ventura) o posterior. En macOS 26 la barra lateral usa vidrio líquido y el detalle de cada proyecto es la **oficina
+  nativa en vivo** (ver «Oficina en vivo»); en versiones anteriores, un material translúcido y la vista web.
+- Xcode, o al menos las Command Line Tools con Swift 6 (`xcode-select --install`; compruébalo con `swift --version`). Para que el
+  binario incluya la oficina con vidrio líquido hace falta el **SDK de macOS 26+ (Xcode ≥ 26)**; con un Xcode anterior la app
+  compila igual (el vidrio cae a un sustituto plano, `#if compiler(>=6.2)`), pero el release en CI debe usar Xcode ≥ 26
+  (variable `XCODE_VERSION` del workflow, ver [`release.md`](release.md)).
 - Node.js 20+ y [pnpm](https://pnpm.io) (para construir la UI web que va dentro del `.app`).
 - Un agente de Chopshop corriendo en alguna máquina de tu red Tailscale, y Tailscale conectado en este Mac.
 
@@ -33,7 +37,7 @@ Variables opcionales de `build.sh`: `CHOPSHOP_APP=/otra/ruta/Chopshop.app` (sali
 
 ## Configurar la conexión
 
-La app lee `~/.config/chopshop/config.toml` (o la ruta de `CHOPSHOP_CONFIG`; con `XDG_CONFIG_HOME` definido, `$XDG_CONFIG_HOME/chopshop/config.toml`). También puedes configurar un agente desde la propia app: **Ajustes… (⌘,)**, que se abre sola si no hay ninguno configurado, pide `agent_url` y `token_file` (ruta, nunca el token), escribe solo esas dos claves de `[app]` (conserva el resto del archivo y los comentarios, permisos 600) y recarga los agentes sin reiniciar. Para editarlo a mano, parte de la plantilla del repo:
+La app lee `~/.config/chopshop/config.toml` (o la ruta de `CHOPSHOP_CONFIG`; con `XDG_CONFIG_HOME` definido, `$XDG_CONFIG_HOME/chopshop/config.toml`). También puedes configurar un agente desde la propia app: **Ajustes… (⌘,)**, que se abre sola si no hay ninguno configurado (o con el primer 401: sin emparejar), pide `agent_url`, escribe solo esa clave de `[app]` (conserva el resto del archivo y los comentarios, permisos 600; quita un `token_file` viejo de `[app]`), recarga los agentes sin reiniciar y muestra el emparejamiento de cada agente. Para editarlo a mano, parte de la plantilla del repo:
 
 ```sh
 mkdir -p ~/.config/chopshop
@@ -45,7 +49,6 @@ y deja en él (como mínimo) la sección `[app]`:
 ```toml
 [app]
 agent_url = "http://100.64.0.10:3790"    # IP de Tailscale del agente + puerto (agent.port)
-token_file = "~/.chopshop/agent/token"   # ruta a un archivo con el token (nunca el token en sí)
 refresh_seconds = 3                      # segundos entre sondeos (1-300)
 ```
 
@@ -54,22 +57,48 @@ Varias máquinas: una tabla por agente; la app las combina en una sola vista (ca
 ```toml
 [app.agents.host-b]
 url = "http://100.64.0.11:3790"
-token_file = "~/.chopshop/agent/host-b.token"
 ```
 
-También se puede configurar por entorno (tiene prioridad sobre el archivo): `CHOPSHOP_APP__AGENT_URL`, `CHOPSHOP_APP__TOKEN_FILE`, `CHOPSHOP_APP__REFRESH_SECONDS`, `CHOPSHOP_APP__AGENTS__HOST_B__URL`, `CHOPSHOP_APP__AGENTS__HOST_B__TOKEN_FILE` (en el nombre, `_` equivale a `-`).
+También se puede configurar por entorno (tiene prioridad sobre el archivo): `CHOPSHOP_APP__AGENT_URL`, `CHOPSHOP_APP__REFRESH_SECONDS`, `CHOPSHOP_APP__AGENTS__HOST_B__URL` (en el nombre, `_` equivale a `-`). `token_file` (y `CHOPSHOP_APP__*TOKEN_FILE`) de versiones anteriores se ignora sin error.
 
-### Token del agente
+### Emparejar este Mac con el agente
 
-Las lecturas (`GET`) se autorizan por identidad Tailscale; las **acciones** (`POST`: responder y `settle`) exigen además el token del agente (o ser el propio dueño por origen local). El token es el contenido del archivo `agent.token_file` del agente (por defecto `~/.chopshop/agent/token`). Cópialo a este Mac por `scp`, con permisos restrictivos:
+Con el agente en `api_version 2` **toda** petición (lecturas incluidas) exige una credencial de dispositivo (docs/agent-api.md,
+«Emparejamiento por dispositivo»). Se obtiene una vez por agente:
 
-```sh
-mkdir -p ~/.chopshop/agent
-scp host-a:.chopshop/agent/token ~/.chopshop/agent/token
-chmod 600 ~/.chopshop/agent/token
-```
+1. En la máquina del agente (CLI local, no hay ruta HTTP): `chopshop pair create --name "MacBook"`. Imprime un código de un solo
+   uso (p. ej. `K7QM-93XD`) que caduca en 10 minutos.
+2. En la app: **Ajustes… (⌘,) → Emparejamiento**, escribe el código (con o sin guion, da igual mayúsculas) y pulsa **Emparejar**
+   (o, en macOS 26, directamente en el detalle del proyecto).
 
-La app lee el archivo en cada petición (puedes rotar el token sin reabrirla), lo envía solo como `Authorization: Bearer …` y **nunca** lo imprime ni lo guarda en otro sitio. No lo pegues en `config.toml`: ahí va solo la ruta.
+La app llama a `POST /pair` y guarda la credencial (`cs1_…`) en el **Llavero** (contraseña genérica, servicio `com.chopshop.agent`,
+cuenta `<máquina>@<host:puerto>`, solo este dispositivo, sin sincronizar con iCloud). **Nunca** va a `config.toml` ni a
+`UserDefaults` ni a los logs. Se manda como `Authorization: Bearer cs1_…` en cada petición (`/snapshot`, `/stream`, `/answer`, `/settle`).
+
+- **Desemparejar** (Ajustes) borra la credencial de este Mac; para invalidarla también en el agente: `chopshop pair list` y
+  `chopshop pair revoke <device_id>`. Si el agente la revoca, la app recibe 401, borra la entrada del Llavero y vuelve a pedir código.
+- Errores al emparejar: código incorrecto (401), usado o caducado (410), demasiados intentos (429), o agente sin emparejamiento
+  (anterior a `api_version 2`: actualízalo). Contra un agente antiguo las acciones fallan con 403 y la app lo explica; en macOS 26
+  el detalle del proyecto ofrece «Seguir con la vista clásica».
+- Al primer arranque con un ad-hoc nuevo, macOS puede preguntar si la app puede usar el Llavero: pulsa «Permitir siempre».
+
+## Oficina en vivo (macOS 26)
+
+En macOS 26 o posterior el detalle de un **proyecto** es la vista nativa `ChopshopNative` (oficina isométrica / grafo en capas,
+«necesita tu atención», lista compacta), alimentada por el stream de eventos del agente principal (el primero configurado):
+
+- `LiveStore` abre `GET /stream` (SSE) con la credencial, pliega cada sobre con la misma regla que `projection.py`
+  (`LiveState.apply`; hay test de equivalencia con la proyección dorada) y reconecta con `Last-Event-ID` y backoff 3→30 s.
+  El indicador de la barra dice **en vivo**, **reconectando** o **sin emparejar**.
+- Los botones de una pregunta responden por `POST /answer`; permitir/denegar y reintentar no tienen API: el botón abre el hilo en T3.
+- La vista web (`WKWebView`) sigue cargada detrás: Resumen, Preguntas, Actividad… y todo en macOS < 26 siguen con `GET /snapshot`.
+  Si el stream no responde y no hay datos (agente antiguo), se ve la vista web.
+- Modo demo sin agente: `Chopshop.app/Contents/MacOS/Chopshop --demo-fixture apps/agent/tests/fixtures/events/ui-fixture.jsonl`
+  (o `CHOPSHOP_DEMO_FIXTURE=…`): reproduce la secuencia acelerada.
+- Por ahora el stream es de un solo agente; los demás se ven por `/snapshot` en la vista web.
+
+Código: `apps/mac/Sources/ChopshopNative` (lógica pura en `Live/`, sin requisito de macOS 26; vistas con `@available(macOS 26.0, *)`).
+Banco de pruebas con Previews: `apps/mac/native` (ver su README).
 
 ## Abrir la app la primera vez
 
@@ -84,7 +113,7 @@ Si macOS la marca como «dañada» (por haberla copiado desde otra máquina o de
 
 - **Conectando…**: primer sondeo en curso. **Ningún agente configurado**: falta `[app]` en el `config.toml` (la pantalla indica la ruta que busca la app).
 - **«agente no alcanzable»**: no hay conexión (Tailscale desconectado, agente parado, IP o puerto incorrectos) o se agotó el tiempo de espera. La app sigue abierta, reintenta cada ciclo y, si ya había datos, los muestra marcados como viejos.
-- **«acceso denegado (403)»**: tu identidad Tailscale no es el dueño ni está en `allowed_logins` del agente. **«token rechazado (401)»**: el archivo `token_file` no existe o no coincide con el del agente (afecta sobre todo a las acciones).
+- **«acceso denegado (403)»**: tu identidad Tailscale no es el dueño ni está en `allowed_logins` del agente (o el agente es anterior a `api_version 2`). **«sin emparejar o credencial revocada (401)»**: empareja este Mac (ver arriba).
 - La barra lateral muestra cuántos agentes responden (p. ej. «2 de 3 agentes»).
 
 ## Solución de problemas
@@ -95,7 +124,7 @@ Si macOS la marca como «dañada» (por haberla copiado desde otra máquina o de
 | `Falta Resources/web` | Ejecuta `pnpm install && pnpm app` desde la raíz (construye la UI antes del `.app`). |
 | La ventana abre pero dice que no hay agente configurado | Crea `~/.config/chopshop/config.toml` con `[app]` (ver arriba) y reabre la app. Si usas `CHOPSHOP_CONFIG`, ten en cuenta que una app abierta desde Finder no hereda las variables de tu terminal: lánzala con `open` desde esa misma terminal o usa la ruta por defecto. |
 | «agente no alcanzable» siempre | `curl http://100.64.0.10:3790/health` desde este Mac; `tailscale status`; que el agente escuche en esa IP (`agent.bind`) y el puerto sea el de `agent.port`. |
-| Se ve todo pero responder falla con 403/401 | Falta el token o no coincide: vuelve a copiar el archivo (ver «Token del agente») y comprueba su ruta en `token_file`. |
+| Se ve todo pero responder falla con 403/401 | 401: empareja de nuevo (Ajustes → Emparejamiento). 403: identidad Tailscale sin permiso de escritura, o agente anterior a `api_version 2`. |
 | Los datos de una máquina salen «de hace N s» | Esa máquina dejó de responder; el resto sigue en vivo. |
 | Cambié el `config.toml` y no pasa nada | La configuración se lee al abrir: cierra y vuelve a abrir la app. |
 | Quiero ver errores del arranque | Ejecuta el binario desde la terminal: `apps/mac/dist/Chopshop.app/Contents/MacOS/Chopshop`. |
@@ -103,5 +132,5 @@ Si macOS la marca como «dañada» (por haberla copiado desde otra máquina o de
 ## Desarrollo
 
 - `swift build` en `apps/mac` compila sin empaquetar; `swift run` busca la UI en `CHOPSHOP_WEB_DIR` o en `Resources/web` del directorio actual.
-- `swift test` (requiere Xcode) ejecuta las pruebas de la lógica pura: lectura del config, cliente con transporte falso, resumen y combinación de agentes. La combinación de snapshots que pinta la UI se prueba en JS: `pnpm test` (`packages/api/test`).
+- `swift test` (requiere Xcode) ejecuta las pruebas de la lógica pura: lectura del config, cliente con transporte falso, resumen y combinación de agentes (`ChopshopUITests`), y el contrato del bus (sobres dorados, `LiveState.fold` == proyección dorada de `projection.py`), parser SSE, stream con transporte falso, reconexión, emparejamiento y mapeo a la oficina (`ChopshopNativeTests`). La proyección dorada se regenera con `python3 apps/mac/Tests/ChopshopNativeTests/tools/make_golden.py <apps/agent con projection.py>`. La combinación de snapshots que pinta la UI se prueba en JS: `pnpm test` (`packages/api/test`).
 - Capturas con datos de ejemplo, sin servidores: [`screenshots.md`](screenshots.md).

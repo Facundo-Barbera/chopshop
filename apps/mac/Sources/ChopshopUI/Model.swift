@@ -1,5 +1,6 @@
 import SwiftUI
 import WebKit
+import ChopshopNative
 
 enum Section: String, CaseIterable, Identifiable {
     case overview, questions, events, reactions, graph, batches, machines, project
@@ -55,14 +56,25 @@ final class AppModel: ObservableObject {
     @Published var link: LinkState = .connecting
     @Published var lastUpdate: Date?
     @Published var lastError: String?
-    /// Hoja de ajustes (⌘,); se abre sola al arrancar si no hay ningún agente configurado.
+    /// Hoja de ajustes (⌘,); se abre sola al arrancar si no hay ningún agente configurado, y con el primer 401 (sin emparejar).
     @Published var showSettings = false
+    /// Sube cuando cambia un emparejamiento (para repintar lo que depende del Keychain).
+    @Published var pairingRevision = 0
+    /// El usuario pidió la vista web para los proyectos en esta sesión (agente sin emparejamiento).
+    @Published var preferWeb = false
+
+    /// Credenciales de dispositivo (`cs1_…`) por agente: Keychain, nunca config.toml ni UserDefaults.
+    let credentials: CredentialStore = KeychainCredentialStore()
+    /// Stream en vivo (`GET /stream`) del agente principal (el primero configurado): alimenta la oficina nativa en macOS 26.
+    /// En macOS < 26 no se abre: la UI web sigue con `GET /snapshot`.
+    let live = LiveStore()
+    private var askedPairing = false
 
     weak var web: WKWebView?
 
     /// Sección [app] de ~/.config/chopshop/config.toml (+ CHOPSHOP_APP__*). Se recarga con `reloadConfig()`.
     private(set) var config = AppConfig.load()
-    private lazy var hub = AgentHub(specs: config.agents)
+    private lazy var hub = AgentHub(specs: config.agents, credentials: credentials)
     private var results: [AgentResult] = []
     private var labels: [String: String] = [:]     // agente -> último machine_id visto
     private var pollTask: Task<Void, Never>?
@@ -86,6 +98,7 @@ final class AppModel: ObservableObject {
         }
         if args.contains("--capture") { Capture.watch(model: self) }
         startPolling()
+        startLive()
         // Sin ningún agente configurado no hay nada que mostrar: se pide la conexión en los ajustes
         if hub.isEmpty && !args.contains("--capture") { showSettings = true }
     }
@@ -146,6 +159,11 @@ final class AppModel: ObservableObject {
         if fetched.contains(where: { $0.isOK }) { lastUpdate = Date() }
         // Con datos de algún agente no se muestra error en la barra: la UI web marca cuáles fallan.
         lastError = fetched.contains(where: { $0.isOK }) ? nil : fetched.first(where: { !$0.isOK })?.shortMessage
+        // Con api_version 2 todo exige credencial: el primer 401 de la sesión abre los ajustes para emparejar.
+        if !askedPairing, fetched.contains(where: { $0.status == .unauthorized }), !args.contains("--capture") {
+            askedPairing = true
+            showSettings = true
+        }
         pushAgents()
     }
 
@@ -166,6 +184,8 @@ final class AppModel: ObservableObject {
         lastError = nil
         link = LinkState.from([], configured: hub.clients.count)
         startPolling()
+        live.reset()
+        startLive()
         pushAgents()      // sin agentes envía la lista vacía; con agentes espera a la primera ronda
     }
 
@@ -174,6 +194,96 @@ final class AppModel: ObservableObject {
     func pushAgents() {
         if results.isEmpty && !hub.isEmpty { return }
         push("agents", ["agents": results.map { $0.bridgeObject }, "configPath": AppConfig.configPath(), "interval": config.refreshSeconds])
+    }
+
+    // --- stream en vivo, emparejamiento ---
+
+    var agents: [AgentSpec] { hub.clients.map(\.spec) }
+    private var primary: AgentClient? { hub.clients.first }
+
+    /// `--demo-fixture <ruta.jsonl>` (o `CHOPSHOP_DEMO_FIXTURE`): reproduce un `.jsonl` de sobres en vez de conectar al agente.
+    private var demoFixture: String? {
+        value(after: "--demo-fixture") ?? ProcessInfo.processInfo.environment["CHOPSHOP_DEMO_FIXTURE"].flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    /// Abre el stream del agente principal si hay URL y credencial (si no, `live.status` = `.noCredential` y se pide emparejar).
+    func startLive() {
+        guard #available(macOS 26.0, *) else { return }
+        live.onUnauthorized = { [weak self] in self?.pairingRevision += 1 }
+        if let path = demoFixture {
+            if let fs = try? FixtureStream(contentsOf: URL(fileURLWithPath: AppConfig.expand(path)), speed: 20) { live.connect(fs) }
+            return
+        }
+        guard let url = primary?.spec.baseURL else { live.reset(); return }
+        live.connect(agent: url, credentials: credentials)
+    }
+
+    func isPaired(_ agent: String) -> Bool { hub.client(named: agent)?.isPaired ?? false }
+
+    /// Nombre de este Mac (lo que verá `chopshop pair list`).
+    var deviceName: String { Host.current().localizedName ?? "Mac" }
+
+    /// Id estable de este dispositivo (no es secreto: re-emparejar con el mismo id invalida la credencial anterior).
+    var deviceID: String {
+        let key = "chopshop.deviceID"
+        if let id = UserDefaults.standard.string(forKey: key), !id.isEmpty { return id }
+        let id = UUID().uuidString.lowercased()
+        UserDefaults.standard.set(id, forKey: key)
+        return id
+    }
+
+    /// Canjea un código de `chopshop pair create` y guarda la credencial en el Keychain. Devuelve el error para la UI, o nil.
+    func pair(agent: String, code: String) async -> String? {
+        guard let c = hub.client(named: agent), let url = c.spec.baseURL else { return "Agente desconocido: guarda antes su URL." }
+        let pc = PairingClient()
+        let machine = ((try? await pc.machineID(baseURL: url)) ?? nil) ?? url.host ?? agent
+        do {
+            let r = try await pc.pair(baseURL: url, code: code, deviceName: deviceName, deviceID: deviceID)
+            credentials.forget(baseURL: url)
+            try credentials.save(r.credential, account: CredentialAccount.make(machine: machine, baseURL: url))
+        } catch let e as PairingError {
+            return e.message
+        } catch {
+            return "No pude guardar la credencial en el Llavero."
+        }
+        pairingRevision += 1
+        if c === primary { live.reset(); startLive() }
+        Task { await refresh() }
+        return nil
+    }
+
+    /// Olvida la credencial de ese agente (el agente la sigue teniendo hasta `chopshop pair revoke`).
+    func unpair(agent: String) {
+        guard let c = hub.client(named: agent), let url = c.spec.baseURL else { return }
+        credentials.forget(baseURL: url)
+        pairingRevision += 1
+        if c === primary { live.reset(); startLive() }
+        Task { await refresh() }
+    }
+
+    // --- acciones de la oficina nativa ---
+
+    var attentionActions: AttentionActions {
+        AttentionActions(answer: { [weak self] task, option in
+            guard let self else { return "la app se está cerrando" }
+            return await self.answer(task, option)
+        }, open: { [weak self] url in self?.open(url) })
+    }
+
+    /// `POST /answer {thread_id, choice, request}` al agente principal. nil = enviado.
+    func answer(_ task: MockTask, _ option: String) async -> String? {
+        guard let c = primary else { return "no hay agente configurado" }
+        let payload: [String: Any] = ["thread_id": task.id, "choice": option, "request": task.question?.request ?? ""]
+        guard let action = AgentAction.route(type: "answer", payload: payload) else { return "respuesta no válida" }
+        let r = await c.perform(action)
+        if r.ok { Task { await refresh() }; return nil }
+        return r.message
+    }
+
+    /// Enlaces del hilo: web o la app de T3 (`t3-thread://`).
+    func open(_ url: URL) {
+        guard ["http", "https", "t3-thread"].contains(url.scheme?.lowercased() ?? "") else { return }
+        NSWorkspace.shared.open(url)
     }
 
     // --- acciones (POST a la API del agente) ---

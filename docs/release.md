@@ -88,7 +88,7 @@ Viven en el bloque `env:` de `release-mac.yml` y se cambian editando el archivo:
 | `MAX_DELTAS` / `MAX_VERSIONS` / `DELTA_COMPRESSION` | `3` / `5` / `lzma` | Deltas hacia cada versión nueva, versiones que conserva el feed (los zips **nunca** se borran) y compresión |
 | `PHASED_ROLLOUT_INTERVAL` | vacío | Segundos entre tandas de rollout gradual (`sparkle:phasedRolloutInterval`), solo canal estable |
 | `FULL_RELEASE_NOTES_URL` | vacío | Enlace a las notas completas (`--full-release-notes-url`) |
-| `XCODE_VERSION` | vacío | Fuerza `/Applications/Xcode_<versión>.app`; vacío = el del runner |
+| `XCODE_VERSION` | vacío | Fuerza `/Applications/Xcode_<versión>.app`; vacío = el del runner. Debe ser **Xcode ≥ 26** (SDK de macOS 26) para que el binario lleve la oficina nativa con vidrio líquido; con uno anterior compila igual, con sustituto plano (ver `mac-build.md`, «Oficina en vivo») |
 
 **Si falta algo, el workflow falla en el primer job.** El paso «Secrets y variables requeridos» lista de una vez **todos** los nombres que faltan (solo nombres, nunca valores), los repite como tabla en el resumen del job y valida el formato de las variables (Team ID de 10 caracteres, identidad coherente con el Team ID, clave pública de 32 bytes, URL https, `BUNDLE_ID` no genérico). No se ha tocado keychain, red ni credenciales todavía.
 

@@ -1,14 +1,15 @@
 import SwiftUI
 
-/// Hoja de ajustes: conexión con un agente (`agent_url` y `token_file` de la sección `[app]` del config).
-/// Guarda con `ConfigWriter` (preserva el resto del archivo, permisos 600) y recarga los agentes sin reiniciar.
+/// Hoja de ajustes: conexión con un agente (`agent_url` de la sección `[app]` del config) y emparejamiento de este Mac con cada
+/// agente (credencial en el Keychain, nunca en el config). Guarda con `ConfigWriter` (preserva el resto del archivo, permisos 600)
+/// y recarga los agentes sin reiniciar.
 struct SettingsView: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
 
     @State private var agentURL = ""
-    @State private var tokenFile = ""
     @State private var message: String?
+    @State private var info: String?
 
     /// Variables de entorno que pisan al archivo (para avisar de que guardar puede no cambiar nada).
     private var envOverrides: Bool {
@@ -27,16 +28,7 @@ struct SettingsView: View {
                     .textFieldStyle(.roundedBorder)
             }
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Archivo del token (opcional)").font(.caption.weight(.medium))
-                TextField("~/.chopshop/agent/token", text: $tokenFile)
-                    .textFieldStyle(.roundedBorder)
-                Text("Ruta a un archivo con el token, nunca el token en sí. Solo hace falta para las acciones (responder, cerrar hilos…).")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Text("Se guarda en \(AppConfig.configPath()) (solo agent_url y token_file de [app]; el resto del archivo no se toca).")
+            Text("Se guarda en \(AppConfig.configPath()) (solo agent_url de [app]; el resto del archivo no se toca).")
                 .font(.caption).foregroundStyle(.secondary)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
@@ -51,16 +43,30 @@ struct SettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            Divider()
+            Text("Emparejamiento").font(.headline)
+            if model.agents.isEmpty {
+                Text("Guarda primero la URL del agente; después empareja este Mac con un código de `chopshop pair create`.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            } else {
+                ForEach(model.agents, id: \.name) { PairingView(agent: $0) }
+                Text("Cada agente da una credencial a este Mac; se guarda en el Llavero (nunca en config.toml).")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            if let info {
+                Text(info).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+
             HStack {
                 Spacer()
-                Button("Cancelar") { dismiss() }
+                Button("Cerrar") { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Button("Guardar") { save() }
                     .keyboardShortcut(.defaultAction)
             }
         }
         .padding(20)
-        .frame(width: 480)
+        .frame(width: 520)
         .preferredColorScheme(.dark)
         .onAppear { load() }
     }
@@ -71,25 +77,29 @@ struct SettingsView: View {
         if let data = FileManager.default.contents(atPath: AppConfig.configPath()) {
             text = String(decoding: data, as: UTF8.self)
         }
-        let cur = ConfigWriter.currentValues(text: text)
-        agentURL = cur.agentURL
-        tokenFile = cur.tokenFile
+        agentURL = ConfigWriter.currentAgentURL(text: text)
         message = nil
     }
 
     private func save() {
         let url = AppConfig.normalizeURL(agentURL)
-        if let problem = ConfigWriter.validateURL(url) ?? ConfigWriter.validateTokenFile(tokenFile) {
+        if let problem = ConfigWriter.validateURL(url) {
             message = problem
             return
         }
         do {
-            try ConfigWriter.save(path: AppConfig.configPath(), agentURL: url, tokenFile: tokenFile)
+            try ConfigWriter.save(path: AppConfig.configPath(), agentURL: url)
         } catch {
             message = "No pude guardar: \(error.localizedDescription)"
             return
         }
         model.reloadConfig()
-        dismiss()
+        message = nil
+        // Sin emparejar no se puede leer nada del agente (api_version 2): la hoja se queda abierta para emparejar.
+        if let a = model.agents.first, !model.isPaired(a.name) {
+            info = "Guardado. Ahora empareja este Mac con el agente."
+        } else {
+            dismiss()
+        }
     }
 }
