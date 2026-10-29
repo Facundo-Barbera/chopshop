@@ -83,10 +83,11 @@ El script escribe JSONL en stdout, una línea por evento:
 {"type": "triage.result", "severity": "notice", "needs": "bot", "subject": {"kind": "issue", "id": "o/r#42"}, "body": {"kind": "bug"}}
 ```
 
-El runner completa `v`, `id`, `project` y `cause = {id: <sobre disparador>, depth: <depth del disparador> + 1}` (el bus
-añade `seq`, `ts` y `machine`). Se descartan (y cuentan) las líneas que no son JSON, las que no son un objeto y las de
-tipos fuera de `emits`; `severity`/`needs` desconocidos pasan a `info`/`null`, sin `subject` se usa
-`{kind: automation, id: <proyecto>/<nombre>}`. Como mucho 100 sobres por ejecución. Si la ejecución vence el
+El runner completa `project` y `cause = {id: <sobre disparador>, depth: <depth del disparador> + 1}` y lo publica con
+`events.emit_envelope` (contrato de `agent/envelope.py`), que valida el sobre y pone `v`, `id` (ULID), `seq`, `ts` y
+`machine`. Se descartan (y cuentan) las líneas que no son JSON, las que no son un objeto, las de tipos fuera de `emits`
+y las que el bus rechaza; `severity`/`needs` desconocidos pasan a `info`/`null`; un `subject` ausente o con `kind`
+fuera del contrato se sustituye por `{kind: automation, id: <nombre>}`. Como mucho 100 sobres por ejecución. Si la ejecución vence el
 timeout no se publica nada de su salida.
 
 Siempre se emite un `automation.ran`:
@@ -139,9 +140,8 @@ chopshop automation check demo
 chopshop automation run demo triage --event-file sobre.json --dry-run
 ```
 
-## Pendiente del contrato de sobre
+## Relación con el contrato de sobre
 
-Mientras el bus no tenga las columnas del sobre (migración v3 de la tarea A), `severity`, `needs`, `subject`, `cause` e
-`id` de los sobres de automatizaciones viajan en `body._env`, y `normalize()` traduce las filas viejas (`event`) al
-tipo nuevo. Al integrar el contrato, `bus_emit` pasa a usar `events.emit` con el sobre completo y `body._env`
-desaparece.
+El hilo lee sobres con `events.list_after` (ya traducidos desde nombres viejos por `envelope.from_legacy`) y publica con
+`events.emit_envelope`. El anti-bucle propio (`cause.depth >= 3` no dispara) es más estricto que el del bus
+(`depth > 3` se descarta), así que una cadena de automatizaciones nunca llega a ser rechazada por el bus.

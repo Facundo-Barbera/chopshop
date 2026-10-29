@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from test_chopshop import Env  # noqa: E402
 from chopshop import cli, profile, settings  # noqa: E402
-from chopshop.agent import automations as A, db, events, service  # noqa: E402
+from chopshop.agent import automations as A, db, envelope as envmod, events, service  # noqa: E402
 
 PY = sys.executable
 EXAMPLE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "examples", "automations", "triage"))
@@ -38,6 +38,9 @@ def spec(**over):
     ss = A.specs({"project": "p", "automations": [auto(**over)]})
     assert ss, errs_of(auto(**over))
     return ss[0]
+
+
+GH = {"repo": "o/r", "action": "opened", "url": "https://github.com/o/r/issues/1", "title": "t", "number": 1}
 
 
 def envelope(type_="github.issue.opened", project="p", depth=0, **body):
@@ -233,15 +236,14 @@ class TestTriggers(Tmp):
         self.assertEqual(len(e2.matches(envelope("automation.ran", automation="otra"))), 1)
 
     def test_legacy_rows(self):
-        """Filas del bus actual (antes del contrato v3): `event` viejo -> tipo nuevo; metadatos del sobre en body._env."""
+        """Un dict con el nombre viejo (`event`, sin `type`) se traduce con envelope.from_legacy."""
         e, _ = self.engine([auto(name="q", on=[{"type": "question.opened", "where": {"needs": "bot"}}])])
         row = {"seq": 9, "ts": 1.0, "machine_id": "h", "event": "pending_question", "project": "p",
-               "body": {"summary": "?", "_env": {"id": "X", "needs": "bot", "cause": {"id": None, "depth": 0}}}}
+               "body": {"summary": "?", "request": "rq-1", "level": "bot"}}
         self.assertEqual(len(e.matches(row)), 1)
-        row["body"]["_env"]["cause"]["depth"] = 3
-        self.assertEqual(e.matches(row), [])
-        env = A.normalize(dict(row, body={"a": 1}))
-        self.assertEqual((env["type"], env["id"], env["body"]), ("question.opened", "seq-9", {"a": 1}))
+        self.assertEqual(e.matches(dict(row, cause={"id": "X", "depth": 3})), [])
+        env = A.normalize(row)
+        self.assertEqual((env["type"], env["id"], env["needs"], env["body"]["legacy"]), ("question.opened", "seq-9", "bot", "pending_question"))
 
     def test_schedule_every_with_clock(self):
         self.script("print('{\"type\": \"a1.result\"}')\n")
@@ -322,8 +324,9 @@ class TestRunner(Tmp):
         self.assertEqual((a["type"], a["severity"], a["needs"], a["body"], a["project"]), ("a1.result", "notice", "bot", {"k": 1}, "p"))
         self.assertEqual(a["cause"]["depth"], 2)
         self.assertEqual((b["severity"], b["needs"], b["body"]), ("info", None, {}))
-        self.assertEqual(b["subject"], {"kind": "automation", "id": "p/a1", "title": "a1"})
-        self.assertTrue(a["id"] and a["id"] != b["id"])
+        self.assertEqual(b["subject"], {"kind": "automation", "id": "a1"})
+        ids = [x["id"] for x in r["envelopes"]] + [r["ran"]["id"]]
+        self.assertEqual(len(set(ids)), 3)
         self.assertEqual(ran["type"], "automation.ran")
         self.assertEqual((ran["severity"], ran["body"]["exit"], ran["body"]["discarded"]), ("warn", 0, 3))
         self.assertIn("3 líneas descartadas", ran["body"]["error"])
@@ -357,7 +360,8 @@ class TestRunner(Tmp):
         r, c = self.run1(spec(timeout=1), grace=0.3)
         self.assertLess(time.monotonic() - t0, 10)
         self.assertTrue(r["timed_out"], r)
-        pids = [int(x) for x in open(os.path.join(self.pdir, "pids")).read().split()]
+        with open(os.path.join(self.pdir, "pids")) as f:
+            pids = [int(x) for x in f.read().split()]
         end = time.monotonic() + 5
         while time.monotonic() < end and not all(_dead(p) for p in pids):
             time.sleep(0.05)
@@ -597,16 +601,18 @@ class TestService(Env):
         self.svc.automations_once()
         A.bus_emit(self.conn, self.svc.cfg, {"type": "github.issue.opened", "project": "p", "id": "G1", "severity": "info",
                                              "needs": None, "subject": {"kind": "issue", "id": "o/r#1"},
-                                             "cause": {"id": None, "depth": 0}, "body": {"number": 1}})
+                                             "cause": {"id": None, "depth": 0}, "body": GH})
         self.pump()
         chain = [(e["type"], e["cause"]["depth"]) for e in self.rows() if e["project"] == "p"]
         self.assertEqual(chain, [("github.issue.opened", 0),
                                  ("t.result", 1), ("automation.ran", 1),
                                  ("u.result", 2), ("automation.ran", 2),
                                  ("t.result", 3), ("automation.ran", 3)])           # depth 3: u ya no se dispara
+        for e in events.list_after(self.conn, 0, 1000):                           # todo cumple el contrato de A
+            self.assertEqual(envmod.errors({k: v for k, v in e.items() if k not in ("event", "machine_id")}), [], e)
         t1 = [e for e in self.rows() if e["type"] == "t.result"][0]
         self.assertEqual(t1["body"], {"from": "github.issue.opened"})
-        self.assertEqual(t1["cause"]["id"], "G1")
+        self.assertEqual(t1["cause"]["id"], self.rows()[1]["id"])                 # el id que el bus dio al sobre de GitHub
         # el cursor sobrevive: un servicio nuevo no reprocesa
         svc2 = service.AgentService(self.svc.cfg, conn=self.conn)
         self.assertEqual(svc2.automations_once(), [])
@@ -615,7 +621,7 @@ class TestService(Env):
         cfg = dict(self.svc.cfg, automations={"enabled": False, "interval": 2})
         svc = service.AgentService(cfg, conn=self.conn)
         svc.automations_once()
-        A.bus_emit(self.conn, cfg, {"type": "github.issue.opened", "project": "p", "body": {}})
+        A.bus_emit(self.conn, cfg, {"type": "github.issue.opened", "project": "p", "body": GH})
         self.assertEqual(svc.automations_once(), [])
 
 
