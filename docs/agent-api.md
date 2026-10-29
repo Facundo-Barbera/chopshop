@@ -1,8 +1,9 @@
-# chopshop-agent: contrato de módulos y API (v0.6, api_version 1 + 2)
+# chopshop-agent: contrato de módulos y API (v0.7, api_version 1 + 2)
 
 `api_version 2` es **aditiva**: añade `GET /stream` (SSE), `GET /state` y el emparejamiento por dispositivo (`POST /pair`).
-`GET /snapshot`, `GET /events` y `GET /health` conservan su forma v1 (`api_version: 1`); la v2 se anuncia en el `hello` del stream,
-en `GET /state` y en la respuesta de `POST /pair`.
+`GET /snapshot` y `GET /events` conservan su forma v1 (`api_version: 1` en `/snapshot`); la v2 se anuncia en `GET /health`,
+en el `hello` del stream, en `GET /state` y en la respuesta de `POST /pair`. La versión del agente (`version`) y `API_VERSION` salen de una
+sola fuente: `chopshop/__init__.py` y `chopshop/agent/__init__.py`.
 
 Contexto: el agente corre en cada máquina como servicio de usuario (`systemd --user` en Linux, launchd en macOS). Escucha en
 `agent.bind`:`agent.port` (`~/.config/chopshop/config.toml`, ver `config.example.toml`): por defecto `127.0.0.1`; para otras máquinas,
@@ -81,7 +82,7 @@ Todo eso → **403**.
 
 | Método y ruta | Descripción |
 |---|---|
-| `GET /health` | `{ok, api_version, version, machine_id, ts, uptime, whoami}` (`whoami.device` si se usó una credencial de dispositivo). Sin credencial |
+| `GET /health` | `{ok, api_version: 2, version, machine_id, ts, uptime, whoami}` (`whoami.device` si se usó una credencial de dispositivo). Sin credencial |
 | `POST /pair` | `{code, device_name?, device_id?}` → `{device_id, credential, api_version: 2}` (ver «Emparejamiento»). Sin credencial |
 | `GET /stream?after=&project=&types=` | Server-Sent Events (v2), ver abajo |
 | `GET /state?project=` | proyección completa (v2), lo mismo que el evento `state` del stream |

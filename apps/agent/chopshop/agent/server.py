@@ -29,7 +29,7 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import API_VERSION, __version__, collector as collector_mod, db, events, pairing as pairing_mod, projection, stream, t3watch, webhooks
+from . import API_VERSION, SNAPSHOT_API_VERSION, __version__, collector as collector_mod, db, events, pairing as pairing_mod, projection, stream, t3watch, webhooks
 
 log = logging.getLogger("chopshop.agent")
 
@@ -454,7 +454,7 @@ class AgentApp:
         if self.runtime.errors:
             agent["errors"] = dict(self.runtime.errors)
         return {
-            "api_version": API_VERSION, "machine_id": self.machine_id, "ts": now,
+            "api_version": SNAPSHOT_API_VERSION, "machine_id": self.machine_id, "ts": now,
             "generated": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(now)),
             "machine": latest.get("machine", {}), "apps": latest.get("apps", []),
             "projects": sorted(projects.values(), key=lambda p: (-p["cpu_pct"], p["name"])),

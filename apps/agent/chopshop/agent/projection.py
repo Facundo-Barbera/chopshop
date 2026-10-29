@@ -13,9 +13,8 @@ Los sobres salen de `events.list_after` (contrato del bus, docs/event-envelope.m
 import copy
 import threading
 
-from . import db, events
+from . import API_VERSION, db, events
 
-API_VERSION = 2
 RECENT = 50
 PAGE = 1000
 _RUNNING = ("running", "preparing")

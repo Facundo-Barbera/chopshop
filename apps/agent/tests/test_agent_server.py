@@ -12,11 +12,14 @@ import sys
 import tempfile
 import time
 import unittest
+from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))          # para importar los falsos de otros tests
+import chopshop  # noqa: E402
+import chopshop.agent as agent_pkg  # noqa: E402
 from chopshop import settings  # noqa: E402
-from chopshop.agent import collector as collector_mod, db, events, server, t3watch  # noqa: E402
+from chopshop.agent import collector as collector_mod, db, events, projection, server, t3watch  # noqa: E402
 from chopshop.agent.service import AgentService  # noqa: E402
 from test_agent_collector import FakeProc  # noqa: E402
 
@@ -174,8 +177,16 @@ class TestRoutes(ServerBase):
         self.assertEqual(st, 200)
         self.assertEqual(r.getheader("Content-Type"), "application/json; charset=utf-8")
         self.assertEqual(sorted(body), ["api_version", "machine_id", "ok", "ts", "uptime", "version", "whoami"])
-        self.assertEqual((body["ok"], body["api_version"], body["machine_id"]), (True, 1, "host-a"))
+        self.assertEqual((body["ok"], body["api_version"], body["machine_id"]), (True, 2, "host-a"))
+        self.assertEqual(body["version"], agent_pkg.__version__)
         self.assertEqual(body["whoami"], {"login": None, "via": "local", "write": True})
+
+    def test_version_single_source(self):
+        # La versión vive en chopshop/__init__.py; los package.json deben decir lo mismo (y projection reusa API_VERSION).
+        root = Path(__file__).resolve().parents[3]
+        for pkg in ("package.json", "apps/agent/package.json", "packages/api/package.json"):
+            self.assertEqual(json.loads((root / pkg).read_text())["version"], agent_pkg.__version__, pkg)
+        self.assertEqual((agent_pkg.__version__, projection.API_VERSION), (chopshop.__version__, agent_pkg.API_VERSION))
 
     def test_snapshot_has_contract_shape(self):
         self.sample()

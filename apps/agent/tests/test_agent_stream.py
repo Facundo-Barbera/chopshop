@@ -464,7 +464,7 @@ class TestStream(StreamBase):
         self.assertEqual(body["events"][0]["event"], "thread_started")
         st, body, _ = self.get("/events?after=0")
         self.assertLessEqual(old, set(body["events"][0]))
-        self.assertEqual(self.get("/health")[1]["api_version"], 1)
+        self.assertEqual(self.get("/health")[1]["api_version"], 2)
 
 
 # ---------------------------------------------------------------- emparejamiento (unidad)
