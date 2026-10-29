@@ -22,8 +22,9 @@ enum Capture {
         guard parts.count == 2 else { return }
         let sheet = parts[0] == "settings"
         model.showSettings = sheet
-        if sheet {}
-        else if parts[0].hasPrefix("project:") { model.nav = .project(String(parts[0].dropFirst(8))) }
+        if sheet {
+            // la hoja se abre encima de la sección actual
+        } else if parts[0].hasPrefix("project:") { model.nav = .project(String(parts[0].dropFirst(8))) }
         else if parts[0].hasPrefix("machine:") { model.nav = .machine(String(parts[0].dropFirst(8))) }
         else if let s = Section(rawValue: parts[0]) { model.nav = s == .machines ? .machines : .section(s) }
         let out = parts[1]
