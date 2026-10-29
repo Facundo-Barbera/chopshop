@@ -16,6 +16,8 @@ public final class LiveStore: ObservableObject {
     /// Máquina del agente (del `hello`).
     @Published public private(set) var machine: String?
     public private(set) var state = LiveState()
+    /// Sala de máquinas (api_version 3): `machine_room` del último `state` más los sobres de la sala plegados encima.
+    @Published public private(set) var machineRoom = MachineRoom()
     /// Cursor de reanudación.
     public private(set) var lastEventID: String?
     /// Ya llegó algo del agente (un `state` o algún sobre).
@@ -66,7 +68,7 @@ public final class LiveStore: ObservableObject {
     /// Olvida el estado (otro agente, o desemparejado).
     public func reset() {
         disconnect()
-        state = LiveState(); lastEventID = nil; machine = nil; awaitingState = false; failures = 0
+        state = LiveState(); machineRoom = MachineRoom(); lastEventID = nil; machine = nil; awaitingState = false; failures = 0
         status = .idle
         flush()
     }
@@ -119,11 +121,13 @@ public final class LiveStore: ObservableObject {
             // las series no vienen en la proyección: se conservan las que ya se tenían
             for (k, v) in state.series where !v.cpu.isEmpty { st.series[k] = v }
             state = st
+            machineRoom = MachineRoom(state: json)
             awaitingState = false
             lastEventID = id ?? String(st.headSeq)
             flush()
         case .envelope(let e):
             state.apply(e)
+            if MachineRoom.types.contains(e.type) { machineRoom.apply(e) }
             if let id = id ?? e.seq.map(String.init) { lastEventID = id }
             if !awaitingState { scheduleFlush() }
         }
