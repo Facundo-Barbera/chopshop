@@ -52,6 +52,13 @@
         "waiting_bot": 0
       },
       "graphs": [],
+      "machine_room": {
+        "automations": [],
+        "floor": 0,
+        "listeners": [],
+        "rack": [],
+        "subscriptions": []
+      },
       "name": "awesome-gb",
       "office": {
         "company": "Awesome GB",

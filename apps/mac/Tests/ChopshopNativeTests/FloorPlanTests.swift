@@ -75,7 +75,7 @@ final class FloorPlanTests: XCTestCase {
         let b = FloorLayout(plan: f)
         XCTAssertEqual(a, b, "los escritorios no se mueven cuando cambia el ocupante")
         XCTAssertEqual(a.rooms.count, 2)
-        XCTAssertEqual(a.spots.count, 3, "el retirado conserva su hueco")
+        XCTAssertEqual(a.spots.filter { !$0.isMachine }.count, 3, "el retirado conserva su hueco")
         let s0 = a.spot("awesome-gb/0/backend/0")!, s1 = a.spot("awesome-gb/0/backend/1")!
         XCTAssertEqual(s0.cy, s1.cy); XCTAssertLessThan(s0.cx, s1.cx)
         XCTAssertGreaterThan(a.rooms[1].x0, a.rooms[0].x0 + a.rooms[0].w)
@@ -110,5 +110,87 @@ final class FloorPlanTests: XCTestCase {
         XCTAssertEqual(FloorPlan.lobby(in: live, company: "Awesome GB"), FloorPlan.lobby(in: json, company: "Awesome GB"))
         XCTAssertEqual(FloorPlan.lobby(in: live, company: nil, projects: ["otro"]), FloorPlan.lobby(in: json, company: nil, projects: ["otro"]))
         XCTAssertTrue(FloorPlan.floors(in: live, project: "otro").isEmpty)
+    }
+
+    // MARK: sala de máquinas (una sala del piso más bajo del proyecto, no una vista aparte)
+
+    static let roomText = #"""
+    {"listeners": [{"name": "forge", "state": "down"}, {"name": "t3watch", "state": "ok"}],
+     "automations": [{"project": "awesome-gb", "name": "triage", "exit": 0}, {"project": "otro", "name": "backup", "exit": 1}],
+     "subscriptions": [{"name": "todo", "projects": ["*"], "signed": false}, {"name": "awe", "projects": ["awesome-*"], "signed": true},
+                       {"name": "otro", "projects": ["otro"], "signed": false}, {"name": "viejo", "signed": false}],
+     "rack": [{"provider": "github", "repo": "o/docs", "project": "awesome-gb", "kind": "docs", "light": "green", "runs": []},
+              {"provider": "github", "repo": "o/main", "project": "awesome-gb", "kind": "main", "light": "red", "runs": []},
+              {"provider": "github", "repo": "o/otro", "project": "otro", "kind": "main", "light": "amber", "runs": []}]}
+    """#
+
+    func stateWithRoom() throws -> JSONValue {
+        guard case .object(var o) = try state() else { throw XCTSkip("estado sin objeto") }
+        o["machine_room"] = try JSONValue(text: Self.roomText)
+        return .object(o)
+    }
+
+    func testMachineRoomLivesOnLowestFloorScopedToProject() throws {
+        let fs = FloorPlan.floors(in: try stateWithRoom(), project: "awesome-gb")
+        XCTAssertNil(fs[1].machineRoom, "solo en el piso más bajo")
+        let r = try XCTUnwrap(fs[0].machineRoom)
+        XCTAssertEqual(r.rack.map(\.repo), ["o/main", "o/docs"], "solo sus repos, main primero")
+        XCTAssertEqual(r.automations.map(\.name), ["triage"])
+        XCTAssertEqual(r.subscriptions.map(\.name), ["todo", "awe", "viejo"], "`*`, glob y sin filtro (agente anterior)")
+        XCTAssertEqual(r.listeners.map(\.name), ["forge", "t3watch"], "los listeners del agente sirven a todos")
+        XCTAssertNil(FloorPlan.lobby(in: try stateWithRoom(), company: "Awesome GB").machineRoom)
+        // sin `machine_room` en el estado: sala vacía, igual que desde LiveState
+        XCTAssertEqual(FloorPlan.floors(in: try state(), project: "awesome-gb")[0].machineRoom, MachineRoom())
+    }
+
+    func testAgentPerProjectRoomWins() throws {
+        guard case .object(var o) = try stateWithRoom(), case .array(var ps) = o["projects"], case .object(var p) = ps[0] else {
+            return XCTFail("forma")
+        }
+        p["machine_room"] = ["floor": 0, "listeners": [], "automations": [], "subscriptions": [],
+                             "rack": [["provider": "github", "repo": "o/solo", "project": "awesome-gb", "light": "green", "runs": []]]]
+        ps[0] = .object(p); o["projects"] = .array(ps)
+        let r = FloorPlan.floors(in: .object(o), project: "awesome-gb")[0].machineRoom
+        XCTAssertEqual(r?.rack.map(\.repo), ["o/solo"])
+    }
+
+    func testMachineRoomLayoutHasCabinetPerRepoAndConsole() throws {
+        let f = FloorPlan.floors(in: try stateWithRoom(), project: "awesome-gb")[0]
+        let l = FloorLayout(plan: f)
+        let m = try XCTUnwrap(l.machine)
+        XCTAssertEqual(m.cabinets.map(\.id), ["rack:github:o/main", "rack:github:o/docs"])
+        XCTAssertEqual(m.console.id, FloorLayout.consoleID)
+        XCTAssertEqual(l.spots.filter(\.isMachine).map(\.id), ["rack:github:o/main", "rack:github:o/docs", "machine"])
+        XCTAssertEqual(m.y0, l.rooms[0].y0, "en la misma fila que los departamentos")
+        XCTAssertGreaterThan(m.x0, l.rooms[1].x0 + l.rooms[1].w, "después del último departamento")
+        for c in m.cabinets { XCTAssertTrue(c.cx > m.x0 && c.cx < m.x0 + m.w && c.cy > m.y0 && c.cy < m.y0 + m.d) }
+        XCTAssertGreaterThanOrEqual(l.maxU, m.x0 + m.w - m.y0, "el encuadre incluye la sala")
+        // las luces y los runs no mueven nada: solo cuántos repos hay
+        var g = f
+        g.machineRoom?.rack[0].light = .green
+        g.machineRoom?.listeners = []
+        XCTAssertEqual(FloorLayout(plan: g), l)
+        // un piso de tres departamentos manda la sala a la fila siguiente
+        var h = f
+        h.rooms.append(FloorPlan.Room(role: "x", permanent: false, desks: []))
+        let lh = FloorLayout(plan: h)
+        XCTAssertEqual(lh.machine?.x0, 0)
+        XCTAssertGreaterThan(lh.machine?.y0 ?? 0, 0)
+    }
+
+    func testMachineRoomAlertsAndLabels() throws {
+        guard #available(macOS 26.0, *) else { throw XCTSkip("FloorOfficeView requiere macOS 26") }
+        let f = FloorPlan.floors(in: try stateWithRoom(), project: "awesome-gb")[0]
+        XCTAssertEqual(FloorOfficeView.label(f, "rack:github:o/main"), "main")
+        XCTAssertEqual(FloorOfficeView.label(f, FloorLayout.consoleID), "Sala de máquinas")
+        let alerts = FloorOfficeView.alerts(f, layout: FloorLayout(plan: f), now: ended)
+        XCTAssertEqual(alerts.last?.id, "rack:github:o/main", "el repo en rojo pide atención")
+        XCTAssertEqual(FloorOfficeView.machineTip(f, FloorLayout.consoleID).visual, .stuck, "listener caído")
+    }
+
+    func testTypedLiveStateMachineRoomMatchesJSON() throws {
+        let json = try stateWithRoom()
+        let live = try XCTUnwrap(LiveState(json: json))
+        XCTAssertEqual(FloorPlan.floors(in: live, project: "awesome-gb"), FloorPlan.floors(in: json, project: "awesome-gb"))
     }
 }

@@ -3,6 +3,8 @@ import Foundation
 // Sala de máquinas (docs/plans/office-redesign.md §4; forma en docs/agent-api.md «api_version 3»). Puro (sin SwiftUI, macOS 13).
 // `machine_room` de `GET /state` plegado con la MISMA regla `apply` que projection.py para `listener.state`, `automation.ran`,
 // `forge.repo.state` y `forge.run.state`. `subscriptions` no sale de sobres: solo cambia con cada `state` completo.
+// No es una vista aparte: es una SALA del piso de cada proyecto (`FloorPlan.machineRoom`), con `scoped(to:)` = lo de ese proyecto
+// (misma regla que `machine_room.scope` del agente, que publica el resultado en `projects[].machine_room`).
 
 /// Luz de un módulo del rack: la decide el agente (verde = CI de la rama por defecto bien; ámbar = runs en curso o en cola;
 /// rojo = último run fallido o PR con CI rojo; gris = sin datos o proveedor degradado).
@@ -231,6 +233,8 @@ public struct AutomationStatus: Hashable, Sendable, Identifiable {
 /// Suscripción saliente (webhook). Nunca trae la URL.
 public struct SubscriptionStatus: Hashable, Sendable, Identifiable {
     public var name: String
+    /// Proyectos que reparte (`*` o globs); sin el campo (agente anterior) = todos.
+    public var projects: [String]
     public var lastOK: String?
     public var lastError: String?
     public var signed: Bool
@@ -241,9 +245,16 @@ public struct SubscriptionStatus: Hashable, Sendable, Identifiable {
     init?(json: JSONValue.Object) {
         guard let name = json["name"]?.string else { return nil }
         self.name = name
+        let ps = (json["projects"]?.array ?? []).compactMap(\.string)
+        projects = ps.isEmpty ? ["*"] : ps
         lastOK = json["last_ok"]?.string
         lastError = json["last_error"]?.string
         signed = json["signed"]?.bool ?? false
+    }
+
+    /// ¿Reparte sobres de `project`? (`*` o glob con la sintaxis de `fnmatch`, como `webhooks.matches` del agente).
+    public func serves(_ project: String) -> Bool {
+        projects.contains { $0 == "*" || fnmatch($0, project, 0) == 0 }
     }
 }
 
@@ -261,14 +272,39 @@ public struct MachineRoom: Equatable, Sendable {
 
     /// Desde `GET /state` (o el evento `state`): lee `machine_room` si viene. Tolerante: ignora lo que no conoce.
     public init(state json: JSONValue) {
-        self.init()
+        self.init(room: json["machine_room"]?.object ?? [:])
         headSeq = json["head_seq"]?.int ?? 0
-        guard let mr = json["machine_room"]?.object else { return }
-        listeners = (mr["listeners"]?.array ?? []).compactMap { $0.object.flatMap(ListenerStatus.init(json:)) }
-        automations = (mr["automations"]?.array ?? []).compactMap { $0.object.flatMap(AutomationStatus.init(json:)) }
-        subscriptions = (mr["subscriptions"]?.array ?? []).compactMap { $0.object.flatMap(SubscriptionStatus.init(json:)) }
-        rack = (mr["rack"]?.array ?? []).compactMap(RackUnit.init(json:))
+    }
+
+    /// Desde un objeto `machine_room` (el de arriba del estado o el `projects[].machine_room` de un proyecto).
+    public init(room mr: JSONValue.Object) {
+        self.init(listeners: mr["listeners"]?.array ?? [], automations: mr["automations"]?.array ?? [],
+                  subscriptions: mr["subscriptions"]?.array ?? [], rack: mr["rack"]?.array ?? [])
+    }
+
+    /// Desde la sala ya plegada de `LiveState` (lo que usa la app).
+    public init(_ s: LiveState.MachineRoomState) {
+        self.init(listeners: s.listeners.map(JSONValue.object), automations: s.automations.map(JSONValue.object),
+                  subscriptions: s.subscriptions.map(JSONValue.object), rack: s.rack.map(JSONValue.object))
+    }
+
+    private init(listeners l: [JSONValue], automations a: [JSONValue], subscriptions sb: [JSONValue], rack r: [JSONValue]) {
+        self.init()
+        listeners = l.compactMap { $0.object.flatMap(ListenerStatus.init(json:)) }
+        automations = a.compactMap { $0.object.flatMap(AutomationStatus.init(json:)) }
+        subscriptions = sb.compactMap { $0.object.flatMap(SubscriptionStatus.init(json:)) }
+        rack = r.compactMap(RackUnit.init(json:))
         sortRack()
+    }
+
+    /// La sala vista desde el piso de `project`: su rack, sus automatizaciones y los webhooks que lo reparten; los listeners son
+    /// del agente y sirven a todos, así que van enteros. Misma regla que `machine_room.scope` del agente.
+    public func scoped(to project: String) -> MachineRoom {
+        var r = self
+        r.automations = automations.filter { $0.project == project }
+        r.subscriptions = subscriptions.filter { $0.serves(project) }
+        r.rack = rack.filter { $0.project == project }
+        return r
     }
 
     /// Tipos que cambian la sala.

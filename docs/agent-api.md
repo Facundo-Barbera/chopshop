@@ -187,7 +187,8 @@ data: { ...sobre (docs/event-envelope.md)... }
 
 Plan: `docs/plans/office-redesign.md`. Todo lo de la v2 sigue igual; `GET /state`, el `hello` y el evento `state` del stream
 pasan a decir `api_version: 3` y el estado gana campos. Un cliente v2 ignora lo nuevo. La regla sigue siendo
-`GET /state == fold(apply, sobres)`; la única excepción es `machine_room.subscriptions`, que no viene de sobres (ver abajo).
+`GET /state == fold(apply, sobres)`; la única excepción es `machine_room.subscriptions` (y su copia recortada en
+`projects[].machine_room.subscriptions`), que no viene de sobres (ver abajo).
 
 ### Forma nueva de `GET /state`
 
@@ -217,6 +218,19 @@ pasan a decir `api_version: 3` y el estado gana campos. Un cliente v2 ignora lo 
                        "actor": "...", "head_branch": "be/x", "head_sha": "abc", "url": "...", "updated_at": "...",
                        "origin": {"kind": "thread", "id": "mcp:b7", "label": "backend · awesome-gb/0/backend/0"}}]}]}}
 ```
+
+Además, cada proyecto lleva la **sala de máquinas de su piso** (aditivo; la app la pinta como una sala del piso más bajo del
+proyecto, no hay vista aparte):
+
+```json
+{"projects": [{"name": "awesome-gb", "...": "...",
+  "machine_room": {"floor": 0, "listeners": ["…todos…"], "automations": ["…las del proyecto…"],
+                   "subscriptions": ["…las que lo reparten…"], "rack": ["…sus módulos…"]}}]}
+```
+
+`floor` = el índice más bajo de `office.floors` (0 sin `office`). `rack` y `automations`: los de `project` igual al proyecto;
+`subscriptions`: las que tienen `*` o un glob que lo cubre en `projects` (sin `projects`, todas); `listeners`: todos (son del
+agente). Se recalcula tras cada sobre (`machine_room.rooms`, parte de `fold`) y tras rellenar `subscriptions`.
 
 ### Regla `apply` de los sobres nuevos (la misma en `projection.py` y en `LiveState.swift`)
 
@@ -249,7 +263,7 @@ pasan a decir `api_version: 3` y el estado gana campos. Un cliente v2 ignora lo 
   sujeto (nunca de la tarea).
 
 `machine_room.subscriptions` lo rellena `GET /state` (y el evento `state` del stream) desde la tabla de suscripciones y la
-última entrega (`deliveries`): nombre, `last_ok`, `last_error` (texto corto, nunca la URL), `signed`. No cambia con los deltas;
+última entrega (`deliveries`): nombre, `projects` (su filtro), `last_ok`, `last_error` (texto corto, nunca la URL), `signed`. No cambia con los deltas;
 la app lo refresca con cada `state`. El test de equivalencia lo excluye.
 
 ### Semivida (función pura compartida)

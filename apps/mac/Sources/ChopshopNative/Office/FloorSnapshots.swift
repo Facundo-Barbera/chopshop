@@ -6,12 +6,15 @@ import AppKit
 @available(macOS 26.0, *)
 @MainActor
 public extension Snapshots {
-    /// Piso Producto (oscuro/claro), triage dormido seleccionado y vestíbulo: `floor-*.png`.
+    /// Piso Producto con su sala de máquinas (oscuro/claro), triage dormido seleccionado, armario del repo principal seleccionado
+    /// (panel de la sala) y vestíbulo: `floor-*.png`.
     static func renderFloors(to out: String) {
         let shots: [(String, FloorPlan, Bool, String?, CGSize)] = [
             ("floor-producto-dark", FloorFixture.floor, true, nil, CGSize(width: 1100, height: 620)),
             ("floor-producto-light", FloorFixture.floor, false, nil, CGSize(width: 1100, height: 620)),
             ("floor-triage-selected", FloorFixture.floor, true, "awesome-gb/0/triage/0", CGSize(width: 1100, height: 620)),
+            ("floor-machine-room-selected", FloorFixture.floor, true, FloorLayout.cabinetID("github:<org>/<repo-principal>"),
+             CGSize(width: 1100, height: 760)),
             ("floor-lobby-dark", FloorFixture.lobby, true, nil, CGSize(width: 1000, height: 480)),
         ]
         for (name, plan, dark, sel, size) in shots {
@@ -42,6 +45,9 @@ public extension Snapshots {
               to: "\(out)/city-office-zoom-mitad.png")
         write(city(CityFocus(project: "awesome-gb", p: 1, floor: "awesome-gb#1")), dark: true, size: size,
               to: "\(out)/city-office-zoom-fin.png")
+        // el piso más bajo trae la sala de máquinas del proyecto
+        write(city(CityFocus(project: "awesome-gb", p: 0.7, floor: "awesome-gb#0")), dark: true, size: size,
+              to: "\(out)/city-office-zoom-producto.png")
         if let docs = FloorPlan.floor(in: state, project: "awesome-gb", index: 1) {
             write(FloorOfficeView(plan: docs, frozenNow: FloorFixture.now, flatChrome: true).background(IsoBackdrop()),
                   dark: true, size: CGSize(width: 1100, height: 620), to: "\(out)/city-office-piso-docs.png")
