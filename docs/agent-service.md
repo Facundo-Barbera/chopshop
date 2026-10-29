@@ -116,11 +116,17 @@ Es una capa delgada sobre T3: **no** lanza servidores de prueba, no reparte puer
    curl -s http://127.0.0.1:3790/snapshot | python3 -m json.tool | head -40
    ```
 
-   Desde otra máquina de tu tailnet contra `host-a` (IP de ejemplo; identidad Tailscale para leer, más bearer para escribir):
+   Desde otra máquina de tu tailnet contra `host-a` (IP de ejemplo; identidad Tailscale **y** una credencial en toda petición
+   salvo `/health`: la de un dispositivo emparejado o el bearer legado del paso 3):
 
    ```sh
-   TOKEN="$(cat ~/.chopshop/agent/token)"      # el archivo copiado en el paso 3
-   curl -s http://100.64.0.10:3790/snapshot | head -c 300
+   # en host-a:            chopshop pair create --name "portátil"     -> código de un solo uso, p. ej. K7QM-93XD (10 min)
+   # en la otra máquina:   canjearlo una vez y guardar la credencial cs1_… (la app de Mac lo hace sola y la guarda en el Keychain)
+   curl -s -X POST http://100.64.0.10:3790/pair -H 'Content-Type: application/json' \
+        -d '{"code": "K7QM-93XD", "device_name": "portátil"}'
+   TOKEN="cs1_..."                             # o el bearer legado: "$(cat ~/.chopshop/agent/token)"
+   curl -s -H "Authorization: Bearer $TOKEN" http://100.64.0.10:3790/snapshot | head -c 300
+   curl -sN -H "Authorization: Bearer $TOKEN" http://100.64.0.10:3790/stream      # eventos en vivo (SSE)
    curl -s -X POST http://100.64.0.10:3790/settle \
         -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"thread_id": "<id del hilo>"}'
    ```
@@ -140,7 +146,7 @@ Es una capa delgada sobre T3: **no** lanza servidores de prueba, no reparte puer
 
 | Modo | Quién entra |
 |---|---|
-| `tailscale+token` | identidad de Tailscale (`tailscale whois --json <ip>`, cache 60 s): `owner_login` lee y escribe, `allowed_logins` solo leen. **Escribir exige además el bearer.** |
+| `tailscale+token` | identidad de Tailscale (`tailscale whois --json <ip>`, cache 60 s): `owner_login` lee y escribe, `allowed_logins` solo leen. **Toda petición (salvo `GET /health` y `POST /pair`) exige además una credencial**: la de un dispositivo emparejado (`chopshop pair create|list|revoke|prune`, ver docs/agent-api.md) o el bearer legado. |
 | `token` | solo el bearer, en toda petición. Para clientes sin identidad Tailscale o si no usas Tailscale |
 | `none-local` | nadie por red; solo el origen local |
 
@@ -159,7 +165,8 @@ El agente **no ejecuta comandos que le pida un cliente**: no hay ninguna ruta qu
 | `chopshop agent check-config` dice `bind = "auto" pero no pude obtener la IP de Tailscale` | `tailscaled` no está activo o `tailscale_bin` no es el correcto. Arráncalo o pon la IP en `agent.bind` |
 | La unidad falla al arrancar y reintenta cada 10 s | `journalctl --user -u chopshop-agent -n 50`. Típico: puerto ocupado, `bind` inválido o IP de Tailscale aún sin levantar al iniciar sesión (reintenta solo) |
 | `403 sin identidad válida` desde otra máquina | `owner_login`/`allowed_logins` no coincide con el login real (`tailscale whois 100.64.0.x`), o `tailscale whois` no responde (falta `tailscale set --operator`). Con `auth = "token"` falta el bearer |
-| `403 las escrituras exigen el bearer` | añade `Authorization: Bearer $(cat token)`; el token del cliente debe ser el mismo archivo del agente |
+| `401 falta una credencial válida` | empareja el dispositivo (`chopshop pair create` en el agente + `POST /pair`) o usa `Authorization: Bearer $(cat token)` con el mismo archivo del agente; si el dispositivo fue revocado, vuelve a emparejarlo |
+| `403 Host no reconocido` / `cabecera Origin` / `Content-Type` | conecta por IP o por `machine_id`/hostname (o añade el nombre a `agent.allowed_hosts`); no llames al agente desde un navegador; las escrituras van con `Content-Type: application/json` |
 | `403 esta identidad es de solo lectura` | el login está en `allowed_logins`; solo `owner_login` escribe |
 | `agent.t3_ok` es `false` / evento `t3_unreachable` | revisa `agent.t3.t3_bin` / `origin`, la credencial cacheada en `<CHOPSHOP_HOME>/t3-credential.json` (bórrala para forzar un pairing nuevo) y que T3 esté arriba; el agente reintenta con backoff (10 s → 5 min) y avisa `t3_recovered` |
 | `503 T3 desactivado` | `agent.t3_enabled = false` en esa máquina |

@@ -21,7 +21,7 @@ import threading
 import time
 
 from .. import engine as engine_mod, events as legacy_events, graph, home, settings, state
-from . import __version__, collector as collector_mod, config, db, envelope, events, server, t3watch
+from . import __version__, collector as collector_mod, config, db, envelope, events, pairing, server, t3watch
 
 log = logging.getLogger("chopshop.agent")
 
@@ -191,14 +191,16 @@ def prune_events(conn, days, now=None):
 
 # ---------------------------------------------------------------- puente del motor
 
-def engine_emitter(conn, cfg, poster=None):
+def engine_emitter(conn, cfg, poster=None, on_emit=None):
     """`emit_fn` para el motor dentro del agente (misma firma y resultado que `chopshop.events.emit`): primero guarda el
     sobre en el bus (con el mismo `ts` en segundos que la línea de events.jsonl, así `import_legacy` la reconoce y no la
     duplica) y después hace lo de siempre (events.jsonl + suscripciones de state.json, p. ej. el `notify` de reacciones)."""
     def emit_fn(st, event, project, body, adhoc_files=None, log=True, only=None):
         ts = state.now()
         try:
-            events.emit(conn, cfg, event, project, body, poster=poster, ts=envelope.epoch(ts))
+            seq = events.emit(conn, cfg, event, project, body, poster=poster, ts=envelope.epoch(ts))
+            if on_emit:
+                on_emit(seq)                     # despierta a /stream
         except Exception:  # noqa: BLE001 - el bus no debe frenar al motor
             logging.getLogger("chopshop.agent").exception("no pude registrar %s en el bus", event)
         return legacy_events.emit(st, event, project, body, adhoc_files, log=log, only=only, ts=ts)
@@ -221,7 +223,7 @@ class AgentService:
 
     def __init__(self, cfg, conn=None, collector=None, t3=None, runner=None, poster=None,
                  orchestrator_fn=None, clock=time.time, maint_interval=MAINT_INTERVAL, maint_first=MAINT_FIRST, compact_every=COMPACT_EVERY,
-                 engine_tick=None):
+                 engine_tick=None, stream_opts=None):
         self.cfg, self.clock, self.runner, self.poster = cfg, clock, runner, poster
         self.engine_tick = engine_tick or engine_mod.tick
         self.owns_conn = conn is None
@@ -229,10 +231,11 @@ class AgentService:
         self.collector = collector or collector_mod.Collector(cfg, self.conn)
         self.t3 = t3 or t3watch.T3(cfg)
         self.runtime = server.Runtime(clock)
-        self.auth = server.Authenticator(cfg, runner)
+        self.pairing = pairing.Pairing(self.conn, clock)
+        self.auth = server.Authenticator(cfg, runner, pairing=self.pairing)
         self.app = server.AgentApp(cfg, self.conn, self.collector, self.t3, self.auth, self.runtime,
-                                   self.emit, orchestrator_fn, clock)
-        self.engine_emit = engine_emitter(self.conn, cfg, poster)
+                                   self.emit, orchestrator_fn, clock, pairing=self.pairing, stream_opts=stream_opts)
+        self.engine_emit = engine_emitter(self.conn, cfg, poster, self.app.stream.bus.publish)
         self.maint_interval, self.maint_first = maint_interval, maint_first
         self.compact_every = compact_every
         self.stop_event = threading.Event()
@@ -241,7 +244,9 @@ class AgentService:
 
     # -- API común de los módulos
     def emit(self, event, project, body=None):
-        return events.emit(self.conn, self.cfg, event, project, body, poster=self.poster)
+        seq = events.emit(self.conn, self.cfg, event, project, body, poster=self.poster)
+        self.app.stream.bus.publish(seq)            # despierta a los clientes de /stream
+        return seq
 
     @property
     def address(self):
@@ -263,6 +268,7 @@ class AgentService:
         except BaseException:
             self._close_servers()
             raise
+        self.app.listen_ips = {str(server.parse_ip(s.server_address[0])) for s in self.servers}
         self._import_legacy()
         if background:
             self._spawn("sampler", self._run_sampler)
@@ -302,6 +308,7 @@ class AgentService:
         res = events.import_legacy(self.conn, home.events_log(), self.cfg.get("machine_id"))
         if res["imported"]:
             log.info("importados %d eventos de events.jsonl (%d omitidos)", res["imported"], res["skipped"])
+            self.app.stream.bus.publish()
         return res
 
     def engine_once(self):
@@ -368,6 +375,7 @@ class AgentService:
             return
         self._stopped = True
         self.stop_event.set()
+        self.app.stream.close()                     # corta las conexiones SSE (sus hilos son daemon)
         self._close_servers()
         end = time.monotonic() + STOP_TIMEOUT
         for t in self.threads:
