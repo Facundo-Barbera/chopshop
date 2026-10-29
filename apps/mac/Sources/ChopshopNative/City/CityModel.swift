@@ -235,7 +235,7 @@ public struct CityModel: Equatable, Sendable {
             }
             floors = Array(floors.prefix(CityOffice.maxFloorsPerBuilding))
             if !lobby.isEmpty { floors.insert(lobbyFloor(lobby, company: c), at: 0) }
-            for k in floors.indices { floors[k].level = k; floors[k].alert?.floor = floors[k].id }
+            for k in floors.indices { let id = floors[k].id; floors[k].level = k; floors[k].alert?.floor = id }
             let col = i % cols, row = i / cols
             buildings.append(CityBuilding(company: c, index: i, x0: CityGeo.margin + Double(col) * CityGeo.pitchX,
                                           y0: CityGeo.margin + Double(row) * CityGeo.pitchY,

@@ -3,40 +3,7 @@ import XCTest
 
 /// Ciudad con `GET /state` v3: empresa desde `office.company`, un piso por piso del perfil, vestíbulo en la planta baja.
 final class CityOfficeTests: XCTestCase {
-    func desk(_ id: String, _ thread: String?) -> String {
-        let occ = thread.map { #"{"thread_id": "\#($0)", "phase": "running"}"# } ?? "null"
-        return #"{"id": "\#(id)", "slot": 0, "retired": false, "occupant": \#(occ), "lineage": [], "notes_pending": 0}"#
-    }
-
-    func task(_ id: String, thread: String, phase: String, attention: String? = nil) -> String {
-        let at = attention.map { #""\#($0)""# } ?? "null"
-        return #"{"id": "\#(id)", "thread_id": "\#(thread)", "phase": "\#(phase)", "attention": \#(at), "title": "t \#(id)"}"#
-    }
-
-    func state() throws -> LiveState {
-        let office = """
-        {"company": "Awesome GB", "half_life_s": 1800, "floors": [
-          {"index": 0, "name": "Producto", "rooms": [
-            {"role": "triage", "permanent": true, "desks": [\(desk("awesome-gb/0/triage/0", nil))]},
-            {"role": "backend", "permanent": false, "desks": [\(desk("awesome-gb/0/backend/0", "th-a")), \(desk("awesome-gb/0/backend/1", "th-b"))]}]},
-          {"index": 1, "name": "Docs", "rooms": [
-            {"role": "docs", "permanent": false, "desks": [\(desk("awesome-gb/1/docs/0", "th-c"))]}]}]}
-        """
-        let json = """
-        {"api_version": 3, "machine": "contabo-dev", "head_seq": 9, "projects": [
-          {"name": "awesome-gb", "counts": {}, "batches": [], "graphs": [], "office": \(office),
-           "tasks": [\(task("a", thread: "th-a", phase: "running")), \(task("b", thread: "th-b", phase: "waiting", attention: "human")),
-                     \(task("c", thread: "th-c", phase: "running")), \(task("d", thread: "th-d", phase: "running")),
-                     \(task("e", thread: "th-e", phase: "failed"))],
-           "attention": [{"key": "task:b", "needs": "human", "seq": 5, "type": "question.opened", "subject": {"kind": "task", "id": "b"},
-                          "summary": "¿sigo?"}]},
-          {"name": "chopshop", "counts": {}, "batches": [], "graphs": [],
-           "tasks": [\(task("x", thread: "th-x", phase: "running"))], "attention": []}],
-         "lobby": [{"thread_id": "th-d", "project": "awesome-gb", "company": "Awesome GB", "phase": "running", "waiting_role": null}],
-         "recent": []}
-        """
-        return try XCTUnwrap(LiveState(json: try JSONValue(text: json)))
-    }
+    func state() throws -> LiveState { try XCTUnwrap(CityOfficeFixture.state) }
 
     func testOfficeIsReadFromState() throws {
         let s = try state()

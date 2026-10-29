@@ -6,8 +6,8 @@ completa en verde en contabo-dev.
 
 ## 1. Compilar
 
-- [ ] `cd apps/mac && swift build` (app) y `cd apps/mac/native && swift build` (banco de pruebas, `NATIVE_PREVIEWS`).
-- [ ] Puntos de la integración con más riesgo de no compilar:
+- [x] `cd apps/mac && swift build` (app) y `cd apps/mac/native && swift build` (banco de pruebas, `NATIVE_PREVIEWS`).
+- [x] Puntos de la integración con más riesgo de no compilar:
   - **Sala de máquinas, dos tipos**: `LiveState.MachineRoomState` (anidado, JSON, `Live/LiveStateOffice.swift`; lo usan
     `LiveState`, `LiveStateNames`, `OfficeFixture`, `OfficeTests`) y el `MachineRoom` tipado de nivel superior
     (`MachineRoom/MachineRoomModel.swift`; lo usan `LiveStore`, `MachineRoomView`, `MachineRoomSnapshots`, `MachineRoomTests`).
@@ -31,19 +31,19 @@ cp apps/agent/tests/fixtures/events/machine-room-fixture.jsonl apps/mac/Sources/
 
 ## 3. `swift test`
 
-- [ ] `ContractTests` / `LiveStateTests` (dorada `ui-fixture.state.json` regenerada: v3 con `lobby` y `machine_room`).
-- [ ] `OfficeEquivalenceTests` (nuevo en la integración): oficina, vestíbulo y sala de máquinas == `projection.fold` de Python.
-- [ ] `OfficeTests` (incluye la tabla `office/halflife.json` de semivida), `CityOfficeTests`, `CityTests`, `FloorPlanTests`,
+- [x] `ContractTests` / `LiveStateTests` (dorada `ui-fixture.state.json` regenerada: v3 con `lobby` y `machine_room`).
+- [x] `OfficeEquivalenceTests` (nuevo en la integración): oficina, vestíbulo y sala de máquinas == `projection.fold` de Python.
+- [x] `OfficeTests` (incluye la tabla `office/halflife.json` de semivida), `CityOfficeTests`, `CityTests`, `FloorPlanTests`,
       `MachineRoomTests`, `StreamTests`, `SnapshotMapperTests`.
 
 ## 4. Capturas (`docs/screenshots.md`)
 
-- [ ] `ChopshopSnap <salida> machine-room` → `machine-room-dark.png` / `-light.png`: listeners (t3watch caído), scripts, y el
+- [x] `ChopshopSnap <salida> machine-room` → `machine-room-dark.png` / `-light.png`: listeners (t3watch caído), scripts, y el
       rack de Awesome GB con **dos módulos**: repo principal (rojo, 3 runs: hilo, cron, bot) y Engine CX (ámbar, run de
       automatización en cola). La vista calcula "hace X" con el reloj real: el texto relativo cambia entre capturas.
-- [ ] Ciudad con varios pisos por proyecto y vestíbulo en planta baja (escena de `CityOfficeTests`).
-- [ ] Previews de `Office/FloorOfficeView.swift` (piso Producto, triage seleccionado, vestíbulo).
-- [ ] Ciudad: clic en un piso de un proyecto con `office` → zoom continuo que acaba en `FloorOfficeView` de **ese** piso (etiquetas
+- [x] Ciudad con varios pisos por proyecto y vestíbulo en planta baja (escena de `CityOfficeTests`).
+- [x] Previews de `Office/FloorOfficeView.swift` (piso Producto, triage seleccionado, vestíbulo).
+- [x] Ciudad: clic en un piso de un proyecto con `office` → zoom continuo que acaba en `FloorOfficeView` de **ese** piso (etiquetas
       y barra de atención iguales durante el zoom y al montarse); un proyecto sin `office` sigue abriendo la vista Grafo.
 
 ## 5. Comportamiento a mirar a ojo
@@ -54,6 +54,20 @@ cp apps/agent/tests/fixtures/events/machine-room-fixture.jsonl apps/mac/Sources/
       ×2 si falló, sale bajo 0,1), retirado en gris, triage permanente "dormido" con su lámpara y notas pendientes.
 - [ ] Sala de máquinas (barra lateral, macOS 26): ámbar parpadea; chips de origen (hilo con rol · escritorio, automatización,
       bot, cron, humano); webhooks sin URL.
+
+## Resultado en el Mac (2026-10-29, Xcode 27.1, Swift 6.4, rama `fix/or-mac-verify`)
+
+- `swift build` en `apps/mac` y `apps/mac/native`: verde tras un arreglo (`CityModel.build`: acceso solapado a `floors[k]` al
+  asignar `alert?.floor`, error de exclusividad en Swift 6.4). `native/` no tiene target de tests.
+- `swift test` en `apps/mac`: 91 + 15 tests en verde tras un arreglo: `LiveState.trimRuns` reordenaba los runs del rack por
+  `updated_at`; ahora conserva el orden de llegada como `_trim` de `machine_room.py` (fallaba `OfficeEquivalenceTests`).
+  Doradas sin regenerar (no cambió el contrato).
+- Capturas: `ChopshopSnap <salida> machine-room | floor | city-office` (los dos últimos, nuevos: `Office/FloorSnapshots.swift`;
+  la escena de `CityOfficeTests` pasa a `City/CityOfficeFixture.swift`). Arreglado de paso en `RackRender`: con el rack estrecho
+  el subtítulo "proveedor · tipo · rama" se pisaba con el nombre del módulo; ahora la rejilla cede sitio y, si no cabe, se omite.
+  Los cuadros amarillos 🚫 a la derecha de cada run son los `Link` que `ImageRenderer` no sabe dibujar (solo en la captura).
+- El zoom de la ciudad se comprobó congelado (`frozenZoom` p = 0,5 y 1 hacia el piso Docs, el segundo del proyecto); el montaje
+  interactivo de `FloorOfficeView` tras el clic no se probó a mano.
 
 ## 6. Huecos conocidos (no son de compilar)
 

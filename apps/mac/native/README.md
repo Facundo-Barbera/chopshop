@@ -46,6 +46,10 @@ misma regla que `agent/machine_room.py`; tests en `MachineRoomTests` y `OfficeEq
   su proyección dorada está en `Tests/ChopshopNativeTests/Resources/machine-room-fixture.state.json`).
 - Capturas: `swift run ChopshopSnap /tmp/mr machine-room` → `machine-room-dark.png` / `machine-room-light.png`.
 
+Oficina por departamentos (`Office/`): `swift run ChopshopSnap /tmp/of floor` → `floor-*.png` (las previews de `FloorOfficeView`)
+y `swift run ChopshopSnap /tmp/of city-office` → `city-office-*.png` (ciudad v3 de `CityOfficeFixture`: varios pisos por proyecto,
+vestíbulo en planta baja, zoom al piso Docs y ese piso montado).
+
 ## Estructura
 
 - `Sources/ChopshopNative` es un **symlink** a `apps/mac/Sources/ChopshopNative`: el mismo código que compila la app.

@@ -152,8 +152,17 @@ struct RackRenderer {
                 g.fill(Path(ellipseIn: CGRect(x: x - 1.5, y: y - 1.5, width: 3, height: 3)), with: .color(pal.railHole.color))
             }
         }
+        // etiqueta: título a la izquierda y "proveedor · tipo · rama" a la derecha, junto a la rejilla; la rejilla cede sitio y,
+        // si aun así no cabe (rack estrecho), el subtítulo se omite (el detalle del módulo ya lo muestra)
+        let title = g.resolve(Text(u.title).font(.system(size: 12, weight: .semibold)).foregroundStyle(pal.text.color))
+        var sub = [u.provider, u.kind].compactMap { $0 }.joined(separator: " · ")
+        if let b = u.defaultBranch { sub += " · " + b }
+        let subt = g.resolve(Text(sub).font(.system(size: 9.5, design: .monospaced)).foregroundStyle(pal.subtext.color))
+        let titleEnd = r.minX + 44 + title.measure(in: r.size).width
+        let room = r.maxX - 22 - (titleEnd + 12 + subt.measure(in: r.size).width)
+        let ventW = max(0, min(110, r.width * 0.28, room))
+        let showSub = room >= 0
         // rejilla a la derecha
-        let ventW = min(110, r.width * 0.28)
         var vx = r.maxX - 14 - ventW
         while vx < r.maxX - 14 {
             g.fill(Path(roundedRect: CGRect(x: vx, y: r.minY + 9, width: 2.5, height: r.height - 18), cornerRadius: 1), with: .color(pal.vent.color))
@@ -172,13 +181,8 @@ struct RackRenderer {
         g.fill(Path(ellipseIn: lampRect), with: .color(pal.ledOff.mix(lc, u.light == .gray ? 0.6 : k).color))
         g.fill(Path(ellipseIn: CGRect(x: s.lamp.x - lr * 0.45, y: s.lamp.y - lr * 0.6, width: lr * 0.6, height: lr * 0.45)),
                with: .color(.white.opacity(0.35 * k)))
-        // etiqueta
-        let title = Text(u.title).font(.system(size: 12, weight: .semibold)).foregroundStyle(pal.text.color)
         g.draw(title, at: CGPoint(x: r.minX + 44, y: r.minY + 13), anchor: .leading)
-        var sub = [u.provider, u.kind].compactMap { $0 }.joined(separator: " · ")
-        if let b = u.defaultBranch { sub += " · " + b }
-        let subt = Text(sub).font(.system(size: 9.5, design: .monospaced)).foregroundStyle(pal.subtext.color)
-        g.draw(subt, at: CGPoint(x: r.maxX - 22 - ventW, y: r.minY + 13), anchor: .trailing)
+        if showSub { g.draw(subt, at: CGPoint(x: r.maxX - 22 - ventW, y: r.minY + 13), anchor: .trailing) }
         // leds de runs
         let runs = RackLayout.runOrder(u)
         for (i, c) in s.leds.enumerated() where i < runs.count {
