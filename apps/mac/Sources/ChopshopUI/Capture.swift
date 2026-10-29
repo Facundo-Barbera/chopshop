@@ -4,6 +4,7 @@ import Foundation
 /// Captura de pantalla desde dentro de la app (para documentación/iteración de diseño).
 /// `screencapture` por ssh no tiene permiso de grabación de pantalla; una app sí puede
 /// leer sus propias ventanas. Protocolo: escribir "<sección> <ruta.png>" en /tmp/chopshop-shot.req.
+/// `settings` abre la hoja de ajustes y captura la hoja; cualquier otra sección la cierra.
 @MainActor
 enum Capture {
     static let requestPath = "/tmp/chopshop-shot.req"
@@ -19,7 +20,10 @@ enum Capture {
         try? FileManager.default.removeItem(atPath: requestPath)
         let parts = txt.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: " ", maxSplits: 1).map(String.init)
         guard parts.count == 2 else { return }
-        if parts[0].hasPrefix("project:") { model.nav = .project(String(parts[0].dropFirst(8))) }
+        let sheet = parts[0] == "settings"
+        model.showSettings = sheet
+        if sheet {}
+        else if parts[0].hasPrefix("project:") { model.nav = .project(String(parts[0].dropFirst(8))) }
         else if parts[0].hasPrefix("machine:") { model.nav = .machine(String(parts[0].dropFirst(8))) }
         else if let s = Section(rawValue: parts[0]) { model.nav = s == .machines ? .machines : .section(s) }
         let out = parts[1]
@@ -31,13 +35,14 @@ enum Capture {
             delay = 2.0
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-            let ok = snap(to: out)
+            let ok = snap(to: out, sheet: sheet)
             try? (ok ? "ok" : "fail").write(toFile: out + ".done", atomically: true, encoding: .utf8)
         }
     }
 
-    static func snap(to path: String) -> Bool {
-        guard let win = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }) else { return false }
+    static func snap(to path: String, sheet: Bool = false) -> Bool {
+        guard let main = NSApp.windows.first(where: { $0.isVisible && $0.styleMask.contains(.titled) && $0.sheetParent == nil }),
+              let win = sheet ? main.attachedSheet : main else { return false }
         typealias Fn = @convention(c) (CGRect, UInt32, UInt32, UInt32) -> Unmanaged<CGImage>?
         guard let sym = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "CGWindowListCreateImage") else { return false }
         let fn = unsafeBitCast(sym, to: Fn.self)

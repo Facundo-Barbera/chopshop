@@ -1,9 +1,9 @@
 import Foundation
 
 /// Edición del `config.toml` desde la pantalla de ajustes. Solo Foundation (sin SwiftUI) para poder probarla aparte.
-/// Escribe únicamente `agent_url` de la sección `[app]` (y quita el `token_file` de versiones anteriores, que ya no se usa:
-/// la credencial vive en el Keychain); el resto del archivo (otras secciones, `[app.agents.*]`, `refresh_seconds`, comentarios,
-/// líneas en blanco) queda tal cual.
+/// La pantalla gestiona la lista de máquinas: las tablas `[app.agents.<nombre>]` (`url`, `enabled`), que se reescriben enteras
+/// (`update(text:agents:)`), y quita de `[app]` el `agent_url` suelto y el `token_file` de versiones anteriores (la credencial vive
+/// en el Keychain). El resto del archivo (otras secciones, `refresh_seconds`, comentarios, líneas en blanco) queda tal cual.
 enum ConfigWriter {
     /// Claves de `[app]` que la pantalla de ajustes gestiona (`token_file` solo para borrarla).
     static let managedKeys = ["agent_url", "token_file"]
@@ -26,10 +26,105 @@ enum ConfigWriter {
         return nil
     }
 
+    /// nil si el nombre sirve para una máquina nueva o editada (`others`: los nombres de las demás); si no, el mensaje.
+    /// Letras, números, `-` y `_` (así también vale como clave de entorno `CHOPSHOP_APP__AGENTS__<NOMBRE>__URL`).
+    static func validateName(_ raw: String, others: [String]) -> String? {
+        let n = raw.trimmingCharacters(in: .whitespaces)
+        if n.isEmpty { return "Ponle un nombre a la máquina (por ejemplo mini o contabo)." }
+        guard n.count <= 40, isBareKey(n) else { return "El nombre solo puede tener letras, números, - y _ (máximo 40)." }
+        if others.contains(where: { $0.caseInsensitiveCompare(n) == .orderedSame }) { return "Ya hay una máquina con ese nombre." }
+        return nil
+    }
+
+    /// Clave TOML sin comillas: letras y números ASCII, `-` y `_`.
+    static func isBareKey(_ s: String) -> Bool {
+        !s.isEmpty && s.unicodeScalars.allSatisfy { ($0.isASCII && CharacterSet.alphanumerics.contains($0)) || $0 == "-" || $0 == "_" }
+    }
+
     // MARK: - Lectura de los valores actuales (solo del archivo, sin entorno)
 
     static func currentAgentURL(text: String) -> String {
         TomlLite.parse(text).first(where: { $0.path == ["app"] })?.values["agent_url"] ?? ""
+    }
+
+    // MARK: - Lista de máquinas
+
+    /// Devuelve `text` con las máquinas de `agents` como tablas `[app.agents.<nombre>]`, en ese orden:
+    /// - las tablas `[app.agents.*]` que hubiera se quitan enteras (también claves que la app ya no usa, como `token_file`);
+    /// - las nuevas van justo después de la sección `[app]` (que se crea al final si no existe);
+    /// - de `[app]` se quitan `agent_url` y `token_file` (migración desde la configuración de un solo agente).
+    static func update(text: String, agents: [AgentSpec]) -> String {
+        let eol = text.contains("\r\n") ? "\r\n" : "\n"
+        var blocks = split(update(text: text, agentURL: "")).filter { b in
+            guard let p = b.path else { return true }
+            return !(p.count == 3 && p[0] == "app" && p[1] == "agents")
+        }
+        var tables: [String] = []
+        for a in agents {
+            tables += ["[app.agents.\(isBareKey(a.name) ? a.name : quote(a.name))]",
+                       "url = " + quote(AppConfig.normalizeURL(a.url)),
+                       "enabled = \(a.enabled)",
+                       ""]
+        }
+        func trimTail(_ i: Int) {
+            while let l = blocks[i].lines.last, l.trimmingCharacters(in: .whitespaces).isEmpty { blocks[i].lines.removeLast() }
+        }
+        if let i = blocks.firstIndex(where: { $0.path == ["app"] }) {
+            trimTail(i)
+            blocks[i].lines.append("")
+            blocks[i].lines += tables
+        } else if !agents.isEmpty {
+            if let last = blocks.indices.last {
+                trimTail(last)
+                if !blocks[last].lines.isEmpty { blocks[last].lines.append("") }
+            }
+            blocks.append(Block(path: ["app"], lines: ["[app]", ""] + tables))
+        }
+        var lines = blocks.flatMap(\.lines)
+        while lines.count > 1, lines[lines.count - 1].isEmpty, lines[lines.count - 2].isEmpty { lines.removeLast() }
+        if let l = lines.last, !l.isEmpty { lines.append("") }
+        return lines.joined(separator: eol)
+    }
+
+    /// Si `text` es una configuración de un solo agente (`agent_url`/`token_file` sueltos en `[app]`), el texto migrado a
+    /// `[app.agents.*]` (el `agent_url` pasa a ser la máquina `agente`, el nombre que ya tenía); nil si no hay nada que migrar.
+    static func migrateLegacy(text: String) -> String? {
+        let app = TomlLite.parse(text).first(where: { $0.path == ["app"] })?.values ?? [:]
+        guard app["agent_url"] != nil || app["token_file"] != nil else { return nil }
+        return update(text: text, agents: AppConfig.parse(text).agents)
+    }
+
+    /// Trozo del archivo: un encabezado `[tabla]` y sus líneas hasta el siguiente (el primero, sin encabezado: lo de antes).
+    struct Block {
+        var path: [String]?
+        var lines: [String]
+    }
+
+    /// Parte `text` en bloques por encabezado, sin confundir con encabezados los `[` de valores multilínea.
+    static func split(_ text: String) -> [Block] {
+        let lines = text.replacingOccurrences(of: "\r\n", with: "\n")
+            .split(separator: "\n", omittingEmptySubsequences: false).map { String($0) }
+        var blocks = [Block(path: nil, lines: [])]
+        var depth = 0
+        var triple: String?
+        for raw in lines {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if let t = triple {
+                if line.contains(t) { triple = nil }
+            } else if depth > 0 {
+                depth = max(0, depth + TomlLite.bracketDelta(line))
+            } else if line.hasPrefix("[") {
+                blocks.append(Block(path: line.hasPrefix("[[") ? [] : (TomlLite.headerPath(line) ?? []), lines: [raw]))
+                continue
+            } else if !line.hasPrefix("#"), let eq = line.firstIndex(of: "=") {
+                let rest = line[line.index(after: eq)...].trimmingCharacters(in: .whitespaces)
+                for q in ["\"\"\"", "'''"] where rest.hasPrefix(q) && !rest.dropFirst(3).contains(q) { triple = q }
+                if triple == nil, rest.hasPrefix("[") || rest.hasPrefix("{") { depth = max(0, TomlLite.bracketDelta(rest)) }
+            }
+            blocks[blocks.count - 1].lines.append(raw)
+        }
+        if blocks[0].lines.isEmpty { blocks.removeFirst() }
+        return blocks
     }
 
     // MARK: - Edición pura del texto
@@ -198,11 +293,21 @@ enum ConfigWriter {
     /// carpeta y luego lo mueve encima, para que el archivo nunca quede legible por otros ni a medio escribir.
     /// Si `path` es un enlace simbólico (dotfiles), se escribe en su destino.
     static func save(path: String, agentURL: String) throws {
+        try save(path: path) { update(text: $0, agentURL: agentURL) }
+    }
+
+    /// Guarda la lista de máquinas (ver `update(text:agents:)`), igual que `save(path:agentURL:)`.
+    static func save(path: String, agents: [AgentSpec]) throws {
+        try save(path: path) { update(text: $0, agents: agents) }
+    }
+
+    /// Lee `path` ("" si no existe), aplica `transform` y escribe el resultado (600, temporal + mover).
+    static func save(path: String, transform: (String) -> String) throws {
         let fm = FileManager.default
         let target = URL(fileURLWithPath: path).resolvingSymlinksInPath()
         var text = ""
         if let data = fm.contents(atPath: target.path) { text = String(decoding: data, as: UTF8.self) }
-        let updated = update(text: text, agentURL: agentURL)
+        let updated = transform(text)
 
         let dir = target.deletingLastPathComponent()
         try fm.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
