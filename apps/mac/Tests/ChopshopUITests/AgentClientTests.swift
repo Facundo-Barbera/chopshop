@@ -1,5 +1,6 @@
 import XCTest
 @testable import ChopshopUI
+import ChopshopNative
 
 final class FakeTransport: HTTPTransport {
     var responses: [String: (Int, String)] = [:]   // "METHOD /ruta" -> (código, JSON)
@@ -17,8 +18,12 @@ final class FakeTransport: HTTPTransport {
 }
 
 final class AgentClientTests: XCTestCase {
-    func client(_ t: FakeTransport, token: String? = "token-de-prueba", file: String? = "/tmp/t") -> AgentClient {
-        AgentClient(spec: AgentSpec(name: "host-a", url: "http://100.64.0.10:3790", tokenFile: file), transport: t, readToken: { _ in token })
+    func store(_ token: String?) -> InMemoryCredentialStore {
+        InMemoryCredentialStore(token.map { ["host-a@100.64.0.10:3790": $0] } ?? [:])
+    }
+
+    func client(_ t: FakeTransport, token: String? = "cs1_de-prueba") -> AgentClient {
+        AgentClient(spec: AgentSpec(name: "host-a", url: "http://100.64.0.10:3790"), transport: t, credentials: store(token))
     }
 
     func testSnapshotOKSendsBearer() async {
@@ -27,10 +32,18 @@ final class AgentClientTests: XCTestCase {
         let r = await client(t).fetchSnapshot()
         XCTAssertEqual(r.status, .ok)
         XCTAssertEqual(r.machineId, "host-a")
-        XCTAssertEqual(t.seen[0].value(forHTTPHeaderField: "Authorization"), "Bearer token-de-prueba")
+        XCTAssertEqual(t.seen[0].value(forHTTPHeaderField: "Authorization"), "Bearer cs1_de-prueba")
         XCTAssertEqual(t.seen[0].url?.absoluteString, "http://100.64.0.10:3790/snapshot")
         // el puente nunca lleva el token
-        XCTAssertFalse(String(describing: r.bridgeObject).contains("token-de-prueba"))
+        XCTAssertFalse(String(describing: r.bridgeObject).contains("cs1_de-prueba"))
+    }
+
+    func testCredentialIsPerAgentEndpoint() async {
+        let t = FakeTransport()
+        t.responses["GET /snapshot"] = (200, "{}")
+        let other = AgentClient(spec: AgentSpec(name: "b", url: "http://100.64.0.11:3790"), transport: t, credentials: store("cs1_de-prueba"))
+        _ = await other.fetchSnapshot()
+        XCTAssertNil(t.seen[0].value(forHTTPHeaderField: "Authorization"), "la credencial de otro agente no se manda")
     }
 
     func testWithoutTokenNoAuthorizationHeader() async {
@@ -65,7 +78,7 @@ final class AgentClientTests: XCTestCase {
     }
 
     func testInvalidURLAndNonJSON() async {
-        let bad = AgentClient(spec: AgentSpec(name: "x", url: "ftp://host", tokenFile: nil), transport: FakeTransport())
+        let bad = AgentClient(spec: AgentSpec(name: "x", url: "ftp://host"), transport: FakeTransport(), credentials: store(nil))
         let r = await bad.fetchSnapshot()
         XCTAssertEqual(r.status, .error)
         let t = FakeTransport()
@@ -93,20 +106,26 @@ final class AgentClientTests: XCTestCase {
         XCTAssertEqual(t.seen[0].httpMethod, "POST")
         XCTAssertEqual(String(decoding: t.seen[0].httpBody ?? Data(), as: UTF8.self), "{\"thread_id\":\"th-1\"}")
         t.responses["POST /settle"] = (403, "{\"error\":\"solo lectura\"}")
-        let denied = await client(t, file: nil).perform(AgentAction.route(type: "settle", payload: ["thread_id": "th-1"])!)
+        let denied = await client(t, token: nil).perform(AgentAction.route(type: "settle", payload: ["thread_id": "th-1"])!)
         XCTAssertFalse(denied.ok)
         XCTAssertTrue(denied.message.contains("403"))
+        XCTAssertTrue(denied.message.contains("emparejado"), "explica que falta emparejar / actualizar el agente")
+        t.responses["POST /settle"] = (401, "{}")
+        let revoked = await client(t).perform(AgentAction.route(type: "settle", payload: ["thread_id": "th-1"])!)
+        XCTAssertTrue(revoked.message.contains("empareja"))
+        XCTAssertFalse(revoked.message.contains("cs1_"), "nunca se imprime la credencial")
     }
 
     func testHubKeepsOrderAndPicksClient() async {
         let t = FakeTransport()
         t.responses["GET /snapshot"] = (200, "{\"machine_id\":\"m\"}")
-        let hub = AgentHub(specs: [AgentSpec(name: "b", url: "http://100.64.0.11:3790", tokenFile: nil), AgentSpec(name: "a", url: "http://100.64.0.10:3790", tokenFile: nil)], transport: t)
+        let hub = AgentHub(specs: [AgentSpec(name: "b", url: "http://100.64.0.11:3790"), AgentSpec(name: "a", url: "http://100.64.0.10:3790")],
+                           transport: t, credentials: store(nil))
         let rs = await hub.fetchAll()
         XCTAssertEqual(rs.map { $0.name }, ["b", "a"])
         XCTAssertEqual(hub.client(named: "a")?.spec.name, "a")
         XCTAssertNil(hub.client(named: nil), "con varios agentes hay que indicar cuál")
-        let one = AgentHub(specs: [AgentSpec(name: "solo", url: "http://100.64.0.10:3790", tokenFile: nil)], transport: t)
+        let one = AgentHub(specs: [AgentSpec(name: "solo", url: "http://100.64.0.10:3790")], transport: t, credentials: store(nil))
         XCTAssertEqual(one.client(named: nil)?.spec.name, "solo")
     }
 }

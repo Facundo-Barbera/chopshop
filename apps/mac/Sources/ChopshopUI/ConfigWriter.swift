@@ -1,10 +1,11 @@
 import Foundation
 
 /// Edición del `config.toml` desde la pantalla de ajustes. Solo Foundation (sin SwiftUI) para poder probarla aparte.
-/// Escribe únicamente `agent_url` y `token_file` de la sección `[app]`; el resto del archivo (otras secciones,
-/// `[app.agents.*]`, `refresh_seconds`, comentarios, líneas en blanco) queda tal cual.
+/// Escribe únicamente `agent_url` de la sección `[app]` (y quita el `token_file` de versiones anteriores, que ya no se usa:
+/// la credencial vive en el Keychain); el resto del archivo (otras secciones, `[app.agents.*]`, `refresh_seconds`, comentarios,
+/// líneas en blanco) queda tal cual.
 enum ConfigWriter {
-    /// Claves que la pantalla de ajustes puede escribir.
+    /// Claves de `[app]` que la pantalla de ajustes gestiona (`token_file` solo para borrarla).
     static let managedKeys = ["agent_url", "token_file"]
 
     // MARK: - Validación
@@ -25,37 +26,24 @@ enum ConfigWriter {
         return nil
     }
 
-    /// nil si la ruta es aceptable (vacía también: el token es opcional para las lecturas).
-    /// Exige ruta absoluta o con `~` para que no se pegue el token en sí por error.
-    static func validateTokenFile(_ raw: String) -> String? {
-        let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if t.isEmpty { return nil }
-        if t.rangeOfCharacter(from: .newlines) != nil || !(t.hasPrefix("/") || t.hasPrefix("~")) {
-            return "Escribe la ruta de un archivo (absoluta o con ~), nunca el token en sí."
-        }
-        return nil
-    }
-
     // MARK: - Lectura de los valores actuales (solo del archivo, sin entorno)
 
-    static func currentValues(text: String) -> (agentURL: String, tokenFile: String) {
-        let app = TomlLite.parse(text).first(where: { $0.path == ["app"] })?.values ?? [:]
-        return (app["agent_url"] ?? "", app["token_file"] ?? "")
+    static func currentAgentURL(text: String) -> String {
+        TomlLite.parse(text).first(where: { $0.path == ["app"] })?.values["agent_url"] ?? ""
     }
 
     // MARK: - Edición pura del texto
 
-    /// Devuelve `text` con `agent_url` y `token_file` de `[app]` actualizados:
+    /// Devuelve `text` con `agent_url` de `[app]` actualizado:
     /// - si la clave existe en `[app]`, se reemplaza esa línea (se conservan sangría y comentario final);
     /// - si no existe, se agrega al final de la sección `[app]`; si no hay `[app]`, se agrega la sección al final del archivo;
-    /// - un valor vacío elimina la clave (así se puede quitar `token_file`).
+    /// - una URL vacía elimina la clave; `token_file` de `[app]` se elimina siempre (ya no se usa).
     /// No toca claves homónimas de otras secciones (`[app.agents.*]`, etc.).
-    static func update(text: String, agentURL: String, tokenFile: String) -> String {
+    static func update(text: String, agentURL: String) -> String {
         let url = AppConfig.normalizeURL(agentURL)
-        let token = tokenFile.trimmingCharacters(in: .whitespacesAndNewlines)
         let wanted: [(key: String, value: String?)] = [
             ("agent_url", url.isEmpty ? nil : url),
-            ("token_file", token.isEmpty ? nil : token),
+            ("token_file", nil),
         ]
 
         let eol = text.contains("\r\n") ? "\r\n" : "\n"
@@ -209,12 +197,12 @@ enum ConfigWriter {
     /// Lee `path` (si existe), aplica `update` y lo escribe con permisos 600: primero a un temporal 600 en la misma
     /// carpeta y luego lo mueve encima, para que el archivo nunca quede legible por otros ni a medio escribir.
     /// Si `path` es un enlace simbólico (dotfiles), se escribe en su destino.
-    static func save(path: String, agentURL: String, tokenFile: String) throws {
+    static func save(path: String, agentURL: String) throws {
         let fm = FileManager.default
         let target = URL(fileURLWithPath: path).resolvingSymlinksInPath()
         var text = ""
         if let data = fm.contents(atPath: target.path) { text = String(decoding: data, as: UTF8.self) }
-        let updated = update(text: text, agentURL: agentURL, tokenFile: tokenFile)
+        let updated = update(text: text, agentURL: agentURL)
 
         let dir = target.deletingLastPathComponent()
         try fm.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
@@ -241,9 +229,9 @@ extension ConfigWriter {
     /// Autocomprobación mínima de `update` (no se ejecuta al arrancar; llámala a mano o desde un REPL de depuración).
     /// Las pruebas completas están en Tests/ChopshopUITests/ConfigWriterTests.swift.
     static func selfCheck() -> Bool {
-        let src = "# c\n[app]\nagent_url = \"http://100.64.0.10:3790\"  # viejo\nrefresh_seconds = 3\n"
-        let out = update(text: src, agentURL: "http://100.64.0.11:3790/", tokenFile: "~/t")
-        return out == "# c\n[app]\nagent_url = \"http://100.64.0.11:3790\"  # viejo\nrefresh_seconds = 3\ntoken_file = \"~/t\"\n"
+        let src = "# c\n[app]\nagent_url = \"http://100.64.0.10:3790\"  # viejo\ntoken_file = \"~/t\"\nrefresh_seconds = 3\n"
+        let out = update(text: src, agentURL: "http://100.64.0.11:3790/")
+        return out == "# c\n[app]\nagent_url = \"http://100.64.0.11:3790\"  # viejo\nrefresh_seconds = 3\n"
     }
 }
 #endif
