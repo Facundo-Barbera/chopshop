@@ -376,6 +376,8 @@ def render_unit(cfg, exec_path=None, extra_rw=(), template=None, environ=None):
     exe = os.path.expanduser(exec_path) if exec_path else default_exec(env)
     rw = [os.path.dirname(cfg.get("db_path") or ""), home.home()]
     rw += list((cfg.get("service") or {}).get("read_write_paths") or []) + list(extra_rw)
+    if not (cfg.get("t3") or {}).get("origin"):    # T3 local: su CLI (`t3 auth pairing create`) escribe en su carpeta de datos
+        rw.append(env.get("T3CODE_HOME") or os.path.join(home_dir, ".t3"))
     seen, rw_out = set(), []
     for p in rw:
         p = os.path.abspath(os.path.expanduser(p)) if p else ""

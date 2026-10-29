@@ -76,6 +76,10 @@ Es una capa delgada sobre T3: **no** lanza servidores de prueba, no reparte puer
    `ProtectSystem=strict` con `ReadWritePaths` (db, `general.home`, extras), `Nice=10`, `CPUQuota=30%`, `MemoryHigh/Max`,
    `Slice=chopshop.slice`, `Restart=on-failure`.
 
+   Con el T3 local (`agent.t3.origin` vacío) la unidad añade sola a `ReadWritePaths` la carpeta de datos de T3 (`$T3CODE_HOME` o `~/.t3`):
+   el agente emite el pairing ejecutando `t3 auth pairing create` y ese CLI escribe ahí. Los topes de memoria (`MemoryHigh=1G`,
+   `MemoryMax=1500M`) dejan sitio a ese CLI (~300-500 MB); con topes menores queda en estado D y el `stop` de la unidad hace timeout.
+
    Para verificarla sin arrancar nada (si tienes `systemd-analyze`):
 
    ```sh

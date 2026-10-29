@@ -265,6 +265,31 @@ class TestUnit(TmpCase):
         text = service.render_unit(cfg, "/usr/bin/true", environ={"HOME": self.tmp, "PATH": "/usr/bin"})
         self.assertIn("-/srv/uno", text)
 
+    def test_local_t3_data_dir_is_writable(self):
+        text, _ = self.render()
+        self.assertIn(" -%h/.t3", text)                                      # T3 local: ~/.t3 por defecto
+        text, _ = self.render(env={"T3CODE_HOME": os.path.join(self.tmp, "casa", "t3-datos")})
+        self.assertIn(" -%h/t3-datos", text)
+        self.assertNotIn("%h/.t3", text)
+
+    def test_local_t3_data_dir_not_duplicated(self):
+        home = os.path.join(self.tmp, "casa")
+        cfg = base_cfg(self.tmp, service={"read_write_paths": ["~/.t3"]})
+        text = service.render_unit(cfg, "/usr/bin/true", environ={"HOME": home, "PATH": "/usr/bin"}).replace("%h/.t3/", "")
+        self.assertEqual(text.count("%h/.t3"), 1)
+
+    def test_remote_t3_origin_does_not_add_data_dir(self):
+        home = os.path.join(self.tmp, "casa")
+        cfg = base_cfg(self.tmp, t3={"origin": "http://192.0.2.5:3773"})
+        text = service.render_unit(cfg, "/usr/bin/true", environ={"HOME": home, "PATH": "/usr/bin"})
+        self.assertNotIn(".t3", text)
+
+    def test_template_memory_limits_fit_t3_cli(self):
+        with open(service.UNIT_TEMPLATE, encoding="utf-8") as f:
+            t = f.read()
+        self.assertRegex(t, r"(?m)^MemoryHigh=1G$")
+        self.assertRegex(t, r"(?m)^MemoryMax=1500M$")
+
     def test_unresolved_placeholder_is_an_error(self):
         tpl = os.path.join(self.tmp, "t.service")
         with open(tpl, "w") as f:
