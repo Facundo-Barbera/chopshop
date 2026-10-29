@@ -5,9 +5,9 @@ import os
 import sys
 import time
 
-from . import engine, events, graph, home, inbox, metrics, miniyaml, profile, state, t3
+from . import engine, events, graph, home, inbox, integrate, metrics, miniyaml, profile, state, t3
 
-HELP_EPILOG = """comandos: profile list|show|check | fanout | run | poll | watch | status | snapshot | metrics | wait | gather | answer [--queue] | stop | settle | subscribe | graph new|run|status | agent run|status|token|check-config|print-unit"""
+HELP_EPILOG = """comandos: profile list|show|check | fanout | run | poll | watch | status | snapshot | metrics | wait | gather | answer [--queue] | stop | settle | integrate | subscribe | graph new|run|status | agent run|status|token|check-config|print-unit"""
 
 
 def _load_tasks(args):
@@ -154,6 +154,23 @@ def cmd_settle(a):
     return 0
 
 
+def cmd_integrate(a):
+    rs = integrate.run(a.target, a.thread, a.host, a.project, a.dry_run, adhoc_files=a.webhook_file,
+                       log=(lambda *_: None) if a.json else print)
+    if a.json:
+        print(json.dumps(rs, indent=2, ensure_ascii=False))
+    else:
+        for r in rs:
+            line = "%s: %s" % (r["target"], r["status"])
+            if r["status"] == "ok":
+                line += " (%s -> %s %s%s)" % (r["branch"], r["base"], (r.get("commit") or "")[:10],
+                                              "" if r.get("settled") else "; settle falló: " + r.get("settle_error", ""))
+            elif r.get("detail") and r["status"] not in ("dry_run",):
+                line += "\n  " + r["detail"].replace("\n", "\n  ")[:800]
+            print(line)
+    return 0 if integrate.ok(rs) else 1
+
+
 def cmd_stop(a):
     n = engine.stop(a.batch, a.task)
     print("%d hilos interrumpidos (no se archiva ni se borra nada)" % n)
@@ -262,6 +279,9 @@ def build():
     x = sp.add_parser("gather"); x.add_argument("batch"); x.add_argument("--json", action="store_true"); x.set_defaults(f=cmd_gather)
     x = sp.add_parser("answer"); x.add_argument("task"); x.add_argument("choice", nargs="+"); x.add_argument("--request"); x.add_argument("--by", help="quién responde (bot-sim, humano…) para el historial"); x.add_argument("--queue", action="store_true", help="solo encola la respuesta (la envía watch/poll)"); x.set_defaults(f=cmd_answer)
     x = sp.add_parser("settle"); x.add_argument("batch"); x.set_defaults(f=cmd_settle)
+    x = sp.add_parser("integrate", help="rebase + tests + push sin reescribir historia a la base, y settle")
+    x.add_argument("target", nargs="?", help="id de lote o de tarea"); x.add_argument("--thread"); x.add_argument("--host"); x.add_argument("--project")
+    x.add_argument("--dry-run", action="store_true", help="solo pasos 1-3: sin push ni settle"); x.add_argument("--json", action="store_true"); hook(x); x.set_defaults(f=cmd_integrate)
     x = sp.add_parser("stop"); x.add_argument("batch", nargs="?"); x.add_argument("--task"); x.set_defaults(f=cmd_stop)
     x = sp.add_parser("snapshot"); x.add_argument("--events", type=int, default=80); x.set_defaults(f=cmd_snapshot)
     x = sp.add_parser("graph"); x.add_argument("action", choices=["new", "run", "status"]); x.add_argument("target", nargs="?", help="new: proyecto; run/status: id del grafo")
