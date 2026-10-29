@@ -14,6 +14,12 @@ struct IsoBackdrop: View {
     }
 }
 
+/// Lo que define la escena de la oficina o del grafo: si cambia, se reconstruye.
+struct LiveSceneKey: Equatable {
+    let graph: MockGraph
+    let tasks: [String: MockTask]
+}
+
 @available(macOS 26.0, *)
 struct IsoAlert: Identifiable { let id: String; let label: String; let title: String; let visual: NodeVisual }
 
@@ -121,6 +127,13 @@ public struct IsoOfficeView: View {
             }
         }
         .clipped()
+        // En vivo el grafo y las tareas cambian: se rehace la escena (la cámara y la selección viven aparte y se conservan).
+        .onChange(of: LiveSceneKey(graph: graph, tasks: tasks)) { _, k in
+            guard demo == nil else { return }
+            scene = IsoScene(graph: k.graph, tasks: k.tasks)
+            if let s = selected, scene.desk(s) == nil { selected = nil }
+            if let h = hovered, scene.desk(h) == nil { hovered = nil }
+        }
     }
 
     private func hit(_ p: CGPoint) -> String? {

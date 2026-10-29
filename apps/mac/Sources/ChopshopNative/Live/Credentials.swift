@@ -60,9 +60,13 @@ public final class InMemoryCredentialStore: CredentialStore, @unchecked Sendable
 
 /// Keychain del usuario: contraseña genérica, servicio `com.chopshop.agent`, accesible tras el primer desbloqueo y solo en este
 /// dispositivo (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`), sin sincronizar con iCloud.
+/// Guarda en memoria lo ya leído (la app pregunta en cada petición; así el Keychain se consulta una vez por cuenta).
 public final class KeychainCredentialStore: CredentialStore, @unchecked Sendable {
     public static let service = "com.chopshop.agent"
     public let service: String
+    private let lock = NSLock()
+    private var cache: [String: String] = [:]
+    private var cachedAccounts: [String]?
 
     public init(service: String = KeychainCredentialStore.service) { self.service = service }
 
@@ -75,6 +79,14 @@ public final class KeychainCredentialStore: CredentialStore, @unchecked Sendable
     }
 
     public func credential(account: String) -> String? {
+        lock.lock(); let hit = cache[account]; lock.unlock()
+        if let hit { return hit }
+        guard let v = read(account) else { return nil }
+        lock.lock(); cache[account] = v; lock.unlock()
+        return v
+    }
+
+    private func read(_ account: String) -> String? {
         var q = base(account)
         q[kSecReturnData as String] = true
         q[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -96,14 +108,24 @@ public final class KeychainCredentialStore: CredentialStore, @unchecked Sendable
             st = SecItemAdd(q as CFDictionary, nil)
         }
         guard st == errSecSuccess else { throw CredentialError.keychain(st) }
+        lock.lock(); cache[account] = credential; cachedAccounts = nil; lock.unlock()
     }
 
     public func delete(account: String) throws {
+        lock.lock(); cache[account] = nil; cachedAccounts = nil; lock.unlock()
         let st = SecItemDelete(base(account) as CFDictionary)
         guard st == errSecSuccess || st == errSecItemNotFound else { throw CredentialError.keychain(st) }
     }
 
     public func accounts() -> [String] {
+        lock.lock(); let hit = cachedAccounts; lock.unlock()
+        if let hit { return hit }
+        let list = readAccounts()
+        lock.lock(); cachedAccounts = list; lock.unlock()
+        return list
+    }
+
+    private func readAccounts() -> [String] {
         var q = base()
         q[kSecReturnAttributes as String] = true
         q[kSecMatchLimit as String] = kSecMatchLimitAll

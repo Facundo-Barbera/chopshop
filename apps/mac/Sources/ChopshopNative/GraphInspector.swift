@@ -32,13 +32,11 @@ struct GraphInspector: View {
             if let t = task, t.state == .needsYou {
                 if let q = t.question {
                     Text(q.summary).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    HStack(spacing: 6) { ForEach(q.options, id: \.self) { Button($0) {}.buttonStyle(.bordered).controlSize(.small) } }
-                } else {
-                    HStack(spacing: 6) { Button("Permitir") {}.buttonStyle(.bordered).controlSize(.small); Button("Denegar") {}.buttonStyle(.bordered).controlSize(.small) }
                 }
+                AttentionButtons(task: t).id(t.id)
             } else if let t = task, t.state == .stuck {
                 Text(t.lastError ?? "falló").font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                Button("Reintentar") {}.buttonStyle(.bordered).controlSize(.small)
+                AttentionButtons(task: t).id(t.id)
             } else if let r = task?.result ?? card.node.result {
                 Text(r).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }

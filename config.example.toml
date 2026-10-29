@@ -37,14 +37,14 @@ credential_file = "~/.chopshop/t3-credential-host-b.json"   # caché aparte por 
 # La app de macOS: cliente puro de la API del agente (no ejecuta nada local). Ver docs/mac-build.md.
 [app]
 agent_url = "http://100.64.0.10:3790"     # URL del chopshop-agent (IP de Tailscale + puerto del agente)
-token_file = "~/.chopshop/agent/token"    # copia local del archivo de token del agente (0600); nunca el token en sí
+# Sin token_file: la app se empareja con cada agente (`chopshop pair create` + Ajustes… → Emparejar) y guarda la credencial
+# de dispositivo en el Keychain. Un token_file viejo aquí se ignora.
 refresh_seconds = 3                       # segundos entre sondeos de /snapshot (1-300)
 
 # Más máquinas (opcional): una tabla por agente; la app combina todas en una sola vista.
-# Env: CHOPSHOP_APP__AGENTS__HOST_B__URL, CHOPSHOP_APP__AGENTS__HOST_B__TOKEN_FILE
+# Env: CHOPSHOP_APP__AGENTS__HOST_B__URL
 [app.agents.host-b]
 url = "http://100.64.0.11:3790"
-token_file = "~/.chopshop/agent/host-b.token"
 
 # El agente (chopshop-agent), uno por máquina.
 [agent]

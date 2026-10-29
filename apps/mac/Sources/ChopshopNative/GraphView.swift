@@ -77,6 +77,11 @@ public struct GraphView: View {
             }
         }
         .clipped()
+        .onChange(of: LiveSceneKey(graph: graph, tasks: tasks)) { _, k in
+            scene = GraphScene(graph: k.graph, tasks: k.tasks)
+            if let s = selected, scene.card(s) == nil { selected = nil }
+            if let h = hovered, scene.card(h) == nil { hovered = nil }
+        }
     }
 
     private func hit(_ p: CGPoint) -> String? {

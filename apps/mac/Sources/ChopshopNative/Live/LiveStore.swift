@@ -18,6 +18,8 @@ public final class LiveStore: ObservableObject {
     public private(set) var state = LiveState()
     /// Cursor de reanudación.
     public private(set) var lastEventID: String?
+    /// Ya llegó algo del agente (un `state` o algún sobre).
+    public var hasData: Bool { state.headSeq > 0 || !state.projects.isEmpty }
     /// Se llama al recibir 401 (credencial revocada o inválida).
     public var onUnauthorized: (() -> Void)?
 

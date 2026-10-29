@@ -1,4 +1,5 @@
 import Foundation
+import ChopshopNative
 
 /// Estado de la última consulta a un agente. Los textos para el usuario los compone la UI web (`statusMessage`).
 enum AgentStatus: String {
@@ -22,7 +23,7 @@ struct AgentResult {
         case .ok: return ""
         case .unreachable: return "agente no alcanzable" + (error.map { " (\($0))" } ?? "")
         case .forbidden: return "acceso denegado (403)"
-        case .unauthorized: return "token rechazado (401)"
+        case .unauthorized: return "sin emparejar o credencial revocada (401)"
         case .incompatible, .error: return error ?? "error del agente"
         }
     }
@@ -111,24 +112,22 @@ struct URLSessionTransport: HTTPTransport {
 
 // MARK: - Cliente
 
-/// Cliente de la API de un agente. El bearer se lee del archivo `token_file` en cada petición (así se puede rotar sin
-/// reiniciar la app) y solo vive en la cabecera: nunca se guarda ni se imprime.
+/// Cliente de la API de un agente. La credencial de dispositivo (`cs1_…`, emparejamiento) se lee del almacén (Keychain) en cada
+/// petición (así emparejar o desemparejar no exige reiniciar) y solo vive en la cabecera: nunca se guarda en otro sitio ni se imprime.
 final class AgentClient {
     let spec: AgentSpec
     private let transport: HTTPTransport
-    private let readToken: (String) -> String?
+    let credentials: CredentialStore
 
-    init(spec: AgentSpec, transport: HTTPTransport = URLSessionTransport(), readToken: @escaping (String) -> String? = AgentClient.readTokenFile) {
+    init(spec: AgentSpec, transport: HTTPTransport = URLSessionTransport(), credentials: CredentialStore) {
         self.spec = spec
         self.transport = transport
-        self.readToken = readToken
+        self.credentials = credentials
     }
 
-    static func readTokenFile(_ path: String) -> String? {
-        guard let data = FileManager.default.contents(atPath: path) else { return nil }
-        let s = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-        return s.isEmpty ? nil : s
-    }
+    /// Credencial guardada para este agente (nil = sin emparejar).
+    var credential: String? { spec.baseURL.flatMap { credentials.find(baseURL: $0)?.credential } }
+    var isPaired: Bool { credential != nil }
 
     enum Outcome {
         case response(code: Int, json: [String: Any]?)
@@ -145,7 +144,7 @@ final class AgentClient {
         var req = URLRequest(url: url)
         req.httpMethod = method
         req.setValue("application/json", forHTTPHeaderField: "Accept")
-        if let file = spec.tokenFile, let token = readToken(file) { req.setValue("Bearer " + token, forHTTPHeaderField: "Authorization") }
+        if let c = credential { req.setValue("Bearer " + c, forHTTPHeaderField: "Authorization") }
         if let body {
             guard JSONSerialization.isValidJSONObject(body), let data = try? JSONSerialization.data(withJSONObject: body) else {
                 return .failure(.error, "cuerpo de la petición inválido")
@@ -210,10 +209,11 @@ final class AgentClient {
         case .response(let code, let json):
             switch code {
             case 200..<300: return ActionResult(ok: true, message: "ok", data: json)
-            case 401: return ActionResult(ok: false, message: "el agente rechazó el token (401): revisa token_file")
+            case 401: return ActionResult(ok: false, message: "el agente rechazó la credencial (401): empareja este Mac de nuevo en Ajustes")
             case 403:
-                let hint = spec.tokenFile == nil ? " (no hay token_file configurado)" : ""
-                return ActionResult(ok: false, message: "acceso denegado (403): las acciones exigen identidad Tailscale autorizada y el token del agente" + hint)
+                let hint = isPaired ? "" : " Este Mac no está emparejado con el agente."
+                return ActionResult(ok: false, message: "acceso denegado (403): hace falta identidad Tailscale autorizada y un dispositivo emparejado; "
+                                    + "si el agente es anterior a api_version 2 (sin emparejamiento), actualízalo." + hint)
             default: return ActionResult(ok: false, message: Self.agentError(json, code))
             }
         }
@@ -224,8 +224,8 @@ final class AgentClient {
 final class AgentHub {
     let clients: [AgentClient]
 
-    init(specs: [AgentSpec], transport: HTTPTransport = URLSessionTransport()) {
-        clients = specs.map { AgentClient(spec: $0, transport: transport) }
+    init(specs: [AgentSpec], transport: HTTPTransport = URLSessionTransport(), credentials: CredentialStore) {
+        clients = specs.map { AgentClient(spec: $0, transport: transport, credentials: credentials) }
     }
 
     var isEmpty: Bool { clients.isEmpty }
