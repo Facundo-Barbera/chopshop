@@ -89,10 +89,10 @@ Todo eso → **403**.
 | `GET /metrics?from=&to=&group=machine\|app\|project&step=` | series (ver `collector.query`) |
 | `GET /events?after=<seq>&limit=` | `{events:[sobre], last_seq, head_seq}` (sobre v1 de `docs/event-envelope.md`, + `event` y `machine_id` viejos): `last_seq` = cursor para la siguiente consulta (seq del último devuelto, o `after` si no hay), `head_seq` = último de la máquina |
 | `GET /threads?project=&limit=` | `{threads:[...]}` desde `t3_threads` (más recientes primero) |
-| `GET /subscriptions` | `{subscriptions:{nombre:{project,events,created,projects,types,exclude_types,min_severity,needs,only_changes,context,debounce_s,signed}}}` (filtros; sin URL ni rutas; `signed` = tiene `secret_file`). Ver «Suscripciones (webhooks v2)» |
+| `GET /subscriptions` | `{subscriptions:{nombre:{project,events,created,projects,types,exclude_types,min_severity,needs,only_changes,context,debounce_s,signed,headers}}}` (filtros; sin URL ni rutas; `signed` = tiene `secret_file`; `headers` = tiene `headers_file`). Ver «Suscripciones (webhooks v2)» |
 | `POST /answer` | `{thread_id, choice, request?}` → responde en T3 (`{ok, request_id, answers, question}`). `AnswerError` (sin pendientes, ambigua, opción no válida) → 400; T3 caído → 502 |
 | `POST /settle` | `{thread_id}` → `t3_thread_organize settle` (nunca archivar) → `{ok, thread_id}` |
-| `POST /subscriptions` / `DELETE /subscriptions/<name>` | `{name, webhook_file, project?, events?, projects?, types?, exclude_types?, min_severity?, needs?, only_changes?, context?, debounce_s?, secret_file?}` (`webhook_file`/`secret_file` = rutas de archivos existentes en la máquina del agente, nunca una URL; `secret_file` con permisos 0600). Reemplaza la suscripción entera. Valores inválidos → 400 |
+| `POST /subscriptions` / `DELETE /subscriptions/<name>` | `{name, webhook_file, project?, events?, projects?, types?, exclude_types?, min_severity?, needs?, only_changes?, context?, debounce_s?, secret_file?, headers_file?}` (`webhook_file`/`secret_file`/`headers_file` = rutas de archivos existentes en la máquina del agente, nunca una URL; `secret_file` y `headers_file` con permisos 0600). Reemplaza la suscripción entera. Valores inválidos → 400 |
 
 ### Forma de `GET /snapshot`
 
@@ -212,19 +212,28 @@ pregunta no cuenta como `pending_question`) y, si el evento no tiene nombre viej
 `X-Chopshop-Delivery: <n.º de intento, 1–4>` y, con `secret_file`, `X-Chopshop-Signature: sha256=<hex(HMAC-SHA256(secreto, cuerpo))>`
 (el secreto = contenido del archivo sin espacios; si el archivo falta o es legible por grupo/otros no se envía nada). Verificación en el
 receptor: `hmac.compare_digest(cabecera, "sha256=" + hmac.new(secreto, cuerpo_crudo, sha256).hexdigest())`.
+Con `headers_file` (0600; una cabecera por línea `Nombre: valor`, vacías y `#...` se ignoran) se añaden esas cabeceras, p. ej.
+`Authorization: Bearer …` para receptores que la exigen (los webhooks de Grok responden `401` sin ella). No se pueden pisar
+`Content-Type`, `Content-Length`, `Host`, `User-Agent`, `Transfer-Encoding`, `Connection` ni `X-Chopshop-*`; un archivo que falta, es
+legible por otros o está mal formado hace que no se envíe nada (definitivo). Se relee en cada intento; los valores nunca se guardan ni
+se registran.
 Timeout 3 s por intento; **3 reintentos** tras 2, 10 y 60 s ante error de red, `5xx`, `408`, `425` o `429` (otros `4xx` y archivos
 ilegibles son definitivos). Cada destino tiene su propio carril (hilo) y los reintentos se programan sin ocupar hilo: un destino lento o
 caído no retrasa a otro. `deliveries(event_seq, name, ok, detail, ts, attempts, next_retry)` guarda el último intento (`detail` =
 `HTTP <código>` o el tipo de excepción; nunca la URL, el secreto ni mensajes de excepción) y `next_retry` (epoch) si queda reintento.
+Cada intento se registra además en el log (journal) como `chopshop.agent.webhooks`: `webhook <nombre>: seq=<n> type=<type>
+intento=<n>/4 <detail> <ms>ms <ok | reintento N en Ss | sin reintento | reintentos agotados>` (INFO si ok, WARNING si no). Con nivel
+DEBUG también los omitidos por `only_changes` y los retenidos por `debounce_s`.
 
 **CLI**: `chopshop subscribe <nombre> --webhook-file F [--project p1,p2] [--types 'question.*,task.state'] [--exclude-types ...]
-[--min-severity notice] [--needs bot,human] [--only-changes] [--context] [--debounce 5] [--secret-file K]` registra en el agente
+[--min-severity notice] [--needs bot,human] [--only-changes] [--context] [--debounce 5] [--secret-file K] [--headers-file H]` registra en el agente
 (`POST /subscriptions`); `chopshop subscribe --list --agent` lista los filtros. Sin opciones v2 ni `--agent` el comando sigue escribiendo
 la suscripción del motor viejo (`state.json`), como antes.
 
 **Esquema**: `user_version` 4 añade a `subscriptions` las columnas nulables `projects`, `types`, `exclude_types`, `needs` (JSON),
 `min_severity`, `only_changes`, `context`, `debounce_s`, `secret_file`, y a `deliveries` `attempts`, `next_retry`. La migración es
-idempotente (solo añade columnas que falten) y conserva las suscripciones existentes.
+idempotente (solo añade columnas que falten) y conserva las suscripciones existentes. `user_version` 5 añade
+`subscriptions.headers_file` (nulable).
 
 ## Decisiones de los módulos (resumen)
 
