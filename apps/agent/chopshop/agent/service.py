@@ -3,7 +3,7 @@
 `AgentService` ensambla los módulos (colector, T3, eventos) y el servidor HTTP (`server.py`):
   hilos: muestreo (+ compactación) · sondeo de T3 · motor (`engine.tick` con el bus inyectado, solo si hay lotes en
   state.json) · importación periódica de events.jsonl (CLI externa) · automatizaciones (sobres del bus + horarios) ·
-  mantenimiento (retención de eventos, checkpoint WAL).
+  GitHub (si `[agent.github] enabled`) · mantenimiento (retención de eventos, checkpoint WAL).
   Un fallo en un hilo se registra (sin repetirlo cada ciclo) y el hilo sigue; `stop()` los para a todos de forma ordenada.
 `run` instala SIGTERM/SIGINT para la parada limpia. Nada aquí habla con systemd salvo `status` (solo lectura, inyectable) y
 `print-unit` solo IMPRIME la unidad: no escribe, no habilita y no arranca nada.
@@ -22,7 +22,7 @@ import threading
 import time
 
 from .. import engine as engine_mod, events as legacy_events, graph, home, settings, state
-from . import __version__, automations as automations_mod, collector as collector_mod, config, db, envelope, events, pairing, server, t3watch
+from . import __version__, automations as automations_mod, collector as collector_mod, config, db, envelope, events, github, pairing, server, t3watch
 
 log = logging.getLogger("chopshop.agent")
 
@@ -176,6 +176,9 @@ def check_config(cfg, runner=None, which=shutil.which):
             warns.append("agent.t3.%s es una clave vieja que ya no se usa: bórrala de la config" % "/".join(old))
     if not os.path.isdir(cfg.get("projects_root") or ""):
         warns.append("projects_root no existe: %s" % cfg.get("projects_root"))
+    gerrs, gwarns = github.check(cfg, which)
+    errs += gerrs
+    warns += gwarns
     for k, v in (cfg.get("retention") or {}).items():
         if isinstance(v, bool) or not isinstance(v, (int, float)) or v <= 0:
             errs.append("retention.%s debe ser un número > 0 (es %r)" % (k, v))
@@ -227,7 +230,8 @@ class AgentService:
 
     def __init__(self, cfg, conn=None, collector=None, t3=None, runner=None, poster=None,
                  orchestrator_fn=None, clock=time.time, maint_interval=MAINT_INTERVAL, maint_first=MAINT_FIRST, compact_every=COMPACT_EVERY,
-                 engine_tick=None, stream_opts=None, automations=None):
+                 engine_tick=None, stream_opts=None, automations=None,
+                 gh_runner=None, gh_projects_fn=github.profile_repos):
         self.cfg, self.clock, self.runner, self.poster = cfg, clock, runner, poster
         self.engine_tick = engine_tick or engine_mod.tick
         self.owns_conn = conn is None
@@ -247,6 +251,10 @@ class AgentService:
             self.emit_envelope, clock=clock, store=automations_mod.MetaStore(self.conn), enabled=acfg.get("enabled", True))
         self._auto_cursor = None
         self._auto_loaded = None
+        self.github = None
+        if (cfg.get("github") or {}).get("enabled"):
+            self.github = github.GitHubPoller(self.conn, cfg, self.emit, runner=gh_runner, clock=clock,
+                                              projects_fn=gh_projects_fn)
         self.stop_event = threading.Event()
         self.servers, self.threads, self._serving = [], [], []
         self._stopped = False
@@ -294,6 +302,8 @@ class AgentService:
             if (self.cfg.get("automations") or {}).get("enabled", True):
                 self._spawn("automations", self._loop, "automations", self.automations_once,
                             lambda: (self.cfg.get("automations") or {}).get("interval") or 2)
+            if self.github is not None:
+                self._spawn("github", self._loop, "github", self.github.poll_once, self.github.next_delay)
             self._spawn("maintenance", self._maintenance)
         for s in self.servers:
             self._serving.append(s)

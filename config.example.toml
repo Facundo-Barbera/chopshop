@@ -90,6 +90,7 @@ credential_file = ""                      # vacío = <CHOPSHOP_HOME>/t3-credenti
 root = "~/projects/proyecto-demo"
 worktrees = "~/.t3/worktrees/proyecto-demo"
 t3_project_id = "00000000-0000-0000-0000-000000000000"
+repo = "dueño/proyecto-demo"              # opcional: repo de GitHub del proyecto (para los eventos github.*)
 
 # Webhooks: nombre -> RUTA a un archivo (0600) cuyo contenido es la URL. Nunca pongas la URL aquí.
 [agent.webhook_files]
@@ -99,6 +100,16 @@ bot = "~/.config/chopshop/webhooks/bot.url"
 [agent.automations]
 enabled = true                            # interruptor global: false = el hilo `automations` no ejecuta nada
 interval = 2                              # s entre pasadas (sobres nuevos del bus + horarios)
+
+# Ingreso de GitHub por polling con ETag (eventos github.*; ver docs/agent-service.md). Usa el `gh` ya autenticado de esta
+# máquina (`gh auth login`); el token nunca va aquí ni se lee. El proyecto de cada repo sale de `repo` en el perfil
+# (~/.chopshop/profiles/<proyecto>.yaml) o de `repo` en [agent.projects.<proyecto>].
+[agent.github]
+enabled = false                           # true = hilo `github` del agente
+repos = ["dueño/repo"]                    # repos a vigilar ("dueño/repo"); esto es un marcador
+interval_s = 45                           # segundos entre pasadas (GitHub puede pedir más con X-Poll-Interval)
+gh_bin = "gh"                             # CLI de GitHub
+ci = true                                 # mirar check-runs del HEAD de los PRs abiertos (github.ci.completed)
 
 # Retención del historial de métricas y de eventos.
 [agent.retention]
