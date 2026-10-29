@@ -266,6 +266,12 @@ test de Python y `HalfLifeTests.swift`).
 Todas exigen permiso de escritura (dueño, origen local o credencial de servicio/dispositivo). No hay `DELETE` de escritorios ni de
 pisos; ninguna ruta crea ni ejecuta scripts.
 
+Notas (`agent/notes.py`, tabla `desk_notes`): el escritorio debe estar declarado en el perfil local de su proyecto (si no, 404);
+`from` es obligatorio salvo que la identidad lo aporte (login, dispositivo u origen); el texto admite saltos de línea y tabuladores
+(400 si supera 2 KB). Como mucho 50 notas vivas por escritorio (al pasarse caducan las más viejas). `pending` cuenta las notas sin
+consumir y sin caducar. Las consume el hilo que despierta en el escritorio (`notes.consume` + `notes.prompt_block` para su
+prompt); el mantenimiento borra las consumidas o caducadas con más de 7 días.
+
 ## Suscripciones (webhooks v2)
 
 Cada suscripción es **un webhook** (la URL vive en `webhook_file`, primera línea, 0600) que recibe el **sobre completo** (§2.1 del

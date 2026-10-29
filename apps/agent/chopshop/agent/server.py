@@ -29,7 +29,7 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import API_VERSION, __version__, collector as collector_mod, db, events, pairing as pairing_mod, projection, stream, t3watch, webhooks
+from . import API_VERSION, __version__, collector as collector_mod, db, events, notes as notes_mod, pairing as pairing_mod, projection, stream, t3watch, webhooks
 
 log = logging.getLogger("chopshop.agent")
 
@@ -338,6 +338,7 @@ class AgentApp:
         self.stream = stream.StreamHub(conn, dict(cfg, machine_id=self.machine_id), self.projector,
                                        device_active=getattr(auth, "device_active", None), **(stream_opts or {}))
         self.listen_ips = set()           # IPs de todos los listeners (las rellena el servicio; para validar Host)
+        self.desk_fn = notes_mod.declared_desk   # id de escritorio -> escritorio del perfil local o None (inyectable)
 
     # -- enrutado
     def match(self, method, path):
@@ -348,6 +349,10 @@ class AgentApp:
         if path.startswith("/subscriptions/") and len(path) > len("/subscriptions/"):
             if method == "DELETE":
                 return "unsubscribe", {"name": urllib.parse.unquote(path[len("/subscriptions/"):])}
+            raise ApiError(405, "método no permitido")
+        if path.startswith("/desks/") and path.endswith("/notes") and len(path) > len("/desks//notes"):
+            if method == "POST":
+                return "desk_note", {"desk": urllib.parse.unquote(path[len("/desks/"):-len("/notes")])}
             raise ApiError(405, "método no permitido")
         if any(p == path for (_m, p) in self.ROUTES):
             raise ApiError(405, "método no permitido")
@@ -518,6 +523,23 @@ class AgentApp:
         self._t3(t3watch.settle, thread)
         log.info("hilo %s settled por %s", thread, ident.login or ident.via)
         return {"ok": True, "thread_id": thread}
+
+    # -- escritorios
+    def r_desk_note(self, ident, q, body, desk):
+        """Nota de un bot en la bandeja de un escritorio -> `desk.note` (la consume el hilo que despierta allí)."""
+        d = self.desk_fn(desk)
+        if d is None:
+            raise ApiError(404, "escritorio desconocido (no lo declara el perfil de su proyecto)")
+        frm = body.get("from") if body.get("from") not in (None, "") else (ident.login or ident.device or ident.via)
+        try:
+            note = notes_mod.add(self.conn, d["id"], frm, body.get("text"), body.get("ttl_s"), self.clock())
+        except notes_mod.NoteError as e:
+            raise ApiError(400, str(e))
+        n = notes_mod.count(self.conn, d["id"], self.clock())
+        log.info("nota %s en el escritorio %s de %s", note["id"], d["id"], ident.login or ident.via)
+        if self.emit_fn:
+            self.emit_fn("desk.note", d["project"], notes_mod.body(note, n))
+        return {"ok": True, "note_id": note["id"], "pending": n}
 
     # -- suscripciones
     def r_subscribe(self, ident, q, body):
