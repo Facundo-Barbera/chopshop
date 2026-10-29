@@ -11,7 +11,7 @@ struct RootView: View {
         } detail: {
             // El WebView no se destruye nunca (se reconstruiría la UI web entera): en macOS 26 la oficina nativa se pone encima.
             ZStack {
-                GlassBackdrop()
+                WindowBackdrop()
                 WebView()
                 if #available(macOS 26.0, *) {
                     if model.selection == .project, let p = model.project, !model.preferWeb {
@@ -38,7 +38,6 @@ struct RootView: View {
                 }
             }
         }
-        .background(WindowGlass())
         .sheet(isPresented: $model.showSettings) {
             SettingsView().environmentObject(model)
         }
@@ -102,80 +101,11 @@ struct PairingScreen: View {
     }
 }
 
-/// Hace que la ventana deje pasar el escritorio (vidrio de verdad); el relleno lo pone `GlassBackdrop`.
-struct WindowGlass: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView {
-        let v = NSView()
-        DispatchQueue.main.async {
-            guard let w = v.window else { return }
-            w.isOpaque = false
-            w.backgroundColor = .clear
-        }
-        return v
-    }
-    func updateNSView(_ v: NSView, context: Context) {}
-}
-
-/// Fondo neutro: grafito translúcido sobre material del sistema. Sin color propio; el acento vive en los controles.
-struct GlassBackdrop: View {
+/// Fondo del detalle: el de ventana del sistema, opaco como en las vistas nativas (oficina, sala de máquinas). El vidrio
+/// es solo de la barra lateral y la de herramientas, como en las apps de macOS; la UI web es transparente encima.
+struct WindowBackdrop: View {
     var body: some View {
-        ZStack {
-            VisualEffect(material: .underWindowBackground)
-            LinearGradient(colors: [Color(white: 0.17).opacity(0.72), Color(white: 0.09).opacity(0.80)], startPoint: .top, endPoint: .bottom)
-            RadialGradient(colors: [Color.white.opacity(0.07), .clear], center: .topLeading, startRadius: 0, endRadius: 620)
-        }
-        .ignoresSafeArea()
-    }
-}
-
-struct VisualEffect: NSViewRepresentable {
-    let material: NSVisualEffectView.Material
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let v = NSVisualEffectView()
-        v.material = material
-        v.blendingMode = .behindWindow
-        v.state = .active
-        return v
-    }
-    func updateNSView(_ v: NSVisualEffectView, context: Context) { v.material = material }
-}
-
-// MARK: - Logo
-
-/// «Bloque cortado»: un cuadrado de grafito partido en dos mitades desplazadas por un tajo en diagonal.
-struct ChopLogo: View {
-    var size: CGFloat = 30
-    var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: size * 0.26, style: .continuous)
-                .fill(LinearGradient(colors: [Color(white: 0.34), Color(white: 0.13)], startPoint: .top, endPoint: .bottom))
-            RoundedRectangle(cornerRadius: size * 0.26, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.22), lineWidth: 0.8)
-            ChopMark().fill(Color.white.opacity(0.94)).padding(size * 0.2)
-        }
-        .frame(width: size, height: size)
-        .shadow(color: .black.opacity(0.35), radius: size * 0.12, y: size * 0.05)
-    }
-}
-
-struct ChopMark: Shape {
-    func path(in r: CGRect) -> Path {
-        let w = r.width, h = r.height, x = r.minX, y = r.minY
-        let gap = w * 0.09
-        var p = Path()
-        // mitad superior-izquierda
-        p.move(to: CGPoint(x: x, y: y + h * 0.05))
-        p.addLine(to: CGPoint(x: x + w * 0.62 - gap, y: y + h * 0.05))
-        p.addLine(to: CGPoint(x: x + w * 0.30 - gap, y: y + h * 0.95))
-        p.addLine(to: CGPoint(x: x, y: y + h * 0.95))
-        p.closeSubpath()
-        // mitad inferior-derecha, desplazada
-        p.move(to: CGPoint(x: x + w * 0.72 + gap, y: y + h * 0.05))
-        p.addLine(to: CGPoint(x: x + w, y: y + h * 0.05))
-        p.addLine(to: CGPoint(x: x + w, y: y + h * 0.95))
-        p.addLine(to: CGPoint(x: x + w * 0.40 + gap, y: y + h * 0.95))
-        p.closeSubpath()
-        return p
+        Color(nsColor: .windowBackgroundColor).ignoresSafeArea()
     }
 }
 
@@ -186,30 +116,20 @@ struct Sidebar: View {
 
     var body: some View {
         List(selection: Binding<NavItem?>(get: { model.nav }, set: { if let n = $0 { model.nav = n } })) {
-            HStack(spacing: 10) {
-                ChopLogo(size: 32)
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("Chopshop").font(.headline)
-                    Text("taller de hilos").font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            .padding(.vertical, 6)
-            .noSelection()
-
             ForEach(Section.views) { s in
                 Label(s.title, systemImage: s.symbol)
                     .badge(s == .questions || s == .reactions ? (model.counts[s] ?? 0) : 0)
                     .tag(NavItem.section(s))
             }
 
-            SwiftUI.Section(header: header("Proyectos")) {
+            SwiftUI.Section("Proyectos") {
                 if model.projects.isEmpty {
                     Text("sin proyectos").font(.callout).foregroundStyle(.secondary).noSelection()
                 }
                 ForEach(model.projects) { p in ProjectRow(p: p).tag(NavItem.project(p.name)) }
             }
 
-            SwiftUI.Section(header: header("Máquinas")) {
+            SwiftUI.Section("Máquinas") {
                 if model.machines.isEmpty {
                     Text("sin máquinas").font(.callout).foregroundStyle(.secondary).noSelection()
                 }
@@ -217,34 +137,38 @@ struct Sidebar: View {
             }
         }
         .listStyle(.sidebar)
+        // Pie discreto (sin cápsula: la barra lateral ya es de vidrio): estado de la conexión y versión del bundle.
         .safeAreaInset(edge: .bottom) {
-            StatusCapsule {
-                HStack(spacing: 8) {
-                    PulseDot(color: dot, live: model.link.isLive)
-                    Text(model.link.label)
-                        .font(.caption.weight(.medium))
-                        .help("Estado de la conexión con los agentes de Chopshop (API por Tailscale). Se configuran en Ajustes… (⌘,) o en la sección [app] de ~/.config/chopshop/config.toml")
-                    Spacer()
-                    Text("v0.6")
-                        .font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 7) {
+                Circle().fill(dot).frame(width: 7, height: 7)
+                Text(model.link.label)
+                    .font(.caption).foregroundStyle(.secondary)
+                    .help("Estado de la conexión con los agentes de Chopshop (API por Tailscale). Se configuran en Ajustes… (⌘,) o en la sección [app] de ~/.config/chopshop/config.toml")
+                Spacer()
+                if let v = Self.version {
+                    Text("v\(v)").font(.caption).foregroundStyle(.tertiary)
                 }
             }
-            .padding(12)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 10)
         }
     }
 }
 
 extension Sidebar {
-    func header(_ t: String) -> some View {
-        Text(t.uppercased()).font(.caption2.weight(.semibold)).tracking(0.8).foregroundStyle(.primary.opacity(0.6))
-    }
+    /// Gris si todo va bien; color solo si algo pide atención.
     var dot: Color {
         switch model.link {
-        case .ok: return .green
+        case .ok, .connecting: return .secondary
         case .partial, .unconfigured: return .orange
         case .down: return .red
-        case .connecting: return .gray
         }
+    }
+
+    /// Versión del .app (CFBundleShortVersionString que pone build.sh); sin bundle (swift run) o sin versión, nada.
+    static var version: String? {
+        guard let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String, !v.isEmpty, v != "0.0.0" else { return nil }
+        return v
     }
 }
 
@@ -266,12 +190,13 @@ struct PulseDot: View {
     }
 }
 
+/// Proyecto en la barra lateral: naranja si un hilo espera respuesta, acento si algo corre, gris si está quieto. Sin animación.
 struct ProjectRow: View {
     let p: ProjectInfo
     var body: some View {
         HStack(spacing: 8) {
-            if p.running > 0 { PulseDot(color: .green, live: true) }
-            else if p.questions > 0 { Circle().fill(.orange).frame(width: 7, height: 7).frame(width: 14) }
+            if p.questions > 0 { Circle().fill(.orange).frame(width: 7, height: 7).frame(width: 14) }
+            else if p.running > 0 { Circle().fill(Color.accentColor).frame(width: 7, height: 7).frame(width: 14) }
             else { Circle().fill(.secondary.opacity(0.5)).frame(width: 6, height: 6).frame(width: 14) }
             Text(p.name).font(.callout).lineLimit(1)
             Spacer(minLength: 4)
@@ -313,46 +238,35 @@ struct Spark: View {
     }
 }
 
+/// Máquina en la barra lateral: una línea (icono, nombre, CPU reciente y su %). RAM y disco, en la ayuda y en la vista Máquinas.
 struct MachineRow: View {
     let m: Machine
     private var hot: Bool { m.cpuNow >= 100 }
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Image(systemName: m.os == "Darwin" ? "macmini" : "server.rack").foregroundStyle(.secondary)
-                Text(m.name).font(.callout).lineLimit(1)
-                Spacer(minLength: 4)
-                if m.ok {
-                    Text("\(m.cpus) núcleos").font(.caption2).foregroundStyle(.secondary)
-                }
-            }
+        HStack(spacing: 6) {
+            Image(systemName: m.os == "Darwin" ? "macmini" : "server.rack").foregroundStyle(.secondary)
+            Text(m.name).font(.callout).lineLimit(1)
+            Spacer(minLength: 4)
             if m.ok {
-                metric("CPU", m.cpu, "\(m.cpuNow)%", hot ? .orange : .primary)
-                metric("RAM", m.ram, "\(m.ramNow)%", .primary)
+                Spark(values: m.cpu, color: hot ? Color.orange : Color.secondary, fill: false)
+                    .frame(width: 40, height: 12)
+                Text("\(m.cpuNow)%")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(hot ? Color.orange : Color.secondary)
+                    .frame(width: 34, alignment: .trailing)
             } else {
                 Text("sin datos").font(.caption).foregroundStyle(.secondary)
-                    .help(m.reason ?? "")
             }
         }
-        .padding(.vertical, 3)
+        .padding(.vertical, 1)
+        .help(help)
     }
 
-    func metric(_ l: String, _ v: [Double], _ t: String, _ c: Color) -> some View {
-        HStack(spacing: 6) {
-            Text(l).font(.caption2).foregroundStyle(.secondary).frame(width: 26, alignment: .leading)
-            Spark(values: v, color: c.opacity(0.85)).frame(height: 14)
-            Text(t).font(.caption2.monospacedDigit().weight(.medium)).frame(width: 34, alignment: .trailing)
-        }
-    }
-}
-
-extension LinkState {
-    /// Con al menos un agente respondiendo, el punto de estado late.
-    var isLive: Bool {
-        switch self {
-        case .ok, .partial: return true
-        default: return false
-        }
+    private var help: String {
+        guard m.ok else { return m.reason ?? "La máquina no responde" }
+        var parts = ["CPU \(m.cpuNow)%", "RAM \(m.ramNow)%", "\(m.cpus) núcleos"]
+        if !m.disk.isEmpty { parts.append("disco \(m.disk)") }
+        return parts.joined(separator: " · ")
     }
 }
 
@@ -362,25 +276,5 @@ extension View {
     /// `selectionDisabled` existe desde macOS 14; en macOS 13 la fila queda seleccionable y no pasa nada más.
     @ViewBuilder func noSelection() -> some View {
         if #available(macOS 14.0, *) { self.selectionDisabled() } else { self }
-    }
-}
-
-/// Píldora de estado: vidrio líquido en macOS 26+ (compilando con el SDK de Xcode 26) y material translúcido en el resto.
-struct StatusCapsule<Content: View>: View {
-    private let content: Content
-
-    init(@ViewBuilder content: () -> Content) { self.content = content() }
-
-    var body: some View {
-        let inner = content.padding(.horizontal, 14).padding(.vertical, 9)
-        #if compiler(>=6.2)
-        if #available(macOS 26.0, *) {
-            GlassEffectContainer(spacing: 8) { inner.glassEffect(.regular, in: .capsule) }
-        } else {
-            inner.background(.ultraThinMaterial, in: Capsule())
-        }
-        #else
-        inner.background(.ultraThinMaterial, in: Capsule())
-        #endif
     }
 }

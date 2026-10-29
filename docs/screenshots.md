@@ -29,7 +29,7 @@ python3 tools/screenshots/shoot.py --build               # recompila la UI (apps
 
 Notas:
 
-- Las capturas muestran solo el contenido web; el shell SwiftUI (barra lateral, ventana) no se emula. El fondo degradado imita el vidrio nativo sobre el que va la web.
+- Las capturas muestran solo el contenido web; el shell SwiftUI (barra lateral, ventana) no se emula. El fondo gris liso imita el fondo de ventana del sistema (modo oscuro) sobre el que va la web.
 - Si cambias la UI, ejecuta antes `pnpm build` (actualiza el bundle de `apps/mac/Resources/web`) o usa `--build`.
 - Para añadir una vista, agrégala a `SCENES` en `shoot.py` (clave = nombre del PNG, valor = `vista[:argumento]`, como en el mensaje `select` de la app).
 - Mantén cada PNG por debajo de ~300 KB (el tamaño por defecto es 1200×760).

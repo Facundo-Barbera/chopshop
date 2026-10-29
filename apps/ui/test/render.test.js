@@ -74,6 +74,16 @@ test("Actividad, Reacciones y Grafo se dibujan con los datos del orquestador", (
   assert.match(render(ui.Graph, { snap, now }), /Planificador/);
 });
 
+test("aspecto sobrio: sin título duplicado, webhooks entregados sin etiqueta, tarjetas compactas sin campo libre", () => {
+  const { snap, c, titles } = base();
+  const ov = render(ui.Overview, { snap, c, now, go() {}, nav() {}, titles });
+  assert.doesNotMatch(ov, /<h1/);
+  assert.doesNotMatch(ov, /webhook entregado/);
+  assert.doesNotMatch(ov, /o escribe otra respuesta/);
+  assert.match(render(ui.Questions, { c, now }), /o escribe otra respuesta/);
+  assert.doesNotMatch(render(ui.Reactions, { snap, now }), /tone-(pink|violet|mint)/);
+});
+
 test("agente caído: banner con el estado y datos viejos; sin datos: pantalla de conexión", () => {
   const store = createStore({ now: () => now });
   store.update(fx.agents);
@@ -87,5 +97,6 @@ test("agente caído: banner con el estado y datos viejos; sin datos: pantalla de
   assert.match(html, /No pude conectar/);
   assert.match(html, /403/);
   assert.match(render(ui.Connecting, { agents: [], configPath: "~/.config/chopshop/config.toml" }), /Ningún agente configurado/);
+  assert.doesNotMatch(render(ui.Connecting, { agents: [], configPath: "" }), /token_file/);
   assert.match(render(ui.Connecting, { agents: null }), /Conectando/);
 });

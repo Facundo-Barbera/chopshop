@@ -38,10 +38,10 @@ SCENES = {
 # Escenas que necesitan otro tamaño (el grafo es ancho).
 SIZES = {"graph": "1440x800"}
 
-# Fondo que en la app pone el shell SwiftUI (la web es transparente sobre vidrio nativo).
+# Fondo que en la app pone el shell SwiftUI: la web es transparente sobre el fondo opaco de ventana del sistema
+# (NSColor.windowBackgroundColor en modo oscuro, aproximado).
 BACKDROP = """<style>
-html{background:radial-gradient(1100px 700px at 15% 0%,#26418f 0%,transparent 60%),
-radial-gradient(900px 700px at 100% 100%,#4a2a7a 0%,transparent 60%),#0d1330}
+html{background:#262626}
 </style>"""
 
 STUB = """<script>
