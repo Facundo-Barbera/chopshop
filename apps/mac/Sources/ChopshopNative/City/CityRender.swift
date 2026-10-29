@@ -2,8 +2,9 @@ import SwiftUI
 
 // Dibujo de la ciudad en un Canvas, con la misma proyección que la oficina (IsoFrame ≡ IsoCam).
 // Orden (de atrás hacia delante): suelo y calles → tráfico → edificios por profundidad (pisos de abajo arriba, azotea) →
-// brillo ámbar/rojo → etiquetas. El piso elegido para el zoom se pinta hueco: muros del fondo, la oficina (IsoRenderer, el mismo
-// dibujo que IsoOfficeView) y muros delanteros que bajan; los pisos de encima suben y salen de cuadro.
+// brillo ámbar/rojo → etiquetas. El piso elegido para el zoom se pinta hueco: muros del fondo, la oficina (FloorRenderer, el mismo
+// dibujo que FloorOfficeView; IsoRenderer si el proyecto no trae `office`) y muros delanteros que bajan; los pisos de encima
+// suben y salen de cuadro.
 
 /// Color en 0…1 con mezcla lineal (para teñir de ámbar/rojo y encender ventanas sin saltos).
 @available(macOS 26.0, *)
@@ -72,13 +73,20 @@ struct CityPalette {
     static let redSlab = (CityRGB(255, 110, 100), CityRGB(240, 66, 56), CityRGB(176, 46, 40))
 }
 
-/// Zoom en curso hacia un piso: la transición y la escena de su oficina (la de IsoOfficeView).
+/// Zoom en curso hacia un piso: la transición y lo que hay dentro (el piso v3 de FloorOfficeView, o la escena de IsoOfficeView si
+/// el proyecto no trae `office`).
 @available(macOS 26.0, *)
 struct CityZoom {
+    enum Content {
+        case floor(FloorPlan, FloorLayout, now: Date)
+        case graph(IsoScene)
+    }
     let project: String
+    /// `CityFloor.id` del piso elegido (un proyecto v3 puede tener varios).
+    let floorID: String
     let p: Double
     let transition: CityTransition
-    let scene: IsoScene
+    let content: Content
 }
 
 @available(macOS 26.0, *)
@@ -239,7 +247,7 @@ struct CityRenderer {
 
     private func drawBuilding(_ ctx: inout GraphicsContext, _ b: CityBuilding, glows: inout [(path: Path, color: CityRGB, a: Double)]) {
         let o = CityGeo.overhang
-        let targetLevel: Int? = zoom.flatMap { z in b.floors.first { $0.project == z.project }?.level }
+        let targetLevel: Int? = zoom.flatMap { z in b.floors.first { $0.id == z.floorID }?.level }
         let lift = targetLevel == nil ? 0 : CityTransition.upperLift(p) * CityTransition.liftDistance
         var topZ = 0.0
         for f in b.floors {
@@ -394,17 +402,25 @@ struct CityRenderer {
             ribbon(&g, b, face: .backX, zb: zb, hh: hb, levels: [], amber: 0, red: 0, alpha: 1)
             ribbon(&g, b, face: .backY, zb: zb, hh: hb, levels: [], amber: 0, red: 0, alpha: 1)
         }
-        // la oficina, con el MISMO dibujo que IsoOfficeView (las salas se extruyen y los escritorios brotan con el zoom)
-        var sc = z.scene
+        // la oficina, con el MISMO dibujo que la vista que se monta al final (FloorOfficeView o IsoOfficeView)
         let rr = CityTransition.roomRise(p), dp = CityTransition.deskPop(p)
         if rr > 0.001 {
-            for i in sc.rooms.indices { sc.rooms[i].rise = rr; sc.rooms[i].wallRise = rr }
-            for i in sc.desks.indices { sc.desks[i].pop = dp; sc.desks[i].floorZ = Iso.slabH * rr }
-            for i in sc.wires.indices { sc.wires[i].draw = dp }
             let oc = z.transition.officeCamera(p)
             let cam = IsoCam(s: oc.s, cu: oc.cu, cv: oc.cv, ax: oc.ax, ay: oc.ay)
             var go = g
-            IsoRenderer(scene: sc, cam: cam, box: IsoCameraBox(), dark: dark, t: t, selected: nil, hovered: nil, size: size).draw(&go)
+            switch z.content {
+            case .floor(let plan, let lay, let now):
+                // los escritorios son fijos: el piso entero aparece con el zoom
+                go.opacity = g.opacity * rr
+                FloorRenderer(plan: plan, layout: lay, cam: cam, box: FloorCameraBox(), dark: dark, t: t, now: now,
+                              selected: nil, hovered: nil).draw(&go)
+            case .graph(var sc):
+                // las salas se extruyen y los escritorios brotan con el zoom
+                for i in sc.rooms.indices { sc.rooms[i].rise = rr; sc.rooms[i].wallRise = rr }
+                for i in sc.desks.indices { sc.desks[i].pop = dp; sc.desks[i].floorZ = Iso.slabH * rr }
+                for i in sc.wires.indices { sc.wires[i].draw = dp }
+                IsoRenderer(scene: sc, cam: cam, box: IsoCameraBox(), dark: dark, t: t, selected: nil, hovered: nil, size: size).draw(&go)
+            }
         }
         if hf > 0.3 {
             box(&g, b.x1 - wt, b.y0, b.x1, b.y1 - wt, zb, zb + hf, top: pal.bodyT, left: pal.bodyL, right: pal.bodyR, edge: pal.bodyEdge)

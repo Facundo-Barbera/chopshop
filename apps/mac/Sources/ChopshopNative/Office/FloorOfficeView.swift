@@ -27,17 +27,22 @@ public struct FloorOfficeView: View {
 
     private var layout: FloorLayout { FloorLayout(plan: plan) }
 
-    private func alerts(_ now: Date) -> [IsoAlert] {
+    private func alerts(_ now: Date) -> [IsoAlert] { Self.alerts(plan, layout: layout, now: now) }
+
+    /// La barra «Atención» del piso sin nada seleccionado (la ciudad pinta la misma durante el zoom).
+    static func alerts(_ plan: FloorPlan, layout: FloorLayout, now: Date) -> [IsoAlert] {
         layout.spots.compactMap { sp -> (FloorLayout.Spot, FloorPlan.Occupant, NodeVisual)? in
             guard let o = plan.occupant(of: sp.id, now: now), o.visual == .needsYou || o.visual == .stuck else { return nil }
             return (sp, o, o.visual)
         }
         .sorted { ($0.2 == .needsYou ? 0 : 1, $0.0.id) < ($1.2 == .needsYou ? 0 : 1, $1.0.id) }
-        .map { IsoAlert(id: $0.0.id, label: label(for: $0.0.id), title: $0.1.title ?? $0.1.threadID, visual: $0.2) }
+        .map { IsoAlert(id: $0.0.id, label: label(plan, $0.0.id), title: $0.1.title ?? $0.1.threadID, visual: $0.2) }
     }
 
+    func label(for id: String) -> String { Self.label(plan, id) }
+
     /// Etiqueta corta del hueco: `rol·n` en un piso, el rol que espera (o «sin rol») en el vestíbulo.
-    func label(for id: String) -> String {
+    static func label(_ plan: FloorPlan, _ id: String) -> String {
         if id.hasPrefix("lobby:") {
             let g = plan.guest(String(id.dropFirst(6)))
             return g?.waitingRole.map { "espera · \($0)" } ?? "sin rol"
@@ -129,26 +134,7 @@ public struct FloorOfficeView: View {
             FloorRenderer(plan: plan, layout: lay, cam: cam, box: box, dark: scheme == .dark, t: t, now: now,
                           selected: selected, hovered: hovered).draw(&ctx)
         } symbols: {
-            ForEach(lay.spots, id: \.id) { sp in
-                let lk = plan.look(sp.id, now: now)
-                let tint = lk?.visual?.tint
-                Text(label(for: sp.id))
-                    .font(.system(size: 10, weight: .semibold))
-                    .padding(.horizontal, 7).padding(.vertical, 2)
-                    .background(Capsule().fill(scheme == .dark ? Color.black.opacity(0.5) : Color.white.opacity(0.78)))
-                    .overlay(Capsule().strokeBorder(tint?.opacity(0.9) ?? Color.primary.opacity(0.14), lineWidth: 0.7))
-                    .foregroundStyle(tint ?? Color.primary.opacity(0.85))
-                    .tag("d:\(sp.id)")
-            }
-            ForEach(lay.rooms, id: \.index) { r in
-                Text(roomTitle(r))
-                    .font(.system(size: 9, weight: .medium, design: .monospaced)).tracking(1.3)
-                    .padding(.horizontal, 8).padding(.vertical, 3)
-                    .background(Capsule().fill(scheme == .dark ? Color(white: 0.11).opacity(0.92) : Color.white.opacity(0.9)))
-                    .overlay(Capsule().strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.7))
-                    .foregroundStyle(Color.primary.opacity(0.75))
-                    .tag("r:\(r.index)")
-            }
+            Self.labels(plan, layout: lay, now: now, dark: scheme == .dark)
             if let h = hovered {
                 let o = plan.occupant(of: h, now: now)
                 IsoTooltip(label: label(for: h), title: o?.title ?? o?.threadID ?? deskState(h, now: now),
@@ -158,7 +144,33 @@ public struct FloorOfficeView: View {
         }
     }
 
-    private func roomTitle(_ r: FloorLayout.RoomBox) -> String {
+    /// Etiquetas de escritorios (`d:<id>`) y departamentos (`r:<i>`) que resuelve FloorRenderer (la ciudad las usa en el zoom).
+    @ViewBuilder static func labels(_ plan: FloorPlan, layout lay: FloorLayout, now: Date, dark: Bool) -> some View {
+        ForEach(lay.spots, id: \.id) { sp in
+            let lk = plan.look(sp.id, now: now)
+            let tint = lk?.visual?.tint
+            Text(label(plan, sp.id))
+                .font(.system(size: 10, weight: .semibold))
+                .padding(.horizontal, 7).padding(.vertical, 2)
+                .background(Capsule().fill(dark ? Color.black.opacity(0.5) : Color.white.opacity(0.78)))
+                .overlay(Capsule().strokeBorder(tint?.opacity(0.9) ?? Color.primary.opacity(0.14), lineWidth: 0.7))
+                .foregroundStyle(tint ?? Color.primary.opacity(0.85))
+                .tag("d:\(sp.id)")
+        }
+        ForEach(lay.rooms, id: \.index) { r in
+            Text(roomTitle(plan, r))
+                .font(.system(size: 9, weight: .medium, design: .monospaced)).tracking(1.3)
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(Capsule().fill(dark ? Color(white: 0.11).opacity(0.92) : Color.white.opacity(0.9)))
+                .overlay(Capsule().strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.7))
+                .foregroundStyle(Color.primary.opacity(0.75))
+                .tag("r:\(r.index)")
+        }
+    }
+
+    private func roomTitle(_ r: FloorLayout.RoomBox) -> String { Self.roomTitle(plan, r) }
+
+    static func roomTitle(_ plan: FloorPlan, _ r: FloorLayout.RoomBox) -> String {
         if plan.kind == .lobby { return ["VESTÍBULO", plan.company?.uppercased()].compactMap { $0 }.joined(separator: " · ") }
         let room = plan.rooms[r.index]
         return room.role.uppercased() + (room.permanent ? " · PERMANENTE" : "")
