@@ -81,7 +81,7 @@ Las URLs de webhook y los tokens **nunca** van en el config ni en el código: so
 
 ### Perfiles
 
-Los perfiles de proyecto son locales y tampoco se versionan: `~/.chopshop/profiles/<proyecto>.yaml` (modo `0600`). Campos principales: `repo`, `t3_project`, `host`, `overflow_host`, `remote_repos`, `provider`/`model` (opcionales), `runtime_mode`, `scratch`, `ready` (filtros), `branches.pattern`, `decider`, `can_run`/`cannot_run`, `autonomy`, `reactions` y `graph`. Las reglas del perfil se inyectan como preámbulo del prompt de cada hilo.
+Los perfiles de proyecto son locales y tampoco se versionan: `~/.chopshop/profiles/<proyecto>.yaml` (modo `0600`). Campos principales: `repo`, `t3_project`, `host`, `overflow_host`, `remote_repos`, `provider`/`model` (opcionales), `runtime_mode`, `scratch`, `ready` (filtros), `branches.pattern`, `decider`, `can_run`/`cannot_run`, `autonomy`, `reactions`, `graph` e `integration` (ver [Integración en main](#integración-en-main)). Las reglas del perfil se inyectan como preámbulo del prompt de cada hilo.
 
 ```yaml
 # ~/.chopshop/profiles/proyecto-demo.yaml
@@ -108,6 +108,8 @@ apps/agent/bin/chopshop metrics                        # CPU/RAM/disco de esta m
 apps/agent/bin/chopshop stop [<batch>] [--task T]      # interrumpe hilos y marca tareas en cola como canceladas (nunca archiva)
 apps/agent/bin/chopshop gather <batch> [--json]        # resultados en Markdown
 apps/agent/bin/chopshop settle <batch>                 # t3_thread_organize settle (nunca archiva)
+apps/agent/bin/chopshop integrate <batch|task> [--dry-run] [--json] [--webhook-file F]   # rebase + tests + push a la base + settle
+apps/agent/bin/chopshop integrate --thread ID --host H --project P                       # un hilo suelto de T3
 apps/agent/bin/chopshop subscribe --project P --events pending_question,task_done --webhook-file F
 apps/agent/bin/chopshop graph new proyecto-demo --bugs examples/dummy-bugs.yaml
 apps/agent/bin/chopshop graph run g-0001 | status [g-0001] [--json]
@@ -125,7 +127,28 @@ apps/agent/bin/chopshop graph run g-0001 | status [g-0001] [--json]
 
 ### Webhooks y eventos
 
-Eventos: `pending_question` (con `summary`, `options`, `request` y el comando `reply`), `task_done`, `batch_done`, además de los de reacciones y grafo. Las entregas quedan registradas en `~/.chopshop/events.jsonl`.
+Eventos: `pending_question` (con `summary`, `options`, `request` y el comando `reply`), `task_done`, `batch_done`, `task_integrated` (con `batch`, `task`, `thread`, `branch`, `base`, `commit` y `settled`; lo emite `chopshop integrate` solo tras un push correcto), además de los de reacciones y grafo. Las entregas quedan registradas en `~/.chopshop/events.jsonl`.
+
+### Integración en main
+
+`chopshop integrate <batch|task>` lleva a la base el trabajo de un hilo que **terminó** (`completed`, sin preguntas ni permisos pendientes). Con un lote, integra en orden cada tarea con hilo. Rama y worktree salen de T3 (`t3_thread_read` → `thread.branch` y `thread.worktreePath`): Chopshop no crea worktrees, trabaja en el que creó T3, así que se corre en la máquina donde está ese worktree. Pasos:
+
+1. El worktree debe estar limpio (`git status --porcelain` vacío) y en la rama del hilo; si no, aborta (`dirty` / `wrong_branch`).
+2. `git fetch origin` y `git rebase origin/<base>` (`base_ref` del perfil, `main` por defecto). Si hay conflicto: `git rebase --abort` y estado `conflict`.
+3. Corre `integration.test_cmd` en `integration.test_cwd` (relativo al worktree) con `integration.timeout` (900 s por defecto). Sin `test_cmd` no se integra nunca (`no_tests`); si fallan, `tests_failed`.
+4. `git push origin HEAD:<base>`, **nunca** con `--force`, `-f`, `--force-with-lease` ni refspecs `+`: el módulo tiene una guardia que rechaza ese push antes de ejecutarlo. Si el remoto lo rechaza porque la base avanzó, reintenta hasta 2 veces fetch + rebase + tests; después, `push_rejected`.
+5. Solo si el push salió bien: `t3_thread_organize {action: settle}` (nunca archiva), `integrated: true` en la tarea y evento `task_integrated`.
+
+`--dry-run` hace los pasos 1-3 sin push ni settle; `--json` da el resultado por tarea (`status`, `steps`, `detail`, `commit`...). El código de salida es distinto de 0 si alguna tarea no quedó integrada (las ya integradas cuentan como hechas).
+
+```yaml
+# en ~/.chopshop/profiles/proyecto-demo.yaml
+base_ref: main
+integration:
+  test_cmd: [python3, -m, unittest, discover, -s, tests]   # lista argv, sin shell
+  test_cwd: apps/agent                                     # relativo al worktree del hilo
+  timeout: 900                                             # segundos
+```
 
 ### Reacciones por eventos
 

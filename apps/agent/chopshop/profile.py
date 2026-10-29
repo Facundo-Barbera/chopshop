@@ -6,7 +6,7 @@ from . import home, miniyaml, settings
 
 KNOWN = {"project", "company", "repo", "host", "overflow_host", "remote_repos", "t3_project", "scratch",
          "provider", "model", "runtime_mode", "workspace", "base_ref", "tracker", "ready", "branches",
-         "decider", "approvers", "can_run", "cannot_run", "autonomy", "reactions", "max_parallel", "graph"}
+         "decider", "approvers", "can_run", "cannot_run", "autonomy", "reactions", "max_parallel", "graph", "integration"}
 
 
 class ProfileError(Exception):
@@ -76,7 +76,29 @@ def validate(d):
     errs += reactions.validate(d)
     from . import graph
     errs += graph.validate(d)
+    errs += validate_integration(d)
     m = d.get("model")
     if m and "/" not in str(m):
         errs.append("model debe ser 'instancia/modelo' (p. ej. claudeAgent/claude-haiku-5-5)")
+    return errs
+
+
+INTEGRATION_KEYS = ("test_cmd", "test_cwd", "timeout")
+
+
+def validate_integration(d):
+    """Bloque opcional `integration:` (lo usa `chopshop integrate`)."""
+    g = d.get("integration")
+    if g is None:
+        return []
+    if not isinstance(g, dict):
+        return ["integration: se esperaba un mapa"]
+    errs = ["integration.%s desconocido (%s)" % (k, ", ".join(INTEGRATION_KEYS)) for k in g if k not in INTEGRATION_KEYS]
+    tc = g.get("test_cmd")
+    if tc is not None and not (isinstance(tc, list) and tc and all(isinstance(x, str) and x for x in tc)):
+        errs.append("integration.test_cmd debe ser una lista argv no vacía (p. ej. [python3, -m, unittest])")
+    if "test_cwd" in g and not isinstance(g["test_cwd"], str):
+        errs.append("integration.test_cwd debe ser una ruta relativa al worktree")
+    if "timeout" in g and (not isinstance(g["timeout"], (int, float)) or isinstance(g["timeout"], bool) or g["timeout"] <= 0):
+        errs.append("integration.timeout debe ser un número de segundos > 0")
     return errs
