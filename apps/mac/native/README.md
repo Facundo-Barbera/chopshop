@@ -32,6 +32,20 @@ swift run ChopshopSnap /tmp/city city-keys                      # city-01-ciudad
 swift run ChopshopSnap /tmp/city city-video /tmp/city/city.mp4  # MP4 H.264 1400×900 a 30 fps
 ```
 
+## Sala de máquinas
+
+Tercera vista (Ciudad · Oficina · **Sala de máquinas**, `MachineRoom/`): el rack de repos (un módulo 1U por repo con su luz:
+verde, ámbar parpadeante si hay runs en curso, rojo, gris sin datos) con los runs de GitHub Actions de cada uno (workflow,
+disparador, rama@sha y **origen**: hilo/escritorio, automatización, bot, horario, persona), más los listeners del agente, las
+automatizaciones (última ejecución, exit, próximo horario) y los webhooks salientes. Lógica pura en `MachineRoomModel.swift`
+(`MachineRoomState` pliega `machine_room` con la misma regla que `agent/machine_room.py`; tests en `MachineRoomTests`); vistas en
+`MachineRoomView`/`RackRender` (macOS 26).
+
+- En la app: barra lateral → **Sala de máquinas** (`LiveMachineRoomScreen(store:)`, macOS 26).
+- Datos de prueba: `Resources/machine-room-fixture.jsonl` (copia de `apps/agent/tests/fixtures/events/machine-room-fixture.jsonl`;
+  su proyección dorada está en `Tests/ChopshopNativeTests/Resources/machine-room-fixture.state.json`).
+- Capturas: `swift run ChopshopSnap /tmp/mr machine-room` → `machine-room-dark.png` / `machine-room-light.png`.
+
 ## Estructura
 
 - `Sources/ChopshopNative` es un **symlink** a `apps/mac/Sources/ChopshopNative`: el mismo código que compila la app.
