@@ -168,7 +168,7 @@ def check_config(cfg, runner=None, which=shutil.which):
             warns.append("define agent.t3.t3_bin o agent.t3.origin: sin ellos el sondeo de T3 avisará t3_unreachable")
         old = [k for k in ("helper", "node", "transport") if k in t3c]
         if old:
-            warns.append("agent.t3.%s ya no se usa (sin helper node ni fleet): bórralo de la config" % "/".join(old))
+            warns.append("agent.t3.%s es una clave vieja que ya no se usa: bórrala de la config" % "/".join(old))
     if not os.path.isdir(cfg.get("projects_root") or ""):
         warns.append("projects_root no existe: %s" % cfg.get("projects_root"))
     for k, v in (cfg.get("retention") or {}).items():

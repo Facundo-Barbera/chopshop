@@ -1,21 +1,21 @@
-"""Vigilante de T3: lee proyectos e hilos vía el helper MCP (t3mcp.mjs), mantiene `t3_threads` y emite eventos por transición.
+"""Vigilante de T3: lee proyectos e hilos por el MCP de T3, mantiene `t3_threads` y emite eventos por transición.
 
-- `T3(cfg, runner=None)`: `.call(tool, args)` ejecuta `node <helper> <tool> '<json>'` con `T3MCP_ACCESS` y `T3_BIN` de `cfg["t3"]`.
-  Los fallos (helper ausente, timeout, salida no JSON, fallo MCP `_tag`) se convierten en `T3Error`. También guarda el estado de
-  alcanzabilidad/backoff que usa `poll` (`.reachable`, `.failures`, `.backoff`, `.retry_at`).
+- `T3(cfg, client=None, clock=None)`: adaptador fino sobre el cliente MCP nativo compartido (`chopshop/t3mcp.py`).
+  `.call(tool, args)` delega en `client` (inyectado, o un `t3mcp.Client` construido desde `cfg["t3"]`: `origin`,
+  `access`, `credential_file`, `t3_bin`); todo fallo llega como `T3Error` (= `t3mcp.T3Error`). Guarda además el estado
+  de alcanzabilidad/backoff que usa `poll` (`.reachable`, `.failures`, `.backoff`, `.retry_at`, `.last_error`).
+  No hay transporte propio: autenticación, sesión MCP y la guardia contra archivar viven en `t3mcp.Client`.
 - `poll(conn, cfg, t3, emit_fn)`: una pasada. `emit_fn(event, project, body)` (el integrador lo envuelve sobre `events.emit`).
   Eventos: `thread_started`, `thread_done`, `thread_failed`, `thread_settled`, `pending_question`, `pending_approval`,
   `t3_unreachable` (una sola vez al caer) y `t3_recovered`. La primera pasada (sin línea base) siembra la tabla en silencio
   salvo las preguntas pendientes, que sí se avisan (son accionables).
-- `settle(t3, thread_id)`: `t3_thread_organize {action: "settle"}`. Archivar queda prohibido (también en `T3.call`).
-- `answer(t3, thread_id, choice, request=None)`: misma lógica que `chopshop/engine.py::_send_answer/_resolve_answer`.
-Sin red ni procesos propios: todo se prueba inyectando `runner(cmd, env, timeout) -> objeto con returncode/stdout/stderr`."""
-import json
-import os
-import subprocess
+- `settle(t3, thread_id)`: `t3_thread_organize {action: "settle"}`. Nunca archiva.
+- `answer(t3, thread_id, choice, request=None)`: resuelve la opción con `chopshop/answers.py` (igual que el motor).
+Se prueba inyectando un cliente falso con `.call(tool, args) -> obj` (o que lance `T3Error`)."""
 import time
 from datetime import datetime, timezone
 
+from .. import answers, t3mcp
 from . import db
 
 # Estados de hilo de T3 (los terminales coinciden con engine.TERMINAL). `idle` (hilos de proveedor/subagentes sin
@@ -24,73 +24,47 @@ ACTIVE = {"running", "starting", "waiting", "queued", "pending"}
 DONE = {"completed"}
 FAILED = {"failed", "cancelled", "interrupted", "rolled_back"}
 
-TIMEOUT = 60              # segundos por llamada al helper
+TIMEOUT = 60              # segundos por llamada a T3
 BACKOFF_BASE = 10         # primer reintento tras caer T3
 BACKOFF_MAX = 300
-PAGE = 25                 # el helper trunca salidas grandes (~64 KB): páginas chicas
+PAGE = 25                 # páginas chicas: respuestas acotadas y cortes tempranos al paginar
 MAX_PAGES = 20
 MAX_READS = 40            # tope de t3_thread_read por pasada
 NEW_SLACK = 30            # un hilo "nuevo" se considera reciente si se creó tras la pasada anterior (menos esta holgura)
-ORGANIZE_ACTIONS = {"settle"}   # único t3_thread_organize permitido: jamás archivar
 
-
-class T3Error(Exception):
-    pass
+T3Error = t3mcp.T3Error
 
 
 class AnswerError(T3Error):
     """Petición inválida al responder (sin preguntas, ambigua u opción no válida): no es un fallo de T3."""
 
 
-def _run(cmd, env=None, timeout=TIMEOUT):
-    return subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=timeout)
+def make_client(conf, timeout=TIMEOUT):
+    """`t3mcp.Client` desde la sección `agent.t3` (vacíos = valores por defecto del cliente)."""
+    conf = conf or {}
+    return t3mcp.Client(origin=conf.get("origin") or None, access=conf.get("access") or "approval-required",
+                        credential_file=conf.get("credential_file") or None, t3_bin=conf.get("t3_bin") or "t3",
+                        timeout=timeout)
 
 
 class T3:
-    def __init__(self, cfg, runner=None, clock=None, timeout=TIMEOUT):
+    def __init__(self, cfg, client=None, clock=None, timeout=TIMEOUT):
         self.cfg = cfg
         self.conf = cfg.get("t3") or {}
-        self.runner = runner or _run
+        self.client = client if client is not None else make_client(self.conf, timeout)
         self.clock = clock or time.time
-        self.timeout = timeout
         self.reachable = None     # None = aún no se sabe; True/False tras la primera pasada
         self.failures = 0         # fallos consecutivos de poll
         self.retry_at = 0.0       # no volver a llamar antes de este instante (clock)
         self.last_error = None
 
-    # ---- transporte ----
-    def command(self, tool, args):
-        helper = os.path.expanduser(self.conf.get("helper") or "")
-        return [self.conf.get("node") or "node", helper, tool, json.dumps(args or {}, ensure_ascii=False)]
-
-    def env(self):
-        return dict(os.environ, T3MCP_ACCESS=self.conf.get("access") or "approval-required",
-                    T3_BIN=os.path.expanduser(self.conf.get("t3_bin") or "~/.local/bin/t3"))
-
     def call(self, tool, args=None):
-        args = args or {}
-        if tool == "t3_thread_organize" and args.get("action") not in ORGANIZE_ACTIONS:
-            raise T3Error("acción de t3_thread_organize no permitida: %r (solo settle; nunca archivar)" % args.get("action"))
         try:
-            r = self.runner(self.command(tool, args), self.env(), self.timeout)
-        except subprocess.TimeoutExpired:
-            raise T3Error("%s: tiempo agotado (%ss)" % (tool, self.timeout))
-        except OSError as e:
-            raise T3Error("%s: no pude ejecutar el helper: %s" % (tool, e))
-        out = (getattr(r, "stdout", "") or "").strip()
-        err = (getattr(r, "stderr", "") or "").strip()
-        if r.returncode != 0 or out.startswith("ERROR"):
-            raise T3Error("%s falló: %s" % (tool, (err or out or "código %s" % r.returncode)[:600]))
-        try:
-            data = json.loads(out)
-        except ValueError:
-            raise T3Error("%s: respuesta que no es JSON (¿salida truncada?): %s" % (tool, out[:120]))
-        # fallos de herramienta MCP: content=[{type:text,text:'{"_tag":...Failure...}'}]
-        if isinstance(data, list) and data and isinstance(data[0], dict) and "_tag" in str(data[0].get("text", ""))[:20]:
-            raise T3Error("%s: %s" % (tool, str(data[0]["text"])[:600]))
-        if isinstance(data, dict) and str(data.get("_tag", "")).endswith("Failure"):
-            raise T3Error("%s: %s" % (tool, (data.get("message") or data.get("code") or "fallo")[:600]))
-        return data
+            return self.client.call(tool, args or {})
+        except T3Error:
+            raise
+        except Exception as e:  # noqa: BLE001 - un cliente que falla de forma inesperada cuenta como T3 caído
+            raise T3Error("%s: %s" % (tool, str(e)[:600]))
 
     def projects(self):
         """Proyectos de T3 no borrados: [{id, title, workspaceRoot, ...}]."""
@@ -349,26 +323,6 @@ def settle(t3, thread_id):
     return t3.call("t3_thread_organize", {"threadId": thread_id, "action": "settle"})
 
 
-def _resolve_answer(q, choice):
-    """Traduce `choice` (nº de opción 1..n, etiqueta, valor o texto libre) al valor que espera T3 (lista si multiSelect)."""
-    opts = q.get("options", [])
-    val = lambda o: o.get("value") or o["label"]  # noqa: E731
-    picks = [c.strip() for c in choice.split(",")] if q.get("multiSelect") else [choice]
-    res = []
-    for c in picks:
-        if c.isdigit() and 1 <= int(c) <= len(opts):
-            res.append(val(opts[int(c) - 1]))
-            continue
-        m = [o for o in opts if o["label"].lower() == c.lower() or (o.get("value") or "").lower() == c.lower()]
-        if m:
-            res.append(val(m[0]))
-            continue
-        if opts and q.get("allowCustomAnswer") is False:
-            raise AnswerError("'%s' no es una opción válida" % c)
-        res.append(c)
-    return res if q.get("multiSelect") else res[0]
-
-
 def answer(t3, thread_id, choice, request=None):
     """Responde la pregunta pendiente de un hilo. `request` = id (o prefijo) si hay varias. Con una petición de varias
     preguntas, `choice` debe ser un dict {id_pregunta: elección}. Devuelve {"request_id", "answers", "question"}."""
@@ -385,15 +339,9 @@ def answer(t3, thread_id, choice, request=None):
     qs = q.get("questions") or []
     if not qs:
         raise AnswerError("la petición %s no trae preguntas" % ids[0])
-    if isinstance(choice, dict):
-        by_id = {qq["id"]: qq for qq in qs}
-        unknown = [k for k in choice if k not in by_id]
-        if unknown or len(choice) != len(qs):
-            raise AnswerError("respuestas no coinciden con las preguntas (%s)" % ", ".join(sorted(by_id)))
-        ans = {k: _resolve_answer(by_id[k], str(v)) for k, v in choice.items()}
-    elif len(qs) != 1:
-        raise AnswerError("la petición tiene %d preguntas; pasa choice como {id: elección}" % len(qs))
-    else:
-        ans = {qs[0]["id"]: _resolve_answer(qs[0], str(choice))}
+    try:
+        ans = answers.resolve_all(qs, choice)
+    except answers.InvalidChoice as e:
+        raise AnswerError(str(e))
     t3.call("t3_pending_request", {"action": "respond", "threadId": thread_id, "requestId": ids[0], "answers": ans})
     return {"request_id": ids[0], "answers": ans, "question": qs[0] if len(qs) == 1 else qs}
