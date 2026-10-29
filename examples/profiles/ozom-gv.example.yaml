@@ -1,0 +1,35 @@
+# Ejemplo de identidad de empresa, proyecto y piso (docs/plans/office-personalization.md). Va en el perfil local
+# ~/.chopshop/profiles/ozom-gv.yaml (sin versionar); el logo, en ~/.chopshop/brand/ (tampoco va al repo).
+project: ozom-gv
+repo: <org>/<repo-ozom-gv>
+office:
+  company: ozom
+  brand:                          # empresa: basta declararlo en un perfil de ozom (se fusiona entre perfiles)
+    name: ozom
+    accent: teal                  # nombre de la paleta contenida o #rrggbb (se apaga solo)
+    monogram: oz
+    logo_file: ozom/logo.svg      # relativo a ~/.chopshop/brand/
+    building:
+      style: brick
+      roof: garden
+    materials:
+      floor: oak
+      walls: plaster
+      furniture: walnut
+    lighting: warm
+  look:                           # proyecto: sobrescribe el brand solo en sus pisos
+    materials:
+      floor: terrazzo
+  floors:
+    - name: Producto
+      rooms:
+        - {role: backend, desks: 4}
+        - {role: frontend, desks: 2}
+    - name: Datos
+      look:                       # piso: sobrescribe el proyecto
+        accent: slate
+        lighting: cool
+        materials:
+          furniture: steel
+      rooms:
+        - {role: data, desks: 3}

@@ -4,12 +4,13 @@
   (`MAX_FLOORS_PER_PROJECT`, `MAX_ROOMS_PER_FLOOR`, `MAX_DESKS_PER_ROOM`, `MAX_DESKS_PER_FLOOR`).
 - `validate_building(profiles) -> [problema]`: tope de pisos de proyecto por edificio (empresa) entre todos los perfiles.
 - `desks(prof) -> [desk]`: escritorios declarados, con id estable `<proyecto>/<piso>/<rol>/<n>` (piso y n desde 0).
-- `structure(prof)`: forma de `office` para el sobre `office.changed` y para `GET /state` (sin ocupantes).
+- `structure(prof, retired, brand)`: forma de `office` para el sobre `office.changed` y para `GET /state` (sin ocupantes), con la
+  identidad visual resuelta (`identity` del proyecto y de cada piso; `identity.py`, docs/plans/office-personalization.md).
 - `roles(prof)`, `wake_triggers(prof, role)`, `match_rules(prof)`, `half_life_s(prof)`, `rack_repos(prof)`, `rack_actors(prof)`.
 Puro: sin I/O (el perfil ya viene cargado por `chopshop.profile.load`)."""
 import re
 
-from . import automations
+from . import automations, identity
 
 MAX_FLOORS_PER_PROJECT = 4
 MAX_ROOMS_PER_FLOOR = 6
@@ -20,8 +21,8 @@ DEFAULT_HALF_LIFE = 30 * 60       # s
 MIN_HALF_LIFE = 60
 MAX_HALF_LIFE = 7 * 86400
 
-OFFICE_KEYS = ("company", "half_life", "floors", "roles")
-FLOOR_KEYS = ("name", "rooms")
+OFFICE_KEYS = ("company", "half_life", "floors", "roles", "brand", "look")
+FLOOR_KEYS = ("name", "rooms", "look")
 ROOM_KEYS = ("role", "desks", "permanent")
 ROLE_KEYS = ("prompt_file", "wake", "match")
 MATCH_KEYS = ("title", "branch", "label")
@@ -54,7 +55,10 @@ def parse_duration(v):
 
 def validate(prof):
     """Problemas de los bloques `office:` y `rack:` (lista vacía si están bien o no existen)."""
-    return _office_errs(prof) + _rack_errs(prof)
+    errs = _office_errs(prof)
+    if _mapping(prof.get("office")):
+        errs += identity.validate(prof)
+    return errs + _rack_errs(prof)
 
 
 def _office_errs(prof):
@@ -216,7 +220,8 @@ def _rack_errs(prof):
 
 
 def validate_building(profiles):
-    """Tope de pisos de proyecto por edificio: `profiles` = perfiles cargados; agrupa por `company(prof)`."""
+    """Tope de pisos de proyecto por edificio y conflictos de `office.brand` entre perfiles de la misma empresa: `profiles` =
+    perfiles cargados; agrupa por `company(prof)`."""
     per = {}
     for p in profiles:
         n = len(floors(p))
@@ -228,7 +233,12 @@ def validate_building(profiles):
         if total > MAX_BUILDING_FLOORS:
             errs.append("edificio %s: %d pisos de proyecto (máximo %d): %s" % (
                 comp, total, MAX_BUILDING_FLOORS, ", ".join("%s=%d" % x for x in items)))
-    return errs
+    return errs + identity.validate_brands(profiles, company)
+
+
+def brands(profiles):
+    """{empresa: `office.brand` fusionado entre perfiles} (ver `identity.company_brands`)."""
+    return identity.company_brands(profiles, company)
 
 
 # ---------------------------------------------------------------- lectura (perfil ya validado)
@@ -279,10 +289,12 @@ def desks(prof):
     return out
 
 
-def structure(prof, retired=()):
+def structure(prof, retired=(), brand=None):
     """`office` del sobre `office.changed` / `GET /state` sin ocupantes. `retired` = ids de escritorios que ya no declara el
-    perfil (se conservan, `retired: true`, en su piso/departamento si aún existe; si no, en un departamento al final del piso)."""
+    perfil (se conservan, `retired: true`, en su piso/departamento si aún existe; si no, en un departamento al final del piso).
+    `brand` = `office.brand` fusionado de la empresa (`brands(perfiles)`); si falta, el del propio perfil."""
     retired = sorted(set(retired), key=lambda d: (parse_desk_id(d) or ("", 0, "", 0))[1:])
+    ident = identity.resolve(prof, brand if brand is not None else _office(prof).get("brand"), company(prof))
     fl = []
     for fi, f in enumerate(floors(prof)):
         rooms = []
@@ -293,14 +305,16 @@ def structure(prof, retired=()):
             rooms.append({"role": r["role"], "permanent": bool(r.get("permanent")),
                           "desks": [{"id": desk_id(prof.get("project"), fi, r["role"], s), "slot": s, "retired": False}
                                     for s in range(n)]})
-        fl.append({"index": fi, "name": f.get("name") if isinstance(f.get("name"), str) else None, "rooms": rooms})
+        fl.append({"index": fi, "name": f.get("name") if isinstance(f.get("name"), str) else None, "rooms": rooms,
+                   "identity": identity.floor_identity(ident, f, prof.get("project"), fi)})
     for did in retired:
         p = parse_desk_id(did)
         if not p:
             continue
         _, fi, role, slot = p
         while len(fl) <= fi:
-            fl.append({"index": len(fl), "name": None, "rooms": []})
+            fl.append({"index": len(fl), "name": None, "rooms": [],
+                       "identity": identity.floor_identity(ident, {}, prof.get("project"), len(fl))})
         room = next((r for r in fl[fi]["rooms"] if r["role"] == role), None)
         if room is None:
             room = {"role": role, "permanent": False, "desks": []}
@@ -308,7 +322,7 @@ def structure(prof, retired=()):
         if not any(d["id"] == did for d in room["desks"]):
             room["desks"].append({"id": did, "slot": slot, "retired": True})
             room["desks"].sort(key=lambda d: d["slot"])
-    return {"company": company(prof), "half_life_s": half_life_s(prof), "floors": fl}
+    return {"company": company(prof), "half_life_s": half_life_s(prof), "floors": fl, "identity": ident}
 
 
 def roles(prof):

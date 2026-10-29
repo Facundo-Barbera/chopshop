@@ -66,6 +66,7 @@ class Office:
         self.profiles_fn = profiles_fn or _load_profiles
         self.half_life = {}           # proyecto -> T½ (s)
         self.company = {}             # proyecto -> empresa
+        self.brands = {}              # empresa -> office.brand fusionado entre perfiles (identity.py)
         self._lock = threading.RLock()
         self._loaded = None           # instante de la última relectura de perfiles
 
@@ -119,7 +120,9 @@ class Office:
         with self._lock:
             changed = []
             known = {r["project"] for r in self._q("SELECT DISTINCT project FROM desks")}
-            for prof in self.profiles_fn():
+            profs = list(self.profiles_fn())
+            self.brands = layout.brands(profs)
+            for prof in profs:
                 project = prof.get("project")
                 if not project or ("office" not in prof and project not in known):
                     continue
@@ -134,7 +137,9 @@ class Office:
     def sync_project(self, project, by="profile"):
         """Resincroniza un proyecto tras reescribir su perfil (`PUT /office`): `office.changed {by}` si cambió. -> sobre o None."""
         with self._lock:
-            prof = next((p for p in self.profiles_fn() if p.get("project") == project), None)
+            profs = list(self.profiles_fn())
+            self.brands = layout.brands(profs)
+            prof = next((p for p in profs if p.get("project") == project), None)
             return self._sync(prof, by=by) if prof else None
 
     def _sync(self, prof, by="profile"):
@@ -161,7 +166,7 @@ class Office:
                 self._x("UPDATE desks SET retired=1 WHERE id=?", (did,))
                 retired.append(did)
         gone = [did for did, old in have.items() if did not in declared]
-        struct = layout.structure(prof, gone)
+        struct = layout.structure(prof, gone, self.brands.get(self.company[project]))
         last = self._meta(STRUCT + project)
         last_seq, last_struct = (last.split(" ", 1) + [""])[:2] if last else ("0", "")
         stale = int(last_seq or 0) < self._min_seq()

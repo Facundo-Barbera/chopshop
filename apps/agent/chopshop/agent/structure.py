@@ -169,10 +169,11 @@ def read(conn, project):
     prof, text = _load(project)
     _, retired = _known(conn, project, prof)
     return {"project": project, "rev": rev(text), "office": prof.get("office"), "rack": prof.get("rack"),
-            "structure": layout.structure(prof, retired), "limits": LIMITS}
+            "structure": layout.structure(prof, retired, _brand(project, prof)), "limits": LIMITS}
 
 
-def _building_errs(project, candidate):
+def _company_profiles(project, candidate):
+    """`candidate` más los demás perfiles locales de su empresa."""
     profs = [candidate]
     for name in profile_mod.list_projects():
         if name == project:
@@ -182,7 +183,16 @@ def _building_errs(project, candidate):
         except profile_mod.ProfileError:
             continue
     comp = layout.company(candidate)
-    return layout.validate_building([p for p in profs if layout.company(p) == comp])
+    return [p for p in profs if layout.company(p) == comp]
+
+
+def _building_errs(project, candidate):
+    return layout.validate_building(_company_profiles(project, candidate))
+
+
+def _brand(project, prof):
+    """`office.brand` fusionado de la empresa de `prof` (la misma identidad que publica `office.changed`)."""
+    return layout.brands(_company_profiles(project, prof)).get(layout.company(prof))
 
 
 def apply(conn, project, office, rack=None, by="bot", base_rev=None, reactivate=()):
@@ -229,7 +239,7 @@ def apply(conn, project, office, rack=None, by="bot", base_rev=None, reactivate=
                 _save_known(conn, project, known, retired)
             candidate["project"] = project
             return {"project": project, "rev": rev(text), "changed": False, "by": by,
-                    "structure": layout.structure(candidate, retired), "diff": diff}
+                    "structure": layout.structure(candidate, retired, _brand(project, candidate)), "diff": diff}
         out = replace_blocks(text, blocks)
         try:
             parsed = miniyaml.loads(out)
@@ -242,7 +252,7 @@ def apply(conn, project, office, rack=None, by="bot", base_rev=None, reactivate=
         _save_known(conn, project, known_after, retired_after)
         candidate["project"] = project
         return {"project": project, "rev": rev(out), "changed": True, "by": by,
-                "structure": layout.structure(candidate, retired_after), "diff": diff}
+                "structure": layout.structure(candidate, retired_after, _brand(project, candidate)), "diff": diff}
 
 
 def _write(path, text):
@@ -268,4 +278,4 @@ def changed_body(res):
     """Cuerpo del sobre `office.changed` (docs/event-envelope.md) a partir del resultado de `apply`."""
     s = res["structure"]
     return {"project": res["project"], "by": res["by"], "company": s["company"], "half_life_s": s["half_life_s"],
-            "floors": s["floors"], "diff": res["diff"]}
+            "floors": s["floors"], "identity": s.get("identity"), "diff": res["diff"]}

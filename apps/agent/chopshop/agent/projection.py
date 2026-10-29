@@ -199,6 +199,8 @@ def _apply_office(state, p, typ, env, body):
             d["notes_pending"] = prev.get("notes_pending") or 0
         p["office"] = {"company": body.get("company"), "half_life_s": body.get("half_life_s") or DEFAULT_HALF_LIFE,
                        "floors": floors}
+        if body.get("identity") is not None:                     # aditivo (office-personalization): solo si viene
+            p["office"]["identity"] = copy.deepcopy(body["identity"])
         return
     tid = body.get("thread_id")
     if typ == "task.state":
