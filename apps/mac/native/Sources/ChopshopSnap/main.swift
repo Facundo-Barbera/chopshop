@@ -1,11 +1,12 @@
 import AppKit
 import ChopshopNative
 
-// uso: ChopshopSnap <directorio de salida> [demo|demo-keys|city-keys|city-video [vídeo.mp4]]
+// uso: ChopshopSnap <directorio de salida> [demo|demo-keys|city-keys|city-video [vídeo.mp4]|machine-room]
 //   sin 2º argumento: capturas de proyecto/oficina
 //   demo: fotogramas clave de la demo (key-*.png) + secuencia seq/f0000.jpg a 12 fps (demo-keys: solo las claves)
 //   city-keys: claves de la ciudad (city-0N-*.png, 1400×900 @1x) desde city-fixture.jsonl
 //   city-video: la cronología de la ciudad en MP4 H.264, 1400×900 a 30 fps (por defecto <salida>/city.mp4)
+//   machine-room: sala de máquinas desde machine-room-fixture.jsonl (machine-room-dark.png / machine-room-light.png)
 let args = Array(CommandLine.arguments.dropFirst())
 let out = args.first ?? "/tmp/chopshop-snaps"
 try? FileManager.default.createDirectory(atPath: out, withIntermediateDirectories: true)
@@ -45,6 +46,15 @@ if let mode = args.dropFirst().first, mode == "city-keys" || mode == "city-video
             if k % 90 == 0 { print("vídeo \(k)/\(n)"); fflush(stdout) }
         }
         print(ok ? "ok \(path)" : "error: no se pudo escribir \(path)")
+    }
+    exit(0)
+}
+if let mode = args.dropFirst().first, mode == "machine-room" {
+    MainActor.assumeIsolated {
+        for dark in [true, false] {
+            Snapshots.renderMachineRoom(dark: dark, to: "\(out)/machine-room-\(dark ? "dark" : "light").png")
+            print("ok machine-room-\(dark ? "dark" : "light")")
+        }
     }
     exit(0)
 }

@@ -1,0 +1,250 @@
+{
+  "automations": [
+    {
+      "duration_ms": 900,
+      "error": "exit 1",
+      "exit": 1,
+      "name": "docs-sync",
+      "next_run": "2026-10-30T07:30:00.000Z",
+      "project": "awesome-gb",
+      "severity": "error",
+      "trigger": "manual",
+      "ts": "2026-10-29T16:09:21.000Z"
+    }
+  ],
+  "listeners": [
+    {
+      "backoff_s": 0,
+      "error": null,
+      "last_cycle": "2026-10-29T16:07:00.000Z",
+      "last_ok": "2026-10-29T16:07:00.000Z",
+      "name": "forge",
+      "state": "ok",
+      "ts": "2026-10-29T16:08:39.000Z"
+    },
+    {
+      "backoff_s": 0,
+      "error": null,
+      "last_cycle": "2026-10-29T16:00:00.000Z",
+      "last_ok": "2026-10-29T16:00:00.000Z",
+      "name": "t3watch",
+      "state": "ok",
+      "ts": "2026-10-29T16:06:47.000Z"
+    }
+  ],
+  "rack": [
+    {
+      "ci": "pending",
+      "default_branch": "main",
+      "error": null,
+      "kind": "main",
+      "label": "repo-principal",
+      "light": "amber",
+      "project": "awesome-gb",
+      "provider": "github",
+      "repo": "<org>/<repo-principal>",
+      "runs": [
+        {
+          "actor": "<login-humano>",
+          "conclusion": "success",
+          "created_at": "2026-10-29T16:20:00Z",
+          "event": "push",
+          "head_branch": "be/login",
+          "head_sha": "0182ab8",
+          "origin": {
+            "id": "mcp:b7",
+            "kind": "thread",
+            "label": "backend · awesome-gb/0/backend/0"
+          },
+          "run_id": "200",
+          "status": "completed",
+          "title": "t200",
+          "triggering_actor": "<login-humano>",
+          "updated_at": "2026-10-29T16:09:00Z",
+          "url": "https://github.com/<org>/<repo-principal>/actions/runs/200",
+          "workflow": "ci",
+          "workflow_path": ".github/workflows/ci.yml"
+        },
+        {
+          "actor": "<login-humano>",
+          "conclusion": null,
+          "created_at": "2026-10-29T16:21:00Z",
+          "event": "schedule",
+          "head_branch": "main",
+          "head_sha": "01849a7",
+          "origin": {
+            "id": ".github/workflows/nightly.yml",
+            "kind": "schedule",
+            "label": "cron"
+          },
+          "run_id": "201",
+          "status": "queued",
+          "title": "t201",
+          "triggering_actor": "<login-humano>",
+          "updated_at": "2026-10-29T16:06:00Z",
+          "url": "https://github.com/<org>/<repo-principal>/actions/runs/201",
+          "workflow": "nightly",
+          "workflow_path": ".github/workflows/nightly.yml"
+        },
+        {
+          "actor": "<login-humano>",
+          "conclusion": "success",
+          "created_at": "2026-10-29T16:47:00Z",
+          "event": "push",
+          "head_branch": "main",
+          "head_sha": "00cede5",
+          "origin": {
+            "id": "<login-humano>",
+            "kind": "human",
+            "label": "<login-humano>"
+          },
+          "run_id": "107",
+          "status": "completed",
+          "title": "t107",
+          "triggering_actor": "<login-humano>",
+          "updated_at": "2026-10-29T15:17:00Z",
+          "url": "https://github.com/<org>/<repo-principal>/actions/runs/107",
+          "workflow": "ci",
+          "workflow_path": ".github/workflows/ci.yml"
+        },
+        {
+          "actor": "<login-humano>",
+          "conclusion": "failure",
+          "created_at": "2026-10-29T16:46:00Z",
+          "event": "push",
+          "head_branch": "main",
+          "head_sha": "00ccef6",
+          "origin": {
+            "id": "<login-humano>",
+            "kind": "human",
+            "label": "<login-humano>"
+          },
+          "run_id": "106",
+          "status": "completed",
+          "title": "t106",
+          "triggering_actor": "<login-humano>",
+          "updated_at": "2026-10-29T15:16:00Z",
+          "url": "https://github.com/<org>/<repo-principal>/actions/runs/106",
+          "workflow": "ci",
+          "workflow_path": ".github/workflows/ci.yml"
+        },
+        {
+          "actor": "<login-humano>",
+          "conclusion": "success",
+          "created_at": "2026-10-29T16:45:00Z",
+          "event": "push",
+          "head_branch": "main",
+          "head_sha": "00cb007",
+          "origin": {
+            "id": "<login-humano>",
+            "kind": "human",
+            "label": "<login-humano>"
+          },
+          "run_id": "105",
+          "status": "completed",
+          "title": "t105",
+          "triggering_actor": "<login-humano>",
+          "updated_at": "2026-10-29T15:15:00Z",
+          "url": "https://github.com/<org>/<repo-principal>/actions/runs/105",
+          "workflow": "ci",
+          "workflow_path": ".github/workflows/ci.yml"
+        },
+        {
+          "actor": "<login-humano>",
+          "conclusion": "success",
+          "created_at": "2026-10-29T16:44:00Z",
+          "event": "push",
+          "head_branch": "main",
+          "head_sha": "00c9118",
+          "origin": {
+            "id": "<login-humano>",
+            "kind": "human",
+            "label": "<login-humano>"
+          },
+          "run_id": "104",
+          "status": "completed",
+          "title": "t104",
+          "triggering_actor": "<login-humano>",
+          "updated_at": "2026-10-29T15:14:00Z",
+          "url": "https://github.com/<org>/<repo-principal>/actions/runs/104",
+          "workflow": "ci",
+          "workflow_path": ".github/workflows/ci.yml"
+        }
+      ],
+      "ts": "2026-10-29T16:08:32.000Z",
+      "url": "https://github.com/<org>/<repo-principal>"
+    },
+    {
+      "ci": "failure",
+      "default_branch": "main",
+      "error": null,
+      "kind": "docs",
+      "label": "Engine CX",
+      "light": "red",
+      "project": "awesome-gb",
+      "provider": "github",
+      "repo": "<org>/<engine-cx>",
+      "runs": [
+        {
+          "actor": "<login-grok-juan-manuel>",
+          "conclusion": null,
+          "created_at": "2026-10-29T16:31:00Z",
+          "event": "workflow_dispatch",
+          "head_branch": "main",
+          "head_sha": "003bef1",
+          "origin": {
+            "id": "<login-grok-juan-manuel>",
+            "kind": "bot",
+            "label": "Grok · Juan Manuel"
+          },
+          "run_id": "31",
+          "status": "in_progress",
+          "title": "t31",
+          "triggering_actor": "<login-grok-juan-manuel>",
+          "updated_at": "2026-10-29T16:11:00Z",
+          "url": "https://github.com/<org>/<engine-cx>/actions/runs/31",
+          "workflow": "docs",
+          "workflow_path": ".github/workflows/docs.yml"
+        },
+        {
+          "actor": "<login-grok-facundo>",
+          "conclusion": "failure",
+          "created_at": "2026-10-29T16:30:00Z",
+          "event": "workflow_dispatch",
+          "head_branch": "main",
+          "head_sha": "003a002",
+          "origin": {
+            "id": "n-7f3a",
+            "kind": "automation",
+            "label": "docs-sync · docs.yml"
+          },
+          "run_id": "30",
+          "status": "completed",
+          "title": "t30",
+          "triggering_actor": "<login-grok-facundo>",
+          "updated_at": "2026-10-29T16:10:00Z",
+          "url": "https://github.com/<org>/<engine-cx>/actions/runs/30",
+          "workflow": "docs",
+          "workflow_path": ".github/workflows/docs.yml"
+        }
+      ],
+      "ts": "2026-10-29T16:09:07.000Z",
+      "url": "https://github.com/<org>/<engine-cx>"
+    },
+    {
+      "ci": null,
+      "default_branch": null,
+      "error": "rate_limit",
+      "kind": "main",
+      "label": "chopshop",
+      "light": "gray",
+      "project": "chopshop",
+      "provider": "github",
+      "repo": "facundo-barbera/chopshop",
+      "runs": [],
+      "ts": "2026-10-29T16:07:22.000Z",
+      "url": null
+    }
+  ],
+  "subscriptions": []
+}
