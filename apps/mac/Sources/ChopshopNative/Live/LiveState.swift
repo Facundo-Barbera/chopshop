@@ -117,7 +117,7 @@ public struct LiveState: Equatable, Sendable {
         }
         if env.type == "question.opened", let key = env.subjectKey {
             questions[key] = Question(request: body["request_id"]?.string ?? "", summary: body["summary"]?.string ?? env.subject?.title ?? "",
-                                      options: body["options"]?.strings ?? [], level: body["level"]?.string, escalateAfter: body["escalate_after_s"]?.int)
+                                      options: Self.optionLabels(body["options"]), level: body["level"]?.string, escalateAfter: body["escalate_after_s"]?.int)
         } else if env.type == "question.answered", let key = env.subjectKey, let tid = env.subject?.id {
             let q = questions.removeValue(forKey: key)
             var l = answered[tid] ?? []
@@ -178,6 +178,8 @@ public struct LiveState: Equatable, Sendable {
                         subjectKind: env.subject?.kind, subjectID: sid, since: old?.since ?? env.ts,
                         summary: Self.nonEmpty(body["summary"]?.string) ?? Self.nonEmpty(body["note"]?.string) ?? env.subject?.title))
                     projects[pi].attention.sort { $0.seq < $1.seq }
+                } else {
+                    questions.removeValue(forKey: key)      // el sujeto ya no espera: su pregunta (si la había) se cerró
                 }
             }
             projects[pi].counts = Self.counts(projects[pi])
@@ -187,6 +189,11 @@ public struct LiveState: Equatable, Sendable {
     }
 
     private static func nonEmpty(_ s: String?) -> String? { s.flatMap { $0.isEmpty ? nil : $0 } }
+
+    /// Opciones de una pregunta: cadenas, u objetos `{label, …}` (forma de T3).
+    static func optionLabels(_ v: JSONValue?) -> [String] {
+        (v?.array ?? []).compactMap { $0.string ?? $0["label"]?.string }
+    }
 
     /// running (running/preparing), queued, waiting (sin atención), done (done/settled), failed, stuck (último sobre warn/error y sin
     /// terminar), needs_human (atención human/approval), waiting_bot (atención bot).

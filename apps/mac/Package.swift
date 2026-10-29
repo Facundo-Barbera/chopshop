@@ -11,11 +11,26 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "ChopshopUI",
-            dependencies: [.product(name: "Sparkle", package: "Sparkle")],
+            dependencies: ["ChopshopNative", .product(name: "Sparkle", package: "Sparkle")],
             path: "Sources/ChopshopUI"
+        ),
+        // Capa nativa: stream en vivo, proyección, emparejamiento (puro, macOS 13) y la oficina/grafo (vistas @available(macOS 26),
+        // solo con el SDK de macOS 26+). Sin NATIVE_PREVIEWS: los #Preview y sus recursos son del banco de pruebas (apps/mac/native).
+        .target(
+            name: "ChopshopNative",
+            path: "Sources/ChopshopNative",
+            exclude: ["Resources"]
         ),
         // Pruebas de la lógica pura (config, cliente con transporte falso, resumen): `swift test` (requiere Xcode, no solo las CLT)
         .testTarget(name: "ChopshopUITests", dependencies: ["ChopshopUI"], path: "Tests/ChopshopUITests"),
+        // Contrato del bus (sobres dorados, equivalencia del reductor con projection.py), SSE, stream, emparejamiento y mapeo a la oficina
+        .testTarget(
+            name: "ChopshopNativeTests",
+            dependencies: ["ChopshopNative"],
+            path: "Tests/ChopshopNativeTests",
+            exclude: ["tools"],
+            resources: [.copy("Resources")]
+        ),
     ],
     swiftLanguageModes: [.v5]
 )
