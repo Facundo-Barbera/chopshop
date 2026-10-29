@@ -586,7 +586,29 @@ def _fmt_s(v):
     return ("%d" % v) if float(v).is_integer() else ("%.1f" % v)
 
 
-def ran_envelope(spec, trigger, trigger_env, res, emitted, discarded):
+def next_run(spec, store, now):
+    """Próximo disparo por horario de la automatización (epoch) o None si no tiene `schedule`. `store` = cursores de `tick`."""
+    best = None
+    for i, t in enumerate(spec.get("on") or []):
+        if t.get("type") != "schedule":
+            continue
+        cand = None
+        if t.get("_every"):
+            last = store.get("sched:%s:%s:%d" % (spec["project"], spec["name"], i))
+            cand = max(now, (float(last) if last is not None else now) + t["_every"])
+        elif t.get("_cron"):
+            m = (int(now) // 60 + 1) * 60
+            for _ in range(8 * 1440):              # una semana y un día cubre cualquier cron de 5 campos usado aquí
+                if cron_match(t["_cron"], m):
+                    cand = m
+                    break
+                m += 60
+        if cand is not None and (best is None or cand < best):
+            best = cand
+    return best
+
+
+def ran_envelope(spec, trigger, trigger_env, res, emitted, discarded, next_run_ts=None):
     """Sobre `automation.ran` (siempre: éxito, fallo o timeout)."""
     failed = res["timed_out"] or res["exit"] != 0
     err = res["error"]
@@ -600,7 +622,8 @@ def ran_envelope(spec, trigger, trigger_env, res, emitted, discarded):
             "body": {"automation": spec["name"], "trigger": trigger, "trigger_event": (trigger_env or {}).get("id"),
                      "exit": res["exit"], "duration_ms": res["duration_ms"], "emitted": emitted, "discarded": discarded,
                      "timed_out": res["timed_out"], "stdout_tail": res["stdout"][-TAIL:], "stderr_tail": res["stderr"][-TAIL:],
-                     "truncated": res["truncated"], "error": err}}
+                     "truncated": res["truncated"], "error": err,
+                     "next_run": envelope.iso(next_run_ts) if next_run_ts is not None else None}}
 
 
 def write_log(spec, rec, root=None):
@@ -647,7 +670,7 @@ def _publish(emit_fn, e):
 
 
 def run_once(spec, emit_fn, trigger="manual", trigger_env=None, root=None, secrets_root=None, environ=None,
-             grace=KILL_GRACE, wall=time.time):
+             grace=KILL_GRACE, wall=time.time, next_run_fn=None):
     """Ejecuta, convierte la salida en sobres, los emite (más `automation.ran`) y deja una línea en el log."""
     res = execute(spec, trigger_env, root, secrets_root, environ, grace)
     envs, discarded = parse_output(res["stdout"], spec, trigger_env)
@@ -661,7 +684,13 @@ def run_once(spec, emit_fn, trigger="manual", trigger_env=None, root=None, secre
         except envelope.EnvelopeError:               # el bus lo rechaza (esquema del tipo): se descarta y se cuenta
             discarded += 1
     envs = sent
-    ran = ran_envelope(spec, trigger, trigger_env, res, len(envs), discarded)
+    nxt = None
+    if next_run_fn is not None:
+        try:
+            nxt = next_run_fn()
+        except Exception:  # noqa: BLE001 - el próximo horario es informativo
+            nxt = None
+    ran = ran_envelope(spec, trigger, trigger_env, res, len(envs), discarded, nxt)
     _publish(emit_fn, ran)
     write_log(spec, {"ts": wall(), "trigger": trigger, "trigger_event": (trigger_env or {}).get("id"), "exit": res["exit"],
                      "duration_ms": res["duration_ms"], "emitted": len(envs), "discarded": discarded,
@@ -824,7 +853,8 @@ class Automations:
     def _worker(self, s, trigger, env, skey):
         key = (s["project"], s["name"])
         try:
-            r = run_once(s, self.emit_fn, trigger, env, self.root, self.secrets_root, self.environ, self.grace)
+            r = run_once(s, self.emit_fn, trigger, env, self.root, self.secrets_root, self.environ, self.grace,
+                         next_run_fn=lambda: next_run(s, self.store, self.clock()))
             self.stats[key]["runs"] += 1
             if r["error"]:
                 self.stats[key]["failed"] += 1

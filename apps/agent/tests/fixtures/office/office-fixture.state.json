@@ -31,6 +31,12 @@
   ],
   "machine": "contabo-dev",
   "machine_health": null,
+  "machine_room": {
+    "automations": [],
+    "listeners": [],
+    "rack": [],
+    "subscriptions": []
+  },
   "projects": [
     {
       "attention": [],
@@ -302,7 +308,7 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCC5Y3S0P6VP445Z86V9AZJP",
+      "id": "01MCC5Y3S06JHT08KGKJZTR7D3",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
@@ -327,7 +333,7 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCC5Y3S0P6VP445Z86V9AZJN",
+      "id": "01MCC5Y3S06JHT08KGKJZTR7D2",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
@@ -411,7 +417,7 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCC5Y3S0P6VP445Z86V9AZJM",
+      "id": "01MCC5Y3S06JHT08KGKJZTR7D1",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
@@ -429,6 +435,7 @@
       "body": {
         "desk": "awesome-gb/0/backend/1",
         "inheritance": null,
+        "notes_pending": 0,
         "reason": "start",
         "role": "backend",
         "since": "2027-01-15T08:03:00.000Z",
@@ -439,7 +446,7 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCC5Y3S0P6VP445Z86V9AZJK",
+      "id": "01MCC5Y3S06JHT08KGKJZTR7D0",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
@@ -481,7 +488,7 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCC5Y3S0P6VP445Z86V9AZJJ",
+      "id": "01MCC5Y3S06JHT08KGKJZTR7CZ",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
@@ -507,7 +514,7 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCC5Y3S0P6VP445Z86V9AZJH",
+      "id": "01MCC5Y3S06JHT08KGKJZTR7CY",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
@@ -534,6 +541,7 @@
           "title": "[be] sesión",
           "worktree": "/wt/mcp:a1"
         },
+        "notes_pending": 0,
         "reason": "inherited",
         "role": "backend",
         "since": "2027-01-15T08:03:00.000Z",
@@ -544,7 +552,7 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCC5Y3S0P6VP445Z86V9AZJG",
+      "id": "01MCC5Y3S06JHT08KGKJZTR7CX",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
@@ -569,7 +577,7 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCC5Y3S0P6VP445Z86V9AZJF",
+      "id": "01MCC5Y3S06JHT08KGKJZTR7CW",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
@@ -610,7 +618,7 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCC5Y3S0P6VP445Z86V9AZJE",
+      "id": "01MCC5Y3S06JHT08KGKJZTR7CV",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
@@ -653,7 +661,7 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCC5Y3S0P6VP445Z86V9AZJD",
+      "id": "01MCC5Y3S06JHT08KGKJZTR7CT",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
@@ -679,7 +687,7 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCC5Y3S0P6VP445Z86V9AZJC",
+      "id": "01MCC5Y3S06JHT08KGKJZTR7CS",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
@@ -698,6 +706,7 @@
       "body": {
         "desk": "awesome-gb/1/frontend/0",
         "inheritance": null,
+        "notes_pending": 0,
         "reason": "start",
         "role": "frontend",
         "since": "2027-01-15T08:01:00.000Z",
@@ -708,7 +717,7 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCC5Y3S0P6VP445Z86V9AZJB",
+      "id": "01MCC5Y3S06JHT08KGKJZTR7CR",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
@@ -727,6 +736,7 @@
       "body": {
         "desk": "awesome-gb/0/backend/0",
         "inheritance": null,
+        "notes_pending": 0,
         "reason": "start",
         "role": "backend",
         "since": "2027-01-15T08:01:00.000Z",
@@ -737,7 +747,7 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCC5Y3S0P6VP445Z86V9AZJA",
+      "id": "01MCC5Y3S06JHT08KGKJZTR7CQ",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
@@ -779,7 +789,7 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCC5Y3S0P6VP445Z86V9AZJ9",
+      "id": "01MCC5Y3S06JHT08KGKJZTR7CP",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
@@ -821,7 +831,7 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCC5Y3S0P6VP445Z86V9AZJ8",
+      "id": "01MCC5Y3S06JHT08KGKJZTR7CN",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
@@ -863,7 +873,7 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCC5Y3S0P6VP445Z86V9AZJ7",
+      "id": "01MCC5Y3S06JHT08KGKJZTR7CM",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
@@ -951,7 +961,7 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCC5Y3S0P6VP445Z86V9AZJ6",
+      "id": "01MCC5Y3S06JHT08KGKJZTR7CK",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",

@@ -26,7 +26,7 @@ public struct LiveState: Equatable, Sendable {
         public var attention: [Attention] = []
     }
 
-    public static let apiVersion = 2
+    public static let apiVersion = 3
     public static let recentLimit = 50
 
     public var machine: String?
@@ -36,6 +36,8 @@ public struct LiveState: Equatable, Sendable {
     public var projects: [Project] = []
     /// Últimos 50 sobres, el más nuevo primero.
     public var recent: [Envelope] = []
+    /// Sala de máquinas (v3): listeners, automatizaciones, webhooks y rack (`MachineRoom/MachineRoomModel.swift`).
+    public var machineRoom = MachineRoomState()
 
     // Lo siguiente NO viene en la proyección del agente (la proyección solo guarda el resumen de la atención): el cliente lo recuerda
     // de los sobres que ve, para pintar las opciones de una pregunta, el historial de respuestas y las gráficas de la máquina.
@@ -115,6 +117,7 @@ public struct LiveState: Equatable, Sendable {
             push(&sr.cpu, body["cpu_pct"]?.double); push(&sr.ram, body["ram_pct"]?.double); push(&sr.run, body["threads_running"]?.double)
             series[name] = sr
         }
+        machineRoom.apply(env)
         if env.type == "question.opened", let key = env.subjectKey {
             questions[key] = Question(request: body["request_id"]?.string ?? "", summary: body["summary"]?.string ?? env.subject?.title ?? "",
                                       options: Self.optionLabels(body["options"]), level: body["level"]?.string, escalateAfter: body["escalate_after_s"]?.int)
@@ -238,6 +241,7 @@ public struct LiveState: Equatable, Sendable {
             return p
         }
         recent = (o["recent"]?.array ?? []).compactMap(Envelope.init(json:))
+        machineRoom = MachineRoomState(json: o["machine_room"])
         // Reconstruye lo que no trae la proyección con los sobres recientes (del más viejo al más nuevo).
         var replay = LiveState(machine: machine)
         for e in recent.reversed() where e.type == "question.opened" || e.type == "question.answered" || e.type == "machine.health" {

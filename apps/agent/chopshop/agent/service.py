@@ -24,7 +24,7 @@ import time
 
 from .. import engine as engine_mod, events as legacy_events, graph, home, settings, state
 from . import __version__, actions as actions_mod, automations as automations_mod, collector as collector_mod, config, db, envelope, \
-    events, github, halflife, notes, office as office_mod, pairing, roles as roles_mod, server, t3watch
+    events, github, halflife, listeners, notes, office as office_mod, pairing, roles as roles_mod, server, t3watch
 from .forge import rack as forge_rack
 
 log = logging.getLogger("chopshop.agent")
@@ -276,6 +276,7 @@ class AgentService:
         if (cfg.get("github") or {}).get("enabled") and (cfg.get("github") or {}).get("actions", True):
             self.actions = actions_mod.ActionsPoller(self.conn, cfg, self.emit_forge, runner=gh_runner, clock=clock,
                                                      profiles_fn=gh_profiles_fn)
+        self.listeners = listeners.Listeners(self.emit, clock) if cfg.get("listeners", True) else None
         self.stop_event = threading.Event()
         self.servers, self.threads, self._serving = [], [], []
         self._stopped = False
@@ -370,6 +371,7 @@ class AgentService:
         self._import_legacy()
         if background:
             self._spawn("sampler", self._run_sampler)
+            self._listener("sampler", None)
             if self.cfg.get("t3_enabled", True):
                 self._spawn("t3", self._loop, "t3", self._poll_once, lambda: self.cfg.get("t3_poll_interval") or 5)
             if self.cfg.get("engine_enabled", True):
@@ -432,14 +434,32 @@ class AgentService:
         return self.engine_tick(None, None, lambda m: log.info("motor: %s", m), emit_fn=self.engine_emit)
 
     # -- hilos
+    def _listener(self, name, res, exc=None):
+        """`listener.state` del hilo tras un ciclo (nunca lanza: la sala de máquinas no frena a nadie)."""
+        if self.listeners is None:
+            return
+        state, error, backoff = "ok", None, 0
+        if exc is not None:
+            state, error = "degraded", "%s: %s" % (type(exc).__name__, exc)
+        elif name == "t3" and isinstance(res, dict) and res.get("reachable") is False:
+            state, error, backoff = "down", getattr(self.t3, "last_error", None), res.get("backoff") or 0
+        elif name == "github" and self.github is not None and self.github.degraded_since is not None:
+            state, error, backoff = "degraded", "GitHub degradado (cuota o gh)", self.github.until - self.clock()
+        try:
+            self.listeners.report(name, state, error, backoff)
+        except Exception:  # noqa: BLE001
+            log.debug("no pude publicar listener.state de %s", name, exc_info=True)
+
     def _loop(self, name, fn, interval):
         while not self.stop_event.is_set():
             try:
-                fn()
+                res = fn()
                 self.runtime.ok(name)
+                self._listener(name, res)
             except Exception as e:  # noqa: BLE001 - un fallo no mata el hilo
                 if self.runtime.fail(name, e):
                     log.warning("hilo %s: %s: %s", name, type(e).__name__, e)
+                self._listener(name, None, e)
             if self.stop_event.wait(max(0.05, float(interval()))):
                 break
 

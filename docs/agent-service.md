@@ -209,6 +209,16 @@ en el log y no degrada. Los logs llevan repo, código HTTP y motivo; nunca la sa
 (`ProtectSystem=strict`) `gh` lee su config de `~/.config/gh` sin problema; si tu `gh` necesita escribir su estado
 (`~/.local/state/gh`), añádelo con `--rw` o `[agent.service] read_write_paths`.
 
+## Sala de máquinas: listeners, scripts y webhooks
+
+`GET /state` (v3) trae `machine_room` con el registro de lo que corre en la máquina:
+
+- `listeners`: el servicio publica `listener.state` de sus hilos (`t3watch`, `forge` = hilo de GitHub, `automations`, `engine`,
+  `collector`) cuando cambia el estado (ok/degradado/caído), el error o el backoff, y como latido cada hora.
+- `automations`: la última ejecución de cada script (`automation.ran`: disparador, exit, duración, error y `next_run`, el
+  próximo horario si tiene `schedule`).
+- `subscriptions`: los webhooks salientes con su último envío bueno y el último fallo (texto corto; nunca la URL ni el secreto).
+
 ## Troubleshooting
 
 | Síntoma | Causa y arreglo |
