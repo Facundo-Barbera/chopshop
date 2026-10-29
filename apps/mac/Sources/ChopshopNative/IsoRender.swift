@@ -257,7 +257,7 @@ struct IsoRenderer {
             // marca de celda: seleccionado = discontinua, hover = tenue
             if d.id == selected || d.id == hovered {
                 let r = poly([P(d.cx - 34, d.cy - 34, z + 0.2), P(d.cx + 34, d.cy - 34, z + 0.2), P(d.cx + 34, d.cy + 34, z + 0.2), P(d.cx - 34, d.cy + 34, z + 0.2)])
-                var g = ctx
+                let g = ctx
                 g.fill(r, with: .color((tint ?? ink).opacity(d.id == selected ? 0.07 : 0.05)))
                 g.stroke(r, with: .color((tint ?? ink).opacity(d.id == selected ? 0.75 : 0.35)),
                          style: StrokeStyle(lineWidth: 1.1, lineJoin: .round, dash: d.id == selected ? [4, 3] : []))

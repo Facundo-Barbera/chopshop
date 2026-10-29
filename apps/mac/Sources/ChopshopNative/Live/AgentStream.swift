@@ -12,6 +12,8 @@ public enum StreamMessage: Equatable, Sendable {
 
 /// Estado de la conexión de un agente, para la UI.
 public enum StreamStatus: Equatable, Sendable {
+    /// Sin conexión abierta (sin URL del agente, o parada a propósito).
+    case idle
     case connecting
     case live
     case reconnecting(String)
@@ -23,7 +25,19 @@ public enum StreamStatus: Equatable, Sendable {
 public enum StreamError: Error, Equatable {
     case http(Int)
     case unauthorized
+    /// 503: el agente ya tiene el máximo de streams abiertos; `Retry-After` en segundos.
+    case busy(retryAfter: Double?)
     case ended
+}
+
+/// Respuesta de la petición del stream: código, cabeceras (claves en minúsculas) y bytes del cuerpo.
+public struct StreamResponse: Sendable {
+    public var status: Int
+    public var headers: [String: String]
+    public var bytes: AsyncThrowingStream<Data, Error>
+    public init(status: Int, headers: [String: String] = [:], bytes: AsyncThrowingStream<Data, Error>) {
+        self.status = status; self.headers = Dictionary(headers.map { ($0.key.lowercased(), $0.value) }, uniquingKeysWith: { a, _ in a }); self.bytes = bytes
+    }
 }
 
 /// Fuente de mensajes de un agente: lo implementan la conexión SSE real y el reproductor de fixtures.
@@ -34,7 +48,7 @@ public protocol MessageSource: Sendable {
 
 /// Transporte de bytes de la conexión SSE (`URLSession.bytes` en producción, falso en pruebas).
 public protocol ByteStreamTransport: Sendable {
-    func open(_ request: URLRequest) async throws -> (status: Int, bytes: AsyncThrowingStream<Data, Error>)
+    func open(_ request: URLRequest) async throws -> StreamResponse
 }
 
 /// `URLSession.bytes` sin caché ni cookies, sin seguir redirecciones (el `Authorization` no puede acabar en otro host)
@@ -55,7 +69,7 @@ public struct URLSessionByteTransport: ByteStreamTransport {
         session = URLSession(configuration: cfg, delegate: delegate, delegateQueue: nil)
     }
 
-    public func open(_ request: URLRequest) async throws -> (status: Int, bytes: AsyncThrowingStream<Data, Error>) {
+    public func open(_ request: URLRequest) async throws -> StreamResponse {
         let (bytes, resp) = try await session.bytes(for: request)
         guard let http = resp as? HTTPURLResponse else { throw URLError(.badServerResponse) }
         let stream = AsyncThrowingStream<Data, Error> { cont in
@@ -72,11 +86,13 @@ public struct URLSessionByteTransport: ByteStreamTransport {
             }
             cont.onTermination = { _ in task.cancel() }
         }
-        return (http.statusCode, stream)
+        var headers: [String: String] = [:]
+        for (k, v) in http.allHeaderFields { if let k = k as? String { headers[k] = "\(v)" } }
+        return StreamResponse(status: http.statusCode, headers: headers, bytes: stream)
     }
 }
 
-/// Una conexión SSE a `GET /stream` de un agente. Un solo intento: `LiveConnection` la reintenta con backoff.
+/// Una conexión SSE a `GET /stream` de un agente. Un solo intento: `LiveStore` la reintenta con backoff.
 public struct AgentStream: MessageSource {
     public let baseURL: URL
     public let credential: @Sendable () -> String?
@@ -102,11 +118,12 @@ public struct AgentStream: MessageSource {
     }
 
     public func run(lastEventID: String?, onMessage: @Sendable (StreamMessage, String?) async -> Void) async throws {
-        let (status, bytes) = try await transport.open(try makeRequest(lastEventID: lastEventID))
-        if status == 401 { throw StreamError.unauthorized }
-        guard (200..<300).contains(status) else { throw StreamError.http(status) }
+        let resp = try await transport.open(try makeRequest(lastEventID: lastEventID))
+        if resp.status == 401 { throw StreamError.unauthorized }
+        if resp.status == 503 { throw StreamError.busy(retryAfter: resp.headers["retry-after"].flatMap { Double($0.trimmingCharacters(in: .whitespaces)) }) }
+        guard (200..<300).contains(resp.status) else { throw StreamError.http(resp.status) }
         var parser = SSEParser()
-        for try await chunk in bytes {
+        for try await chunk in resp.bytes {
             for ev in parser.feed(chunk) {
                 guard let msg = Self.decode(ev) else { continue }
                 await onMessage(msg, ev.id)
