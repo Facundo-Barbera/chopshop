@@ -371,7 +371,7 @@ class TestDeliveryV2(Base):
         deadline = threading.Event()
         for _ in range(50):
             d = self.deliveries()
-            if all((s, "rapido") in d for s in seqs):
+            if all((s, "rapido") in d and (s, "caido") in d for s in seqs):
                 break
             deadline.wait(0.05)
         d = self.deliveries()
