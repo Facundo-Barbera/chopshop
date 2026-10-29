@@ -87,7 +87,7 @@ class TestReactions(Env):
         self.prof("r", PROFILE)
         self.assertEqual(profile.validate(profile.load("r")), [])
         fake = FakeR(["¿Qué enfoque prefieres?", "¿Hago push a main y delete de la rama?", "¿Qué color?"])
-        engine.t3.call = fake
+        self.use_t3(fake)
         bid = engine.create_batch(profile.load("r"), ["a", "b", "c"], "host-a", 3, [])
         self.run_ticks(bid, 2)                       # lanza y detecta preguntas
         got = {(g["level"], g["task"]) for g in Hook.got}
@@ -116,7 +116,7 @@ class TestReactions(Env):
         self.hook("human-sim")
         self.prof("r", PROFILE)
         fake = FakeR([None, None, None])
-        engine.t3.call = fake
+        self.use_t3(fake)
         bid = engine.create_batch(profile.load("r"), ["x"], "host-a", 2, [])
         self.run_ticks(bid, 3)                       # lanza, fija huella, detecta atasco (after: 0)
         b = state.read()["batches"][bid]
@@ -135,7 +135,7 @@ class TestReactions(Env):
         self.hook("human-sim")
         self.prof("r", PROFILE)
         fake = FakeR(["¿Hago push a main y delete de la rama?"]); fake.ghost = True
-        engine.t3.call = fake
+        self.use_t3(fake)
         bid = engine.create_batch(profile.load("r"), ["x"], "host-a", 2, [])
         self.run_ticks(bid, 6)                       # stall (after: 0) NO debe disparar con una pregunta abierta
         b = state.read()["batches"][bid]
@@ -145,7 +145,7 @@ class TestReactions(Env):
 
     def test_old_batches_are_not_touched(self):
         self.prof("r", PROFILE)
-        fake = FakeR([None]); engine.t3.call = fake
+        fake = FakeR([None]); self.use_t3(fake)
         prof = profile.load("r")
         old = dict(prof, reactions=[])
         bid = engine.create_batch(old, ["x"], "host-a", 2, [])   # lote creado sin reglas

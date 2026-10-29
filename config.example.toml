@@ -13,22 +13,26 @@
 home = "~/.chopshop"          # estado local: perfiles, lotes, eventos (CHOPSHOP_HOME tiene prioridad)
 default_host = "host-a"       # host de T3 por defecto de los perfiles (debe existir en [hosts.*])
 overflow_host = "host-b"      # donde se desbordan los lotes más grandes que el tope del host (vacío = no hay)
-fleet_bin = ""                # ruta del CLI `fleet` si algún host usa transporte "fleet" (vacío = buscar en PATH)
 
 # Hosts de T3. Si defines al menos uno, REEMPLAZAN al host genérico "local" (no se mezclan).
+# Chopshop habla con el MCP HTTP de T3 con su cliente nativo (stdlib). Se autentica solo: pide un código de pairing
+# de un solo uso a `t3_bin` (`t3 auth pairing create`, siempre EN LOCAL), hace OAuth+PKCE y cachea el token en
+# <CHOPSHOP_HOME>/t3-credential.json (0600). El token nunca se imprime ni va en la config.
+# Claves viejas (transport, node, helper, fleet_host, general.fleet_bin) se ignoran sin error.
 [hosts.host-a]
-transport = "local"           # "local": corre el helper t3mcp.mjs en esta misma máquina
+origin = ""                   # vacío = el T3 de esta máquina (origen leído de ~/.t3/userdata/server-runtime.json)
 cap = 2                       # máximo de hilos en paralelo
 purpose = "dev"
-node = "node"
-t3_bin = "~/.t3/bin/t3"
-helper = "~/.local/share/fleet/t3mcp.mjs"
-access = "approval-required"
+t3_bin = "t3"                 # CLI de T3 que emite el pairing local
+access = "approval-required"  # nivel de acceso pedido a T3
+credential_file = ""          # vacío = <CHOPSHOP_HOME>/t3-credential.json
 
 [hosts.host-b]
-transport = "fleet"           # "fleet": `fleet t3mcp <host> ...` (requiere el CLI fleet)
+origin = "http://100.64.0.11:3773"   # URL base del MCP de T3 de otra máquina (IP de Tailscale + puerto de T3)
 cap = 4
 purpose = "tests-only"        # solo tests: sin dev servers ni deploys
+access = "approval-required"
+credential_file = "~/.chopshop/t3-credential-host-b.json"   # caché aparte por host (opcional)
 
 # La app de macOS: cliente puro de la API del agente (no ejecuta nada local). Ver docs/mac-build.md.
 [app]
@@ -67,10 +71,10 @@ worktrees_root = "~/.t3/worktrees"        # <worktrees_root>/<proyecto>/<worktre
 
 # Cómo hablar con el servidor T3 de ESTA máquina.
 [agent.t3]
-node = "node"
-helper = "~/.local/share/fleet/t3mcp.mjs"
-t3_bin = "~/.local/bin/t3"
+origin = ""                               # vacío = origen del archivo runtime de T3 de esta máquina
+t3_bin = "t3"                             # CLI de T3 (pairing local para el flujo OAuth+PKCE)
 access = "full-access"
+credential_file = ""                      # vacío = <CHOPSHOP_HOME>/t3-credential.json (0600)
 
 # Proyectos conocidos por el agente: nombre -> raíz, worktrees e id de T3 (para atribuir métricas e hilos).
 [agent.projects.proyecto-demo]

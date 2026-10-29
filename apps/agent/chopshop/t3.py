@@ -1,50 +1,70 @@
-"""Transporte a T3: herramientas MCP de T3 vía el helper t3mcp.mjs (local) o `fleet t3mcp` (remoto).
-Chopshop no reimplementa nada de T3: solo llama t3_thread_launch / read / organize / pending_request."""
-import json
-import os
-import shutil
-import subprocess
+"""Fachada del motor hacia T3: llama herramientas MCP de T3 con el cliente nativo `t3mcp.Client`.
+Chopshop no reimplementa nada de T3: solo llama t3_thread_launch / read / organize / pending_request.
 
-from . import settings
+Config de host (`[hosts.<nombre>]`):
+- `origin`: URL base del MCP de T3 (p. ej. http://100.64.0.10:3773). Vacío = host local: el origen se lee del
+  archivo runtime de T3 (~/.t3/userdata/server-runtime.json).
+- `access`: nivel de acceso pedido a T3 ("approval-required" por defecto).
+- `credential_file`: caché de la credencial (vacío = <CHOPSHOP_HOME>/t3-credential.json, 0600).
+- `t3_bin`: CLI de T3 con el que se emite el pairing local del flujo OAuth+PKCE.
+Se mantiene un `t3mcp.Client` por host (reutiliza credencial y sesión MCP); `reset()` vacía el caché."""
+import threading
+
+from . import t3mcp
+
+T3Error = t3mcp.T3Error
+
+_lock = threading.Lock()
+_clients = {}
+_factory = None
 
 
-class T3Error(Exception):
-    pass
+def is_local(host_cfg):
+    """Un host es local si no declara `origin` (el cliente lee el origen del runtime de T3)."""
+    return not (host_cfg or {}).get("origin")
 
 
-def _expand(p):
-    return os.path.expanduser(p)
+def _key(host_cfg, host_name):
+    return (host_name, host_cfg.get("origin") or "", host_cfg.get("access") or "approval-required",
+            host_cfg.get("credential_file") or "")
 
 
-def _parse(out):
-    try:
-        return json.loads(out)
-    except ValueError:
-        return out
+def _default_factory(host_cfg, host_name, timeout):
+    return t3mcp.Client(origin=host_cfg.get("origin") or None,
+                        access=host_cfg.get("access") or "approval-required",
+                        credential_file=host_cfg.get("credential_file") or None,
+                        t3_bin=host_cfg.get("t3_bin") or "t3", timeout=timeout)
+
+
+def set_client_factory(fn=None):
+    """Para tests: `fn(host_cfg, host_name, timeout) -> objeto con .call(tool, args)`. None = cliente real."""
+    global _factory
+    with _lock:
+        _factory = fn
+        _clients.clear()
+
+
+def reset():
+    """Olvida los clientes cacheados (y con ello sus sesiones MCP)."""
+    with _lock:
+        _clients.clear()
+
+
+def client(host_cfg, host_name, timeout=90):
+    host_cfg = host_cfg or {}
+    k = _key(host_cfg, host_name)
+    with _lock:
+        c = _clients.get(k)
+        if c is None:
+            c = _clients[k] = (_factory or _default_factory)(host_cfg, host_name, timeout)
+    return c
 
 
 def call(host_cfg, host_name, tool, args=None, timeout=90):
-    args = args or {}
-    tr = host_cfg.get("transport", "local")
-    if tr == "local":
-        env = dict(os.environ, T3MCP_ACCESS=host_cfg.get("access", "approval-required"),
-                   T3_BIN=_expand(host_cfg.get("t3_bin", "~/.t3/bin/t3")))
-        cmd = [host_cfg.get("node", "node"), _expand(host_cfg["helper"]), tool, "-"]
-        r = subprocess.run(cmd, input=json.dumps(args), capture_output=True, text=True, env=env, timeout=timeout)
-    elif tr == "fleet":
-        fleet = os.environ.get("CHOPSHOP_FLEET") or settings.general("fleet_bin") or shutil.which("fleet")
-        if not fleet:
-            raise T3Error("el host %s usa transporte 'fleet' pero el CLI `fleet` no está en PATH aquí "
-                          "(define CHOPSHOP_FLEET o cambia el transporte en ~/.config/chopshop/config.toml)" % host_name)
-        cmd = [fleet, "t3mcp", host_cfg.get("fleet_host", host_name), tool, json.dumps(args)]
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-    else:
-        raise T3Error("transporte desconocido: %s" % tr)
-    out = (r.stdout or "").strip()
-    if r.returncode != 0 or out.startswith("ERROR"):
-        raise T3Error("%s en %s falló: %s" % (tool, host_name, (r.stderr or out).strip()[:600]))
-    data = _parse(out)
-    # errores de herramienta MCP llegan como content=[{type:text,text:'{"_tag":...Failure...}'}]
-    if isinstance(data, list) and data and isinstance(data[0], dict) and "_tag" in str(data[0].get("text", ""))[:20]:
-        raise T3Error("%s en %s: %s" % (tool, host_name, data[0]["text"][:600]))
-    return data
+    c = client(host_cfg, host_name, timeout)
+    if hasattr(c, "timeout"):
+        c.timeout = timeout
+    try:
+        return c.call(tool, args or {})
+    except T3Error as e:
+        raise T3Error("%s: %s" % (host_name, e))

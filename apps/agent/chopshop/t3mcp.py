@@ -1,6 +1,6 @@
 """Cliente nativo (stdlib) del MCP HTTP de T3: JSON-RPC 2.0 por POST a <origin>/mcp.
 
-Reemplaza al helper node t3mcp.mjs y al transporte `fleet`. Autenticación igual que el helper: flujo
+Reemplaza al cliente node anterior y al transporte remoto viejo. Autenticación: flujo
 OAuth MCP de T3 (registro de cliente público + PKCE S256) aprobado con un código de pairing de un solo
 uso emitido EN LOCAL por `t3 auth pairing create` y revocado siempre después. El resultado es una sesión
 "MCP client" normal de T3, cacheada 0600 en <CHOPSHOP_HOME>/t3-credential.json.
@@ -270,7 +270,7 @@ class Client:
             expires_in = float(tok.get("expires_in") or 0)
         except (TypeError, ValueError):
             expires_in = 0
-        # margen de 1 h como el helper; si T3 no da caducidad, se reintenta ante 401
+        # margen de 1 h como el cliente anterior; si T3 no da caducidad, se reintenta ante 401
         ttl = expires_in - 3600 if expires_in > 3600 else max(expires_in, 0) or 24 * 3600
         cred = {"origin": self.origin, "access": self.access, "token": token,
                 "expiresAt": int(self._now_ms() + ttl * 1000)}

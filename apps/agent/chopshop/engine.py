@@ -86,7 +86,7 @@ def compose_prompt(prof, host, hostcfg, task):
     return "\n".join(lines) + "\n\nTarea:\n" + task["prompt"]
 
 
-# ---------- T3 helpers ----------
+# ---------- llamadas a T3 ----------
 def _call(st_hostcfgs, host, tool, args=None):
     return t3.call(st_hostcfgs[host], host, tool, args)
 
@@ -97,9 +97,9 @@ def resolve_project(prof, host, hostcfg):
         return None
     import os
     want = prof.get("t3_project")
-    root = (prof.get("remote_repos") or {}).get(host) or (prof.get("repo") if hostcfg.get("transport") == "local" else None)
+    root = (prof.get("remote_repos") or {}).get(host) or (prof.get("repo") if t3.is_local(hostcfg) else None)
     if root:
-        root = os.path.realpath(os.path.expanduser(root)) if hostcfg.get("transport") == "local" else root
+        root = os.path.realpath(os.path.expanduser(root)) if t3.is_local(hostcfg) else root
     out = t3.call(hostcfg, host, "t3_project_list", {"limit": 100})
     for p in (out or {}).get("projects", []):
         if p.get("deletedAt"):
@@ -107,7 +107,7 @@ def resolve_project(prof, host, hostcfg):
         wr = p.get("workspaceRoot") or ""
         if want and want in (p["id"], p["title"]):
             return p["id"]
-        if root and (wr == root or (hostcfg.get("transport") == "local" and os.path.realpath(wr) == root)
+        if root and (wr == root or (t3.is_local(hostcfg) and os.path.realpath(wr) == root)
                      or wr.replace("~", "") .endswith(root.replace("~", ""))):
             return p["id"]
     if not want and not root:
@@ -430,7 +430,7 @@ def snapshot(events_limit=80):
     import json as _json
     st = state.read()
     out = {"generated": state.now(), "home": home.home(),
-           "hosts": {n: {"cap": h.get("cap"), "purpose": h.get("purpose"), "transport": h.get("transport")}
+           "hosts": {n: {"cap": h.get("cap"), "purpose": h.get("purpose"), "transport": "local" if t3.is_local(h) else "remote"}
                      for n, h in profile.hosts().items()},
            "profiles": profile.list_projects(), "batches": [], "events": [],
            "inbox": inbox.status(),

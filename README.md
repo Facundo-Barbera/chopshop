@@ -53,7 +53,7 @@ Todo lo específico de tu entorno (hosts, rutas, IPs, proyectos, identidades) vi
 
 - La ruta se puede cambiar con `CHOPSHOP_CONFIG=/ruta/a/otro.toml`; si defines `XDG_CONFIG_HOME` se usa `$XDG_CONFIG_HOME/chopshop/config.toml`.
 - El repo solo incluye [`config.example.toml`](config.example.toml), con datos **falsos** (`host-a`, `host-b`, `100.64.0.10`, `usuario@`, `proyecto-demo`...). Cópialo y adáptalo; no lo subas con datos reales.
-- Secciones: `[general]` (estado local, host por defecto, host de desborde), `[hosts.<nombre>]` (transporte, tope de hilos, finalidad), `[app]` (la app de Mac: `agent_url`, `token_file`, `refresh_seconds` y `[app.agents.<nombre>]` para varias máquinas) y `[agent]` (el servicio headless por máquina).
+- Secciones: `[general]` (estado local, host por defecto, host de desborde), `[hosts.<nombre>]` (`origin` del MCP de T3, `access`, `credential_file`, `t3_bin`, tope de hilos, finalidad), `[app]` (la app de Mac: `agent_url`, `token_file`, `refresh_seconds` y `[app.agents.<nombre>]` para varias máquinas) y `[agent]` (el servicio headless por máquina).
 - Precedencia: valores por defecto genéricos < `config.toml` < variables de entorno.
 
 ### Variables de entorno
@@ -73,7 +73,6 @@ Además:
 |---|---|
 | `CHOPSHOP_CONFIG` | Ruta del `config.toml` |
 | `CHOPSHOP_HOME` | Directorio de estado local (por defecto `~/.chopshop`) |
-| `CHOPSHOP_FLEET` | Binario del CLI `fleet`, si algún host usa ese transporte |
 | `CHOPSHOP_APP__AGENT_URL`, `CHOPSHOP_APP__TOKEN_FILE` | Solo la app de Mac: agente al que se conecta (ver abajo) |
 
 ### Webhooks y secretos
@@ -105,7 +104,7 @@ apps/agent/bin/chopshop watch  --interval 20 --webhook-file F   # bucle: envía 
 apps/agent/bin/chopshop wait   <batch> --webhook-file F --timeout 600
 apps/agent/bin/chopshop answer <task> "respuesta" [--request R] [--queue]   # --queue la deja en el buzón y la envía watch/poll
 apps/agent/bin/chopshop snapshot [--events N]          # JSON de solo lectura del estado local (lo usa la UI; no llama a T3)
-apps/agent/bin/chopshop metrics [--collect]            # CPU/RAM/disco por host (JSON)
+apps/agent/bin/chopshop metrics                        # CPU/RAM/disco de esta máquina (JSON; los remotos los da su agente)
 apps/agent/bin/chopshop stop [<batch>] [--task T]      # interrumpe hilos y marca tareas en cola como canceladas (nunca archiva)
 apps/agent/bin/chopshop gather <batch> [--json]        # resultados en Markdown
 apps/agent/bin/chopshop settle <batch>                 # t3_thread_organize settle (nunca archiva)
@@ -121,7 +120,8 @@ apps/agent/bin/chopshop graph run g-0001 | status [g-0001] [--json]
 - Por defecto, el host del perfil (`host-a` en los ejemplos), con un tope de hilos en paralelo.
 - Los lotes grandes pueden desbordarse a `overflow_host` (`host-b`), pensado para tareas de solo tests: el preámbulo prohíbe dev servers y deploys.
 - Se puede forzar con `--host`.
-- Transporte: `local` (llama directo al helper de T3) o `fleet` (requiere el CLI `fleet` en el `PATH` o `CHOPSHOP_FLEET`).
+- Conexión con T3: cliente MCP nativo (`apps/agent/chopshop/t3mcp.py`, solo stdlib). Sin `origin` el host es local (el origen sale de `~/.t3/userdata/server-runtime.json`); con `origin = "http://100.64.0.11:3773"` es el T3 de otra máquina. El cliente se autentica solo: pide un pairing de un solo uso a `t3_bin` en local, hace OAuth+PKCE y cachea el token en `<CHOPSHOP_HOME>/t3-credential.json` (0600, o `credential_file`). Ya no se usan el CLI `fleet` ni el helper node `t3mcp.mjs`.
+- Métricas de hosts remotos: no se recolectan desde aquí; cada máquina corre su propio `chopshop-agent` y la app de Mac las combina.
 
 ### Webhooks y eventos
 

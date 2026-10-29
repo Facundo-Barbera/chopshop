@@ -189,6 +189,16 @@ class TestCheckConfig(TmpCase):
         warns = service.check_config(self.cfg(bind="100.64.0.10", auth="none-local"))[1]
         self.assertTrue(any("none-local" in w for w in warns))
 
+    def test_t3_config_warnings(self):
+        ok = service.check_config(self.cfg(t3_enabled=True), which=lambda b: "/usr/bin/" + b)[1]
+        self.assertFalse(any("agent.t3" in w for w in ok))
+        warns = service.check_config(self.cfg(t3_enabled=True, t3={"t3_bin": "", "origin": ""}))[1]
+        self.assertTrue(any("t3_bin" in w and "origin" in w for w in warns))
+        self.assertEqual(service.check_config(self.cfg(t3_enabled=True, t3={"t3_bin": "", "origin": "http://100.64.0.10:3773"}))[0], [])
+        warns = service.check_config(self.cfg(t3_enabled=True, t3={"t3_bin": "t3", "helper": "~/x/t3mcp.mjs", "node": "node"}))[1]
+        self.assertTrue(any("ya no se usa" in w and "helper" in w for w in warns))
+        self.assertFalse(any("t3_bin o" in w for w in warns))
+
     def test_loose_permissions_warn_without_reading(self):
         tok, hook = self.cfg()["token_file"], os.path.join(self.tmp, "hook")
         for p in (tok, hook):
