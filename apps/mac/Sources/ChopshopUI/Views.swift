@@ -18,9 +18,6 @@ struct RootView: View {
                         LiveProjectScreen(project: p, store: model.live) { PairingScreen() }
                             .environment(\.attentionActions, model.attentionActions)
                     }
-                    if model.selection == .machineRoom {
-                        LiveMachineRoomScreen(store: model.live) { PairingScreen() }
-                    }
                 }
             }
             .navigationTitle(title)

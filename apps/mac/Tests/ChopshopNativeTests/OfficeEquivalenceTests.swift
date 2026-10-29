@@ -37,4 +37,20 @@ final class OfficeEquivalenceTests: XCTestCase {
         XCTAssertEqual(room.rack.map { $0.runs.map(\.runID) },
                        (g["rack"]?.array ?? []).map { ($0["runs"]?.array ?? []).compactMap { $0["run_id"]?.string } })
     }
+
+    /// La sala de cada piso (`MachineRoom.scoped(to:)` sobre la sala plegada) == `projects[].machine_room` del agente
+    /// (`machine_room.scope`; dorada `machine-room-fixture.rooms.json`, sin `subscriptions` porque no salen de sobres).
+    func testPerProjectRoomMatchesPythonScope() throws {
+        let envs = try envelopes("machine-room-fixture.jsonl")
+        let all = MachineRoom(LiveState.fold(envs).machineRoom)
+        let g = try XCTUnwrap(Fixture.json("machine-room-fixture.rooms.json").object)
+        XCTAssertEqual(Set(g.keys), Set(LiveState.fold(envs).projects.map(\.name)))
+        for (project, room) in g {
+            let mine = all.scoped(to: project), theirs = MachineRoom(room: room.object ?? [:])
+            XCTAssertEqual(room["floor"]?.int, 0, project)
+            XCTAssertEqual(mine.rack, theirs.rack, project)
+            XCTAssertEqual(mine.automations, theirs.automations, project)
+            XCTAssertEqual(mine.listeners, theirs.listeners, project)
+        }
+    }
 }

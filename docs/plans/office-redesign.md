@@ -37,7 +37,8 @@ flowchart TB
   subgraph MAC["App de Mac"]
     CITY["Ciudad<br/>edificio = oficina<br/>pisos = proyecto (≤ 4)"]
     OFFICE["Oficina (un piso)<br/>departamentos = roles<br/>escritorios fijos + vestíbulo"]
-    MR["Sala de máquinas<br/>listeners, scripts, webhooks<br/>rack de repos + Actions"]
+    MR["Sala de máquinas (sala del piso más bajo)<br/>rack de SUS repos + Actions<br/>sus scripts y webhooks, listeners"]
+    OFFICE --- MR
   end
   G1 & G2 -- "PUT /office, notas a escritorios" --> AGENT
   G1 & G2 -. "editan perfil (vía API validada)" .-> PROF
@@ -46,7 +47,7 @@ flowchart TB
   OFF -- "lanza / asigna hilo (Chopshop ejecuta)" --> TH
   TH --> T3W --> OFF
   T3W & OFF & FORGE & AUTO --> PROJ
-  PROJ -- "/stream" --> CITY & OFFICE & MR
+  PROJ -- "/stream" --> CITY & OFFICE
 ```
 
 ## Conceptos y reglas
@@ -88,9 +89,24 @@ flowchart TB
 - Los hilos sin rol que terminan se desvanecen en el vestíbulo con la misma semivida y salen; no suben a ningún piso.
 - Si un bot le asigna rol a un hilo del vestíbulo, el hilo sube a su escritorio (`desk.assigned`, `reason: manual`).
 
-### 4. Sala de máquinas (vista aparte)
+### 4. Sala de máquinas (una sala del piso de cada proyecto)
 
-Tercera vista de la app (Ciudad · Oficina · **Sala de máquinas**), no un piso del render de la oficina. Contiene:
+**Cambio de diseño**: ya no es una vista aparte (se quitó «Sala de máquinas» de la barra lateral). Es una **sala** dentro del
+**piso más bajo de cada proyecto**, al lado de los departamentos (el hueco siguiente al último de la rejilla), y solo muestra
+lo de ese proyecto: un **armario por repo** de su rack (luz de estado grande, ámbar parpadeando, y un led por run) y una
+**consola** con un led por listener, script y webhook. Se ve igual en `FloorOfficeView` y en el zoom de la ciudad a ese piso
+(mismo `FloorRenderer`). Clic en un armario o en la consola abre el panel lateral de la sala (rack con el repo elegido y sus
+runs con disparador y origen, scripts, webhooks y listeners). Un repo en rojo sale en la barra «Atención» del piso; el canto
+de la sala se pone rojo con un repo en rojo o un listener caído, y ámbar si falla un script o un webhook o hay un listener
+degradado. Qué entra en la sala de un proyecto (misma regla en el agente, `machine_room.scope`, y en la app,
+`MachineRoom.scoped(to:)`):
+
+- su **rack** (módulos con `project` = el proyecto) y sus **automatizaciones**;
+- los **webhooks** cuyo filtro `projects` lo cubre (`*` o glob; las suscripciones sin filtro, todas);
+- **todos los listeners**: son hilos del agente y sirven a todos los proyectos.
+
+Un proyecto sin `office` (agente v2 o perfil sin bloque `office`) no tiene piso v3 y por tanto no muestra sala (abre el
+Grafo). Contiene:
 
 - **Listeners**: los hilos del agente (`t3watch`, `github`/forge, repartidor de webhooks, planificador de
   automatizaciones, collector) con estado (ok/degradado/caído, último ciclo, backoff). Hoy esto solo se deduce de
@@ -230,7 +246,9 @@ rack:
   retired, occupant:{thread_id, phase, since, ended_at, touched_at, half_life_s}|null, lineage:[…5], notes_pending}]}]}]}`;
   arriba, `lobby: [{thread_id, project, phase, waiting_role?}]` (por edificio) y
   `machine_room: {listeners:[…], automations:[…], subscriptions:[…], rack:[{provider, repo, project, kind, label,
-  light, runs:[…activos y últimos 5]}]}`.
+  light, runs:[…activos y últimos 5]}]}`; y, por proyecto, `projects[].machine_room: {floor, listeners, automations,
+  subscriptions, rack}` = la sala de su piso (`floor` = el más bajo de su `office`, 0 sin `office`), recortada con la regla
+  del punto 4. Cada suscripción de `subscriptions` gana `projects` (su filtro) para poder recortarla.
 - Nuevas: `PUT /office/<proyecto>` (bots; valida y reescribe el perfil), `POST /desks/<id>/assign {thread_id}`,
   `POST /desks/<id>/notes`, `POST /touch {thread_id}`, `GET /desks/<id>` (linaje completo).
 - No hay `DELETE` de escritorios ni de pisos. Ninguna ruta crea ni ejecuta scripts (igual que hoy).
@@ -245,8 +263,11 @@ rack:
 - `IsoScene`/`IsoOfficeView`: las salas pasan a ser **departamentos** (roles) y los escritorios salen del perfil (fijos,
   no aparecen ni desaparecen con las tareas); el muñeco es el ocupante, con opacidad de semivida; escritorio
   permanente dormido con su luz propia; el modo actual por rango de dependencias queda como vista **Grafo**.
-- Nueva `MachineRoom/` (`MachineRoomModel.swift` puro + `MachineRoomView.swift` + `RackRender.swift`) con sus tests como
-  `CityTests`.
+- `MachineRoom/` (`MachineRoomModel.swift` puro + `MachineRoomView.swift` + `RackRender.swift`) con sus tests como
+  `CityTests`. La sala va en el piso: `FloorPlan.machineRoom` (solo el piso más bajo; `MachineRoom.scoped(to:)` sobre
+  `LiveState.machineRoom`), `FloorLayout.machine` (un armario por repo + consola; depende solo de cuántos repos hay),
+  `FloorRenderer` la pinta y `MachineRoomInspector` (en `FloorOfficeView`) abre el panel con `MachineRoomView`. Sin pantalla
+  aparte ni copia de la sala en `LiveStore`.
 - `HalfLife.swift`: función pura de opacidad, misma tabla de casos que el test de Python.
 
 ## Fases y entregables
@@ -258,7 +279,7 @@ rack:
 | **2. Semivida** | temporizador de salida, `POST /touch`, `HalfLife` en Python y Swift con la misma tabla | fixture: terminado → desvanece → sale; tocado → reinicia; con atención → no sale |
 | **3. Oficina nueva en la app** | `LiveState` v3, `IsoScene` por departamentos, vestíbulo, Ciudad con varios pisos por proyecto, vista Grafo conservada | `swift test` en el build de Mac + capturas de fixture (`docs/screenshots.md`) |
 | **4. Forge y rack** | `agent/forge/` con `ForgeProvider` + adaptador GitHub (eventos actuales + `actions/runs` con ETag), `forge.*`, atribución de origen, `listener.state` | fixture con runs de push de un hilo, dispatch de automatización, cron y bot |
-| **5. Sala de máquinas** | vista nueva en la app (listeners, automatizaciones, webhooks, rack con luces y runs) | capturas de fixture; Awesome GB con 2 módulos (main + Engine CX) |
+| **5. Sala de máquinas** | sala en el piso más bajo de cada proyecto (su rack con luces y runs, sus scripts y webhooks, listeners) con panel lateral; `projects[].machine_room` en `/state` | capturas de fixture (`floor-*`, `city-office-zoom-producto`, `machine-room-*`); Awesome GB con 2 módulos (main + Engine CX) |
 | **6. Roles permanentes** | `wake` en `office.py` sobre `automations.py`, `desk_notes` + `POST /desks/<id>/notes`, lanzamiento de un hilo por despertar | triage de Awesome GB despierta por cron y por issue en fixture; prueba real en contabo-dev **con permiso** |
 | **7. API de estructura para bots** | `PUT /office`, `POST /desks/<id>/assign`, `office.changed`, guía para los Grok | un bot reorganiza un piso en contabo-dev sin borrar escritorios |
 

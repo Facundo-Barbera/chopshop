@@ -11,10 +11,16 @@
   crea gris); se guardan todos los no completados y los `RACK_DONE` completados más recientes (por `updated_at`; sin fecha
   cuentan como los más viejos; empate -> el que llegó después), en orden de llegada.
 `rack` se ordena por `(project, kind == main ? 0 : 1, repo)` (lo mismo que `MachineRoomModel.swift`).
-Los emisores son `forge/rack.py` (`forge.repo.state`) y `actions.py` (`forge.run.state`)."""
+Los emisores son `forge/rack.py` (`forge.repo.state`) y `actions.py` (`forge.run.state`).
+
+Sala por proyecto (la sala de máquinas es una SALA del piso de su proyecto, no una vista aparte): `rooms(state)` deja en cada
+`projects[]` un `machine_room` = `scope(sala, proyecto, piso)`: `floor` (el piso más bajo de su `office`, 0 sin `office`), su
+`rack` y sus `automations`, los `subscriptions` cuyo filtro `projects` lo cubre (`*` o glob) y todos los `listeners` (son del
+agente y sirven a todos). `projection._apply` lo recalcula tras cada sobre y `live` tras rellenar `subscriptions`."""
+import fnmatch
 import re
 
-from . import db, envelope
+from . import db, envelope, webhooks
 
 RACK_DONE = 5
 _URL = re.compile(r"(?i)\b[a-z][a-z0-9+.-]*://\S+")
@@ -107,10 +113,39 @@ def filter_project(mr, project):
                 rack=[u for u in mr.get("rack") or [] if u.get("project") == project])
 
 
+def floor_of(project):
+    """Piso donde está la sala: el más bajo del `office` del proyecto (0 si no tiene)."""
+    floors = ((project or {}).get("office") or {}).get("floors") or []
+    idx = [f.get("index") if isinstance(f.get("index"), int) else i for i, f in enumerate(floors)]
+    return min(idx) if idx else 0
+
+
+def serves(sub, project):
+    """¿La suscripción reparte sobres de ese proyecto? (`projects` con `*` o globs; sin `projects` = todos)."""
+    return any(p == "*" or fnmatch.fnmatchcase(project or "", p) for p in sub.get("projects") or ["*"])
+
+
+def scope(mr, project, floor=0):
+    """Sala de máquinas de un proyecto (la que pinta su piso). No muta `mr`."""
+    mr = mr if isinstance(mr, dict) else empty()
+    return {"floor": floor, "listeners": list(mr.get("listeners") or []),
+            "automations": [a for a in mr.get("automations") or [] if a.get("project") == project],
+            "subscriptions": [s for s in mr.get("subscriptions") or [] if serves(s, project)],
+            "rack": [u for u in mr.get("rack") or [] if u.get("project") == project]}
+
+
+def rooms(state):
+    """`projects[].machine_room` desde `machine_room`. En sitio; devuelve `state`."""
+    mr = state.get("machine_room")
+    for p in state.get("projects") or []:
+        p["machine_room"] = scope(mr, p.get("name"), floor_of(p))
+    return state
+
+
 def subscriptions(conn):
-    """[{name, last_ok, last_error, signed}] desde `subscriptions` + la última entrega de cada una. Nunca la URL."""
+    """[{name, projects, last_ok, last_error, signed}] desde `subscriptions` + la última entrega de cada una. Nunca la URL."""
     with db.tx():
-        subs = db.rows(conn.execute("SELECT name, secret_file FROM subscriptions ORDER BY name"))
+        subs = db.rows(conn.execute("SELECT * FROM subscriptions ORDER BY name"))
         out = []
         for s in subs:
             ok = conn.execute("SELECT MAX(ts) FROM deliveries WHERE name=? AND ok=1", (s["name"],)).fetchone()[0]
@@ -119,15 +154,15 @@ def subscriptions(conn):
             err = None
             if bad is not None and (ok is None or bad["ts"] > ok):
                 err = _URL.sub("[url]", str(bad["detail"] or "fallo"))[:160]
-            out.append({"name": s["name"], "last_ok": envelope.iso(ok) if ok else None, "last_error": err,
+            out.append({"name": s["name"], "projects": webhooks.effective(s)["projects"], "last_ok": envelope.iso(ok) if ok else None, "last_error": err,
                         "last_error_at": envelope.iso(bad["ts"]) if err else None, "signed": bool(s.get("secret_file"))})
     return out
 
 
 def live(state, conn):
-    """Rellena `machine_room.subscriptions` (lo único que no viene de sobres). En sitio; devuelve `state`."""
+    """Rellena `machine_room.subscriptions` (lo único que no viene de sobres) y las salas por proyecto. En sitio; devuelve `state`."""
     try:
         _room(state)["subscriptions"] = subscriptions(conn)
     except Exception:  # noqa: BLE001 - una DB vieja sin columnas v4 no rompe /state
         _room(state)["subscriptions"] = []
-    return state
+    return rooms(state)

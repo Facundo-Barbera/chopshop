@@ -169,15 +169,42 @@ final class MachineRoomTests: XCTestCase {
 
     // MARK: LiveStore
 
+    /// La sala sale del `LiveState` del store (ya no hay una copia aparte): `state` completo y sobres encima.
     @MainActor
     func testLiveStoreFeedsMachineRoom() throws {
         let store = LiveStore()
         store.handle(.state(try Fixture.json("machine-room/state.json")), id: nil, gen: 0)
-        XCTAssertEqual(store.machineRoom.rack.count, 2)
+        XCTAssertEqual(MachineRoom(store.state.machineRoom).rack.count, 2)
         store.handle(.envelope(try env("forge.run.state")), id: nil, gen: 0)
-        XCTAssertEqual(store.machineRoom.activeRuns, 1)
-        XCTAssertEqual(store.machineRoom.rack.first?.runs.map(\.runID), ["8999", "9001"])
+        let r = MachineRoom(store.state.machineRoom)
+        XCTAssertEqual(r.activeRuns, 1)
+        XCTAssertEqual(r.rack.first?.runs.map(\.runID), ["8999", "9001"])
+        XCTAssertEqual(r.subscriptions.map(\.name), ["bots", "chat"], "los webhooks del último `state` se conservan")
         store.reset()
-        XCTAssertTrue(store.machineRoom.isEmpty)
+        XCTAssertTrue(MachineRoom(store.state.machineRoom).isEmpty)
+    }
+
+    // MARK: por proyecto
+
+    func testScopedToProject() throws {
+        let r = MachineRoom(state: try Fixture.json("machine-room/state.json"))
+        let a = r.scoped(to: "awesome-gb")
+        XCTAssertEqual(a.rack.count, 2)
+        XCTAssertEqual(a.automations.map(\.name), ["triage"])
+        XCTAssertEqual(a.subscriptions.map(\.name), ["bots", "chat"], "sin `projects` (agente anterior) = todos")
+        XCTAssertEqual(a.listeners, r.listeners)
+        let o = r.scoped(to: "otro")
+        XCTAssertTrue(o.rack.isEmpty && o.automations.isEmpty)
+        XCTAssertEqual(o.listeners.count, 2)
+    }
+
+    func testSubscriptionServesGlobs() throws {
+        func sub(_ ps: JSONValue) -> SubscriptionStatus { SubscriptionStatus(json: ["name": "s", "projects": ps])! }
+        XCTAssertTrue(sub(["*"]).serves("x"))
+        XCTAssertTrue(sub(["awesome-*"]).serves("awesome-gb"))
+        XCTAssertFalse(sub(["awesome-*"]).serves("chopshop"))
+        XCTAssertTrue(sub(["a", "chop?hop"]).serves("chopshop"))
+        XCTAssertEqual(sub([]).projects, ["*"])
+        XCTAssertEqual(SubscriptionStatus(json: ["name": "s"])?.projects, ["*"])
     }
 }

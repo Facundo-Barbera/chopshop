@@ -3,7 +3,8 @@ import SwiftUI
 // Dibujo de un piso de la oficina v3 (departamentos por rol, escritorios fijos) y del vestíbulo. La misma proyección y el mismo
 // lenguaje visual que IsoRenderer (losas extruidas, muros bajos al fondo, escritorio con monitor, muñeco), pero los escritorios
 // salen del perfil: siempre están, y lo que cambia es el ocupante (con su opacidad de semivida), el escritorio dormido de un rol
-// permanente o el retirado (gris).
+// permanente o el retirado (gris). En el piso más bajo del proyecto, la sala de máquinas: un armario por repo (luz de estado
+// grande, ámbar parpadeando, y un led por run) y una consola con un led por listener, script y webhook.
 
 /// Cómo se pinta un hueco en un instante dado.
 @available(macOS 26.0, *)
@@ -185,12 +186,13 @@ struct FloorRenderer {
         // 1· sombras de las losas
         ctx.drawLayer { l in
             l.addFilter(.blur(radius: 9 * cam.s))
-            for r in layout.rooms {
+            for r in layout.rooms + (machineBox.map { [$0] } ?? []) {
                 l.fill(castShadow(r.x0 - 2, r.y0 - 2, r.w + 4, r.d + 4, Iso.slabH + 14, z: 0), with: .color(.black.opacity(dark ? 0.55 : 0.20)))
             }
         }
-        // 2· salas (de atrás hacia delante)
-        for r in layout.rooms.sorted(by: { ($0.x0 + $0.y0) < ($1.x0 + $1.y0) }) {
+        // 2· salas (de atrás hacia delante); la de máquinas es una más
+        for r in (layout.rooms + (machineBox.map { [$0] } ?? [])).sorted(by: { ($0.x0 + $0.y0) < ($1.x0 + $1.y0) }) {
+            if r.index == FloorLayout.machineRoomIndex { drawMachineRoom(&ctx, r); continue }
             let ids = layout.spots.filter { $0.room == r.index }.map(\.id)
             let vs = ids.compactMap { looks[$0]??.visual }
             drawRoom(&ctx, r, needs: vs.contains(.needsYou), stuck: vs.contains(.stuck))
@@ -199,14 +201,21 @@ struct FloorRenderer {
         drawFloor(&ctx, looks: looks)
         // 4· escritorios y muñecos
         for sp in layout.spots.sorted(by: { ($0.cx + $0.cy) < ($1.cx + $1.cy) }) {
+            if sp.isMachine { drawMachineSpot(&ctx, sp); continue }
             guard let lk = looks[sp.id] ?? nil else { continue }
             if isLobby { drawGuest(&ctx, sp, lk) } else { drawDesk(&ctx, sp, lk) }
         }
         // 5· etiquetas
-        for r in layout.rooms {
+        for r in layout.rooms + (machineBox.map { [$0] } ?? []) {
             guard let s = ctx.resolveSymbol(id: "r:\(r.index)") else { continue }
             var g = ctx; g.opacity = 0.9
             g.draw(s, at: P(r.x0 + r.w * 0.5, r.y0, Iso.slabH + Iso.wallH + 16), anchor: .center)
+        }
+        for sp in layout.machine?.cabinets ?? [] {
+            guard let s = ctx.resolveSymbol(id: "m:\(sp.id)") else { continue }
+            var g = ctx; g.opacity = 0.85
+            let p = P(sp.cx, sp.cy + FloorLayout.cabD / 2, floorZ)
+            g.draw(s, at: CGPoint(x: p.x, y: p.y + 6), anchor: .top)
         }
         for sp in layout.spots {
             guard let lk = looks[sp.id] ?? nil, let s = ctx.resolveSymbol(id: "d:\(sp.id)") else { continue }
@@ -223,6 +232,11 @@ struct FloorRenderer {
         if let h = hovered, selected != h, let head = box.heads[h], let s = ctx.resolveSymbol(id: "tip") {
             ctx.draw(s, at: CGPoint(x: head.x, y: head.y - 22), anchor: .bottom)
         }
+    }
+
+    /// La sala de máquinas como una sala más (para sombras, orden y etiqueta `r:-1`).
+    private var machineBox: FloorLayout.RoomBox? {
+        layout.machine.map { FloorLayout.RoomBox(index: FloorLayout.machineRoomIndex, role: "machine", x0: $0.x0, y0: $0.y0, w: $0.w, d: $0.d) }
     }
 
     // Salas ----------------------------------------------------------------
@@ -390,6 +404,109 @@ struct FloorRenderer {
         let pts = [P(dx, dy, z0 + Iso.deskH + 14), P(dx + Iso.deskW, dy, z0 + Iso.deskH + 14), P(dx, dy + Iso.deskD, z0), P(dx + Iso.deskW, dy + Iso.deskD, z0),
                    P(sp.cx, sp.cy + 13, z0 + 34), P(sp.cx - 8, sp.cy + 17, z0), P(sp.cx + 8, sp.cy + 17, z0)]
         hit(sp, pts)
+    }
+
+    // Sala de máquinas -----------------------------------------------------------
+
+    private var cabTop: Color { c(0.230, (0.560, 0.555, 0.545)) }
+    private var cabL: Color { c(0.135, (0.420, 0.415, 0.405)) }
+    private var cabR: Color { c(0.090, (0.330, 0.325, 0.318)) }
+    private var vent: Color { Color.black.opacity(dark ? 0.45 : 0.30) }
+
+    /// Losa y muros como un departamento; suelo técnico más oscuro. Canto rojo si hay un repo en rojo o un listener caído, ámbar
+    /// si falla un script o un webhook, o hay un listener degradado.
+    private func drawMachineRoom(_ ctx: inout GraphicsContext, _ r: FloorLayout.RoomBox) {
+        guard let mr = plan.machineRoom else { return }
+        let stuck = mr.worstLight == .red || mr.listeners.contains { $0.state == .down }
+        let needs = !mr.failingAutomations.isEmpty || mr.subscriptions.contains(where: \.failing) || mr.listeners.contains { $0.state == .degraded }
+        drawRoom(&ctx, r, needs: needs && !stuck, stuck: stuck)
+        let z = floorZ + 0.1, k = 6.0
+        let tiles = poly([P(r.x0 + k, r.y0 + k, z), P(r.x0 + r.w - k, r.y0 + k, z), P(r.x0 + r.w - k, r.y0 + r.d - k, z), P(r.x0 + k, r.y0 + r.d - k, z)])
+        ctx.fill(tiles, with: .color((dark ? Color.black : Color(red: 0.30, green: 0.32, blue: 0.36)).opacity(dark ? 0.24 : 0.07)))
+        var grid = Path()
+        var gx = r.x0 + 26.0
+        while gx < r.x0 + r.w - k { grid.move(to: P(gx, r.y0 + k, z)); grid.addLine(to: P(gx, r.y0 + r.d - k, z)); gx += 26 }
+        var gy = r.y0 + 26.0
+        while gy < r.y0 + r.d - k { grid.move(to: P(r.x0 + k, gy, z)); grid.addLine(to: P(r.x0 + r.w - k, gy, z)); gy += 26 }
+        ctx.stroke(grid, with: .color(ink.opacity(dark ? 0.07 : 0.08)), lineWidth: 0.7)
+        if layout.machine?.cabinets.isEmpty ?? true, let m = layout.machine {
+            // rack sin repos: un armario apagado donde irían
+            var g = ctx; g.opacity = 0.4
+            let x = m.x0 + m.w / 2 - FloorLayout.cabW / 2, y = m.y0 + FloorLayout.pad + 6
+            _ = prism(&g, x, y, floorZ, FloorLayout.cabW, FloorLayout.cabD, FloorLayout.cabH, top: cabTop, left: cabL, right: cabR, edge: dark ? 0.16 : 0.5)
+        }
+    }
+
+    private func drawMachineSpot(_ ctx: inout GraphicsContext, _ sp: FloorLayout.Spot) {
+        guard let mr = plan.machineRoom else { return }
+        if sp.id == FloorLayout.consoleID { drawConsole(&ctx, sp, mr) }
+        else if let u = mr.rack.first(where: { FloorLayout.cabinetID($0.id) == sp.id }) { drawCabinet(&ctx, sp, u) }
+    }
+
+    /// Armario de un repo, de frente a la cámara (cara +y): rejilla, luz de estado y un led por run (activos primero, parpadean).
+    private func drawCabinet(_ ctx: inout GraphicsContext, _ sp: FloorLayout.Spot, _ u: RackUnit) {
+        let z0 = floorZ, w = FloorLayout.cabW, d = FloorLayout.cabD, h = FloorLayout.cabH
+        let x = sp.cx - w / 2, y = sp.cy - d / 2, fy = y + d
+        var g = ctx
+        let sil = prism(&g, x, y, z0, w, d, h, top: cabTop, left: cabL, right: cabR, edge: dark ? 0.18 : 0.55)
+        for k in 0..<6 {
+            let zz = z0 + 5 + Double(k) * 3.2
+            var l = Path(); l.move(to: P(x + 4, fy, zz)); l.addLine(to: P(x + w - 4, fy, zz))
+            g.stroke(l, with: .color(vent), lineWidth: max(0.6, 0.7 * cam.s))
+        }
+        // luz de estado
+        let amp = u.light.blinks ? RackRenderer.blink(t + Double(abs(u.id.hashValue) % 7) * 0.13) : 1
+        let lp = P(x + 7, fy, z0 + h - 7), lr = 2.8 * cam.s
+        var glow = ctx; glow.opacity = (u.light == .gray ? 0.15 : 0.6) * amp; glow.addFilter(.blur(radius: 4 * cam.s))
+        glow.fill(Path(ellipseIn: CGRect(x: lp.x - lr * 2, y: lp.y - lr * 2, width: lr * 4, height: lr * 4)), with: .color(u.light.color))
+        g.fill(Path(ellipseIn: CGRect(x: lp.x - lr, y: lp.y - lr, width: lr * 2, height: lr * 2)), with: .color(u.light.color.opacity(0.35 + 0.65 * amp)))
+        // leds de runs: dos filas de cinco
+        for (i, r) in RackLayout.runOrder(u).enumerated() {
+            let p = P(x + 14 + Double(i % 5) * 3.9, fy, z0 + h - 5 - Double(i / 5) * 4.4), rr = 1.15 * cam.s
+            let a = r.active ? RackRenderer.blink(t + Double(i) * 0.21) : 1
+            g.fill(Path(ellipseIn: CGRect(x: p.x - rr, y: p.y - rr, width: rr * 2, height: rr * 2)), with: .color(r.light.color.opacity(0.3 + 0.7 * a)))
+        }
+        if hovered == sp.id || selected == sp.id {
+            g.fill(sil, with: .color(.white.opacity(dark ? 0.06 : 0.10)))
+            g.stroke(sil, with: .color(u.light.color.opacity(selected == sp.id ? 0.95 : 0.7)), style: StrokeStyle(lineWidth: selected == sp.id ? 1.4 : 1.1, lineJoin: .round))
+        }
+        box.heads[sp.id] = P(sp.cx, y, z0 + h)
+        hit(sp, [P(x, y, z0 + h), P(x + w, y, z0 + h), P(x, fy, z0), P(x + w, fy, z0), P(x + w, y, z0)])
+    }
+
+    /// Consola: mesa con un tablero de leds, una fila por listener (salud), script (último exit) y webhook (último envío).
+    private func drawConsole(_ ctx: inout GraphicsContext, _ sp: FloorLayout.Spot, _ mr: MachineRoom) {
+        let z0 = floorZ, w = 2 * FloorLayout.cellW, dd = Iso.deskD
+        let x = sp.cx - w / 2, y = sp.cy - 20, zt = z0 + Iso.deskH
+        var g = ctx
+        let sil = prism(&g, x, y, z0, w, dd, Iso.deskH, top: deskTop, topEnd: deskTopEnd, left: deskL, right: deskR, edge: dark ? 0.28 : 0.95)
+        let bx = x + 6, by = y + 2, bw = w - 12, bh = 19.0
+        _ = prism(&g, bx, by, zt, bw, 3, bh, top: monBody, left: monBody.opacity(0.95), right: monBody.opacity(0.85), edge: dark ? 0.2 : 0.3)
+        let face = poly([P(bx + 1.5, by + 3, zt + bh - 1.5), P(bx + bw - 1.5, by + 3, zt + bh - 1.5), P(bx + bw - 1.5, by + 3, zt + 1.5), P(bx + 1.5, by + 3, zt + 1.5)])
+        g.fill(face, with: .color(c(0.07, (0.20, 0.20, 0.21))))
+        let ok = RackLight.green.color, off = Color.secondary.opacity(0.5)
+        let rows: [[Color]] = [
+            mr.listeners.map(\.state.color),
+            mr.automations.map { $0.failed ? Attention.stuck : ok },
+            mr.subscriptions.map { $0.failing ? Attention.stuck : ($0.lastOK == nil ? off : ok) },
+        ]
+        for (ri, cols) in rows.enumerated() {
+            let zz = zt + bh - 5 - Double(ri) * 5
+            if cols.isEmpty {
+                var l = Path(); l.move(to: P(bx + 5, by + 3, zz)); l.addLine(to: P(bx + 14, by + 3, zz))
+                g.stroke(l, with: .color(off.opacity(0.6)), lineWidth: max(0.6, 0.8 * cam.s))
+            }
+            for (k, col) in cols.prefix(Int((bw - 8) / 6)).enumerated() {
+                let p = P(bx + 6 + Double(k) * 6, by + 3, zz), rr = 1.3 * cam.s
+                g.fill(Path(ellipseIn: CGRect(x: p.x - rr, y: p.y - rr, width: rr * 2, height: rr * 2)), with: .color(col))
+            }
+        }
+        if hovered == sp.id || selected == sp.id {
+            g.fill(sil, with: .color(.white.opacity(dark ? 0.07 : 0.10)))
+            g.stroke(sil, with: .color(ink.opacity(selected == sp.id ? 0.95 : 0.7)), style: StrokeStyle(lineWidth: selected == sp.id ? 1.4 : 1.1, lineJoin: .round))
+        }
+        box.heads[sp.id] = P(sp.cx, by, zt + bh)
+        hit(sp, [P(x, y, zt + bh), P(x + w, y, zt + bh), P(x, y + dd, z0), P(x + w, y + dd, z0), P(x + w, y, z0)])
     }
 
     // Invitado del vestíbulo ---------------------------------------------------

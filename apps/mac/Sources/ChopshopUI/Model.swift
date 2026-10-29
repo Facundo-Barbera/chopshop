@@ -3,14 +3,11 @@ import WebKit
 import ChopshopNative
 
 enum Section: String, CaseIterable, Identifiable {
-    case overview, questions, events, reactions, graph, batches, machines, project, machineRoom
+    case overview, questions, events, reactions, graph, batches, machines, project
     var id: String { rawValue }
     /// Vistas fijas de la barra lateral (el proyecto y las máquinas tienen su propia sección).
-    static var views: [Section] {
-        var v: [Section] = [.overview, .questions, .events, .reactions, .graph, .batches]
-        if #available(macOS 26.0, *) { v.append(.machineRoom) }      // vista nativa (no existe en la UI web)
-        return v
-    }
+    /// La sala de máquinas no es una vista aparte: es una sala del piso de cada proyecto (oficina nativa).
+    static var views: [Section] { [.overview, .questions, .events, .reactions, .graph, .batches] }
     var title: String {
         switch self {
         case .overview: return "Resumen"
@@ -21,7 +18,6 @@ enum Section: String, CaseIterable, Identifiable {
         case .batches: return "Lotes"
         case .machines: return "Máquinas"
         case .project: return "Proyecto"
-        case .machineRoom: return "Sala de máquinas"
         }
     }
     var symbol: String {
@@ -34,7 +30,6 @@ enum Section: String, CaseIterable, Identifiable {
         case .batches: return "square.stack.3d.up"
         case .machines: return "gauge.with.dots.needle.50percent"
         case .project: return "folder"
-        case .machineRoom: return "server.rack"
         }
     }
 }

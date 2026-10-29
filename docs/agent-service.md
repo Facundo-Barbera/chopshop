@@ -219,6 +219,9 @@ en el log y no degrada. Los logs llevan repo, código HTTP y motivo; nunca la sa
   próximo horario si tiene `schedule`).
 - `subscriptions`: los webhooks salientes con su último envío bueno y el último fallo (texto corto; nunca la URL ni el secreto).
 
+La app no tiene una vista aparte para esto: cada proyecto lo ve como una **sala de su piso más bajo** con lo suyo
+(`projects[].machine_room`: sus repos del rack, sus scripts, los webhooks que lo reparten y todos los listeners).
+
 ## Troubleshooting
 
 | Síntoma | Causa y arreglo |

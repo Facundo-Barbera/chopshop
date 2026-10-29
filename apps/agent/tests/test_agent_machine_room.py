@@ -17,6 +17,7 @@ from test_agent_github import Clock, base_cfg  # noqa: E402
 FIX = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "events")
 MR_FIXTURE = os.path.join(FIX, "machine-room-fixture.jsonl")
 MR_GOLDEN = os.path.join(FIX, "machine-room-fixture.state.json")
+MR_ROOMS = os.path.join(FIX, "machine-room-fixture.rooms.json")      # {proyecto: projects[].machine_room}
 
 
 def load_mr():
@@ -47,8 +48,8 @@ class TestListeners(unittest.TestCase):
 
 class TestMachineRoomProjection(unittest.TestCase):
     def test_fold_matches_golden(self):
-        """fold(machine-room-fixture.jsonl) == machine-room-fixture.state.json (CHOPSHOP_UPDATE_GOLDEN=1 lo regenera; la app
-        usa el mismo)."""
+        """fold(machine-room-fixture.jsonl) == machine-room-fixture.state.json, y la sala de cada proyecto ==
+        machine-room-fixture.rooms.json (CHOPSHOP_UPDATE_GOLDEN=1 los regenera; la app usa los mismos)."""
         envs = load_mr()
         for e in envs:
             envelope.validate(e)
@@ -59,6 +60,12 @@ class TestMachineRoomProjection(unittest.TestCase):
                 f.write(text)
         with open(MR_GOLDEN, encoding="utf-8") as f:
             self.assertEqual(f.read(), text)
+        rooms = json.dumps({p["name"]: p["machine_room"] for p in st["projects"]}, sort_keys=True, indent=2, ensure_ascii=False) + "\n"
+        if os.environ.get("CHOPSHOP_UPDATE_GOLDEN") == "1":
+            with open(MR_ROOMS, "w", encoding="utf-8") as f:
+                f.write(rooms)
+        with open(MR_ROOMS, encoding="utf-8") as f:
+            self.assertEqual(f.read(), rooms)
 
     def test_rules(self):
         envs = load_mr()
@@ -90,12 +97,44 @@ class TestMachineRoomProjection(unittest.TestCase):
         conn.execute("INSERT INTO deliveries(event_seq,name,ok,detail,ts) VALUES(1,'bots',1,'204',100)")
         conn.execute("INSERT INTO deliveries(event_seq,name,ok,detail,ts) VALUES(2,'chat',0,'HTTP 500 https://hooks.example/abc',200)")
         subs = machine_room.subscriptions(conn)
-        self.assertEqual(subs[0], {"name": "bots", "last_ok": envelope.iso(100), "last_error": None, "last_error_at": None,
-                                   "signed": True})
+        self.assertEqual(subs[0], {"name": "bots", "projects": ["*"], "last_ok": envelope.iso(100), "last_error": None,
+                                   "last_error_at": None, "signed": True})
         self.assertEqual((subs[1]["last_error"], subs[1]["signed"]), ("HTTP 500 [url]", False))
         st = projection.Projector(conn, {"machine_id": "m"}).current()
         self.assertEqual([s["name"] for s in st["machine_room"]["subscriptions"]], ["bots", "chat"])
         self.assertEqual(projection.state(conn, {"machine_id": "m"})["machine_room"]["subscriptions"], [])  # fold puro
+
+    def test_room_per_project_floor(self):
+        """La sala vive en el piso más bajo de cada proyecto y solo trae lo suyo (listeners: todos)."""
+        tmp = tempfile.mkdtemp(prefix="chopshop-mr-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        conn = db.connect(os.path.join(tmp, "agent.db"))
+        self.addCleanup(conn.close)
+        conn.execute("INSERT INTO subscriptions(name, webhook_file, created) VALUES('todo','/x/h',1)")
+        conn.execute("INSERT INTO subscriptions(name, webhook_file, created, projects) VALUES('awe','/x/h',1,'[\"awesome-*\"]')")
+        conn.execute("INSERT INTO subscriptions(name, webhook_file, created, project) VALUES('chop','/x/h',1,'chopshop')")
+        envs = load_mr()
+        st = projection.fold(envs, "m")
+        rooms = {p["name"]: p["machine_room"] for p in st["projects"]}
+        mr = st["machine_room"]
+        self.assertEqual(set(rooms), {"awesome-gb", "chopshop"})
+        for name, r in rooms.items():
+            self.assertEqual(r["floor"], 0)
+            self.assertEqual(r["listeners"], mr["listeners"])
+            self.assertEqual(r["rack"], [u for u in mr["rack"] if u["project"] == name])
+            self.assertEqual([a["project"] for a in r["automations"]], [name] * len(r["automations"]))
+        self.assertEqual([u["label"] for u in rooms["awesome-gb"]["rack"]], ["repo-principal", "Engine CX"])
+        self.assertEqual(rooms["chopshop"]["rack"], [])
+        self.assertEqual(projection.apply(st, envs[0]), st)                     # ya plegado: igual
+        # en vivo: webhooks filtrados por su `projects`
+        live = machine_room.live(json.loads(json.dumps(st)), conn)
+        subs = {p["name"]: [s["name"] for s in p["machine_room"]["subscriptions"]] for p in live["projects"]}
+        self.assertEqual(subs, {"awesome-gb": ["awe", "todo"], "chopshop": ["chop", "todo"]})
+        self.assertEqual(projection.filter_project(live, "chopshop")["projects"][0]["machine_room"]["subscriptions"][0]["name"], "chop")
+        # piso más bajo del office
+        p = {"name": "x", "office": {"floors": [{"index": 2}, {"index": 1}]}}
+        self.assertEqual(machine_room.floor_of(p), 1)
+        self.assertEqual(machine_room.floor_of({"name": "y", "office": None}), 0)
 
 
 class TestNextRun(unittest.TestCase):

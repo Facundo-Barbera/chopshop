@@ -1,7 +1,7 @@
 import Foundation
 
-/// Escena v3 de la ciudad: Awesome GB con `office` de dos pisos (Producto, Docs) y un hilo en el vestíbulo; chopshop sin `office`
-/// (un piso, empresa por `CompanyDirectory`). La usan `CityOfficeTests` y `ChopshopSnap <salida> city-office`.
+/// Escena v3 de la ciudad: Awesome GB con `office` de dos pisos (Producto, con su sala de máquinas, y Docs) y un hilo en el
+/// vestíbulo; chopshop sin `office` (un piso, empresa por `CompanyDirectory`). La usan `CityOfficeTests` y `ChopshopSnap <salida> city-office`.
 enum CityOfficeFixture {
     static func desk(_ id: String, _ thread: String?) -> String {
         let occ = thread.map { #"{"thread_id": "\#($0)", "phase": "running"}"# } ?? "null"
@@ -33,6 +33,15 @@ enum CityOfficeFixture {
           {"name": "chopshop", "counts": {}, "batches": [], "graphs": [],
            "tasks": [\(task("x", thread: "th-x", phase: "running"))], "attention": []}],
          "lobby": [{"thread_id": "th-d", "project": "awesome-gb", "company": "Awesome GB", "phase": "running", "waiting_role": null}],
+         "machine_room": {"listeners": [{"name": "t3watch", "state": "ok"}, {"name": "forge", "state": "ok"}],
+          "automations": [{"project": "awesome-gb", "name": "triage", "trigger": "schedule", "exit": 0}],
+          "subscriptions": [{"name": "bots", "projects": ["*"], "last_ok": "2026-10-29T16:10:00.000Z", "last_error": null, "signed": true}],
+          "rack": [{"provider": "github", "repo": "<org>/<repo-principal>", "project": "awesome-gb", "kind": "main", "label": "repo-principal",
+                    "light": "amber", "runs": [{"run_id": "1", "workflow": "ci", "status": "in_progress", "event": "push",
+                                                "origin": {"kind": "thread", "id": "th-a"}}]},
+                   {"provider": "github", "repo": "<org>/<engine-cx>", "project": "awesome-gb", "kind": "docs", "label": "Engine CX",
+                    "light": "green", "runs": []},
+                   {"provider": "github", "repo": "<org>/chopshop", "project": "chopshop", "kind": "main", "light": "red", "runs": []}]},
          "recent": []}
         """
     }()

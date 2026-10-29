@@ -52,8 +52,8 @@ cp apps/agent/tests/fixtures/events/machine-room-fixture.jsonl apps/mac/Sources/
       `office.company` y `CompanyDirectory` solo como respaldo; proyectos sin `office` siguen en un piso.
 - [ ] Piso (`FloorOfficeView`): departamentos por rol, escritorios fijos, ocupante con opacidad de semivida (T½ del perfil,
       ×2 si falló, sale bajo 0,1), retirado en gris, triage permanente "dormido" con su lámpara y notas pendientes.
-- [ ] Sala de máquinas (barra lateral, macOS 26): ámbar parpadea; chips de origen (hilo con rol · escritorio, automatización,
-      bot, cron, humano); webhooks sin URL.
+- [ ] Sala de máquinas (ahora una sala del piso más bajo de cada proyecto, ver §7): ámbar parpadea; chips de origen (hilo con
+      rol · escritorio, automatización, bot, cron, humano); webhooks sin URL.
 
 ## Resultado en el Mac (2026-10-29, Xcode 27.1, Swift 6.4, rama `fix/or-mac-verify`)
 
@@ -77,3 +77,26 @@ cp apps/agent/tests/fixtures/events/machine-room-fixture.jsonl apps/mac/Sources/
   `onInspect` (→ `POST /touch`) queda expuesto en `CityView(state:…)` pero nadie lo cablea aún. El vestíbulo no tiene zoom.
 - `IsoScene`/`IsoOfficeView` siguen con salas por rango de dependencias (modo Grafo); la oficina por departamentos vive en
   `Office/` aparte.
+
+## 7. Sala de máquinas dentro del piso (rama `fix/or-machine-room-in-floor`, sin compilar en Linux)
+
+Cambio: la sala deja de ser una vista aparte (fuera `Section.machineRoom`, `LiveMachineRoomScreen` y `LiveStore.machineRoom`) y
+pasa a ser una sala del piso más bajo de cada proyecto, con solo lo suyo (`MachineRoom.scoped(to:)`; el agente publica lo mismo
+en `projects[].machine_room`). Doradas regeneradas: `ui-fixture.state.json`, `office/office-fixture.state.json` (ganan
+`projects[].machine_room`) y nueva `machine-room-fixture.rooms.json` (copiada a `Tests/ChopshopNativeTests/Resources/`).
+
+- [ ] `swift build` en `apps/mac` y `apps/mac/native` (tocado: `MachineRoomModel`, `MachineRoomView`, `MachineRoomSnapshots`,
+      `FloorPlan`, `FloorRender`, `FloorOfficeView`, `FloorSnapshots`, `CityOfficeFixture`, `LiveStore`, `ChopshopUI/Model` y
+      `Views`). Puntos a mirar: `fnmatch` en `SubscriptionStatus.serves` (Darwin vía Foundation), literales de `FloorFixture`
+      (si el type-checker tarda, partirlos más), `FloorPanelBackground` (sacado de `FloorInspector`).
+- [ ] `swift test` en `apps/mac`: nuevos `FloorPlanTests.testMachineRoom*`/`testAgentPerProjectRoomWins`,
+      `MachineRoomTests.testScopedToProject`/`testSubscriptionServesGlobs`, `OfficeEquivalenceTests.testPerProjectRoomMatchesPythonScope`;
+      cambiado `testLiveStoreFeedsMachineRoom` (lee `store.state.machineRoom`).
+- [ ] Capturas: `ChopshopSnap <salida> floor` → `floor-producto-*.png` con la sala a la derecha de los departamentos (armarios de
+      repo-principal en rojo y Engine CX en ámbar, sin el repo de `otro`) y `floor-machine-room-selected.png` con el panel;
+      `city-office` → `city-office-zoom-producto.png` (la sala aparece en el zoom); `machine-room` → panel de Awesome GB.
+- [ ] En la app: la barra lateral ya no tiene «Sala de máquinas»; Ciudad → clic en el piso más bajo de un proyecto → la sala
+      está en el piso; hover en un armario (tooltip con luz y runs en curso), clic → panel con el repo elegido; clic en otro
+      armario cambia el repo; Esc lo cierra; un repo en rojo sale en la barra «Atención» y al pulsarlo enfoca su armario.
+- [ ] Los pisos superiores del proyecto no tienen sala; un proyecto sin `office` sigue abriendo el Grafo (sin sala).
+
