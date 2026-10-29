@@ -58,7 +58,7 @@ env:
   DELTA_COMPRESSION: lzma
   PHASED_ROLLOUT_INTERVAL: "" # segundos entre tandas del rollout gradual (solo canal estable); vacío = sin rollout
   FULL_RELEASE_NOTES_URL: ""
-  XCODE_VERSION: "" # vacío = Xcode por defecto del runner; p. ej. 16.4 fija /Applications/Xcode_16.4.app
+  XCODE_VERSION: "26.3" # /Applications/Xcode_26.3.app (SDK macOS 26: ChopshopNative usa APIs 26; con vacío el runner usa 16.4 sin ese SDK)
 
 jobs:
   preflight:
