@@ -1,0 +1,6 @@
+# Python incrustado en Chopshop.app para el agente local (Contents/Resources/agent/python; ver embed-agent.sh).
+# Build "install_only_stripped" de astral-sh/python-build-standalone, release y checksums FIJADOS (SHA-256 del .tar.gz).
+PYTHON_RUNTIME_RELEASE=20261026
+PYTHON_RUNTIME_VERSION=3.13.18
+PYTHON_RUNTIME_SHA256_ARM64=8392b6ea51d94391befb2c31ebe75463f045d0b69dfcf5e1bb3234e1f5fa3405
+PYTHON_RUNTIME_SHA256_X86_64=7412c19d896c99431b74a18a5643e110449a7f9590fbab179c3e5ab27b9aa9e3

@@ -78,8 +78,12 @@ final class AppModel: ObservableObject {
 
     weak var web: WKWebView?
 
-    /// Sección [app] de ~/.config/chopshop/config.toml (+ CHOPSHOP_APP__*). Se recarga con `reloadConfig()`.
-    private(set) var config = AppConfig.load()
+    /// Agente incrustado en la app («Usar esta Mac como máquina», BundledAgent.swift).
+    let bundled = BundledAgent()
+
+    /// Sección [app] de ~/.config/chopshop/config.toml (+ CHOPSHOP_APP__*), más el agente de este Mac si el ajuste está activo.
+    /// Se recarga con `reloadConfig()`.
+    private(set) lazy var config = loadConfig()
     private lazy var hub = AgentHub(specs: config.agents, credentials: credentials)
     private var results: [AgentResult] = []
     private var labels: [String: String] = [:]     // agente -> último machine_id visto
@@ -105,6 +109,7 @@ final class AppModel: ObservableObject {
         if args.contains("--capture") { Capture.watch(model: self) }
         startPolling()
         startLive()
+        if !args.contains("--capture") { syncBundledAgent() }
         // Sin ningún agente configurado no hay nada que mostrar: se pide la conexión en los ajustes
         if hub.isEmpty && !args.contains("--capture") { showSettings = true }
     }
@@ -179,7 +184,7 @@ final class AppModel: ObservableObject {
         refreshing = false
         pollTask?.cancel()
         pollTask = nil
-        config = AppConfig.load()
+        config = loadConfig()
         hub = AgentHub(specs: config.agents, credentials: credentials)
         results = []
         labels = [:]
@@ -193,6 +198,28 @@ final class AppModel: ObservableObject {
         live.reset()
         startLive()
         pushAgents()      // sin agentes envía la lista vacía; con agentes espera a la primera ronda
+    }
+
+    private func loadConfig() -> AppConfig {
+        var c = AppConfig.load()
+        c.agents = BundledAgent.merge(c.agents, local: bundled.localSpec)
+        return c
+    }
+
+    /// Registra o quita el agente de este Mac según el ajuste y, cuando responde, empareja la app con él.
+    func syncBundledAgent() {
+        Task { @MainActor in
+            await bundled.sync(isPaired: { [weak self] in self?.isPaired(BundledAgent.agentName) ?? true },
+                               pair: { [weak self] agent, code in await self?.pair(agent: agent, code: code) })
+        }
+    }
+
+    /// Ajuste «Usar esta Mac como máquina».
+    func setUseThisMac(_ on: Bool) {
+        guard bundled.isEnabled != on else { return }
+        bundled.isEnabled = on
+        reloadConfig()
+        syncBundledAgent()
     }
 
     /// Mensaje `agents`: resultados crudos por agente (la UI los combina). Sin agentes configurados va la lista vacía;
