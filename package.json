@@ -1,7 +1,7 @@
 {
   "name": "chopshop",
   "private": true,
-  "version": "0.7.0",
+  "version": "0.8.0",
   "packageManager": "pnpm@12.16.1",
   "scripts": {
     "build": "turbo run build",
