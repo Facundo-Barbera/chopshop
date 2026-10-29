@@ -25,7 +25,7 @@ si necesitas columnas, usa los campos `extra` JSON). `user_version` 2: la migrac
 | `../answers.py` | motor y agente | `resolve(q, choice)` (nº de opción, etiqueta, valor o texto libre; lista si `multiSelect`) y `resolve_all(questions, choice)` (`{id: valor}`; con varias preguntas `choice` es `{id: elección}`). Puro, sin I/O; lanza `InvalidChoice` (`ValueError`). |
 | `../t3.py`, `../t3mcp.py` | motor y agente | `t3mcp.Client(origin, access, credential_file, t3_bin, timeout)`: cliente MCP HTTP nativo (OAuth+PKCE con pairing local, credencial 0600 en `<CHOPSHOP_HOME>/t3-credential.json`). `t3.call(host_cfg, host_name, tool, args)` es la fachada del motor: un cliente cacheado por host (`origin`, `access`, `credential_file`), `t3.is_local(host_cfg)` (= sin `origin`), `t3.T3Error` (= `t3mcp.T3Error`), `t3.set_client_factory(fn)`/`t3.reset()` para tests. Sin `fleet` ni helper node. |
 | `stream.py` | integrador | `Bus` (`publish(seq)`, `wait(seq, timeout)`, `close()`; `AgentService.emit` publica) y `StreamHub` (`serve(handler, ident, query)`, `revoke(device_id)`, `close()`, `active`): ver «`GET /stream`». |
-| `projection.py` | integrador | `apply(state, envelope) -> state` (pura, idempotente por `seq`), `fold(envs)`, `state(conn, cfg)`, `Projector(conn, cfg).current()` (incremental), `to_envelope(row)` (usa `envelope.build` si existe; si no, traduce las filas viejas), `filter_project`. |
+| `projection.py` | integrador | `apply(state, envelope) -> state` (pura, idempotente por `seq`), `fold(envs)`, `state(conn, cfg)`, `Projector(conn, cfg).current()` (incremental), `envelopes_after(conn, after)` (sobres del bus sin `event`/`machine_id`), `filter_project`. |
 | `pairing.py` | integrador | `Pairing(conn, clock)`: `create_code(name, ttl)`, `redeem(code, device_name, device_id, ip)`, `check(cred, ip)`, `active(id)`, `list()`, `revoke(id)`, `prune()`; CLI `chopshop pair create\|list\|revoke\|prune`. Tablas propias `pair_codes` y `devices` (`CREATE TABLE IF NOT EXISTS`, sin tocar `user_version`). |
 | `server.py`, `service.py` | integrador | `server.py`: `ThreadingHTTPServer`, `Authenticator` y las rutas (`AgentApp`). `service.py`: `AgentService` (ensambla módulos, hilos de fondo, parada limpia) y el CLI `chopshop agent run\|status\|token\|check-config\|print-unit`. |
 | `ui/` | hilo UI | cliente puro de la API (ver abajo). |
@@ -167,12 +167,11 @@ data: { ...sobre (docs/event-envelope.md)... }
  "recent": [ ...últimos 50 sobres, el más nuevo primero... ]}
 ```
 - `attention` = cola de lo que necesita acción: un elemento por sujeto (`key = kind:id`) cuyo último sobre trae `needs != null`; el
-  siguiente sobre del mismo sujeto con `needs: null` lo cierra. `since` = cuándo se abrió.
+  siguiente sobre del mismo sujeto con `needs: null` lo cierra (`reaction.applied` y `automation.ran` no cuentan). `since` = cuándo se abrió.
 - `counts`: `running` (running/preparing), `queued`, `waiting` (sin atención), `done` (done/settled), `failed`, `stuck` (último sobre
   `warn`/`error` y sin terminar), `needs_human` (atención human/approval), `waiting_bot` (atención bot).
 - `machine_health` = último `machine.health`; los eventos sin proyecto solo cuentan para `machine_health` y `recent`.
-- Mientras el bus no guarde el sobre completo, las filas viejas (`thread_*`, `pending_question`, `pending_approval`, `t3_*`,
-  `agent_started`) se traducen al vuelo a `task.state`, `question.opened`, `approval.requested`, `machine.health` y `agent.started`.
+- Los sobres son los del bus (`events.list_after`, docs/event-envelope.md) sin los campos viejos `event`/`machine_id`.
 
 ## Decisiones de los módulos (resumen)
 

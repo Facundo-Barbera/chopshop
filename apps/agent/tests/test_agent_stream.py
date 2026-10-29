@@ -12,10 +12,10 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from chopshop.agent import db, events, pairing, projection, server, stream  # noqa: E402
+from chopshop.agent import db, envelope, events, pairing, projection, server, stream  # noqa: E402
 from test_agent_server import TOKEN, ServerBase  # noqa: E402
 
-FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "stream", "ui-fixture.jsonl")
+FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "events", "ui-fixture.jsonl")   # dorado del bus
 
 
 def load_fixture():
@@ -105,26 +105,14 @@ class SSE:
             pass
 
 
-def add_v3_columns(conn):
-    """Simula las columnas del sobre del diseño (§2.3, migración v3 de la tarea A) en una DB de test."""
-    for col in ("id TEXT", "type TEXT", "severity TEXT", "needs TEXT", "subject_kind TEXT", "subject_id TEXT", "cause_id TEXT",
-                "cause_depth INTEGER"):
-        conn.execute("ALTER TABLE events ADD COLUMN " + col)
-
-
 def insert_envelope(conn, env):
-    import datetime
-    ts = datetime.datetime.strptime(env["ts"], "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=datetime.timezone.utc).timestamp()
-    subj, cause = env.get("subject") or {}, env.get("cause") or {}
-    body = dict(env["body"])
-    for k in ("title", "url"):
-        if k in subj:
-            body["subject_" + k] = subj[k]
+    """Guarda un sobre del dorado con su `seq` (columnas v3 del bus)."""
+    s, c = env["subject"], env["cause"]
     with db.tx():
         conn.execute("INSERT INTO events(seq,ts,machine_id,event,project,body,id,type,severity,needs,subject_kind,subject_id,"
-                     "cause_id,cause_depth) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                     (env["seq"], ts, env["machine"], env["type"], env["project"], db.jdump(body), env["id"], env["type"],
-                      env["severity"], env["needs"], subj.get("kind"), subj.get("id"), cause.get("id"), cause.get("depth")))
+                     "subject,cause_id,cause_depth) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                     (env["seq"], envelope.epoch(env["ts"]), env["machine"], env["type"], env["project"], db.jdump(env["body"]),
+                      env["id"], env["type"], env["severity"], env["needs"], s["kind"], s["id"], db.jdump(s), c["id"], c["depth"]))
 
 
 # ---------------------------------------------------------------- proyección pura
@@ -142,36 +130,42 @@ class TestProjection(unittest.TestCase):
         self.assertEqual(new["head_seq"], env["seq"])
 
     def test_fold_of_fixture(self):
-        st = projection.fold(self.envs, "host-a")
+        st = projection.fold(self.envs, "contabo-dev")
         self.assertEqual(st["api_version"], 2)
         self.assertEqual(st["head_seq"], self.envs[-1]["seq"])
-        self.assertEqual(st["machine_health"]["state"], "degraded")
-        self.assertEqual([p["name"] for p in st["projects"]], ["chopshop", "nuskills"])
-        nu = st["projects"][1]
-        self.assertEqual(nu["attention"], [])                    # pregunta respondida y aprobación cerrada por task.state
-        self.assertEqual(nu["counts"], {"running": 1, "queued": 0, "waiting": 0, "stuck": 1, "needs_human": 0, "waiting_bot": 0,
-                                        "done": 1, "failed": 1})
-        self.assertEqual({t["id"]: t["phase"] for t in nu["tasks"]}, {"mcp:a036": "done", "mcp:b7": "failed", "mcp:c9": "running"})
-        self.assertEqual(nu["batches"][0]["id"], "b-0007")
-        self.assertEqual(nu["batches"][0]["status"], "done")
-        self.assertEqual(nu["graphs"][0]["status"], "failed")
-        self.assertEqual({n["id"]: n["phase"] for n in nu["graphs"][0]["nodes"]}, {"n-2": "done", "n-4": "failed"})
-        cs = st["projects"][0]
+        self.assertEqual(st["machine_health"]["state"], "ok")
+        self.assertEqual([p["name"] for p in st["projects"]], ["bixku-utilities", "chopshop", "nuskills"])
+        bx, cs, nu = st["projects"]
+        self.assertEqual(nu["attention"], [])                    # pregunta respondida y tareas terminadas
+        self.assertEqual(nu["counts"], {"running": 0, "queued": 0, "waiting": 0, "stuck": 0, "needs_human": 0, "waiting_bot": 0,
+                                        "done": 2, "failed": 1})
+        self.assertEqual({t["id"]: t["phase"] for t in nu["tasks"]}, {"mcp:a1": "settled", "mcp:b7": "failed", "mcp:a036": "done"})
+        self.assertEqual([(b["id"], b["status"]) for b in nu["batches"]], [("b-0007", "done")])
+        g = nu["graphs"][0]
+        self.assertEqual((g["id"], g["status"]), ("g-2", "failed"))
+        self.assertEqual({n["id"]: n["phase"] for n in g["nodes"]}, {"n-2": "done", "n-3": "failed", "n-4": "running"})
         self.assertEqual([(a["subject"]["id"], a["type"], a["needs"]) for a in cs["attention"]],
-                         [("mcp:z1", "question.opened", "human"), ("mcp:z2", "approval.requested", "approval")])
-        self.assertEqual(cs["attention"][0]["summary"], "¿Mantenemos soporte de Node 18?")
-        self.assertEqual(cs["counts"]["needs_human"], 2)
-        self.assertEqual([e["seq"] for e in st["recent"]], [e["seq"] for e in reversed(self.envs)])
+                         [("Facundo-Barbera/chopshop#51", "triage.result", "bot")])
+        self.assertEqual(cs["counts"]["waiting_bot"], 1)
+        self.assertEqual(bx["counts"]["running"], 1)
+        self.assertEqual([e["seq"] for e in st["recent"]], [e["seq"] for e in reversed(self.envs)][:projection.RECENT])
 
     def test_attention_open_and_close(self):
-        st = projection.fold(self.envs[:11], "host-a")
-        nu = st["projects"][0]
-        self.assertEqual([(a["subject"]["id"], a["needs"]) for a in nu["attention"]], [("mcp:b7", "bot")])
-        self.assertEqual(nu["counts"]["waiting_bot"], 1)
-        st = projection.fold(self.envs[11:12], state=st)            # aprobación sobre otro sujeto
-        self.assertEqual(len(st["projects"][0]["attention"]), 2)
-        st = projection.fold(self.envs[12:16], state=st)            # reaction (sigue abierto) + respondida (cierra)
-        self.assertEqual([a["subject"]["id"] for a in st["projects"][1]["attention"]], ["mcp:a036"])
+        by_seq = {e["seq"]: i for i, e in enumerate(self.envs)}
+        upto = lambda seq: projection.fold(self.envs[:by_seq[seq] + 1], "contabo-dev")  # noqa: E731
+        att = lambda st, name: [(a["subject"]["id"], a["type"], a["needs"])  # noqa: E731
+                                for a in next(p for p in st["projects"] if p["name"] == name)["attention"]]
+        st = upto(1816)                                        # pregunta al bot + reaction.applied (no cierra)
+        self.assertEqual(att(st, "nuskills"), [("mcp:b7", "question.opened", "bot")])
+        self.assertEqual(next(p for p in st["projects"] if p["name"] == "nuskills")["counts"]["waiting_bot"], 1)
+        st = upto(1820)
+        self.assertEqual(att(st, "chopshop"), [("mcp:c41", "approval.requested", "approval")])
+        self.assertEqual(att(st, "bixku-utilities"), [("mcp:x9", "question.opened", "human")])
+        a = next(p for p in st["projects"] if p["name"] == "nuskills")["attention"][0]
+        self.assertEqual(a["since"], self.envs[by_seq[1814]]["ts"])           # abierta desde el task.state con atención
+        self.assertEqual(a["summary"], self.envs[by_seq[1815]]["body"]["summary"])
+        self.assertEqual(att(upto(1822), "nuskills"), [])                     # question.answered cierra
+        self.assertEqual(att(upto(1833), "chopshop"), [("Facundo-Barbera/chopshop#51", "triage.result", "bot")])
 
     def test_one_by_one_equals_fold_and_is_idempotent(self):
         st = projection.empty("host-a")
@@ -202,7 +196,6 @@ class TestStateFromDb(unittest.TestCase):
         self.cfg = {"machine_id": "host-a"}
 
     def test_state_equals_fold_with_ui_fixture(self):
-        add_v3_columns(self.conn)
         envs = load_fixture()
         for e in envs:
             insert_envelope(self.conn, e)
@@ -230,7 +223,8 @@ class TestStateFromDb(unittest.TestCase):
         events.emit(self.conn, cfg, "thread_done", "demo", {"thread_id": "t-1", "title": "Uno", "status": "completed", "result": "ok"})
         events.emit(self.conn, cfg, "t3_unreachable", None, {"down_seconds": 0})
         envs = projection.envelopes_after(self.conn, 0)
-        self.assertEqual([e["type"] for e in envs], ["agent.started", "task.state", "question.opened", "task.state", "machine.health"])
+        self.assertEqual([e["type"] for e in envs], ["agent.started", "task.state", "task.state", "question.opened", "task.state",
+                                                     "machine.health"])
         self.assertEqual(envs[1]["body"]["legacy"], "thread_started")
         full = projection.state(self.conn, self.cfg)
         self.assertEqual(full, projection.fold(envs, "host-a"))
@@ -358,13 +352,13 @@ class TestStream(StreamBase):
         st = c.frame()["data"]
         seqs = self.emit(3, event="thread_done") + [self.svc.emit("agent_started", None, {"version": "x"})]
         self.svc.emit("pending_question", "otro", {"thread_id": "t-9", "request_id": "r2", "questions": []})
-        seqs.append(events.last_seq(self.conn))
-        for f in c.envelope_frames(len(seqs)):
+        head = events.last_seq(self.conn)                          # una pregunta son 2 sobres (task.state + question.opened)
+        for f in c.envelope_frames(head - st["head_seq"]):
             st = projection.apply(st, f["data"])
         code, body, _ = self.get("/state")
         self.assertEqual(code, 200)
         self.assertEqual(st, body)
-        self.assertEqual(body["head_seq"], seqs[-1])
+        self.assertEqual(body["head_seq"], head)
         code, body, _ = self.get("/state?project=otro")
         self.assertEqual([p["name"] for p in body["projects"]], ["otro"])
 
@@ -453,10 +447,11 @@ class TestStream(StreamBase):
         self.assertEqual(set(body), {"api_version", "machine_id", "ts", "generated", "machine", "apps", "projects", "threads",
                                      "pending_questions", "events", "subscriptions", "orchestrator", "agent"})
         self.assertEqual(body["api_version"], 1)
-        self.assertEqual(set(body["events"][0]), {"seq", "ts", "machine_id", "event", "project", "body"})
+        old = {"seq", "ts", "machine_id", "event", "project", "body"}       # campos v1 (el bus añade los del sobre)
+        self.assertLessEqual(old, set(body["events"][0]))
         self.assertEqual(body["events"][0]["event"], "thread_started")
         st, body, _ = self.get("/events?after=0")
-        self.assertEqual(set(body["events"][0]), {"seq", "ts", "machine_id", "event", "project", "body"})
+        self.assertLessEqual(old, set(body["events"][0]))
         self.assertEqual(self.get("/health")[1]["api_version"], 1)
 
 

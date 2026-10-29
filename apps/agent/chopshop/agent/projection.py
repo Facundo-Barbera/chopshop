@@ -5,13 +5,13 @@
 - Cada sobre trae el estado COMPLETO de su sujeto (upsert): `task.state` -> `tasks`, `batch.*` -> `batches`, `graph.*`/`node.state`
   -> `graphs`, `machine.health` -> `machine_health`.
 - `attention` (por proyecto) = cola de sobres abiertos con `needs != null`: uno por sujeto (`kind:id`), lo cierra el siguiente sobre
-  del mismo sujeto con `needs: null` (p. ej. `question.answered`, o `task.state` sin atención).
+  del mismo sujeto con `needs: null` (p. ej. `question.answered`, o `task.state` sin atención). `reaction.applied` y
+  `automation.ran` no abren ni cierran (describen una acción, no el estado del sujeto).
 - `counts` por proyecto: running, queued, waiting, needs_human, waiting_bot, stuck, done, failed (ver `_counts`).
 - `recent` = últimos 50 sobres, el más nuevo primero.
-`to_envelope(row)` convierte una fila de `events` en sobre: usa `envelope.build` (contrato del bus) si existe; si no, una traducción
-mínima de los nombres viejos (`thread_*`, `pending_question`, ...) para que la proyección funcione con lo que ya hay en la DB."""
+Los sobres salen de `events.list_after` (contrato del bus, docs/event-envelope.md)."""
 import copy
-import datetime
+import threading
 
 from . import db, events
 
@@ -20,90 +20,19 @@ RECENT = 50
 PAGE = 1000
 _RUNNING = ("running", "preparing")
 _DONE = ("done", "settled")
+NO_ATTENTION = ("reaction.applied", "automation.ran")   # cuentan lo que se hizo, no el estado del sujeto: no abren ni cierran
 
 
 # ---------------------------------------------------------------- filas -> sobres
 
-def iso(ts):
-    """epoch -> ISO-8601 UTC con milisegundos (`2026-10-29T16:12:03.412Z`); deja pasar textos."""
-    if isinstance(ts, str) or ts is None:
-        return ts
-    return datetime.datetime.fromtimestamp(float(ts), datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
-
-
-_PHASE = {"thread_started": "running", "thread_done": "done", "thread_failed": "failed", "thread_settled": "settled"}
-
-
-def _from_columns(row):
-    """Sobre desde las columnas del esquema v3 del diseño (§2.3: id, type, severity, needs, subject_*, cause_*)."""
-    body = dict(row.get("body") or {})
-    extra = {k: body.pop("subject_" + k) for k in ("title", "url") if "subject_" + k in body}   # título/URL del sujeto
-    subject = None
-    if row.get("subject_id") is not None:
-        subject = dict({"kind": row.get("subject_kind"), "id": row["subject_id"]}, **extra)
-    cause = {"id": row["cause_id"], "depth": row.get("cause_depth") or 0} if row.get("cause_id") else None
-    return {"v": 1, "id": row.get("id") or "%s:%s" % (row.get("machine_id"), row["seq"]), "seq": row["seq"],
-            "ts": iso(row.get("ts")), "machine": row.get("machine_id"), "project": row.get("project"), "type": row["type"],
-            "severity": row.get("severity") or "info", "needs": row.get("needs"), "subject": subject, "cause": cause, "body": body}
-
-
-def _compat(row):
-    """Sobre §2.1 a partir de una fila de `events`. Solo mientras no exista `agent/envelope.py` (tarea A): con las columnas v3
-    usa `_from_columns`; con el esquema v2 (`event`, `body`) traduce los nombres viejos."""
-    if row.get("type"):
-        return _from_columns(row)
-    ev, body = row.get("event"), dict(row.get("body") or {})
-    body.setdefault("legacy", ev)
-    tid = body.get("thread_id")
-    subject = {"kind": "task", "id": tid, "title": body.get("title"), "url": body.get("link")} if tid else None
-    typ, sev, needs = ev, "info", None
-    if ev in _PHASE:
-        typ = "task.state"
-        body.setdefault("phase", _PHASE[ev])
-        body.setdefault("attention", None)
-        sev = "error" if ev == "thread_failed" else "info"
-    elif ev == "pending_question":
-        typ, sev, needs = "question.opened", "notice", body.get("level") if body.get("level") in ("human", "bot") else "human"
-        qs = body.get("questions") or []
-        if "summary" not in body and qs and isinstance(qs[0], dict):
-            body["summary"] = qs[0].get("question")
-    elif ev == "pending_approval":
-        typ, sev, needs = "approval.requested", "notice", "approval"
-    elif ev in ("t3_unreachable", "t3_recovered"):
-        typ, sev = "machine.health", "warn" if ev == "t3_unreachable" else "info"
-        body.setdefault("state", "degraded" if ev == "t3_unreachable" else "ok")
-        body.setdefault("t3_ok", ev == "t3_recovered")
-        subject = {"kind": "machine", "id": row.get("machine_id")}
-    elif ev == "agent_started":
-        typ, subject = "agent.started", {"kind": "agent", "id": row.get("machine_id")}
-    if subject is not None:
-        subject = {k: v for k, v in subject.items() if v is not None}
-    return {"v": 1, "id": "%s:%s" % (row.get("machine_id"), row["seq"]), "seq": row["seq"], "ts": iso(row.get("ts")),
-            "machine": row.get("machine_id"), "project": row.get("project"), "type": typ, "severity": sev, "needs": needs,
-            "subject": subject, "cause": None, "body": body}
-
-
-def to_envelope(row):
-    """Fila de `events` (dict con `body` ya parseado) o sobre -> sobre."""
-    if row.get("v") and row.get("type"):
-        return row
-    try:
-        from . import envelope as env_mod                       # contrato del bus (tarea A), cuando exista
-    except ImportError:
-        env_mod = None
-    if env_mod is not None and hasattr(env_mod, "build"):
-        return env_mod.build(row)
-    return _compat(row)
+def to_envelope(env):
+    """Sobre de `events.list_after` -> sobre §2.1 (sin los campos viejos `event`/`machine_id` que añade para /events)."""
+    return {k: v for k, v in env.items() if k not in ("event", "machine_id")}
 
 
 def envelopes_after(conn, after=0, limit=PAGE):
-    """Sobres con seq > after, en orden (todas las columnas de `events`: las del sobre cuando existan)."""
-    limit = max(1, min(int(limit), events.MAX_LIMIT))
-    with db.tx():
-        rows = db.rows(conn.execute("SELECT * FROM events WHERE seq>? ORDER BY seq LIMIT ?", (int(after), limit)))
-    for r in rows:
-        r["body"] = db.jload(r.get("body"), {})
-    return [to_envelope(r) for r in rows]
+    """Sobres con seq > after, en orden."""
+    return [to_envelope(e) for e in events.list_after(conn, after, limit)]
 
 
 def min_seq(conn):
@@ -182,7 +111,7 @@ def _apply(state, env):
     state["ts"] = env.get("ts") or state["ts"]
     typ, body, proj = env.get("type") or "", env.get("body") or {}, env.get("project")
     if typ == "machine.health":
-        state["machine_health"] = dict(state["machine_health"] or {}, **_clean(body))
+        state["machine_health"] = _clean(body)
     p = _project(state, proj) if proj else None
     if p is not None:
         sid = (env.get("subject") or {}).get("id")
@@ -194,12 +123,16 @@ def _apply(state, env):
             new.update(id=body["batch"], status=body.get("status") or ("done" if typ == "batch.done" else "running"))
             _upsert(p["batches"], "id", body["batch"], new)
         elif typ in ("graph.state", "graph.done") and body.get("graph"):
-            new = dict({k: v for k, v in _clean(body).items() if k != "graph"}, id=body["graph"])
+            old = next((g for g in p["graphs"] if g["id"] == body["graph"]), {})      # graph.done puede venir sin nodos
+            new = dict(old, **{k: v for k, v in _clean(body).items() if k != "graph"})
+            new["id"] = body["graph"]
             if typ == "graph.done":
                 new.setdefault("status", "done")
             _upsert(p["graphs"], "id", body["graph"], new)
         elif typ == "node.state" and body.get("graph"):
-            node = body.get("node") if isinstance(body.get("node"), dict) else {k: v for k, v in _clean(body).items() if k != "graph"}
+            node = body.get("node")                      # cuerpo plano: {"graph","node": id, label, phase, deps, task}
+            node = node if isinstance(node, dict) else dict(
+                {k: v for k, v in _clean(body).items() if k not in ("graph", "node")}, id=node)
             g = next((x for x in p["graphs"] if x["id"] == body["graph"]), None)
             if g is None:
                 g = {"id": body["graph"], "nodes": []}
@@ -207,7 +140,7 @@ def _apply(state, env):
             g["nodes"] = list(g.get("nodes") or [])
             if node.get("id") is not None:
                 _upsert(g["nodes"], "id", node["id"], dict(next((n for n in g["nodes"] if n.get("id") == node["id"]), {}), **node))
-        key = _subject_key(env)
+        key = _subject_key(env) if typ not in NO_ATTENTION else None
         if key is not None:
             old = next((a for a in p["attention"] if a["key"] == key), None)
             p["attention"] = [a for a in p["attention"] if a["key"] != key]
@@ -260,7 +193,6 @@ class Projector:
     """Proyección incremental compartida (SSE y `GET /state`): pliega solo los sobres nuevos desde la última vez."""
 
     def __init__(self, conn, cfg):
-        import threading
         self.conn, self.cfg = conn, cfg
         self._lock = threading.Lock()
         self._state = empty(cfg.get("machine_id"))
