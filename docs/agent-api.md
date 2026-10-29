@@ -1,15 +1,17 @@
-# chopshop-agent: contrato de módulos y API (v0.6, api_version 1 + 2)
+# chopshop-agent: contrato de módulos y API (v0.7, api_version 1 + 2 + 3)
 
 `api_version 2` es **aditiva**: añade `GET /stream` (SSE), `GET /state` y el emparejamiento por dispositivo (`POST /pair`).
 `GET /snapshot`, `GET /events` y `GET /health` conservan su forma v1 (`api_version: 1`); la v2 se anuncia en el `hello` del stream,
-en `GET /state` y en la respuesta de `POST /pair`.
+en `GET /state` y en la respuesta de `POST /pair`. `api_version 3` (también aditiva) añade la oficina por escritorios, el
+vestíbulo y la sala de máquinas (ver «`api_version 3`»).
 
 Contexto: el agente corre en cada máquina como servicio de usuario (`systemd --user` en Linux, launchd en macOS). Escucha en
 `agent.bind`:`agent.port` (`~/.config/chopshop/config.toml`, ver `config.example.toml`): por defecto `127.0.0.1`; para otras máquinas,
 `"auto"` (IP de Tailscale) o la IP concreta (p. ej. `100.64.0.10`). **Nunca** `0.0.0.0` ni `::` (se niega a arrancar). Si `bind` no es
 loopback abre además `127.0.0.1:<port>` (`agent.local_listener`) para el CLI local. Instalación y operación: `docs/agent-service.md`.
 La app es un cliente puro. Stdlib de Python solamente (>=3.9 compatible).
-El agente es una capa delgada sobre T3: observa (métricas, hilos, eventos) y solo escribe en T3 por `answer`/`settle`. **No** lanza ni
+El agente es una capa delgada sobre T3: observa (métricas, hilos, eventos) y solo escribe en T3 por `answer`/`settle` (y, desde la
+v3, el despertar de un rol permanente lanza su hilo como un lote de una tarea por el motor, igual que `fanout`). **No** lanza ni
 mata procesos, no reparte puertos ni crea worktrees: los servers de prueba, puertos y comandos de cada hilo son cosa de T3. Las URLs de webhook nunca se imprimen ni se guardan en DB/logs (solo rutas de archivo).
 
 ## Módulos (cada uno en `apps/agent/chopshop/agent/`, con su test en `apps/agent/tests/`)
@@ -173,6 +175,96 @@ data: { ...sobre (docs/event-envelope.md)... }
   `warn`/`error` y sin terminar), `needs_human` (atención human/approval), `waiting_bot` (atención bot).
 - `machine_health` = último `machine.health`; los eventos sin proyecto solo cuentan para `machine_health` y `recent`.
 - Los sobres son los del bus (`events.list_after`, docs/event-envelope.md) sin los campos viejos `event`/`machine_id`.
+
+## `api_version 3` (aditiva): oficina, vestíbulo y sala de máquinas
+
+Plan: `docs/plans/office-redesign.md`. Todo lo de la v2 sigue igual; `GET /state`, el `hello` y el evento `state` del stream
+pasan a decir `api_version: 3` y el estado gana campos. Un cliente v2 ignora lo nuevo. La regla sigue siendo
+`GET /state == fold(apply, sobres)`; la única excepción es `machine_room.subscriptions`, que no viene de sobres (ver abajo).
+
+### Forma nueva de `GET /state`
+
+```json
+{"api_version": 3, "...": "lo de la v2",
+ "projects": [{"name": "awesome-gb", "...": "lo de la v2",
+   "office": {"company": "Awesome GB", "half_life_s": 1800, "floors": [
+     {"index": 0, "name": "Producto", "rooms": [
+       {"role": "triage", "permanent": true, "desks": [
+         {"id": "awesome-gb/0/triage/0", "slot": 0, "retired": false, "occupant": null, "lineage": [], "notes_pending": 2}]},
+       {"role": "backend", "permanent": false, "desks": [
+         {"id": "awesome-gb/0/backend/0", "slot": 0, "retired": false, "notes_pending": 0,
+          "occupant": {"thread_id": "mcp:b7", "title": "[be] login", "role": "backend", "phase": "done", "attention": null,
+                       "since": "2026-10-29T16:00:00.000Z", "ended_at": "2026-10-29T16:20:00.000Z", "touched_at": null,
+                       "half_life_s": 1800, "inheritance": {"thread_id": "mcp:a1", "summary": "...", "branch": "be/x"}},
+          "lineage": [{"thread_id": "mcp:a1", "since": "...", "until": "...", "reason": "inherited"}]}]}]}]}}],
+ "lobby": [{"thread_id": "mcp:c3", "project": "awesome-gb", "company": "Awesome GB", "title": "...", "phase": "running",
+            "attention": null, "waiting_role": null, "since": "...", "ended_at": null, "touched_at": null, "half_life_s": 1800}],
+ "machine_room": {
+   "listeners": [{"name": "t3watch", "state": "ok", "last_ok": "...", "last_cycle": "...", "backoff_s": 0, "error": null, "ts": "..."}],
+   "automations": [{"project": "awesome-gb", "name": "triage", "trigger": "schedule", "exit": 0, "duration_ms": 2310,
+                    "error": null, "ts": "...", "next_run": "...", "severity": "info"}],
+   "subscriptions": [{"name": "bots", "last_ok": "...", "last_error": null, "signed": true}],
+   "rack": [{"provider": "github", "repo": "<org>/<repo-principal>", "project": "awesome-gb", "kind": "main",
+             "label": "repo-principal", "light": "amber", "default_branch": "main", "ci": "success", "url": "...", "ts": "...",
+             "runs": [{"run_id": "9", "workflow": "ci", "status": "in_progress", "conclusion": null, "event": "push",
+                       "actor": "...", "head_branch": "be/x", "head_sha": "abc", "url": "...", "updated_at": "...",
+                       "origin": {"kind": "thread", "id": "mcp:b7", "label": "backend · awesome-gb/0/backend/0"}}]}]}}
+```
+
+### Regla `apply` de los sobres nuevos (la misma en `projection.py` y en `LiveState.swift`)
+
+- `office.changed` → `projects[project].office = {company, half_life_s, floors}`; cada escritorio conserva `occupant`,
+  `lineage` y `notes_pending` que ya tuviera (por `id`); los nuevos empiezan con `occupant: null, lineage: [], notes_pending: 0`.
+  Un `office.changed` es la estructura **completa** (los retirados vienen con `retired: true`).
+- `desk.assigned` → el escritorio `desk` (si no existe en `office`, se ignora) pasa a `occupant = {thread_id, title, role,
+  phase, attention, since: body.since || ts, ended_at, touched_at, half_life_s: office.half_life_s, inheritance}`, donde
+  `title/phase/attention/ended_at/touched_at` salen de la última `task.state` de ese hilo en el mismo proyecto (o `title` del
+  cuerpo y `phase: "running"` si aún no hay). `notes_pending` = `body.notes_pending` si viene. El hilo sale del `lobby`. Si el hilo
+  ocupaba otro escritorio, ese queda libre (sin linaje: es un traslado).
+- `desk.released` con `desk` → si el ocupante es ese hilo: `lineage = [{thread_id, since, until: ts, reason}] + lineage`
+  (máximo 5) y `occupant = null`. Con `desk: null` → el hilo sale del `lobby`.
+- `desk.waiting` → upsert en `lobby` por `thread_id` con `waiting_role = role` (resto de campos desde la última `task.state`).
+- `desk.note` → `notes_pending = body.pending` (si viene; si no, `+1`).
+- `task.state` (además de lo de la v2): si el hilo ocupa un escritorio de su proyecto, se refrescan `title, phase, attention,
+  ended_at, touched_at` del ocupante. Si no ocupa escritorio: con `role` nulo y fase activa (`queued, preparing, running,
+  waiting`) entra/se refresca en `lobby` (`waiting_role: null`); si ya está en el `lobby` se refresca (también en fase
+  terminal: ahí se desvanece); con fase terminal y sin estar en el `lobby` no entra. `company` y `half_life_s` del elemento
+  del lobby salen del `office` del proyecto (o `null` y 1800).
+- `listener.state` → upsert en `machine_room.listeners` por `name` (cuerpo + `ts`), ordenados por nombre.
+- `automation.ran` → upsert en `machine_room.automations` por `(project, automation)` con `name, trigger, exit,
+  duration_ms, error, next_run, severity, ts`.
+- `forge.repo.state` → upsert en `machine_room.rack` por `(provider, repo)` (cuerpo sin `ci` crudo extra + `ts`), conservando
+  `runs`. `forge.run.state` → upsert del run por `run_id` dentro de su módulo (si el módulo no existe se crea con `light:
+  "gray"`); se conservan todos los `status != completed` y los 5 completados más recientes (por `updated_at`, si no por
+  orden de llegada). `rack` se ordena por `(project, kind == main ? 0 : 1, repo)`.
+- `lobby` se ordena por `(company, project, since)`.
+- Los sobres `desk.*`, `office.changed`, `forge.*` y `listener.state` llevan `needs: null`: cierran atención solo de su propio
+  sujeto (nunca de la tarea).
+
+`machine_room.subscriptions` lo rellena `GET /state` (y el evento `state` del stream) desde la tabla de suscripciones y la
+última entrega (`deliveries`): nombre, `last_ok`, `last_error` (texto corto, nunca la URL), `signed`. No cambia con los deltas;
+la app lo refresca con cada `state`. El test de equivalencia lo excluye.
+
+### Semivida (función pura compartida)
+
+`opacity(phase, attention, ended_at, touched_at, half_life_s, now)`: `1.0` si la fase no es terminal (`done, failed, settled,
+skipped`), si hay `attention` o si no hay fechas; si no, `0.5 ^ (t / T)` con `t = max(0, now − max(ended_at, touched_at))` y
+`T = half_life_s` (× 2 si `failed`). Sale (se deja de pintar y el agente emite `desk.released reason: faded`) cuando
+`opacity < 0.1`, es decir en `base + T·log2(10)`. Tabla compartida: `apps/agent/tests/fixtures/office/halflife.json` (la usan el
+test de Python y `HalfLifeTests.swift`).
+
+### Rutas nuevas
+
+| Método y ruta | Descripción |
+|---|---|
+| `GET /desks/<id>` | `{desk:{id, project, floor, role, slot, permanent, retired}, occupant, lineage:[…20], notes:[pendientes]}` |
+| `POST /touch` | `{thread_id}` → reinicia el reloj de semivida (`touched_at = ahora`) y reemite su `task.state` → `{ok, touched_at}` |
+| `POST /desks/<id>/notes` | `{from, text, ttl_s?}` (texto ≤ 2 KB; `ttl_s` por defecto 86400) → `desk.note` → `{ok, note_id, pending}` |
+| `POST /desks/<id>/assign` | `{thread_id}` → asigna un hilo del vestíbulo (o lo traslada) al escritorio: `desk.assigned reason: manual` |
+| `PUT /office/<proyecto>` | `{office: {...bloque office...}, rack?: {...}, by}` → valida como `profile check` (400 con la lista de problemas), reescribe esos bloques del perfil local, retira (nunca borra) los escritorios que ya no declara y emite `office.changed {by}` |
+
+Todas exigen permiso de escritura (dueño, origen local o credencial de servicio/dispositivo). No hay `DELETE` de escritorios ni de
+pisos; ninguna ruta crea ni ejecuta scripts.
 
 ## Suscripciones (webhooks v2)
 

@@ -1,0 +1,42 @@
+{
+  "v": 1,
+  "id": "01M646XHEM0W40J2GB1G6GW4G0",
+  "seq": 1906,
+  "ts": "2026-10-29T16:12:03.412Z",
+  "machine": "contabo-dev",
+  "project": "awesome-gb",
+  "type": "forge.run.state",
+  "severity": "info",
+  "needs": null,
+  "subject": {
+    "kind": "run",
+    "id": "github:<org>/<repo-principal>#9001",
+    "title": "ci",
+    "url": "https://github.com/<org>/<repo-principal>/actions/runs/9001"
+  },
+  "cause": {
+    "id": null,
+    "depth": 0
+  },
+  "body": {
+    "provider": "github",
+    "repo": "<org>/<repo-principal>",
+    "project": "awesome-gb",
+    "run_id": "9001",
+    "workflow": "ci",
+    "status": "in_progress",
+    "conclusion": null,
+    "event": "push",
+    "actor": "<login-humano>",
+    "head_branch": "be/login",
+    "head_sha": "3f2a9c1",
+    "url": "https://github.com/<org>/<repo-principal>/actions/runs/9001",
+    "created_at": "2026-10-29T16:10:00.000Z",
+    "updated_at": "2026-10-29T16:12:00.000Z",
+    "origin": {
+      "kind": "thread",
+      "id": "mcp:b7",
+      "label": "backend · awesome-gb/0/backend/0"
+    }
+  }
+}

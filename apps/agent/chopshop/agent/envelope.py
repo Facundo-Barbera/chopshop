@@ -22,10 +22,17 @@ V = 1
 MAX_DEPTH = 3                     # anti-bucles: un evento con cause.depth > 3 se descarta
 SEVERITIES = ("info", "notice", "warn", "error")
 NEEDS_VALUES = (None, "human", "bot", "approval")
-SUBJECT_KINDS = ("task", "batch", "node", "graph", "thread", "machine", "pr", "issue", "automation", "agent")
+SUBJECT_KINDS = ("task", "batch", "node", "graph", "thread", "machine", "pr", "issue", "automation", "agent",
+                 "desk", "office", "repo", "run", "listener")
 PHASES = ("queued", "preparing", "running", "waiting", "done", "failed", "skipped", "settled")
 ATTENTION = (None, "ask", "approval", "human", "bot")
 HEALTH = ("ok", "degraded", "down")
+DESK_ASSIGN_REASONS = ("start", "inherited", "manual", "wake")
+DESK_RELEASE_REASONS = ("faded", "inherited", "retired", "manual")
+LIGHTS = ("green", "amber", "red", "gray")
+ORIGIN_KINDS = ("thread", "automation", "bot", "schedule", "human", "unknown")
+FORGE_TYPES = ("forge.repo.state", "forge.run.state", "forge.dispatch")
+OFFICE_TYPES = ("desk.assigned", "desk.released", "desk.waiting", "desk.note", "office.changed", "listener.state")
 GITHUB_TYPES = ("github.issue.opened", "github.issue.updated", "github.issue.closed", "github.pr.opened",
                 "github.pr.updated", "github.pr.merged", "github.pr.review", "github.ci.completed", "github.push")
 
@@ -35,7 +42,7 @@ SEVERITY = {
     "batch.created": "info", "batch.done": "info", "graph.state": "info", "node.state": "info", "graph.done": "info",
     "reaction.applied": "info", "machine.health": "info", "automation.ran": "info", "agent.started": "info",
 }
-SEVERITY.update({t: "info" for t in GITHUB_TYPES})
+SEVERITY.update({t: "info" for t in GITHUB_TYPES + FORGE_TYPES + OFFICE_TYPES})
 NEEDS = {t: None for t in SEVERITY}
 NEEDS.update({"question.opened": "human", "approval.requested": "approval"})
 TYPES = tuple(SEVERITY)
@@ -176,6 +183,20 @@ def default_subject(type, project, body, machine=None):
                        body.get("title"), body.get("url"))
     if type == "automation.ran":
         return subject("automation", body.get("automation") or "?")
+    if type in ("desk.assigned", "desk.note") or type == "desk.released" and body.get("desk"):
+        return subject("desk", body.get("desk") or "?", body.get("role"))
+    if type in ("desk.waiting", "desk.released"):          # vestíbulo: el sujeto es el hilo
+        return subject("thread", body.get("thread_id") or "?", body.get("title"))
+    if type == "office.changed":
+        return subject("office", body.get("project") or project or "?")
+    if type == "forge.repo.state":
+        return subject("repo", "%s:%s" % (body.get("provider") or "?", body.get("repo") or "?"), body.get("label"),
+                       body.get("url"))
+    if type in ("forge.run.state", "forge.dispatch"):
+        return subject("run", "%s:%s#%s" % (body.get("provider") or "?", body.get("repo") or "?",
+                                            body.get("run_id") or body.get("nonce") or "?"), body.get("workflow"), body.get("url"))
+    if type == "listener.state":
+        return subject("listener", body.get("name") or "?")
     if type in ("machine.health",):
         return subject("machine", machine or "?")
     if type == "agent.started":
@@ -388,6 +409,19 @@ SCHEMAS = {
     "agent.started": {"version": _str},
 }
 SCHEMAS.update({t: _GITHUB for t in GITHUB_TYPES})
+_ORIGIN = lambda v: _dict(v) and v.get("kind") in ORIGIN_KINDS
+SCHEMAS.update({
+    "desk.assigned": {"desk": _str, "thread_id": _str, "role": _str, "reason": _in(*DESK_ASSIGN_REASONS)},
+    "desk.released": {"desk": _opt_str, "thread_id": _str, "reason": _in(*DESK_RELEASE_REASONS)},
+    "desk.waiting": {"thread_id": _str, "role": _str},
+    "desk.note": {"desk": _str, "from": _str, "text": _str},
+    "office.changed": {"project": _str, "by": _str, "floors": _list},
+    "forge.repo.state": {"provider": _str, "repo": _str, "light": _in(*LIGHTS)},
+    "forge.run.state": {"provider": _str, "repo": _str, "run_id": _str, "workflow": _opt_str, "status": _str,
+                        "event": _opt_str, "origin": _ORIGIN},
+    "forge.dispatch": {"provider": _str, "repo": _str, "workflow": _str, "ref": _str},
+    "listener.state": {"name": _str, "state": _in(*HEALTH)},
+})
 
 
 def errors(env):

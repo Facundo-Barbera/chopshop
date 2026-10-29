@@ -1,6 +1,6 @@
 # Plan: rediseño de la oficina (pisos por proyecto, escritorios por rol, sala de máquinas)
 
-**Estado: solo plan (29 oct 2026). No hay código ni cambios en ninguna máquina.** Parte de lo que existe hoy:
+**Estado: en implementación en la rama `feat/office-redesign` (fases 0–7 del agente y de la app; ver la tabla de fases). Decisiones provisionales: slugs y logins con marcadores (`<org>/<repo-principal>`, `<login-grok-…>`), GitHub sigue entrando por polling (sin ruta de webhooks entrantes), escritorios solo en el orquestador.** Parte de lo que existía:
 
 - Agente: `apps/agent/chopshop/agent/projection.py` pliega sobres en `GET /state` (`projects[].tasks/batches/graphs/attention`,
   `counts`, `recent`); `t3watch.py` mantiene `t3_threads` y emite `task.state`; `github.py` hace polling con ETag

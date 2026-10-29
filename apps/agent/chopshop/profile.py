@@ -7,7 +7,7 @@ from . import home, miniyaml, settings
 KNOWN = {"project", "company", "repo", "host", "overflow_host", "remote_repos", "t3_project", "scratch",
          "provider", "model", "runtime_mode", "workspace", "base_ref", "tracker", "ready", "branches",
          "decider", "approvers", "can_run", "cannot_run", "autonomy", "reactions", "max_parallel", "graph", "integration",
-         "automations"}
+         "automations", "office", "rack"}
 
 
 class ProfileError(Exception):
@@ -60,6 +60,22 @@ def list_projects():
     return sorted(f[:-5] for f in os.listdir(d) if f.endswith(".yaml")) if os.path.isdir(d) else []
 
 
+def validate_building(project):
+    """Tope de pisos por edificio entre todos los perfiles locales que comparten empresa con `project`."""
+    from .agent import layout
+    profs = []
+    for name in list_projects():
+        try:
+            profs.append(load(name))
+        except ProfileError:
+            continue
+    mine = next((p for p in profs if p["project"] == project), None)
+    if mine is None:
+        return []
+    comp = layout.company(mine)
+    return layout.validate_building([p for p in profs if layout.company(p) == comp])
+
+
 def validate(d):
     """Devuelve lista de problemas (vacía si el perfil es usable)."""
     errs = []
@@ -80,6 +96,8 @@ def validate(d):
     errs += validate_integration(d)
     from .agent import automations
     errs += automations.validate(d)
+    from .agent import layout
+    errs += layout.validate(d)
     m = d.get("model")
     if m and "/" not in str(m):
         errs.append("model debe ser 'instancia/modelo' (p. ej. claudeAgent/claude-haiku-5-5)")
