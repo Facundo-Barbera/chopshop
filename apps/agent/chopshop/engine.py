@@ -3,7 +3,7 @@ Regla anti-Telar: no hay sesiones aquí; cada hilo es un hilo de T3 y Chopshop s
 import re
 import time
 
-from . import events, graph, home, inbox, profile, reactions, settings, state, t3
+from . import answers, events, graph, home, inbox, profile, reactions, settings, state, t3
 
 TERMINAL = {"completed", "failed", "cancelled", "interrupted", "rolled_back"}
 
@@ -339,22 +339,10 @@ def _find_task(st, task_id):
 
 
 def _resolve_answer(q, choice):
-    opts = q.get("options", [])
-    val = lambda o: o.get("value") or o["label"]  # noqa: E731
-    picks = [c.strip() for c in choice.split(",")] if q.get("multiSelect") else [choice]
-    res = []
-    for c in picks:
-        if c.isdigit() and 1 <= int(c) <= len(opts):
-            res.append(val(opts[int(c) - 1]))
-            continue
-        m = [o for o in opts if o["label"].lower() == c.lower() or (o.get("value") or "").lower() == c.lower()]
-        if m:
-            res.append(val(m[0]))
-            continue
-        if opts and q.get("allowCustomAnswer") is False:
-            raise profile.ProfileError("'%s' no es una opción válida" % c)
-        res.append(c)
-    return res if q.get("multiSelect") else res[0]
+    try:
+        return answers.resolve(q, choice)
+    except answers.InvalidChoice as e:
+        raise profile.ProfileError(str(e))
 
 
 def _flat(v):
