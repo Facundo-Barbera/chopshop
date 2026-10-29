@@ -25,7 +25,8 @@ final class CityViewBox {
     }
 }
 
-/// La flota como ciudad isométrica: un edificio por empresa, un piso por proyecto, una ventana encendida por hilo vivo.
+/// La flota como ciudad isométrica: un edificio por empresa, un piso por proyecto (v3: uno por piso de su `office`, ≤ 4, y el
+/// vestíbulo en la planta baja), una ventana encendida por hilo vivo.
 /// Pisos en ámbar (te necesita) o rojo (trabada), barra "Atención" y leyenda. Clic en un piso → zoom continuo hasta ese piso, que
 /// se convierte en la `IsoOfficeView` del proyecto (mismo encuadre, sin fundido). Esc o "Ciudad" vuelve.
 @available(macOS 26.0, *)
@@ -181,7 +182,7 @@ public struct CityView: View {
     }
 
     private func litCount(_ t: Double) -> Int {
-        model.floors.reduce(0) { $0 + lights.windows($1.project, t: t).filter { $0 > 0.5 }.count }
+        model.floors.reduce(0) { $0 + lights.windows($1.id, t: t).filter { $0 > 0.5 }.count }
     }
 
     private func header(t: Double, chrome ch: Double) -> some View {
@@ -232,7 +233,7 @@ public struct CityView: View {
                          hovered: hovered, zoom: z?.0, size: size).draw(&ctx)
         } symbols: {
             ForEach(model.floors) { f in
-                CityFloorPill(name: f.project, tint: lights.tint(f.project, t: t)).tag("cf:\(f.project)")
+                CityFloorPill(name: f.label, tint: lights.tint(f.id, t: t)).tag("cf:\(f.id)")
             }
             ForEach(model.buildings) { b in
                 CityCompanyTag(name: b.company, threads: b.floors.reduce(0) { $0 + $1.activeThreads.count }).tag("cb:\(b.company)")
@@ -252,26 +253,32 @@ public struct CityView: View {
             switch phase {
             case .active(let pt):
                 // solo con la ciudad quieta (p = 0): durante el zoom de vuelta el encuadre no es el de la ciudad
-                let h = (zoomed || p > 0 || frozenTime != nil) ? nil : box.cityFrame.flatMap { CityHit.floor(at: pt, in: model, frame: $0) }
+                let h = (zoomed || p > 0 || frozenTime != nil) ? nil : box.cityFrame.flatMap { CityHit.floorID(at: pt, in: model, frame: $0) }
                 if h != hovered { hovered = h }
             case .ended: hovered = nil
             }
         }
         .gesture(SpatialTapGesture().onEnded { e in
-            guard !zoomed, p == 0, let f = box.cityFrame, let pr = CityHit.floor(at: e.location, in: model, frame: f) else { return }
+            guard !zoomed, p == 0, let f = box.cityFrame, let pr = CityHit.floor(at: e.location, in: model, frame: f) else { return }  // el vestíbulo no entra
             select(pr)
         })
     }
 
     private func overlay(p: Double, chrome ch: Double) -> some View {
-        let cityAlerts = model.alerts.map {
-            IsoAlert(id: $0.project, label: $0.project, title: $0.title, visual: $0.status == .needsYou ? .needsYou : .stuck)
+        // un aviso por piso (id = `CityFloor.id`); el del vestíbulo lleva el proyecto del hilo y su clic entra en esa oficina
+        let cityAlerts = model.alerts.map { a in
+            let fl = model.floor(id: a.floor)
+            let label = fl.map { $0.isLobby ? "Vestíbulo · \(a.project)" : $0.label } ?? a.project
+            return IsoAlert(id: a.floor.isEmpty ? a.project : a.floor, label: label, title: a.title,
+                            visual: a.status == .needsYou ? .needsYou : .stuck)
         }
         let officeAlerts = target.flatMap { pr in graph(pr).map { Self.officeAlerts(box.scene(graph: $0, tasks: tasks(pr)), tasks: tasks(pr)) } } ?? []
         return ZStack(alignment: .bottomLeading) {
             ZStack(alignment: .top) {
                 if !cityAlerts.isEmpty && ch < 1 {
-                    IsoAttentionBar(items: cityAlerts, selected: nil, flat: flatChrome) { id in select(id) }
+                    IsoAttentionBar(items: cityAlerts, selected: nil, flat: flatChrome) { id in
+                        select(model.alerts.first { $0.floor == id }?.project ?? id)
+                    }
                         .padding(.top, 12).opacity(CityTransition.chromeOut(ch)).allowsHitTesting(p == 0)
                 }
                 // la barra que tendrá la oficina, en el mismo sitio (al montarse IsoOfficeView no cambia nada)

@@ -152,7 +152,8 @@ struct CityRenderer {
                 ctx.stroke(gl.path, with: .color(gl.color.color.opacity(0.55 * gl.a)), style: StrokeStyle(lineWidth: 1.2, lineJoin: .round))
             }
         }
-        if let h = hovered, zoom == nil, let b = model.building(of: h), let f = b.floors.first(where: { $0.project == h }) {
+        if let h = hovered, zoom == nil, let b = model.buildings.first(where: { $0.floors.contains { $0.id == h } }),
+           let f = b.floors.first(where: { $0.id == h }) {
             let path = poly(CityHit.floorPolygon(b, level: f.level, frame: cam))
             ctx.stroke(path, with: .color((dark ? Color.white : Color.black).opacity(0.45)), style: StrokeStyle(lineWidth: 1.3, lineJoin: .round))
         }
@@ -251,7 +252,7 @@ struct CityRenderer {
                 else if f.level < tl { g.opacity = CityTransition.lowerAlpha(p) }
             }
             guard g.opacity > 0.001 else { topZ = Double(f.level) * CityGeo.floorH + CityGeo.floorH + zOff; continue }
-            let tn = lights.tint(f.project, t: t)
+            let tn = lights.tint(f.id, t: t)
             let z0 = Double(f.level) * CityGeo.floorH + zOff
             let z1 = z0 + CityGeo.floorH * r
             let (T, L, R) = slabColors(tn.amber, tn.red)
@@ -262,7 +263,7 @@ struct CityRenderer {
             box(&gs, b.x0 - o, b.y0 - o, b.x1 + o, b.y1 + o, z0, min(z1, z0 + CityGeo.slabH), top: T, left: L, right: R, edge: pal.slabEdge)
             let zb = z0 + CityGeo.slabH, hh = z1 - zb
             let fade = cityClamp((r - 0.75) / 0.25)
-            let windows = lights.windows(f.project, t: t)
+            let windows = lights.windows(f.id, t: t)
             if hh > 0.5 {
                 if isTarget, let z = zoom {
                     drawHollow(&g, b, f, zb: zb, hh: hh, windows: windows, amber: tn.amber, red: tn.red, zoom: z)
@@ -292,7 +293,7 @@ struct CityRenderer {
         var g = ctx
         if targetLevel != nil { g.opacity = CityTransition.upperAlpha(p) }
         guard g.opacity > 0.001 else { return }
-        let tn = lights.tint(last.project, t: t)
+        let tn = lights.tint(last.id, t: t)
         // topZ ya incluye la subida si el último piso está encima del elegido; si el elegido es el último, la azotea sube sola
         let roofZ = topZ + (last.level == targetLevel ? lift : 0)
         drawRoof(&g, b, z: roofZ, alpha: roofAlpha(b), amber: tn.amber, red: tn.red)
@@ -430,7 +431,7 @@ struct CityRenderer {
         for b in model.buildings {
             let left = labelsOnLeft(b)
             for f in b.floors where rise(b, f.level) >= 1 {
-                guard let s = ctx.resolveSymbol(id: "cf:\(f.project)") else { continue }
+                guard let s = ctx.resolveSymbol(id: "cf:\(f.id)") else { continue }
                 let z = Double(f.level) * CityGeo.floorH + CityGeo.floorH * 0.55
                 let a = left ? P(b.x0 - o, b.y1 + o, z) : P(b.x1 + o, b.y0 - o, z)
                 var g = ctx; g.opacity = la
