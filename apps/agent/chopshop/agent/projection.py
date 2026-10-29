@@ -8,12 +8,13 @@
   del mismo sujeto con `needs: null` (p. ej. `question.answered`, o `task.state` sin atención). `reaction.applied` y
   `automation.ran` no abren ni cierran (describen una acción, no el estado del sujeto).
 - `counts` por proyecto: running, queued, waiting, needs_human, waiting_bot, stuck, done, failed (ver `_counts`).
+- `lobby` = vestíbulo (hilos activos sin rol y los que esperan escritorio), regla en `lobby.py`.
 - `recent` = últimos 50 sobres, el más nuevo primero.
 Los sobres salen de `events.list_after` (contrato del bus, docs/event-envelope.md)."""
 import copy
 import threading
 
-from . import db, events
+from . import db, events, lobby
 
 API_VERSION = 2
 RECENT = 50
@@ -45,7 +46,7 @@ def min_seq(conn):
 
 def empty(machine=None):
     return {"api_version": API_VERSION, "machine": machine, "head_seq": 0, "ts": None, "machine_health": None,
-            "projects": [], "recent": []}
+            "projects": [], "lobby": [], "recent": []}
 
 
 def _project(state, name):
@@ -152,6 +153,7 @@ def _apply(state, env):
                     "summary": body.get("summary") or body.get("note") or (env.get("subject") or {}).get("title")})
                 p["attention"].sort(key=lambda a: (a["seq"] or 0))
         _counts(p)
+        lobby.apply(state, p, env)
     state["recent"] = [env] + state["recent"][:RECENT - 1]
     return state
 
@@ -185,6 +187,7 @@ def filter_project(st, project):
     """Copia del estado con solo ese proyecto (y `recent` de ese proyecto). `machine_health` se mantiene."""
     out = dict(st)
     out["projects"] = [p for p in st["projects"] if p["name"] == project]
+    out["lobby"] = [x for x in st.get("lobby") or [] if x["project"] == project]
     out["recent"] = [e for e in st["recent"] if e.get("project") == project]
     return out
 
