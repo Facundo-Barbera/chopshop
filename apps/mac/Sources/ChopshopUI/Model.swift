@@ -3,10 +3,15 @@ import WebKit
 import ChopshopNative
 
 enum Section: String, CaseIterable, Identifiable {
-    case overview, questions, events, reactions, graph, batches, machines, project
+    case overview, questions, events, reactions, graph, batches, city, machines, project
     var id: String { rawValue }
-    /// Vistas fijas de la barra lateral (el proyecto y las máquinas tienen su propia sección).
-    static var views: [Section] { [.overview, .questions, .events, .reactions, .graph, .batches] }
+    /// Vistas fijas de la barra lateral (el proyecto y las máquinas tienen su propia sección). La ciudad es solo nativa
+    /// (macOS 26, con el stream en vivo): no tiene versión web. Va al final para no mover los atajos ⌘1…⌘6.
+    static var views: [Section] {
+        var v: [Section] = [.overview, .questions, .events, .reactions, .graph, .batches]
+        if #available(macOS 26.0, *) { v.append(.city) }
+        return v
+    }
     var title: String {
         switch self {
         case .overview: return "Resumen"
@@ -15,6 +20,7 @@ enum Section: String, CaseIterable, Identifiable {
         case .reactions: return "Reacciones"
         case .graph: return "Grafo"
         case .batches: return "Lotes"
+        case .city: return "Ciudad"
         case .machines: return "Máquinas"
         case .project: return "Proyecto"
         }
@@ -27,6 +33,7 @@ enum Section: String, CaseIterable, Identifiable {
         case .reactions: return "bolt.horizontal"
         case .graph: return "point.3.connected.trianglepath.dotted"
         case .batches: return "square.stack.3d.up"
+        case .city: return "building.2"
         case .machines: return "gauge.with.dots.needle.50percent"
         case .project: return "folder"
         }

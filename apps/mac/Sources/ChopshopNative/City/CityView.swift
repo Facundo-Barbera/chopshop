@@ -447,31 +447,33 @@ struct IsoRoomLabel: View {
 // MARK: - En vivo
 
 /// Ciudad en vivo (macOS 26): la flota del `LiveStore` (el mismo estado que pinta la oficina). `onSelectFloor` recibe el proyecto
-/// del piso pulsado (la vista ya hace el zoom a su oficina). La app la abrirá desde la barra lateral; el banco de pruebas, desde la
-/// escena "Ciudad".
+/// del piso pulsado (la vista ya hace el zoom a su oficina). La app la abre desde la barra lateral ("Ciudad").
+/// Sin credencial (o revocada) muestra `unpaired`, como `LiveProjectScreen`; sin stream no hay vista web debajo: un aviso.
 @available(macOS 26.0, *)
-public struct LiveCityScreen: View {
+public struct LiveCityScreen<Unpaired: View>: View {
     @ObservedObject var store: LiveStore
     let directory: CompanyDirectory
     let onSelectFloor: ((String) -> Void)?
+    let unpaired: Unpaired
     @State private var model = CityModel(buildings: [], groundX: 1, groundY: 1)
     @State private var lights = CityLights()
 
-    public init(store: LiveStore, directory: CompanyDirectory = .standard, onSelectFloor: ((String) -> Void)? = nil) {
-        self.store = store; self.directory = directory; self.onSelectFloor = onSelectFloor
+    public init(store: LiveStore, directory: CompanyDirectory = .standard, onSelectFloor: ((String) -> Void)? = nil,
+                @ViewBuilder unpaired: () -> Unpaired) {
+        self.store = store; self.directory = directory; self.onSelectFloor = onSelectFloor; self.unpaired = unpaired()
     }
 
     public var body: some View {
-        Group {
-            if model.buildings.isEmpty {
-                VStack(spacing: 8) {
-                    if case .connecting = store.status { ProgressView().controlSize(.small) }
-                    Text("La ciudad se levanta sola cuando lleguen proyectos.").font(.headline).foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
+        let phase = LivePhase.of(store.status, hasData: store.hasData, hasContent: !model.buildings.isEmpty)
+        return Group {
+            switch phase {
+            case .unpaired:
+                unpaired.frame(maxWidth: .infinity, maxHeight: .infinity)
+            case .content:
                 CityView(model: model, lights: lights, snapshot: store.snapshot, onSelectFloor: onSelectFloor)
                     .padding(.horizontal, 26).padding(.vertical, 22)
+            case .waiting, .offline:
+                placeholder(phase)
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
@@ -480,6 +482,27 @@ public struct LiveCityScreen: View {
         .toolbar { ToolbarItem(placement: .primaryAction) { MachineStatusButton(machines: store.snapshot.machines) } }
         .onAppear { refresh() }
         .onReceive(store.$snapshot) { _ in refresh() }
+    }
+
+    @ViewBuilder private func placeholder(_ phase: LivePhase) -> some View {
+        VStack(spacing: 8) {
+            if case .connecting = store.status { ProgressView().controlSize(.small) }
+            Text(headline(phase)).font(.headline).foregroundStyle(.secondary)
+            if case .reconnecting(let why) = store.status {
+                Text("Reconectando: \(why)").font(.callout).foregroundStyle(.tertiary)
+            } else if phase == .offline {
+                Text("La ciudad necesita el stream en vivo del agente: configúralo y empareja en Ajustes… (⌘,).")
+                    .font(.callout).foregroundStyle(.tertiary)
+            } else {
+                Text("La ciudad se levanta sola cuando lleguen proyectos.").font(.callout).foregroundStyle(.tertiary)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func headline(_ phase: LivePhase) -> String {
+        if phase == .offline { return "Sin stream en vivo del agente" }
+        return store.status == .live ? "Sin proyectos en vivo todavía" : "Conectando con el agente…"
     }
 
     private func refresh() {
