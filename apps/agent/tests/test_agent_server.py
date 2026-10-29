@@ -383,13 +383,14 @@ class TestAuth(ServerBase):
         st, body, _ = self.get("/health")
         self.assertEqual((st, body["whoami"]), (200, {"login": "lector@github", "via": "tailscale", "write": False}))
         self.assertEqual(self.post("/settle", {"thread_id": "t-1"}, headers=self.bearer())[0], 403)
-        # propietario: GET sí; POST exige además el bearer
+        # propietario: /health sin credencial; el resto (lectura y escritura) exige credencial -> 401 sin ella (emparejamiento)
         self.ts.logins["127.0.0.1"] = "yo@github"
         self.svc.auth._whois.clear()
         self.assertEqual(self.get("/health")[1]["whoami"], {"login": "yo@github", "via": "tailscale", "write": False})
-        self.assertEqual(self.post("/settle", {"thread_id": "t-1"})[0], 403)
-        self.assertEqual(self.post("/settle", {"thread_id": "t-1"}, headers=self.bearer("otro"))[0], 403)
-        self.assertEqual(self.post("/settle", {"thread_id": "t-1"}, headers={"Authorization": "Basic " + TOKEN})[0], 403)
+        self.assertEqual(self.get("/snapshot")[0], 401)
+        self.assertEqual(self.post("/settle", {"thread_id": "t-1"})[0], 401)
+        self.assertEqual(self.post("/settle", {"thread_id": "t-1"}, headers=self.bearer("otro"))[0], 401)
+        self.assertEqual(self.post("/settle", {"thread_id": "t-1"}, headers={"Authorization": "Basic " + TOKEN})[0], 401)
         st, body, _ = self.post("/settle", {"thread_id": "t-1"}, headers=self.bearer())
         self.assertEqual((st, body["ok"]), (200, True))
         self.assertEqual(self.get("/health", headers=self.bearer())[1]["whoami"]["write"], True)
@@ -466,14 +467,16 @@ class TestAuth(ServerBase):
         self.assertEqual(a.authorize("::1", local, True, None).via, "local")
         self.assertEqual(a.authorize("100.64.0.9", local, True, None).via, "local")         # la propia IP del agente
         self.assertEqual(a.authorize("::ffff:127.0.0.1", local, False, None).via, "local")
-        self.assertEqual(a.authorize("100.64.0.5", local, False, None).login, "yo@github")
+        self.assertEqual(a.authorize("100.64.0.5", local, False, None, "GET", "/health").login, "yo@github")
+        self.assertEqual(a.authorize("100.64.0.5", local, False, "Bearer " + TOKEN).login, "yo@github")
         self.assertEqual(a.authorize("100.64.0.5", local, True, "Bearer " + TOKEN).write, True)
         self.assertEqual(a.authorize("100.64.0.5", local, True, "bearer " + TOKEN).write, True)   # esquema sin distinguir mayúsculas
-        for ip, write, hdr in (("100.64.0.5", True, None), ("100.64.0.6", True, "Bearer " + TOKEN), ("100.64.0.7", False, None),
-                               ("100.64.0.8", False, None), ("no-es-ip", False, None), ("100.64.0.5", True, "Bearer ")):
+        for ip, write, hdr, code in (("100.64.0.5", True, None, 401), ("100.64.0.5", False, None, 401),
+                                     ("100.64.0.6", True, "Bearer " + TOKEN, 403), ("100.64.0.7", False, None, 403),
+                                     ("100.64.0.8", False, None, 403), ("no-es-ip", False, None, 403), ("100.64.0.5", True, "Bearer ", 401)):
             with self.assertRaises(server.ApiError) as cm:
                 a.authorize(ip, local, write, hdr)
-            self.assertEqual(cm.exception.status, 403, (ip, write, hdr))
+            self.assertEqual(cm.exception.status, code, (ip, write, hdr))
         with self.assertRaises(ValueError):
             server.Authenticator(dict(cfg, auth="nada"))
         # owner vacío: el login vacío jamás coincide
