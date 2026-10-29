@@ -174,7 +174,7 @@ final class AppModel: ObservableObject {
         pollTask?.cancel()
         pollTask = nil
         config = AppConfig.load()
-        hub = AgentHub(specs: config.agents)
+        hub = AgentHub(specs: config.agents, credentials: credentials)
         results = []
         labels = [:]
         machines = []
