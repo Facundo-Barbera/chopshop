@@ -172,7 +172,6 @@ repos = ["dueño/repo"]
 interval_s = 45        # GitHub puede pedir más con X-Poll-Interval; se respeta
 gh_bin = "gh"
 ci = true              # check-runs del HEAD de los PRs abiertos
-actions = true         # rack de la sala de máquinas (runs de Actions, ver abajo)
 ```
 
 Cada pasada, por repo:
@@ -210,27 +209,15 @@ en el log y no degrada. Los logs llevan repo, código HTTP y motivo; nunca la sa
 (`ProtectSystem=strict`) `gh` lee su config de `~/.config/gh` sin problema; si tu `gh` necesita escribir su estado
 (`~/.local/state/gh`), añádelo con `--rw` o `[agent.service] read_write_paths`.
 
-### Rack de la sala de máquinas (`actions = true`)
+## Sala de máquinas: listeners, scripts y webhooks
 
-El mismo hilo (`agent/forge/`, adaptador `forge/github.py` de la interfaz `ForgeProvider`) recorre el **rack**: los
-`rack.repos` de los perfiles locales (`provider` + `repo` + `kind`, ver `examples/profiles/awesome-gb.example.yaml`) más los
-`repos` de aquí como `kind: main`. Por repo y pasada: `GET /repos/{o}/{r}/actions/runs?per_page=20` con ETag
-(`forge_etag:github:<repo>`; un 304 no emite) y, como mucho una vez por hora, `GET /repos/{o}/{r}` para la rama por defecto.
+`GET /state` (v3) trae `machine_room` con el registro de lo que corre en la máquina:
 
-- `forge.run.state` por cada run activo o entre los 5 completados más nuevos **que cambió** (lo último emitido vive en la
-  tabla `forge_runs`; reiniciar no reemite). Lleva `event` (disparador: `push`, `pull_request`, `schedule`,
-  `workflow_dispatch`…) y `origin` `{kind, id, label}`: `thread` (la rama del run es la de un hilo de T3, nunca la rama por
-  defecto), `automation` (una automatización emitió `forge.dispatch` con el nonce en el título del run, o mismo workflow + ref
-  en 10 min), `bot` (`rack.actors` con `kind: bot`, o login `…[bot]`), `schedule`, `human` o `unknown`. El origen de hilo o
-  de automatización, una vez asignado, no cambia.
-- `forge.repo.state` cuando cambia la **luz**: rojo (último run de algún workflow en la rama por defecto fallido, o PR abierto
-  con CI rojo si `ci = true`), ámbar (runs en curso o en cola), verde, gris (sin datos, proveedor no soportado o caído:
-  `error` dice por qué).
-- Un fallo de cuota corta la pasada igual que arriba (backoff y `machine.health`) y deja los módulos de GitHub en gris hasta
-  la siguiente pasada buena. Un proveedor sin adaptador (`gitlab`, …) aparece en gris con `error: proveedor no soportado`.
-
-`listener.state` (sala de máquinas): el servicio publica el estado de sus hilos (`t3watch`, `forge`, `automations`, `engine`,
-`collector`) cuando cambia (ok/degradado/caído, error, backoff) y como latido cada hora.
+- `listeners`: el servicio publica `listener.state` de sus hilos (`t3watch`, `forge` = hilo de GitHub, `automations`, `engine`,
+  `collector`) cuando cambia el estado (ok/degradado/caído), el error o el backoff, y como latido cada hora.
+- `automations`: la última ejecución de cada script (`automation.ran`: disparador, exit, duración, error y `next_run`, el
+  próximo horario si tiene `schedule`).
+- `subscriptions`: los webhooks salientes con su último envío bueno y el último fallo (texto corto; nunca la URL ni el secreto).
 
 ## Troubleshooting
 

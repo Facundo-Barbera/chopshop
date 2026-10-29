@@ -9,7 +9,7 @@
   `automation.ran` no abren ni cierran (describen una acción, no el estado del sujeto).
 - `counts` por proyecto: running, queued, waiting, needs_human, waiting_bot, stuck, done, failed (ver `_counts`).
 - `recent` = últimos 50 sobres, el más nuevo primero.
-- `machine_room` (v3): listeners, automatizaciones y rack de la sala de máquinas (`machine_room.py`); sus `subscriptions` las
+- `machine_room` (v3): listeners, automatizaciones y webhooks de la sala de máquinas (`machine_room.py`); sus `subscriptions` las
   rellena `Projector.current()` desde SQLite (no vienen de sobres).
 Los sobres salen de `events.list_after` (contrato del bus, docs/event-envelope.md)."""
 import copy

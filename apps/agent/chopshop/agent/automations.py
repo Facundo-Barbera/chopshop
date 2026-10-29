@@ -678,8 +678,6 @@ def run_once(spec, emit_fn, trigger="manual", trigger_env=None, root=None, secre
         envs = []                                    # una ejecución que no terminó no publica nada a medias
     sent = []
     for e in envs:
-        if e.get("type") == "forge.dispatch" and isinstance(e.get("body"), dict):
-            e["body"].setdefault("automation", spec["name"])   # para atribuir el run a esta automatización en el rack
         try:
             _publish(emit_fn, e)
             sent.append(e)
