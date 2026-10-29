@@ -11,7 +11,7 @@
   un bot o una persona (por defecto: la regla `reactions` `on: pending_question` del perfil del proyecto, si existe).
   Eventos: `thread_started`, `thread_done`, `thread_failed`, `thread_settled`, `pending_question`, `pending_approval`,
   `t3_unreachable` (una sola vez al caer) y `t3_recovered`. Los cuerpos de hilo llevan además `role` (el guardado, o el de
-  las reglas `match` del perfil), `ended_at` y `touched_at` (ISO, para la semivida de la oficina; `agent/office.py`). La primera pasada (sin línea base) siembra la tabla en silencio
+  las reglas `match` del perfil; `agent/office.py` lo usa para el escritorio) y `ended_at` (ISO). La primera pasada (sin línea base) siembra la tabla en silencio
   salvo las preguntas pendientes, que sí se avisan (son accionables).
 - `settle(t3, thread_id)`: `t3_thread_organize {action: "settle"}`. Nunca archiva.
 - `answer(t3, thread_id, choice, request=None)`: resuelve la opción con `chopshop/answers.py` (igual que el motor).
@@ -253,14 +253,11 @@ def _process(p, t, project, project_id, prev):
     row_title = t.get("title") or (prev or {}).get("title")
     role = (prev or {}).get("role") or p.role(project, row_title, branch)
     ended_at = None
-    if status in DONE | FAILED:     # semivida: cuándo terminó (el primer avistamiento usa la última actualización de T3)
+    if status in DONE | FAILED:     # cuándo terminó (el primer avistamiento usa la última actualización de T3)
         ended_at = (prev or {}).get("ended_at") if prev and prev["status"] in DONE | FAILED else None
         ended_at = ended_at or (p.now if terminal_change else _epoch(t.get("updatedAt"), p.now))
-    with db.tx():
-        touched = p.conn.execute("SELECT touched_at FROM thread_touch WHERE thread_id=?", (tid,)).fetchone()
     body = {"thread_id": tid, "title": row_title, "status": status, "link": t.get("link"), "worktree": worktree,
-            "branch": branch, "pull_requests": _prs(t), "role": role, "ended_at": _iso(ended_at),
-            "touched_at": _iso(touched["touched_at"]) if touched else None}
+            "branch": branch, "pull_requests": _prs(t), "role": role, "ended_at": _iso(ended_at)}
     quiet = p.baseline   # primera pasada: sembrar sin avisar (salvo preguntas)
     if not quiet:
         if active and not was_active:

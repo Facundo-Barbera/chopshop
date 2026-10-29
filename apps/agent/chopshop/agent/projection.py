@@ -45,7 +45,7 @@ def min_seq(conn):
 
 def empty(machine=None):
     return {"api_version": API_VERSION, "machine": machine, "head_seq": 0, "ts": None, "machine_health": None,
-            "projects": [], "lobby": [], "recent": []}
+            "projects": [], "recent": []}
 
 
 def _project(state, name):
@@ -158,10 +158,9 @@ def _apply(state, env):
     return state
 
 
-# ---------------------------------------------------------------- oficina y vestíbulo (api_version 3)
+# ---------------------------------------------------------------- oficina: escritorios (api_version 3)
 
-OFFICE_TYPES = ("office.changed", "desk.assigned", "desk.released", "desk.waiting", "desk.note")
-ACTIVE_PHASES = ("queued", "preparing", "running", "waiting")
+OFFICE_TYPES = ("office.changed", "desk.assigned", "desk.released", "desk.note")   # desk.waiting y el vestíbulo: aparte
 OCCUPANT_FIELDS = ("title", "phase", "attention", "ended_at", "touched_at")
 DEFAULT_HALF_LIFE = 1800.0
 LINEAGE = 5
@@ -182,22 +181,8 @@ def _task(p, tid):
     return next((t for t in p["tasks"] if t.get("id") == tid or t.get("thread_id") == tid), None)
 
 
-def _lobby_item(state, p, tid, base, ts):
-    office = p.get("office") or {}
-    item = {"thread_id": tid, "project": p["name"], "company": office.get("company"), "title": None, "phase": "running",
-            "attention": None, "waiting_role": None, "since": ts, "ended_at": None, "touched_at": None,
-            "half_life_s": office.get("half_life_s") or DEFAULT_HALF_LIFE}
-    old = next((x for x in state["lobby"] if x["thread_id"] == tid), None)
-    if old:
-        item.update(old)
-    item.update({k: base[k] for k in OCCUPANT_FIELDS if k in base})
-    state["lobby"] = [x for x in state["lobby"] if x["thread_id"] != tid] + [item]
-    state["lobby"].sort(key=lambda x: (x.get("company") or "", x.get("project") or "", x.get("since") or ""))
-    return item
-
-
 def _apply_office(state, p, typ, env, body):
-    """Regla `apply` de docs/agent-api.md («api_version 3»): `office`, ocupantes, linaje, notas y `lobby`."""
+    """Regla `apply` de docs/agent-api.md («api_version 3»): `office`, ocupantes, linaje y notas pendientes."""
     ts = env.get("ts")
     if typ == "office.changed":
         old = {d["id"]: d for d in _desks(p.get("office")) if d.get("id")}
@@ -216,10 +201,6 @@ def _apply_office(state, p, typ, env, body):
         seat = next((d for d in _desks(p.get("office")) if (d.get("occupant") or {}).get("thread_id") == tid), None)
         if seat is not None:
             seat["occupant"].update({k: body[k] for k in OCCUPANT_FIELDS if k in body})
-        elif any(x["thread_id"] == tid for x in state["lobby"]):
-            _lobby_item(state, p, tid, body, ts)
-        elif body.get("role") is None and body.get("phase") in ACTIVE_PHASES:
-            _lobby_item(state, p, tid, body, ts)
         return
     if typ == "desk.assigned":
         d = _find_desk(p, body.get("desk"))
@@ -236,21 +217,13 @@ def _apply_office(state, p, typ, env, body):
                          "inheritance": body.get("inheritance")}
         if body.get("notes_pending") is not None:
             d["notes_pending"] = body["notes_pending"]
-        state["lobby"] = [x for x in state["lobby"] if x["thread_id"] != tid]
-    elif typ == "desk.released":
-        if body.get("desk") is None:
-            state["lobby"] = [x for x in state["lobby"] if x["thread_id"] != tid]
-            return
+    elif typ == "desk.released" and body.get("desk"):
         d = _find_desk(p, body.get("desk"))
         occ = (d or {}).get("occupant") or {}
         if d is not None and occ.get("thread_id") == tid:
             d["lineage"] = ([{"thread_id": tid, "since": occ.get("since"), "until": ts, "reason": body.get("reason")}]
                             + list(d.get("lineage") or []))[:LINEAGE]
             d["occupant"] = None
-    elif typ == "desk.waiting":
-        t = _task(p, tid) or {}
-        base = {k: t[k] for k in OCCUPANT_FIELDS if k in t} or {k: body[k] for k in ("title", "phase") if body.get(k)}
-        _lobby_item(state, p, tid, base, ts)["waiting_role"] = body.get("role")
     elif typ == "desk.note":
         d = _find_desk(p, body.get("desk"))
         if d is not None:
@@ -287,7 +260,6 @@ def filter_project(st, project):
     out = dict(st)
     out["projects"] = [p for p in st["projects"] if p["name"] == project]
     out["recent"] = [e for e in st["recent"] if e.get("project") == project]
-    out["lobby"] = [x for x in st.get("lobby") or [] if x.get("project") == project]
     return out
 
 

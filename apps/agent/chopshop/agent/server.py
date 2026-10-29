@@ -319,13 +319,12 @@ class AgentApp:
         ("GET", "/subscriptions"): "subscriptions", ("POST", "/answer"): "answer", ("POST", "/settle"): "settle",
         ("POST", "/subscriptions"): "subscribe",
         ("GET", "/state"): "state", ("GET", "/stream"): "stream", ("POST", "/pair"): "pair",
-        ("POST", "/touch"): "touch",
     }
 
     def __init__(self, cfg, conn, collector, t3, auth, runtime=None, emit_fn=None, orchestrator_fn=None,
                  clock=time.time, pairing=None, stream_opts=None, office=None):
         self.cfg, self.conn = cfg, conn
-        self.office = office              # agent/office.py (None = sin oficina: las rutas /desks y /touch dan 503)
+        self.office = office              # agent/office.py (None = sin oficina: las rutas /desks dan 503)
         self.collector, self.t3, self.auth = collector, t3, auth
         self.runtime = runtime or Runtime(clock)
         self.clock = clock
@@ -505,7 +504,6 @@ class AgentApp:
         res = self._t3(t3watch.answer, thread, choice if isinstance(choice, dict) else str(choice), _text(body, "request", False, 128))
         log.info("respuesta enviada al hilo %s por %s", thread, ident.login or ident.via)
         self._answered(thread, res, by or ident.login or "human")
-        self._touch(thread)
         return dict(res, ok=True)
 
     def _answered(self, thread, res, by):
@@ -538,19 +536,6 @@ class AgentApp:
         if self.office is None:
             raise ApiError(503, "oficina no disponible en este agente")
         return self.office
-
-    def _touch(self, thread):
-        """Responder cuenta como «tocar» (reinicia la semivida); un fallo aquí no deshace la respuesta."""
-        if self.office is None:
-            return
-        try:
-            self.office.touch(thread)
-        except Exception:  # noqa: BLE001
-            log.exception("no pude tocar el hilo %s", thread)
-
-    def r_touch(self, ident, q, body):
-        thread = _ident(body, "thread_id", True)
-        return {"ok": True, "thread_id": thread, "touched_at": self._office().touch(thread)}
 
     def r_desk(self, ident, q, body, desk_id):
         d = self._office().desk(desk_id)

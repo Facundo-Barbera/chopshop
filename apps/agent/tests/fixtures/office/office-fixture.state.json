@@ -1,21 +1,6 @@
 {
   "api_version": 3,
-  "head_seq": 15,
-  "lobby": [
-    {
-      "attention": null,
-      "company": "Awesome GB",
-      "ended_at": null,
-      "half_life_s": 600.0,
-      "phase": "running",
-      "project": "awesome-gb",
-      "since": "2027-01-15T08:01:00.000Z",
-      "thread_id": "mcp:f2",
-      "title": "[fe] modo oscuro",
-      "touched_at": null,
-      "waiting_role": "frontend"
-    }
-  ],
+  "head_seq": 17,
   "machine": "contabo-dev",
   "machine_health": null,
   "projects": [
@@ -23,11 +8,11 @@
       "attention": [],
       "batches": [],
       "counts": {
-        "done": 2,
+        "done": 1,
         "failed": 0,
         "needs_human": 0,
         "queued": 0,
-        "running": 3,
+        "running": 4,
         "stuck": 0,
         "waiting": 0,
         "waiting_bot": 0
@@ -94,10 +79,17 @@
                   },
                   {
                     "id": "awesome-gb/0/backend/1",
-                    "lineage": [],
+                    "lineage": [
+                      {
+                        "reason": "retired",
+                        "since": "2027-01-15T08:03:00.000Z",
+                        "thread_id": "mcp:b8",
+                        "until": "2027-01-15T08:03:00.000Z"
+                      }
+                    ],
                     "notes_pending": 0,
                     "occupant": null,
-                    "retired": false,
+                    "retired": true,
                     "slot": 1
                   }
                 ],
@@ -156,7 +148,7 @@
           "result": "Hecho: [be] sesión",
           "retry_of": null,
           "role": "backend",
-          "seq": 9,
+          "seq": 8,
           "settled": false,
           "severity": "info",
           "status": "completed",
@@ -220,32 +212,6 @@
         {
           "attention": null,
           "batch": null,
-          "branch": "be/mcp:x1",
-          "ended_at": "2027-01-15T08:01:00.000Z",
-          "error": null,
-          "id": "mcp:x1",
-          "level": null,
-          "link": null,
-          "node": null,
-          "phase": "done",
-          "pull_requests": [],
-          "result": "Hecho: explorar",
-          "retry_of": null,
-          "role": null,
-          "seq": 10,
-          "settled": false,
-          "severity": "info",
-          "status": "completed",
-          "summary": "Hecho: explorar",
-          "t3status": "completed",
-          "thread_id": "mcp:x1",
-          "title": "explorar",
-          "updated": "2027-01-15T08:01:00.000Z",
-          "worktree": "/wt/mcp:x1"
-        },
-        {
-          "attention": null,
-          "batch": null,
           "branch": "be/mcp:b7",
           "ended_at": null,
           "error": null,
@@ -258,7 +224,7 @@
           "result": null,
           "retry_of": null,
           "role": "backend",
-          "seq": 11,
+          "seq": 9,
           "settled": false,
           "severity": "info",
           "status": "running",
@@ -267,6 +233,31 @@
           "title": "[be] login con passkeys",
           "updated": "2027-01-15T08:02:00.000Z",
           "worktree": "/wt/mcp:b7"
+        },
+        {
+          "attention": null,
+          "batch": null,
+          "branch": "be/mcp:b8",
+          "ended_at": null,
+          "error": null,
+          "id": "mcp:b8",
+          "level": null,
+          "link": null,
+          "node": null,
+          "phase": "running",
+          "pull_requests": [],
+          "result": null,
+          "retry_of": null,
+          "role": "backend",
+          "seq": 13,
+          "settled": false,
+          "severity": "info",
+          "status": "running",
+          "t3status": "running",
+          "thread_id": "mcp:b8",
+          "title": "[be] segundo",
+          "updated": "2027-01-15T08:03:00.000Z",
+          "worktree": "/wt/mcp:b8"
         }
       ]
     }
@@ -274,28 +265,207 @@
   "recent": [
     {
       "body": {
-        "desk": null,
-        "reason": "faded",
-        "thread_id": "mcp:x1",
-        "title": "explorar"
+        "phase": "running",
+        "role": "backend",
+        "thread_id": "mcp:b8",
+        "title": "[be] segundo"
       },
       "cause": {
         "depth": 0,
         "id": null
       },
-      "id": "01MCCC21A0ZZRZTJ01XH47518P",
+      "id": "01MCC5Y3S005G36SAZSG4NFE6D",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": "awesome-gb",
+      "seq": 17,
+      "severity": "info",
+      "subject": {
+        "id": "mcp:b8",
+        "kind": "thread",
+        "title": "[be] segundo"
+      },
+      "ts": "2027-01-15T08:03:00.000Z",
+      "type": "desk.waiting",
+      "v": 1
+    },
+    {
+      "body": {
+        "desk": "awesome-gb/0/backend/1",
+        "reason": "retired",
+        "thread_id": "mcp:b8"
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01MCC5Y3S005G36SAZSG4NFE6C",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": "awesome-gb",
+      "seq": 16,
+      "severity": "info",
+      "subject": {
+        "id": "awesome-gb/0/backend/1",
+        "kind": "desk"
+      },
+      "ts": "2027-01-15T08:03:00.000Z",
+      "type": "desk.released",
+      "v": 1
+    },
+    {
+      "body": {
+        "by": "profile",
+        "company": "Awesome GB",
+        "diff": {
+          "added": [],
+          "reactivated": [],
+          "retired": [
+            "awesome-gb/0/backend/1"
+          ]
+        },
+        "floors": [
+          {
+            "index": 0,
+            "name": "Producto",
+            "rooms": [
+              {
+                "desks": [
+                  {
+                    "id": "awesome-gb/0/triage/0",
+                    "retired": false,
+                    "slot": 0
+                  }
+                ],
+                "permanent": true,
+                "role": "triage"
+              },
+              {
+                "desks": [
+                  {
+                    "id": "awesome-gb/0/backend/0",
+                    "retired": false,
+                    "slot": 0
+                  },
+                  {
+                    "id": "awesome-gb/0/backend/1",
+                    "retired": true,
+                    "slot": 1
+                  }
+                ],
+                "permanent": false,
+                "role": "backend"
+              }
+            ]
+          },
+          {
+            "index": 1,
+            "name": "Front",
+            "rooms": [
+              {
+                "desks": [
+                  {
+                    "id": "awesome-gb/1/frontend/0",
+                    "retired": false,
+                    "slot": 0
+                  }
+                ],
+                "permanent": false,
+                "role": "frontend"
+              }
+            ]
+          }
+        ],
+        "half_life_s": 600.0,
+        "project": "awesome-gb"
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01MCC5Y3S005G36SAZSG4NFE6B",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
       "seq": 15,
       "severity": "info",
       "subject": {
-        "id": "mcp:x1",
-        "kind": "thread",
-        "title": "explorar"
+        "id": "awesome-gb",
+        "kind": "office"
       },
-      "ts": "2027-01-15T08:43:00.000Z",
-      "type": "desk.released",
+      "ts": "2027-01-15T08:03:00.000Z",
+      "type": "office.changed",
+      "v": 1
+    },
+    {
+      "body": {
+        "desk": "awesome-gb/0/backend/1",
+        "inheritance": null,
+        "reason": "start",
+        "role": "backend",
+        "since": "2027-01-15T08:03:00.000Z",
+        "thread_id": "mcp:b8",
+        "title": "[be] segundo"
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01MCC5Y3S005G36SAZSG4NFE6A",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": "awesome-gb",
+      "seq": 14,
+      "severity": "info",
+      "subject": {
+        "id": "awesome-gb/0/backend/1",
+        "kind": "desk",
+        "title": "backend"
+      },
+      "ts": "2027-01-15T08:03:00.000Z",
+      "type": "desk.assigned",
+      "v": 1
+    },
+    {
+      "body": {
+        "attention": null,
+        "batch": null,
+        "branch": "be/mcp:b8",
+        "ended_at": null,
+        "error": null,
+        "legacy": "thread_started",
+        "level": null,
+        "link": null,
+        "node": null,
+        "phase": "running",
+        "pull_requests": [],
+        "result": null,
+        "retry_of": null,
+        "role": "backend",
+        "settled": false,
+        "status": "running",
+        "t3status": "running",
+        "thread_id": "mcp:b8",
+        "title": "[be] segundo",
+        "worktree": "/wt/mcp:b8"
+      },
+      "cause": {
+        "depth": 0,
+        "id": null
+      },
+      "id": "01MCC5Y3S005G36SAZSG4NFE69",
+      "machine": "contabo-dev",
+      "needs": null,
+      "project": "awesome-gb",
+      "seq": 13,
+      "severity": "info",
+      "subject": {
+        "id": "mcp:b8",
+        "kind": "task",
+        "title": "[be] segundo"
+      },
+      "ts": "2027-01-15T08:03:00.000Z",
+      "type": "task.state",
       "v": 1
     },
     {
@@ -309,11 +479,11 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCCC21A0ZZRZTJ01XH47518N",
+      "id": "01MCC5Y3S005G36SAZSG4NFE68",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
-      "seq": 14,
+      "seq": 12,
       "severity": "info",
       "subject": {
         "id": "awesome-gb/0/triage/0",
@@ -346,11 +516,11 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCCC21A0ZZRZTJ01XH47518M",
+      "id": "01MCC5Y3S005G36SAZSG4NFE67",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
-      "seq": 13,
+      "seq": 11,
       "severity": "info",
       "subject": {
         "id": "awesome-gb/0/backend/0",
@@ -371,11 +541,11 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCCC21A0ZZRZTJ01XH47518K",
+      "id": "01MCC5Y3S005G36SAZSG4NFE66",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
-      "seq": 12,
+      "seq": 10,
       "severity": "info",
       "subject": {
         "id": "awesome-gb/0/backend/0",
@@ -412,11 +582,11 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCCC21A0ZZRZTJ01XH47518J",
+      "id": "01MCC5Y3S005G36SAZSG4NFE65",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
-      "seq": 11,
+      "seq": 9,
       "severity": "info",
       "subject": {
         "id": "mcp:b7",
@@ -424,49 +594,6 @@
         "title": "[be] login con passkeys"
       },
       "ts": "2027-01-15T08:02:00.000Z",
-      "type": "task.state",
-      "v": 1
-    },
-    {
-      "body": {
-        "attention": null,
-        "batch": null,
-        "branch": "be/mcp:x1",
-        "ended_at": "2027-01-15T08:01:00.000Z",
-        "error": null,
-        "legacy": "thread_done",
-        "level": null,
-        "link": null,
-        "node": null,
-        "phase": "done",
-        "pull_requests": [],
-        "result": "Hecho: explorar",
-        "retry_of": null,
-        "role": null,
-        "settled": false,
-        "status": "completed",
-        "summary": "Hecho: explorar",
-        "t3status": "completed",
-        "thread_id": "mcp:x1",
-        "title": "explorar",
-        "worktree": "/wt/mcp:x1"
-      },
-      "cause": {
-        "depth": 0,
-        "id": null
-      },
-      "id": "01MCCC21A0ZZRZTJ01XH47518H",
-      "machine": "contabo-dev",
-      "needs": null,
-      "project": "awesome-gb",
-      "seq": 10,
-      "severity": "info",
-      "subject": {
-        "id": "mcp:x1",
-        "kind": "task",
-        "title": "explorar"
-      },
-      "ts": "2027-01-15T08:01:00.000Z",
       "type": "task.state",
       "v": 1
     },
@@ -498,11 +625,11 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCCC21A0ZZRZTJ01XH47518G",
+      "id": "01MCC5Y3S005G36SAZSG4NFE64",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
-      "seq": 9,
+      "seq": 8,
       "severity": "info",
       "subject": {
         "id": "mcp:a1",
@@ -524,11 +651,11 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCCC21A0ZZRZTJ01XH47518F",
+      "id": "01MCC5Y3S005G36SAZSG4NFE63",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
-      "seq": 8,
+      "seq": 7,
       "severity": "info",
       "subject": {
         "id": "mcp:f2",
@@ -553,11 +680,11 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCCC21A0ZZRZTJ01XH47518E",
+      "id": "01MCC5Y3S005G36SAZSG4NFE62",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
-      "seq": 7,
+      "seq": 6,
       "severity": "info",
       "subject": {
         "id": "awesome-gb/1/frontend/0",
@@ -582,11 +709,11 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCCC21A0ZZRZTJ01XH47518D",
+      "id": "01MCC5Y3S005G36SAZSG4NFE61",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
-      "seq": 6,
+      "seq": 5,
       "severity": "info",
       "subject": {
         "id": "awesome-gb/0/backend/0",
@@ -595,48 +722,6 @@
       },
       "ts": "2027-01-15T08:01:00.000Z",
       "type": "desk.assigned",
-      "v": 1
-    },
-    {
-      "body": {
-        "attention": null,
-        "batch": null,
-        "branch": "be/mcp:x1",
-        "ended_at": null,
-        "error": null,
-        "legacy": "thread_started",
-        "level": null,
-        "link": null,
-        "node": null,
-        "phase": "running",
-        "pull_requests": [],
-        "result": null,
-        "retry_of": null,
-        "role": null,
-        "settled": false,
-        "status": "running",
-        "t3status": "running",
-        "thread_id": "mcp:x1",
-        "title": "explorar",
-        "worktree": "/wt/mcp:x1"
-      },
-      "cause": {
-        "depth": 0,
-        "id": null
-      },
-      "id": "01MCCC21A0ZZRZTJ01XH47518C",
-      "machine": "contabo-dev",
-      "needs": null,
-      "project": "awesome-gb",
-      "seq": 5,
-      "severity": "info",
-      "subject": {
-        "id": "mcp:x1",
-        "kind": "task",
-        "title": "explorar"
-      },
-      "ts": "2027-01-15T08:00:00.000Z",
-      "type": "task.state",
       "v": 1
     },
     {
@@ -666,7 +751,7 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCCC21A0ZZRZTJ01XH47518B",
+      "id": "01MCC5Y3S005G36SAZSG4NFE60",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
@@ -708,7 +793,7 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCCC21A0ZZRZTJ01XH47518A",
+      "id": "01MCC5Y3S005G36SAZSG4NFE5Z",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
@@ -750,7 +835,7 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCCC21A0ZZRZTJ01XH475189",
+      "id": "01MCC5Y3S005G36SAZSG4NFE5Y",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
@@ -838,7 +923,7 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCCC21A0ZZRZTJ01XH475188",
+      "id": "01MCC5Y3S005G36SAZSG4NFE5X",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
@@ -853,5 +938,5 @@
       "v": 1
     }
   ],
-  "ts": "2027-01-15T08:43:00.000Z"
+  "ts": "2027-01-15T08:03:00.000Z"
 }
