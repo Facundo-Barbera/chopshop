@@ -145,8 +145,8 @@ public struct CityView: View {
         let ch = target == nil ? 0 : CityTransition.chrome(p)
         return VStack(alignment: .leading, spacing: 18) {
             ZStack(alignment: .leading) {
-                CityStatusLine(needsYou: model.needsYouCount, stuck: model.stuckCount, running: model.runningCount).opacity(1 - ch)
-                if let pr = target, ch > 0 { CityStatusLine(summary: snapshot.summary(of: pr)).opacity(ch) }
+                CityStatusLine(needsYou: model.needsYouCount, stuck: model.stuckCount, running: model.runningCount).opacity(CityTransition.chromeOut(ch))
+                if let pr = target, ch > 0 { CityStatusLine(summary: snapshot.summary(of: pr)).opacity(CityTransition.chromeIn(ch)) }
             }
             card(p: p, t: t, office: office, chrome: ch)
         }
@@ -188,14 +188,14 @@ public struct CityView: View {
         let g = target.flatMap(graph)
         return HStack(alignment: .firstTextBaseline) {
             ZStack(alignment: .leading) {
-                Text("Todas las empresas").opacity(1 - ch)
-                if let g { Text(g.goal).opacity(ch) }
+                Text("Todas las empresas").opacity(CityTransition.chromeOut(ch))
+                if let g { Text(g.goal).opacity(CityTransition.chromeIn(ch)) }
             }
             .font(.callout.weight(.medium))
             Spacer()
             ZStack(alignment: .trailing) {
-                Text("\(litCount(t)) de \(model.threadCount) hilos").opacity(1 - ch)
-                if let g { Text("\(g.threads) de \(g.threadBudget) hilos").opacity(ch) }
+                Text("\(litCount(t)) de \(model.threadCount) hilos").opacity(CityTransition.chromeOut(ch))
+                if let g { Text("\(g.threads) de \(g.threadBudget) hilos").opacity(CityTransition.chromeIn(ch)) }
             }
             .font(.caption).foregroundStyle(.secondary).padding(.trailing, 6)
             CitySwitch(first: ch > 0.5 ? "Oficina" : "Ciudad", graph: showGraph, zoomed: zoomed || mounted,
@@ -272,16 +272,16 @@ public struct CityView: View {
             ZStack(alignment: .top) {
                 if !cityAlerts.isEmpty && ch < 1 {
                     IsoAttentionBar(items: cityAlerts, selected: nil, flat: flatChrome) { id in select(id) }
-                        .padding(.top, 12).opacity(1 - ch).allowsHitTesting(p == 0)
+                        .padding(.top, 12).opacity(CityTransition.chromeOut(ch)).allowsHitTesting(p == 0)
                 }
                 // la barra que tendrá la oficina, en el mismo sitio (al montarse IsoOfficeView no cambia nada)
                 if !officeAlerts.isEmpty && ch > 0 {
                     IsoAttentionBar(items: officeAlerts, selected: nil, flat: flatChrome) { _ in }
-                        .padding(.top, 12).opacity(ch).allowsHitTesting(false)
+                        .padding(.top, 12).opacity(CityTransition.chromeIn(ch)).allowsHitTesting(false)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            CityLegend().padding(.leading, 18).padding(.bottom, 14).opacity(1 - ch)
+            CityLegend().padding(.leading, 18).padding(.bottom, 14).opacity(CityTransition.chromeOut(ch))
         }
         .animation(.spring(duration: 0.5, bounce: 0.22), value: cityAlerts.map(\.id))
     }
