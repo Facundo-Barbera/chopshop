@@ -18,6 +18,10 @@ struct RootView: View {
                         LiveProjectScreen(project: p, store: model.live) { PairingScreen() }
                             .environment(\.attentionActions, model.attentionActions)
                     }
+                    if model.selection == .city {
+                        LiveCityRoot(store: model.live)
+                            .environment(\.attentionActions, model.attentionActions)
+                    }
                     if model.selection == .machineRoom {
                         LiveMachineRoomScreen(store: model.live) { PairingScreen() }
                     }
@@ -382,5 +386,20 @@ struct StatusCapsule<Content: View>: View {
         #else
         inner.background(.ultraThinMaterial, in: Capsule())
         #endif
+    }
+}
+
+/// «Ciudad» de la barra lateral (macOS 26): un edificio por proyecto; clic en un piso → zoom a la oficina del proyecto (vestíbulo,
+/// pisos por rol y sala de máquinas en un solo mundo). Sin credencial, la pantalla de emparejar.
+@available(macOS 26.0, *)
+private struct LiveCityRoot: View {
+    @ObservedObject var store: LiveStore
+    var body: some View {
+        switch store.status {
+        case .noCredential, .unauthorized:
+            PairingScreen().frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(nsColor: .windowBackgroundColor))
+        default:
+            LiveCityScreen(store: store, perProject: true)
+        }
     }
 }
