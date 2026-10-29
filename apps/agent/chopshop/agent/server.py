@@ -29,7 +29,7 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import API_VERSION, __version__, collector as collector_mod, db, events, layout, office as office_mod, pairing as pairing_mod, projection, stream, t3watch, webhooks
+from . import API_VERSION, __version__, collector as collector_mod, db, envelope, events, halflife, layout, office as office_mod, pairing as pairing_mod, projection, stream, t3watch, webhooks
 
 log = logging.getLogger("chopshop.agent")
 
@@ -317,7 +317,7 @@ class AgentApp:
         ("GET", "/health"): "health", ("GET", "/snapshot"): "snapshot", ("GET", "/metrics"): "metrics",
         ("GET", "/events"): "events", ("GET", "/threads"): "threads",
         ("GET", "/subscriptions"): "subscriptions", ("POST", "/answer"): "answer", ("POST", "/settle"): "settle",
-        ("POST", "/subscriptions"): "subscribe",
+        ("POST", "/subscriptions"): "subscribe", ("POST", "/touch"): "touch",
         ("GET", "/state"): "state", ("GET", "/stream"): "stream", ("POST", "/pair"): "pair",
     }
 
@@ -504,6 +504,7 @@ class AgentApp:
         res = self._t3(t3watch.answer, thread, choice if isinstance(choice, dict) else str(choice), _text(body, "request", False, 128))
         log.info("respuesta enviada al hilo %s por %s", thread, ident.login or ident.via)
         self._answered(thread, res, by or ident.login or "human")
+        halflife.touch(self.conn, thread, self.clock())      # responder también reinicia la semivida
         return dict(res, ok=True)
 
     def _answered(self, thread, res, by):
@@ -551,6 +552,31 @@ class AgentApp:
             raise ApiError(e.status, e.message)
         log.info("hilo %s asignado a %s por %s", thread, desk_id, ident.login or ident.via)
         return {"ok": True, "desk": desk_id, "thread_id": thread}
+
+    # -- semivida
+    def r_touch(self, ident, q, body):
+        """Reinicia el reloj de semivida del hilo y reemite su último `task.state` con `touched_at` (misma atención)."""
+        thread = _ident(body, "thread_id", True)
+        now = halflife.touch(self.conn, thread, self.clock())
+        try:
+            self._retouch(thread, envelope.iso(now))
+        except Exception:  # noqa: BLE001 - el toque ya quedó guardado; el temporizador lo respeta igual
+            log.exception("no pude reemitir task.state de %s tras tocarlo", thread)
+        return {"ok": True, "thread_id": thread, "touched_at": envelope.iso(now)}
+
+    def _retouch(self, thread, touched):
+        st = self.projector.current()
+        for p in st["projects"]:
+            for t in p["tasks"]:
+                if t.get("thread_id") != thread:
+                    continue
+                b = {k: v for k, v in t.items() if k not in ("id", "severity", "seq", "updated")}
+                b["touched_at"] = touched
+                env = events.emit_envelope(self.conn, self.cfg, "task.state", p["name"], b,
+                                           subject=envelope.subject("task", t["id"], t.get("title"), t.get("link")),
+                                           severity=t.get("severity"), needs=envelope.needs_for_attention(t.get("attention")))
+                if env:
+                    self.stream.bus.publish(env["seq"])
 
     # -- suscripciones
     def r_subscribe(self, ident, q, body):

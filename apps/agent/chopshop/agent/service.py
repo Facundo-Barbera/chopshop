@@ -22,7 +22,7 @@ import threading
 import time
 
 from .. import engine as engine_mod, events as legacy_events, graph, home, settings, state
-from . import __version__, automations as automations_mod, collector as collector_mod, config, db, envelope, events, github, office as office_mod, pairing, server, t3watch
+from . import __version__, automations as automations_mod, collector as collector_mod, config, db, envelope, events, github, halflife, office as office_mod, pairing, server, t3watch
 
 log = logging.getLogger("chopshop.agent")
 
@@ -257,12 +257,25 @@ class AgentService:
         if (cfg.get("github") or {}).get("enabled"):
             self.github = github.GitHubPoller(self.conn, cfg, self.emit, runner=gh_runner, clock=clock,
                                               projects_fn=gh_projects_fn)
+        self.fader = halflife.Fader(self.conn, self.app.projector.current, self._fade_emit, clock=clock)
         self.stop_event = threading.Event()
         self.servers, self.threads, self._serving = [], [], []
         self._stopped = False
 
+    def _fade_emit(self, event, project, body):
+        """Salida por semivida: un escritorio lo libera `office.release` (actualiza su tabla y sube a quien espere el rol);
+        el vestíbulo (`desk: null`) va directo al bus."""
+        office = getattr(self, "office", None)
+        if event == "desk.released" and body.get("desk") and office is not None:
+            occ = (office.desk(body["desk"]) or {}).get("occupant") or {}
+            if occ.get("thread_id") == body.get("thread_id"):
+                office.release(body["desk"], body.get("reason") or "faded")
+            return None
+        return self.emit(event, project, body)
+
     # -- API común de los módulos
     def emit(self, event, project, body=None):
+        body = halflife.stamp(self.conn, event, body)   # el `touched_at` de un toque viaja en cada `task.state` del hilo
         seq = events.emit(self.conn, self.cfg, event, project, body, poster=self.poster)
         self.app.stream.bus.publish(seq)            # despierta a los clientes de /stream
         return seq
@@ -316,6 +329,8 @@ class AgentService:
                             lambda: (self.cfg.get("office") or {}).get("interval") or 2)
             if self.github is not None:
                 self._spawn("github", self._loop, "github", self.github.poll_once, self.github.next_delay)
+            if self.cfg.get("halflife_enabled", True):
+                self._spawn("halflife", self._loop, "halflife", self.fader.sweep, self.fader.next_delay)
             self._spawn("maintenance", self._maintenance)
         for s in self.servers:
             self._serving.append(s)
