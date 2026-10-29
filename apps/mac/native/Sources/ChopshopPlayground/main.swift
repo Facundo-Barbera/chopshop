@@ -13,6 +13,26 @@ struct PlaygroundApp: App {
         }
         .defaultSize(width: 1360, height: 860)
         .windowToolbarStyle(.unified)
+        .commands { CityCommands() }
+
+        // La ciudad (city-fixture.jsonl): Ventana → Abrir la ciudad (⌘⇧C).
+        Window("Chopshop · Ciudad", id: "city") {
+            CityPlaygroundScreen()
+                .frame(minWidth: 1100, minHeight: 720)
+                .preferredColorScheme(.dark)
+        }
+        .defaultSize(width: 1400, height: 900)
+        .windowToolbarStyle(.unified)
+    }
+}
+
+struct CityCommands: Commands {
+    @Environment(\.openWindow) private var openWindow
+    var body: some Commands {
+        CommandGroup(after: .windowArrangement) {
+            Button("Abrir la ciudad") { openWindow(id: "city") }
+                .keyboardShortcut("c", modifiers: [.command, .shift])
+        }
     }
 }
 

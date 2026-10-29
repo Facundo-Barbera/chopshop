@@ -11,6 +11,27 @@ para el detalle de proyecto en vivo. Aquí se ve con datos de prueba (`Fixtures`
 
 Requiere **macOS 26** y **Xcode 27** (usa Liquid Glass). Es un paquete aparte de `apps/mac/Package.swift` (la app real, macOS 13 + Sparkle).
 
+## Ciudad
+
+La flota como ciudad isométrica (`City/`): un edificio por empresa, un piso por proyecto, una ventana encendida por hilo vivo;
+pisos en ámbar (te necesita) o rojo (trabada). Clic en un piso → zoom continuo hasta que el piso se convierte en la oficina del
+proyecto; Esc vuelve. Lógica pura en `CityModel`/`CityLights`/`CityCamera`/`CityTimeline` (macOS 13, con tests); vistas en
+`CityView`/`CityRender` (macOS 26).
+
+- En la app: `LiveCityScreen(store:onSelectFloor:)` es la entrada pública (la flota del `LiveStore`; `onSelectFloor` recibe el
+  proyecto del piso pulsado).
+- Playground: menú Ventana → **Abrir la ciudad** (⌘⇧C). "Reproducir cronología" (reloj 0,5×–4×, pausa, reiniciar, en bucle) o
+  "Interactivo" (estado final, clic para el zoom).
+- Datos: `Resources/city-fixture.jsonl`, generado con `python3 apps/mac/Tests/ChopshopNativeTests/tools/make_city_fixture.py`.
+  `CityTimeline` fija la coreografía (~24 s: edificios que suben, rojo 8,2 s, ámbar 9,6 s, zoom 11,4 → 17,0 s, oficina).
+- Capturas y vídeo deterministas (cada fotograma es `CityTimeline.frame(at: t)` con el tiempo congelado):
+
+```sh
+cd apps/mac/native
+swift run ChopshopSnap /tmp/city city-keys                      # city-01-ciudad.png … city-07-claro.png
+swift run ChopshopSnap /tmp/city city-video /tmp/city/city.mp4  # MP4 H.264 1400×900 a 30 fps
+```
+
 ## Estructura
 
 - `Sources/ChopshopNative` es un **symlink** a `apps/mac/Sources/ChopshopNative`: el mismo código que compila la app.
