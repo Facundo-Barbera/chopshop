@@ -111,6 +111,15 @@ def main():
             if office and g < now:
                 env(iso(g), "desk.released", {"kind": "desk", "id": th.get("desk") or tid},
                     {"desk": th.get("desk"), "thread_id": tid, "reason": "faded"})
+    # sala de máquinas: dos repos en el rack (uno con CI en curso) y los listeners del agente
+    for repo, label, light in (("<org>/chopshop", "chopshop", "amber"), ("<org>/chopshop-docs", "docs", "green")):
+        env(iso(now - 120), "forge.repo.state", {"kind": "repo", "id": "github:" + repo},
+            {"provider": "github", "repo": repo, "project": PROJECT, "kind": "main", "label": label, "light": light,
+             "default_branch": "main", "ci": "success", "error": None})
+    for name, st in (("t3watch", "ok"), ("forge", "ok"), ("webhooks", "degraded")):
+        env(iso(now - 60), "listener.state", {"kind": "listener", "id": name},
+            {"name": name, "state": st, "last_ok": iso(now - 60), "last_cycle": iso(now - 60), "backoff_s": 0, "error": None},
+            severity="info" if st == "ok" else "warn")
     # los desk.released de un hilo ya heredado no encuentran ocupante: inofensivos, como en el agente
     ev.sort(key=lambda e: e["ts"])
     for i, e in enumerate(ev, 1):
