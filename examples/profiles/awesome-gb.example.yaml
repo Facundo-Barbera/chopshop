@@ -30,3 +30,18 @@ rack:
   actors:
     "<login-grok-facundo>": {kind: bot, label: Grok · Facundo}
     "<login-grok-juan-manuel>": {kind: bot, label: Grok · Juan Manuel}
+# Salas de máquinas (opcionales: 0, 1 o varias). Cada una en un piso de office.floors (0 = el primero) y con lo que aloja, por
+# nombre o glob: repos del rack (<dueño>/<repo>), listeners del agente, automatizaciones del proyecto y webhooks. Sin el
+# bloque, el proyecto no pinta ninguna.
+machine_rooms:
+  - name: Sala de máquinas
+    floor: 0
+    repos: ["<org>/<repo-principal>"]
+    listeners: ["*"]
+    automations: ["*"]
+    subscriptions: ["*"]
+  - name: Sala de docs
+    floor: 1
+    repos: ["<org>/<engine-cx>"]
+    listeners: [forge]
+    automations: [docs-*]

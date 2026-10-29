@@ -34,7 +34,7 @@ si necesitas columnas, usa los campos `extra` JSON). `user_version` 2: la migrac
 | `office.py` | hilo office | `Office(conn, cfg, emit_fn, profiles_fn=None, clock)`: `.reload()` (perfiles con `office:` → tabla `desks`; retira, nunca borra; emite `office.changed {by: "profile"}` al cambiar la estructura o si el último ya no está retenido), `.tick()` (pliega los `task.state` nuevos del bus con cursor `office_cursor` en `meta`: asigna, hereda, encola por rol lleno), `.assign(desk_id, thread_id)` (`OfficeError` 404/409/400), `.release(desk_id, reason)` (para quien decida la salida, p. ej. la semivida), `.desk(desk_id)`. Tablas `desks`, `desk_occupancy` (ocupante = `until` nulo; linaje ≤ 20), `office_threads` (última `task.state` por hilo), `desk_waiting`; `t3_threads` gana `role` y `ended_at` (esquema 5). Herencia: si un ocupante del rol ya terminó (fase terminal, sin atención), el hilo nuevo hereda el que terminó antes (`reason: inherited`); si no, el primer libre (`start`); la herencia es el último ocupante del escritorio (también ya salido). Rol lleno o sin escritorios → `desk.waiting`; sube en cuanto uno queda libre o su ocupante termina. Los hilos sin rol no se sientan (vestíbulo: aparte). `[agent.office] enabled, interval`. |
 | `halflife.py` | hilo semivida | `opacity/exit_at/gone(phase, attention, ended_at, touched_at, half_life_s[, now])` (pura, tabla `fixtures/office/halflife.json`); `touch(conn, thread_id, now)` / `touched_at` / `touches` (tabla propia `thread_touch`, `CREATE TABLE IF NOT EXISTS`, sin tocar `user_version`); `stamp(conn, event, body)` (añade `touched_at` a los `task.state` que emite `AgentService.emit`); `schedule(state, touches)` / `due(state, now, touches)` sobre la proyección v3 (ocupantes y `lobby`; con `attention` en el ocupante o abierta en `projects[].attention` no sale); `Fader(conn, state_fn, emit_fn, clock)`: `.sweep()` emite `desk.released reason: faded` (`desk: null` en el vestíbulo), `.next_delay()` (1–30 s). Hilo `halflife` del servicio (`agent.halflife_enabled`, por defecto `true`). `POST /touch` y `POST /answer` tocan. |
 | `listeners.py` | integrador | `Listeners(emit, clock).report(hilo, estado, error, backoff_s)` → `listener.state` por transición + latido horario. |
-| `machine_room.py` | integrador | Reductor de `machine_room` (listeners y automatizaciones: `apply`, `filter_project`; el rack es de otro módulo) que llama `projection._apply`; `subscriptions(conn)` / `live(state, conn)` rellenan `machine_room.subscriptions` (`{name, last_ok, last_error, last_error_at, signed}`) en `Projector.current()`. |
+| `machine_room.py` | integrador | Reductor de `machine_room` (listeners y automatizaciones: `apply`, `filter_project`; el rack es de otro módulo) que llama `projection._apply`; `subscriptions(conn)` / `live(state, conn)` rellenan `machine_room.subscriptions` (`{name, projects, last_ok, last_error, last_error_at, signed}`) en `Projector.current()`; `rooms(state)` / `scope(mr, project, cfg)` resuelven `projects[].machine_rooms` (0..N salas, las de `office.machine_rooms`). |
 | `pairing.py` | integrador | `Pairing(conn, clock)`: `create_code(name, ttl)`, `redeem(code, device_name, device_id, ip)`, `check(cred, ip)`, `active(id)`, `list()`, `revoke(id)`, `prune()`; CLI `chopshop pair create\|list\|revoke\|prune`. Tablas propias `pair_codes` y `devices` (`CREATE TABLE IF NOT EXISTS`, sin tocar `user_version`). |
 | `roles.py` | hilo roles | Roles permanentes (fase 6): `Roles(conn, emit_fn, profiles_fn, launch_fn, task_fn, assign_fn, clock)`: `.on_event(sobre)`, `.tick(now)` (schedule), `.sync(now)` (lote lanzado → `assign_fn`, terminado → fin + despertar pendiente), `.manual(project, role)`, `.once(list_after, last_seq)`. Tabla propia `desk_wakes` (`ensure_schema`, `CREATE TABLE IF NOT EXISTS`, sin tocar `user_version`). Ver «Roles permanentes». |
 | `server.py`, `service.py` | integrador | `server.py`: `ThreadingHTTPServer`, `Authenticator` y las rutas (`AgentApp`). `service.py`: `AgentService` (ensambla módulos, hilos de fondo, parada limpia) y el CLI `chopshop agent run\|status\|token\|check-config\|print-unit`. |
@@ -187,8 +187,8 @@ data: { ...sobre (docs/event-envelope.md)... }
 
 Plan: `docs/plans/office-redesign.md`. Todo lo de la v2 sigue igual; `GET /state`, el `hello` y el evento `state` del stream
 pasan a decir `api_version: 3` y el estado gana campos. Un cliente v2 ignora lo nuevo. La regla sigue siendo
-`GET /state == fold(apply, sobres)`; la única excepción es `machine_room.subscriptions` (y su copia recortada en
-`projects[].machine_room.subscriptions`), que no viene de sobres (ver abajo).
+`GET /state == fold(apply, sobres)`; la única excepción es `machine_room.subscriptions` (y sus copias recortadas en
+`projects[].machine_rooms[].subscriptions`), que no viene de sobres (ver abajo).
 
 ### Forma nueva de `GET /state`
 
@@ -219,22 +219,36 @@ pasan a decir `api_version: 3` y el estado gana campos. Un cliente v2 ignora lo 
                        "origin": {"kind": "thread", "id": "mcp:b7", "label": "backend · awesome-gb/0/backend/0"}}]}]}}
 ```
 
-Además, cada proyecto lleva la **sala de máquinas de su piso** (aditivo; la app la pinta como una sala del piso más bajo del
-proyecto, no hay vista aparte):
+Además, cada proyecto lleva sus **salas de máquinas** (aditivo; la app pinta cada una como una sala de su piso, no hay vista
+aparte). Son **opcionales**: un proyecto tiene 0, 1 o varias, las que declara su perfil local en `machine_rooms:` (ver
+`examples/profiles/awesome-gb.example.yaml`; `chopshop profile check` las valida: `name` único, `floor` = un piso de
+`office.floors`, departamentos + salas ≤ 6 por piso). La configuración llega con `office.changed` a `office.machine_rooms` y la
+proyección la resuelve en `projects[].machine_rooms`:
 
 ```json
 {"projects": [{"name": "awesome-gb", "...": "...",
-  "machine_room": {"floor": 0, "listeners": ["…todos…"], "automations": ["…las del proyecto…"],
-                   "subscriptions": ["…las que lo reparten…"], "rack": ["…sus módulos…"]}}]}
+  "office": {"...": "...", "machine_rooms": [
+    {"name": "Sala de máquinas", "floor": 0, "repos": ["<org>/<repo-principal>"], "listeners": ["*"], "automations": ["*"],
+     "subscriptions": ["*"]},
+    {"name": "Sala de docs", "floor": 1, "repos": ["<org>/<engine-cx>"], "listeners": ["forge"], "automations": ["docs-*"],
+     "subscriptions": []}]},
+  "machine_rooms": [
+    {"name": "Sala de máquinas", "floor": 0, "listeners": ["…"], "automations": ["…"], "subscriptions": ["…"], "rack": ["…"]},
+    {"name": "Sala de docs", "floor": 1, "listeners": ["…"], "automations": ["…"], "subscriptions": ["…"], "rack": ["…"]}],
+  "machine_room": {"name": "Sala de máquinas", "floor": 0, "...": "la primera de machine_rooms"}}]}
 ```
 
-`floor` = el índice más bajo de `office.floors` (0 sin `office`). `rack` y `automations`: los de `project` igual al proyecto;
-`subscriptions`: las que tienen `*` o un glob que lo cubre en `projects` (sin `projects`, todas); `listeners`: todos (son del
-agente). Se recalcula tras cada sobre (`machine_room.rooms`, parte de `fold`) y tras rellenar `subscriptions`.
+Qué aloja cada sala (patrones con `*`/`?`/`[…]` estilo `fnmatch`; una lista vacía o ausente = nada de ese tipo): `rack` = los
+módulos del rack con `project` igual al proyecto cuyo `repo` (`<dueño>/<repo>`) casa con `repos`; `automations` = las del
+proyecto cuyo nombre casa; `listeners` y `subscriptions` = los que casan por `name`. El mismo módulo puede estar en dos salas.
+Sin `machine_rooms` en el perfil (o sin `office`): `machine_rooms: []` y el proyecto no pinta ninguna sala.
+`projects[].machine_room` se conserva para clientes anteriores: la primera sala o `null`. Se recalcula tras cada sobre
+(`machine_room.rooms`, parte de `fold`) y tras rellenar `subscriptions`.
 
 ### Regla `apply` de los sobres nuevos (la misma en `projection.py` y en `LiveState.swift`)
 
-- `office.changed` → `projects[project].office = {company, half_life_s, floors}`; cada escritorio conserva `occupant`,
+- `office.changed` → `projects[project].office = {company, half_life_s, floors, machine_rooms}` (`machine_rooms` = la
+  configuración de las salas del perfil, `[]` si no declara ninguna); cada escritorio conserva `occupant`,
   `lineage` y `notes_pending` que ya tuviera (por `id`); los nuevos empiezan con `occupant: null, lineage: [], notes_pending: 0`.
   Un `office.changed` es la estructura **completa** (los retirados vienen con `retired: true`).
 - `desk.assigned` → el escritorio `desk` (si no existe en `office`, se ignora) pasa a `occupant = {thread_id, title, role,

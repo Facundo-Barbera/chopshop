@@ -34,17 +34,18 @@ swift run ChopshopSnap /tmp/city city-video /tmp/city/city.mp4  # MP4 H.264 1400
 
 ## Sala de máquinas
 
-Una **sala del piso más bajo de cada proyecto** (no hay vista aparte ni entrada en la barra lateral): el registro de lo que
-corre en la máquina del agente recortado a ese proyecto — su rack de repos (un armario por repo con luz de estado y un led por
-run de Actions; el panel muestra disparador y origen), sus scripts (automatizaciones: última ejecución, disparador, exit,
-duración, próximo horario), los webhooks salientes que lo reparten (último envío bueno o fallo, firmados o no) y los listeners
-del agente (hilos de fondo con estado, último ciclo y backoff; son de todos). Lógica pura en `MachineRoomModel.swift`
-(`MachineRoom` pliega `machine_room` con la misma regla que `agent/machine_room.py`; `scoped(to:)` = `machine_room.scope`;
-tests en `MachineRoomTests`, `FloorPlanTests` y `OfficeEquivalenceTests`). En el piso: `FloorPlan.machineRoom`,
-`FloorLayout.machine`, `FloorRenderer` (también en el zoom de la ciudad) y el panel `MachineRoomInspector` con `MachineRoomView`
-y `RackRender.swift` (macOS 26). La sala sale de `LiveState.machineRoom` (JSON, equivalencia con la proyección).
+**Salas** de los pisos de cada proyecto (no hay vista aparte ni entrada en la barra lateral), opcionales: 0, 1 o varias, las que
+declara el perfil local en `machine_rooms:` (piso y qué aloja). Cada una muestra el registro de lo que corre en la máquina del
+agente que aloja — repos del rack (un armario por repo con luz de estado y un led por run de Actions; el panel muestra
+disparador y origen), scripts (automatizaciones: última ejecución, disparador, exit, duración, próximo horario), webhooks
+salientes (último envío bueno o fallo, firmados o no) y listeners del agente (hilos de fondo con estado, último ciclo y
+backoff). Lógica pura en `MachineRoomModel.swift` (`MachineRoom` pliega `machine_room` con la misma regla que
+`agent/machine_room.py`; `MachineRoomConfig` = una sala del perfil; `scoped(to:_:)` = `machine_room.scope`; tests en
+`MachineRoomTests`, `FloorPlanTests` y `OfficeEquivalenceTests`). En el piso: `FloorPlan.machineRooms`, `FloorLayout.machines`,
+`FloorRenderer` (también en el zoom de la ciudad) y el panel `MachineRoomInspector` con `MachineRoomView` y `RackRender.swift`
+(macOS 26). Las salas salen de `LiveState.machineRoom` + `office.machineRooms` (equivalencia con la proyección).
 
-- En la app: abre el piso más bajo de un proyecto (Ciudad → clic en el piso) y haz clic en un armario o en la consola.
+- En la app: abre el piso de una sala (Ciudad → clic en el piso) y haz clic en un armario o en la consola.
 - Datos de prueba: `Resources/machine-room-fixture.jsonl` (copia de `apps/agent/tests/fixtures/events/machine-room-fixture.jsonl`;
   su proyección dorada está en `Tests/ChopshopNativeTests/Resources/machine-room-fixture.state.json`).
 - Capturas: `swift run ChopshopSnap /tmp/mr machine-room` → `machine-room-dark.png` / `machine-room-light.png` (el panel de la

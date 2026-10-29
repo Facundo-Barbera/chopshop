@@ -100,3 +100,21 @@ en `projects[].machine_room`). Doradas regeneradas: `ui-fixture.state.json`, `of
       armario cambia el repo; Esc lo cierra; un repo en rojo sale en la barra «Atención» y al pulsarlo enfoca su armario.
 - [ ] Los pisos superiores del proyecto no tienen sala; un proyecto sin `office` sigue abriendo el Grafo (sin sala).
 
+## 8. Salas de máquinas opcionales, 0..N por proyecto (rama `fix/or-machine-rooms-n`, sin compilar en Linux)
+
+Cambio: ya no hay exactamente una sala en el piso más bajo; cada proyecto declara 0..N en su perfil (`machine_rooms:`, ver
+`docs/plans/office-redesign.md` §4). Modelo: `MachineRoomConfig`, `LiveState.Office.machineRooms`, `MachineRoom.name/floor` y
+`scoped(to:_:)` (fuera `scoped(to:)`); `FloorPlan.machineRooms`, `FloorLayout.machines` con ids `rack:<k>:<unidad>` y
+`machine:<k>` (antes `rack:<unidad>` y `machine`). Doradas regeneradas: `machine-room-fixture.jsonl` (+2 `office.changed`:
+Awesome GB con dos salas, chopshop sin ninguna), `machine-room-fixture.rooms.json` (ahora `{proyecto: [salas]}`),
+`office/office-fixture.*` (ganan `office.machine_rooms: []`).
+
+- [ ] `swift build` en `apps/mac` y `apps/mac/native` (tocado: `MachineRoomModel`, `MachineRoomSnapshots`, `LiveStateOffice`,
+      `OfficeFixture`, `FloorPlan`, `FloorRender`, `FloorOfficeView`, `FloorSnapshots`, `CityOfficeFixture`).
+- [ ] `swift test` en `apps/mac`: `FloorPlanTests.testNoRoomsDeclaredNoRoom`/`testRoomsOnTheirFloorsHoldWhatTheProfileSays`/
+      `testAgentPerProjectRoomsWin`/`testMachineRoomsLayoutCabinetsConsolesAndRows`/`testMachineRoomAlertsAndLabels`/
+      `testTypedLiveStateMachineRoomsMatchJSON`, `MachineRoomTests.testScopedToProjectRoom`,
+      `OfficeEquivalenceTests.testPerProjectRoomsMatchPythonScope`.
+- [ ] Capturas: `floor-producto-*.png` con dos salas en Producto («SALA DE MÁQUINAS» con repo-principal en rojo, «SALA DE
+      DOCS» con Engine CX en ámbar; la segunda en la fila siguiente); `city-office` con una sala en Producto y otra en Docs.
+- [ ] En la app: un proyecto sin `machine_rooms:` no pinta sala; con dos, cada consola abre el panel de su sala.

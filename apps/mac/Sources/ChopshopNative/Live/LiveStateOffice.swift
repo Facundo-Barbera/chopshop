@@ -101,12 +101,15 @@ extension LiveState {
         public var company: String?
         public var halfLifeS: Double
         public var floors: [Floor]
+        /// Salas de máquinas que declara el perfil (0..N; vacío = ninguna).
+        public var machineRooms: [MachineRoomConfig]
 
         init?(json: JSONValue) {
             guard json.object != nil else { return nil }
             company = LiveState.nonEmpty(json["company"]?.string)
             halfLifeS = json["half_life_s"]?.double ?? HalfLife.defaultSeconds
             floors = (json["floors"]?.array ?? []).compactMap(Floor.init(json:)).sorted { $0.index < $1.index }
+            machineRooms = (json["machine_rooms"]?.array ?? []).compactMap(MachineRoomConfig.init(json:))
         }
 
         public var desks: [Desk] { floors.flatMap { $0.rooms.flatMap(\.desks) } }

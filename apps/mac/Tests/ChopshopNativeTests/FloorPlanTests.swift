@@ -112,85 +112,126 @@ final class FloorPlanTests: XCTestCase {
         XCTAssertTrue(FloorPlan.floors(in: live, project: "otro").isEmpty)
     }
 
-    // MARK: sala de máquinas (una sala del piso más bajo del proyecto, no una vista aparte)
+    // MARK: salas de máquinas (0..N por proyecto, las que declara su perfil; cada una una sala de su piso)
 
     static let roomText = #"""
     {"listeners": [{"name": "forge", "state": "down"}, {"name": "t3watch", "state": "ok"}],
      "automations": [{"project": "awesome-gb", "name": "triage", "exit": 0}, {"project": "otro", "name": "backup", "exit": 1}],
-     "subscriptions": [{"name": "todo", "projects": ["*"], "signed": false}, {"name": "awe", "projects": ["awesome-*"], "signed": true},
-                       {"name": "otro", "projects": ["otro"], "signed": false}, {"name": "viejo", "signed": false}],
+     "subscriptions": [{"name": "todo", "projects": ["*"], "signed": false}, {"name": "awe", "projects": ["awesome-*"], "signed": true}],
      "rack": [{"provider": "github", "repo": "o/docs", "project": "awesome-gb", "kind": "docs", "light": "green", "runs": []},
               {"provider": "github", "repo": "o/main", "project": "awesome-gb", "kind": "main", "light": "red", "runs": []},
               {"provider": "github", "repo": "o/otro", "project": "otro", "kind": "main", "light": "amber", "runs": []}]}
     """#
+    static let principal: JSONValue = ["name": "Principal", "floor": 0, "repos": ["*"], "listeners": ["*"], "automations": ["*"],
+                                       "subscriptions": ["*"]]
+    static func docs(floor: Int = 1) -> JSONValue {
+        ["name": "Docs", "floor": .number(Double(floor)), "repos": ["o/docs"], "listeners": ["t3watch"], "subscriptions": ["a*"]]
+    }
 
-    func stateWithRoom() throws -> JSONValue {
-        guard case .object(var o) = try state() else { throw XCTSkip("estado sin objeto") }
+    /// El estado con la sala de toda la máquina y, si se dan, las salas que declara el perfil (`office.machine_rooms`) y las que
+    /// publica el agente (`projects[].machine_rooms` / `machine_room`).
+    func stateWithRooms(_ cfgs: [JSONValue]? = nil, rooms: JSONValue? = nil, single: JSONValue? = nil) throws -> JSONValue {
+        guard case .object(var o) = try state(), case .array(var ps) = o["projects"], case .object(var p) = ps[0],
+              case .object(var office) = p["office"] else { throw XCTSkip("forma") }
         o["machine_room"] = try JSONValue(text: Self.roomText)
+        if let cfgs { office["machine_rooms"] = .array(cfgs) }
+        p["office"] = .object(office)
+        if let rooms { p["machine_rooms"] = rooms }
+        if let single { p["machine_room"] = single }
+        ps[0] = .object(p); o["projects"] = .array(ps)
         return .object(o)
     }
 
-    func testMachineRoomLivesOnLowestFloorScopedToProject() throws {
-        let fs = FloorPlan.floors(in: try stateWithRoom(), project: "awesome-gb")
-        XCTAssertNil(fs[1].machineRoom, "solo en el piso más bajo")
-        let r = try XCTUnwrap(fs[0].machineRoom)
-        XCTAssertEqual(r.rack.map(\.repo), ["o/main", "o/docs"], "solo sus repos, main primero")
-        XCTAssertEqual(r.automations.map(\.name), ["triage"])
-        XCTAssertEqual(r.subscriptions.map(\.name), ["todo", "awe", "viejo"], "`*`, glob y sin filtro (agente anterior)")
-        XCTAssertEqual(r.listeners.map(\.name), ["forge", "t3watch"], "los listeners del agente sirven a todos")
-        XCTAssertNil(FloorPlan.lobby(in: try stateWithRoom(), company: "Awesome GB").machineRoom)
-        // sin `machine_room` en el estado: sala vacía, igual que desde LiveState
-        XCTAssertEqual(FloorPlan.floors(in: try state(), project: "awesome-gb")[0].machineRoom, MachineRoom())
-    }
-
-    func testAgentPerProjectRoomWins() throws {
-        guard case .object(var o) = try stateWithRoom(), case .array(var ps) = o["projects"], case .object(var p) = ps[0] else {
-            return XCTFail("forma")
+    func testNoRoomsDeclaredNoRoom() throws {
+        for st in [try stateWithRooms(), try stateWithRooms([]), try stateWithRooms(rooms: [])] {
+            XCTAssertTrue(FloorPlan.floors(in: st, project: "awesome-gb").allSatisfy(\.machineRooms.isEmpty))
+            let live = try XCTUnwrap(LiveState(json: st))
+            XCTAssertTrue(FloorPlan.floors(in: live, project: "awesome-gb").allSatisfy(\.machineRooms.isEmpty))
         }
-        p["machine_room"] = ["floor": 0, "listeners": [], "automations": [], "subscriptions": [],
-                             "rack": [["provider": "github", "repo": "o/solo", "project": "awesome-gb", "light": "green", "runs": []]]]
-        ps[0] = .object(p); o["projects"] = .array(ps)
-        let r = FloorPlan.floors(in: .object(o), project: "awesome-gb")[0].machineRoom
-        XCTAssertEqual(r?.rack.map(\.repo), ["o/solo"])
+        let f = FloorPlan.floors(in: try stateWithRooms(), project: "awesome-gb")[0]
+        XCTAssertTrue(FloorLayout(plan: f).machines.isEmpty)
+        XCTAssertFalse(FloorLayout(plan: f).spots.contains(where: \.isMachine))
     }
 
-    func testMachineRoomLayoutHasCabinetPerRepoAndConsole() throws {
-        let f = FloorPlan.floors(in: try stateWithRoom(), project: "awesome-gb")[0]
+    func testRoomsOnTheirFloorsHoldWhatTheProfileSays() throws {
+        let fs = FloorPlan.floors(in: try stateWithRooms([Self.principal, Self.docs()]), project: "awesome-gb")
+        let p = try XCTUnwrap(fs[0].machineRooms.first), d = try XCTUnwrap(fs[1].machineRooms.first)
+        XCTAssertEqual(fs.map(\.machineRooms.count), [1, 1])
+        XCTAssertEqual((p.name, p.floor, d.name, d.floor), ("Principal", 0, "Docs", 1))
+        XCTAssertEqual(p.rack.map(\.repo), ["o/main", "o/docs"], "solo los repos de su proyecto, main primero")
+        XCTAssertEqual(p.automations.map(\.name), ["triage"], "solo las de su proyecto")
+        XCTAssertEqual(p.subscriptions.map(\.name), ["todo", "awe"])
+        XCTAssertEqual(p.listeners.map(\.name), ["forge", "t3watch"])
+        XCTAssertEqual(d.rack.map(\.repo), ["o/docs"])
+        XCTAssertEqual(d.listeners.map(\.name), ["t3watch"])
+        XCTAssertEqual(d.subscriptions.map(\.name), ["awe"])
+        XCTAssertTrue(d.automations.isEmpty, "sin patrones = nada de ese tipo")
+        XCTAssertTrue(FloorPlan.lobby(in: try stateWithRooms([Self.principal]), company: "Awesome GB").machineRooms.isEmpty)
+        // una sala en un piso que no existe no sale
+        XCTAssertTrue(FloorPlan.floors(in: try stateWithRooms([["name": "X", "floor": 7]]), project: "awesome-gb")
+            .allSatisfy(\.machineRooms.isEmpty))
+    }
+
+    func testAgentPerProjectRoomsWin() throws {
+        let unit: JSONValue = ["provider": "github", "repo": "o/solo", "project": "awesome-gb", "light": "green", "runs": []]
+        let solo: JSONValue = ["name": "Solo", "floor": 1, "listeners": [], "automations": [], "subscriptions": [], "rack": [unit]]
+        let fs = FloorPlan.floors(in: try stateWithRooms([Self.principal], rooms: [solo]), project: "awesome-gb")
+        XCTAssertEqual(fs.map { $0.machineRooms.map(\.name) }, [[], ["Solo"]])
+        XCTAssertEqual(fs[1].machineRooms.first?.rack.map(\.repo), ["o/solo"])
+        // agente anterior: una sola `machine_room` (en su `floor`)
+        let old: JSONValue = ["floor": 0, "listeners": [], "automations": [], "subscriptions": [], "rack": [unit]]
+        let fo = FloorPlan.floors(in: try stateWithRooms(single: old), project: "awesome-gb")
+        XCTAssertEqual(fo.map(\.machineRooms.count), [1, 0])
+        XCTAssertEqual(FloorPlan.floors(in: try stateWithRooms(single: .null), project: "awesome-gb").map(\.machineRooms.count), [0, 0])
+    }
+
+    func testMachineRoomsLayoutCabinetsConsolesAndRows() throws {
+        let f = FloorPlan.floors(in: try stateWithRooms([Self.principal, Self.docs(floor: 0)]), project: "awesome-gb")[0]
         let l = FloorLayout(plan: f)
-        let m = try XCTUnwrap(l.machine)
-        XCTAssertEqual(m.cabinets.map(\.id), ["rack:github:o/main", "rack:github:o/docs"])
-        XCTAssertEqual(m.console.id, FloorLayout.consoleID)
-        XCTAssertEqual(l.spots.filter(\.isMachine).map(\.id), ["rack:github:o/main", "rack:github:o/docs", "machine"])
-        XCTAssertEqual(m.y0, l.rooms[0].y0, "en la misma fila que los departamentos")
+        XCTAssertEqual(l.machines.map(\.index), [0, 1])
+        let m = l.machines[0], n = l.machines[1]
+        XCTAssertEqual(m.cabinets.map(\.id), ["rack:0:github:o/main", "rack:0:github:o/docs"])
+        XCTAssertEqual(m.console.id, FloorLayout.consoleID(0))
+        XCTAssertEqual(n.cabinets.map(\.id), ["rack:1:github:o/docs"], "el mismo repo puede estar en dos salas: ids distintos")
+        XCTAssertEqual(l.spots.filter(\.isMachine).map(\.id),
+                       ["rack:0:github:o/main", "rack:0:github:o/docs", "machine:0", "rack:1:github:o/docs", "machine:1"])
+        XCTAssertEqual(l.spots.filter(\.isMachine).map(\.room), [-1, -1, -1, -2, -2])
+        XCTAssertEqual(m.y0, l.rooms[0].y0, "la primera en la misma fila que los departamentos")
         XCTAssertGreaterThan(m.x0, l.rooms[1].x0 + l.rooms[1].w, "después del último departamento")
+        XCTAssertEqual(n.x0, 0, "la segunda pasa a la fila siguiente (3 por fila)")
+        XCTAssertGreaterThan(n.y0, m.y0)
         for c in m.cabinets { XCTAssertTrue(c.cx > m.x0 && c.cx < m.x0 + m.w && c.cy > m.y0 && c.cy < m.y0 + m.d) }
-        XCTAssertGreaterThanOrEqual(l.maxU, m.x0 + m.w - m.y0, "el encuadre incluye la sala")
+        XCTAssertGreaterThanOrEqual(l.maxU, m.x0 + m.w - m.y0, "el encuadre incluye las salas")
         // las luces y los runs no mueven nada: solo cuántos repos hay
         var g = f
-        g.machineRoom?.rack[0].light = .green
-        g.machineRoom?.listeners = []
+        g.machineRooms[0].rack[0].light = .green
+        g.machineRooms[0].listeners = []
         XCTAssertEqual(FloorLayout(plan: g), l)
-        // un piso de tres departamentos manda la sala a la fila siguiente
-        var h = f
-        h.rooms.append(FloorPlan.Room(role: "x", permanent: false, desks: []))
-        let lh = FloorLayout(plan: h)
-        XCTAssertEqual(lh.machine?.x0, 0)
-        XCTAssertGreaterThan(lh.machine?.y0 ?? 0, 0)
+        XCTAssertEqual(f.machineRoom(of: "rack:1:github:o/docs")?.name, "Docs")
+        XCTAssertEqual(f.machineRoom(of: "machine:0")?.name, "Principal")
+        XCTAssertNil(f.machineRoom(of: "machine:2"))
+        XCTAssertNil(f.machineRoom(of: "awesome-gb/0/triage/0"))
+        XCTAssertEqual(FloorLayout.machinePart("rack:3:github:o/x")?.unit, "github:o/x")
+        XCTAssertEqual(FloorLayout.machinePart("rack:3:github:o/x")?.room, 3)
     }
 
     func testMachineRoomAlertsAndLabels() throws {
         guard #available(macOS 26.0, *) else { throw XCTSkip("FloorOfficeView requiere macOS 26") }
-        let f = FloorPlan.floors(in: try stateWithRoom(), project: "awesome-gb")[0]
-        XCTAssertEqual(FloorOfficeView.label(f, "rack:github:o/main"), "main")
-        XCTAssertEqual(FloorOfficeView.label(f, FloorLayout.consoleID), "Sala de máquinas")
+        let f = FloorPlan.floors(in: try stateWithRooms([Self.principal, Self.docs(floor: 0)]), project: "awesome-gb")[0]
+        XCTAssertEqual(FloorOfficeView.label(f, "rack:0:github:o/main"), "main")
+        XCTAssertEqual(FloorOfficeView.label(f, FloorLayout.consoleID(0)), "Principal")
+        XCTAssertEqual(FloorOfficeView.label(f, FloorLayout.consoleID(1)), "Docs")
+        XCTAssertEqual(FloorOfficeView.machineTitle(f, 1), "DOCS")
         let alerts = FloorOfficeView.alerts(f, layout: FloorLayout(plan: f), now: ended)
-        XCTAssertEqual(alerts.last?.id, "rack:github:o/main", "el repo en rojo pide atención")
-        XCTAssertEqual(FloorOfficeView.machineTip(f, FloorLayout.consoleID).visual, .stuck, "listener caído")
+        XCTAssertEqual(alerts.last?.id, "rack:0:github:o/main", "el repo en rojo pide atención")
+        XCTAssertEqual(FloorOfficeView.machineTip(f, FloorLayout.consoleID(0)).visual, .stuck, "listener caído")
+        XCTAssertEqual(FloorOfficeView.machineTip(f, FloorLayout.consoleID(1)).visual, .done, "en la de docs solo t3watch (ok)")
     }
 
-    func testTypedLiveStateMachineRoomMatchesJSON() throws {
-        let json = try stateWithRoom()
+    func testTypedLiveStateMachineRoomsMatchJSON() throws {
+        let json = try stateWithRooms([Self.principal, Self.docs()])
         let live = try XCTUnwrap(LiveState(json: json))
+        XCTAssertEqual(live.projects.first?.office?.machineRooms.map(\.name), ["Principal", "Docs"])
         XCTAssertEqual(FloorPlan.floors(in: live, project: "awesome-gb"), FloorPlan.floors(in: json, project: "awesome-gb"))
     }
 }

@@ -186,13 +186,13 @@ struct FloorRenderer {
         // 1· sombras de las losas
         ctx.drawLayer { l in
             l.addFilter(.blur(radius: 9 * cam.s))
-            for r in layout.rooms + (machineBox.map { [$0] } ?? []) {
+            for r in layout.rooms + machineBoxes {
                 l.fill(castShadow(r.x0 - 2, r.y0 - 2, r.w + 4, r.d + 4, Iso.slabH + 14, z: 0), with: .color(.black.opacity(dark ? 0.55 : 0.20)))
             }
         }
-        // 2· salas (de atrás hacia delante); la de máquinas es una más
-        for r in (layout.rooms + (machineBox.map { [$0] } ?? [])).sorted(by: { ($0.x0 + $0.y0) < ($1.x0 + $1.y0) }) {
-            if r.index == FloorLayout.machineRoomIndex { drawMachineRoom(&ctx, r); continue }
+        // 2· salas (de atrás hacia delante); las de máquinas son una más
+        for r in (layout.rooms + machineBoxes).sorted(by: { ($0.x0 + $0.y0) < ($1.x0 + $1.y0) }) {
+            if let k = FloorLayout.machineSlot(r.index) { drawMachineRoom(&ctx, r, k); continue }
             let ids = layout.spots.filter { $0.room == r.index }.map(\.id)
             let vs = ids.compactMap { looks[$0]??.visual }
             drawRoom(&ctx, r, needs: vs.contains(.needsYou), stuck: vs.contains(.stuck))
@@ -206,12 +206,12 @@ struct FloorRenderer {
             if isLobby { drawGuest(&ctx, sp, lk) } else { drawDesk(&ctx, sp, lk) }
         }
         // 5· etiquetas
-        for r in layout.rooms + (machineBox.map { [$0] } ?? []) {
+        for r in layout.rooms + machineBoxes {
             guard let s = ctx.resolveSymbol(id: "r:\(r.index)") else { continue }
             var g = ctx; g.opacity = 0.9
             g.draw(s, at: P(r.x0 + r.w * 0.5, r.y0, Iso.slabH + Iso.wallH + 16), anchor: .center)
         }
-        for sp in layout.machine?.cabinets ?? [] {
+        for sp in layout.machines.flatMap(\.cabinets) {
             guard let s = ctx.resolveSymbol(id: "m:\(sp.id)") else { continue }
             var g = ctx; g.opacity = 0.85
             let p = P(sp.cx, sp.cy + FloorLayout.cabD / 2, floorZ)
@@ -234,9 +234,9 @@ struct FloorRenderer {
         }
     }
 
-    /// La sala de máquinas como una sala más (para sombras, orden y etiqueta `r:-1`).
-    private var machineBox: FloorLayout.RoomBox? {
-        layout.machine.map { FloorLayout.RoomBox(index: FloorLayout.machineRoomIndex, role: "machine", x0: $0.x0, y0: $0.y0, w: $0.w, d: $0.d) }
+    /// Las salas de máquinas como salas más (para sombras, orden y etiqueta `r:<machineRoomIndex(k)>`).
+    private var machineBoxes: [FloorLayout.RoomBox] {
+        layout.machines.map { FloorLayout.RoomBox(index: FloorLayout.machineRoomIndex($0.index), role: "machine", x0: $0.x0, y0: $0.y0, w: $0.w, d: $0.d) }
     }
 
     // Salas ----------------------------------------------------------------
@@ -415,8 +415,9 @@ struct FloorRenderer {
 
     /// Losa y muros como un departamento; suelo técnico más oscuro. Canto rojo si hay un repo en rojo o un listener caído, ámbar
     /// si falla un script o un webhook, o hay un listener degradado.
-    private func drawMachineRoom(_ ctx: inout GraphicsContext, _ r: FloorLayout.RoomBox) {
-        guard let mr = plan.machineRoom else { return }
+    private func drawMachineRoom(_ ctx: inout GraphicsContext, _ r: FloorLayout.RoomBox, _ k: Int) {
+        guard plan.machineRooms.indices.contains(k) else { return }
+        let mr = plan.machineRooms[k]
         let stuck = mr.worstLight == .red || mr.listeners.contains { $0.state == .down }
         let needs = !mr.failingAutomations.isEmpty || mr.subscriptions.contains(where: \.failing) || mr.listeners.contains { $0.state == .degraded }
         drawRoom(&ctx, r, needs: needs && !stuck, stuck: stuck)
@@ -429,7 +430,7 @@ struct FloorRenderer {
         var gy = r.y0 + 26.0
         while gy < r.y0 + r.d - k { grid.move(to: P(r.x0 + k, gy, z)); grid.addLine(to: P(r.x0 + r.w - k, gy, z)); gy += 26 }
         ctx.stroke(grid, with: .color(ink.opacity(dark ? 0.07 : 0.08)), lineWidth: 0.7)
-        if layout.machine?.cabinets.isEmpty ?? true, let m = layout.machine {
+        if let m = layout.machines.first(where: { $0.index == k }), m.cabinets.isEmpty {
             // rack sin repos: un armario apagado donde irían
             var g = ctx; g.opacity = 0.4
             let x = m.x0 + m.w / 2 - FloorLayout.cabW / 2, y = m.y0 + FloorLayout.pad + 6
@@ -438,9 +439,9 @@ struct FloorRenderer {
     }
 
     private func drawMachineSpot(_ ctx: inout GraphicsContext, _ sp: FloorLayout.Spot) {
-        guard let mr = plan.machineRoom else { return }
-        if sp.id == FloorLayout.consoleID { drawConsole(&ctx, sp, mr) }
-        else if let u = mr.rack.first(where: { FloorLayout.cabinetID($0.id) == sp.id }) { drawCabinet(&ctx, sp, u) }
+        guard let k = FloorLayout.machineSlot(sp.room), let mr = plan.machineRoom(of: sp.id) else { return }
+        if sp.id == FloorLayout.consoleID(k) { drawConsole(&ctx, sp, mr) }
+        else if let u = mr.rack.first(where: { FloorLayout.cabinetID(k, $0.id) == sp.id }) { drawCabinet(&ctx, sp, u) }
     }
 
     /// Armario de un repo, de frente a la cámara (cara +y): rejilla, luz de estado y un led por run (activos primero, parpadean).
