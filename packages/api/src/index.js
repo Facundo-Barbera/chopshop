@@ -26,14 +26,8 @@ export class ChopshopClient {
   }
   events(after = 0, limit = 200) { return this._req("GET", `/events?after=${after}&limit=${limit}`); }
   threads() { return this._req("GET", "/threads"); }
-  leases() { return this._req("GET", "/leases"); }
-  ports() { return this._req("GET", "/ports"); }
   answer(thread_id, choice, request) { return this._req("POST", "/answer", { thread_id, choice, request }); }
   settle(thread_id) { return this._req("POST", "/settle", { thread_id }); }
-  requestLease(args) { return this._req("POST", "/leases/request", args); }
-  releaseLease(args) { return this._req("POST", "/leases/release", args); }
-  touchLease(lease_id) { return this._req("POST", "/leases/touch", { lease_id }); }
   subscribe(args) { return this._req("POST", "/subscriptions", args); }
   unsubscribe(name) { return this._req("DELETE", "/subscriptions/" + encodeURIComponent(name)); }
-  sweep(dry_run = true) { return this._req("POST", "/sweep", { dry_run }); }
 }

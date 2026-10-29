@@ -69,9 +69,7 @@
       "rss_mb": 2600.0,
       "procs": 18,
       "threads_running": 1,
-      "threads_pending": 0,
-      "leases_active": 1,
-      "leases_queued": 1
+      "threads_pending": 0
      }
     ],
     "threads": [
@@ -87,37 +85,6 @@
      }
     ],
     "pending_questions": [],
-    "leases": {
-     "active": [
-      {
-       "id": "L-0001",
-       "kind": "test_server",
-       "project": "proyecto-demo",
-       "worktree": "~/.t3/worktrees/proyecto-demo/lint",
-       "state": "active",
-       "port": 41020,
-       "requested": 1768494000.0,
-       "started": 1768494010.0,
-       "last_used": 1768494570.0
-      }
-     ],
-     "queued": [
-      {
-       "id": "L-0002",
-       "kind": "test_server",
-       "project": "proyecto-demo",
-       "worktree": "~/.t3/worktrees/proyecto-demo/docs",
-       "state": "queued",
-       "requested": 1768494480.0
-      }
-     ],
-     "capacity": {
-      "max_servers": 4,
-      "used": 1,
-      "cpu_pct_used": 88,
-      "ram_avail_mb": 19500
-     }
-    },
     "events": [
      {
       "seq": 11,
@@ -128,17 +95,6 @@
       "body": {
        "thread_id": "sss703",
        "title": "Revisar la configuración del linter"
-      }
-     },
-     {
-      "seq": 10,
-      "ts": 1768494300.0,
-      "machine_id": "host-a",
-      "event": "lease_granted",
-      "project": "proyecto-demo",
-      "body": {
-       "lease_id": "L-0001",
-       "port": 41020
       }
      }
     ],
@@ -947,9 +903,7 @@
       "rss_mb": 6600.0,
       "procs": 41,
       "threads_running": 2,
-      "threads_pending": 1,
-      "leases_active": 0,
-      "leases_queued": 0
+      "threads_pending": 1
      }
     ],
     "threads": [
@@ -993,16 +947,6 @@
       ]
      }
     ],
-    "leases": {
-     "active": [],
-     "queued": [],
-     "capacity": {
-      "max_servers": 2,
-      "used": 0,
-      "cpu_pct_used": 78,
-      "ram_avail_mb": 2900
-     }
-    },
     "events": [
      {
       "seq": 7,

@@ -82,10 +82,6 @@ final class AgentClientTests: XCTestCase {
         XCTAssertNil(a?.body["by"], "solo viaja lo que define el contrato")
         XCTAssertNil(AgentAction.route(type: "answer", payload: ["thread_id": "th-1", "choice": ""]))
         XCTAssertEqual(AgentAction.route(type: "settle", payload: ["thread_id": "th-1"])?.path, "/settle")
-        XCTAssertEqual(AgentAction.route(type: "leaseRelease", payload: ["lease_id": "L1"])?.path, "/leases/release")
-        XCTAssertNil(AgentAction.route(type: "leaseRelease", payload: [:]))
-        XCTAssertEqual(AgentAction.route(type: "leaseTouch", payload: ["lease_id": "L1"])?.path, "/leases/touch")
-        XCTAssertEqual(AgentAction.route(type: "sweep", payload: [:])?.body["dry_run"] as? Bool, true)
         XCTAssertNil(AgentAction.route(type: "rm -rf", payload: [:]))
     }
 
