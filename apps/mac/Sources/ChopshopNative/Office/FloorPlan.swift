@@ -49,6 +49,35 @@ public struct FloorPlan: Equatable, Sendable {
             inheritedFrom = FloorPlan.nonEmpty(o["inheritance"]?["thread_id"]?.string)
             inheritedSummary = FloorPlan.nonEmpty(o["inheritance"]?["summary"]?.string)
         }
+
+        /// Ocupante tipado de un escritorio (`LiveState.Occupant`); su `half_life_s` ya viene resuelto por la proyección.
+        init(_ o: LiveState.Occupant, project: String) {
+            threadID = o.threadID
+            title = FloorPlan.nonEmpty(o.title)
+            role = FloorPlan.nonEmpty(o.role)
+            self.project = project
+            phase = FloorPlan.nonEmpty(o.phase) ?? "running"
+            attention = FloorPlan.nonEmpty(o.attention)
+            since = o.since; endedAt = o.endedAt; touchedAt = o.touchedAt
+            halfLife = o.halfLifeS
+            waitingRole = nil
+            inheritedFrom = FloorPlan.nonEmpty(o.inheritance?["thread_id"]?.string)
+            inheritedSummary = FloorPlan.nonEmpty(o.inheritance?["summary"]?.string)
+        }
+
+        /// Invitado tipado del vestíbulo (`LiveState.LobbyEntry`).
+        init(_ g: LiveState.LobbyEntry) {
+            threadID = g.threadID
+            title = FloorPlan.nonEmpty(g.title)
+            role = nil
+            project = FloorPlan.nonEmpty(g.project)
+            phase = FloorPlan.nonEmpty(g.phase) ?? "running"
+            attention = FloorPlan.nonEmpty(g.attention)
+            since = g.since; endedAt = g.endedAt; touchedAt = g.touchedAt
+            halfLife = g.halfLifeS
+            waitingRole = FloorPlan.nonEmpty(g.waitingRole)
+            inheritedFrom = nil; inheritedSummary = nil
+        }
     }
 
     public struct Lineage: Equatable, Sendable {
@@ -144,6 +173,36 @@ public struct FloorPlan: Equatable, Sendable {
             let c = nonEmpty(g["company"]?.string), p = g["project"]?.string ?? ""
             return (company != nil && c == company) || projects.contains(p)
         }.compactMap { Occupant($0, project: nil, halfLife: defaultHalfLife) }
+        return plan
+    }
+
+    // MARK: - Desde `LiveState` (lo que usa la app: la proyección ya plegada, sin volver al JSON)
+
+    /// Pisos de un proyecto de la proyección viva (vacío si no trae `office`).
+    public static func floors(in state: LiveState, project: String) -> [FloorPlan] {
+        guard let office = state.projects.first(where: { $0.name == project })?.office else { return [] }
+        let hl = office.halfLifeS
+        return office.floors.map { f -> FloorPlan in
+            var plan = FloorPlan(kind: .floor(project: project, index: f.index), company: office.company, name: nonEmpty(f.name), halfLife: hl)
+            plan.rooms = f.rooms.map { r in
+                let desks = r.desks.map { d in
+                    Desk(id: d.id, slot: d.slot, retired: d.retired, occupant: d.occupant.map { Occupant($0, project: project) },
+                         notesPending: d.notesPending, lineage: d.lineage.map { Lineage(thread: $0.threadID, reason: $0.reason) })
+                }
+                return Room(role: r.role, permanent: r.permanent, desks: desks.sorted { $0.slot < $1.slot })
+            }
+            return plan
+        }.sorted { $0.floorIndex < $1.floorIndex }
+    }
+
+    public static func floor(in state: LiveState, project: String, index: Int) -> FloorPlan? {
+        floors(in: state, project: project).first { $0.floorIndex == index }
+    }
+
+    /// Vestíbulo de un edificio desde la proyección viva (mismo filtro que la versión JSON).
+    public static func lobby(in state: LiveState, company: String?, projects: Set<String> = []) -> FloorPlan {
+        var plan = FloorPlan(kind: .lobby, company: company, name: nil, halfLife: defaultHalfLife)
+        plan.lobby = state.lobby.filter { (company != nil && $0.company == company) || projects.contains($0.project) }.map(Occupant.init)
         return plan
     }
 

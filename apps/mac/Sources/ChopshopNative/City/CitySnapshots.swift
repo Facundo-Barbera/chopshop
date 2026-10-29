@@ -21,12 +21,15 @@ struct CityTimelineState {
     let frame: CityTimeline.Frame
     let snapshot: MockSnapshot
     let zoom: CityFocus?
+    /// Reloj del fixture en `t` (semivida de los pisos v3).
+    let now: Date
 
     init(timeline: CityTimeline, t: Double) {
         let f = timeline.frame(at: t)
         let t0: Date = timeline.envelopes.lazy.compactMap { SnapshotMapper.date($0.ts) }.first ?? Date(timeIntervalSince1970: 0)
         frame = f
-        snapshot = SnapshotMapper.snapshot(f.state, now: t0.addingTimeInterval(t))
+        now = t0.addingTimeInterval(t)
+        snapshot = SnapshotMapper.snapshot(f.state, now: now)
         zoom = t >= CityTimeline.zoomStart ? CityFocus(project: timeline.target, p: CityTimeline.zoom(t)) : nil
     }
 
@@ -35,7 +38,8 @@ struct CityTimelineState {
 
     /// La ciudad congelada en `t` (crecimiento y zoom de la cronología).
     func cityView(t: Double) -> CityView {
-        CityView(model: frame.model, lights: frame.lights, snapshot: snapshot, frozenTime: t, growth: t, frozenZoom: zoom, flatChrome: true)
+        CityView(model: frame.model, lights: frame.lights, snapshot: snapshot, state: frame.state, frozenTime: t, frozenNow: now, growth: t,
+                 frozenZoom: zoom, flatChrome: true)
     }
 }
 

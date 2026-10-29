@@ -74,7 +74,7 @@ public struct CityPlaygroundScreen: View {
     /// Estado final de la cronología (todos los pisos, rojo y ámbar), con el reloj real: CityView hace el zoom ella sola.
     private var interactive: some View {
         let s = CityTimelineState(timeline: Self.timeline, t: CityTimeline.zoomStart)
-        return CityView(model: s.frame.model, lights: s.frame.lights, snapshot: s.snapshot)
+        return CityView(model: s.frame.model, lights: s.frame.lights, snapshot: s.snapshot, state: s.frame.state)
     }
 
     // MARK: reloj
