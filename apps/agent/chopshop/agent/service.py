@@ -1,7 +1,8 @@
 """Servicio chopshop-agent: arranque, hilos de fondo y subcomandos `chopshop agent run|status|token|check-config|print-unit`.
 
 `AgentService` ensambla los módulos (colector, T3, eventos) y el servidor HTTP (`server.py`):
-  hilos: muestreo (+ compactación) · sondeo de T3 · mantenimiento (retención de eventos, checkpoint WAL).
+  hilos: muestreo (+ compactación) · sondeo de T3 · GitHub (si `[agent.github] enabled`) · mantenimiento (retención de
+  eventos, checkpoint WAL).
   Un fallo en un hilo se registra (sin repetirlo cada ciclo) y el hilo sigue; `stop()` los para a todos de forma ordenada.
 `run` instala SIGTERM/SIGINT para la parada limpia. Nada aquí habla con systemd salvo `status` (solo lectura, inyectable) y
 `print-unit` solo IMPRIME la unidad: no escribe, no habilita y no arranca nada.
@@ -20,7 +21,7 @@ import threading
 import time
 
 from .. import home, settings
-from . import __version__, collector as collector_mod, config, db, events, server, t3watch
+from . import __version__, collector as collector_mod, config, db, events, github, server, t3watch
 
 log = logging.getLogger("chopshop.agent")
 
@@ -171,6 +172,9 @@ def check_config(cfg, runner=None, which=shutil.which):
             warns.append("agent.t3.%s es una clave vieja que ya no se usa: bórrala de la config" % "/".join(old))
     if not os.path.isdir(cfg.get("projects_root") or ""):
         warns.append("projects_root no existe: %s" % cfg.get("projects_root"))
+    gerrs, gwarns = github.check(cfg, which)
+    errs += gerrs
+    warns += gwarns
     for k, v in (cfg.get("retention") or {}).items():
         if isinstance(v, bool) or not isinstance(v, (int, float)) or v <= 0:
             errs.append("retention.%s debe ser un número > 0 (es %r)" % (k, v))
@@ -194,7 +198,8 @@ class AgentService:
     """Ensambla módulos + servidor + hilos. `start()` → escucha y trabaja; `stop()` → parada ordenada (idempotente)."""
 
     def __init__(self, cfg, conn=None, collector=None, t3=None, runner=None, poster=None,
-                 orchestrator_fn=None, clock=time.time, maint_interval=MAINT_INTERVAL, maint_first=MAINT_FIRST, compact_every=COMPACT_EVERY):
+                 orchestrator_fn=None, clock=time.time, maint_interval=MAINT_INTERVAL, maint_first=MAINT_FIRST, compact_every=COMPACT_EVERY,
+                 gh_runner=None, gh_projects_fn=github.profile_repos):
         self.cfg, self.clock, self.runner, self.poster = cfg, clock, runner, poster
         self.owns_conn = conn is None
         self.conn = conn if conn is not None else db.connect(cfg["db_path"])
@@ -206,6 +211,10 @@ class AgentService:
                                    self.emit, orchestrator_fn, clock)
         self.maint_interval, self.maint_first = maint_interval, maint_first
         self.compact_every = compact_every
+        self.github = None
+        if (cfg.get("github") or {}).get("enabled"):
+            self.github = github.GitHubPoller(self.conn, cfg, self.emit, runner=gh_runner, clock=clock,
+                                              projects_fn=gh_projects_fn)
         self.stop_event = threading.Event()
         self.servers, self.threads, self._serving = [], [], []
         self._stopped = False
@@ -239,6 +248,8 @@ class AgentService:
             self._spawn("sampler", self._run_sampler)
             if self.cfg.get("t3_enabled", True):
                 self._spawn("t3", self._loop, "t3", self._poll_once, lambda: self.cfg.get("t3_poll_interval") or 5)
+            if self.github is not None:
+                self._spawn("github", self._loop, "github", self.github.poll_once, self.github.next_delay)
             self._spawn("maintenance", self._maintenance)
         for s in self.servers:
             self._serving.append(s)

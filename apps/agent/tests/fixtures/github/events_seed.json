@@ -1,0 +1,7 @@
+[
+  {"id": "40000000002", "type": "PushEvent", "actor": {"login": "duena"},
+   "payload": {"ref": "refs/heads/main", "size": 1, "before": "aaaaaaaaaaaaaaaa", "head": "bbbbbbbbbbbbbbbb",
+               "commits": [{"sha": "bbbbbbbbbbbbbbbb", "message": "Arranque\n\ndetalle"}]}},
+  {"id": "40000000001", "type": "IssuesEvent", "actor": {"login": "duena"},
+   "payload": {"action": "opened", "issue": {"number": 1, "title": "Viejo", "state": "open", "html_url": "https://github.com/Acme/Widget/issues/1", "labels": []}}}
+]
