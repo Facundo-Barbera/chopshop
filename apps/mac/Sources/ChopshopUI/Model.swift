@@ -42,7 +42,7 @@ enum NavItem: Hashable {
 
 /// Estado de la app + puente con React. La app es un cliente puro de la API de los agentes (docs/agent-api.md):
 /// sondea `GET /snapshot` de cada agente configurado y entrega los resultados crudos a la UI web (mensaje `agents`),
-/// que los combina. Las acciones de la UI (responder, settle, leases…) se traducen a POST de la API.
+/// que los combina. Las acciones de la UI (responder y settle de hilos pendientes) se traducen a POST de la API; el resto es de solo lectura.
 /// No ejecuta ningún proceso local ni toca T3: todo pasa por el agente.
 @MainActor
 final class AppModel: ObservableObject {
@@ -197,7 +197,7 @@ final class AppModel: ObservableObject {
         web?.evaluateJavaScript("window.chopshop && window.chopshop.receive(\(js))", completionHandler: nil)
     }
 
-    private static let actionTypes: Set<String> = ["answer", "settle", "leaseRequest", "leaseRelease", "leaseTouch", "sweep"]
+    private static let actionTypes: Set<String> = ["answer", "settle"]
 
     func handle(_ body: [String: Any]) {
         let type = body["type"] as? String ?? ""

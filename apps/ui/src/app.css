@@ -301,7 +301,6 @@ pre { margin: 0; padding: 10px 12px; border-radius: 10px; background: rgba(0,0,0
 .banner-stack { display: grid; gap: 0; }
 .page.center h3 { font-size: 18px; }
 .page.center .muted, .page.center .note { max-width: 560px; text-align: center; }
-.pad-b { padding-bottom: 8px; }
 .tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; margin-bottom: 4px; }
 .tbl th { text-align: left; color: var(--muted); font-weight: 600; font-size: 11px; letter-spacing: .05em; text-transform: uppercase; padding: 4px 8px 4px 0; }
 .tbl td { padding: 4px 8px 4px 0; border-top: 1px solid var(--line); max-width: 160px; }

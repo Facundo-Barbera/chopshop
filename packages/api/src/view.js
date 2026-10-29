@@ -152,12 +152,12 @@ function agentEvent(e, label, name, batchOfThread) {
 
 /**
  * `rows`: [{ name, label, status, error, snapshot|null, stale, age }] (ver createStore).
- * Devuelve { state, machines, agents, leases }: `state` tiene la forma que ya consumían las vistas
+ * Devuelve { state, machines, agents }: `state` tiene la forma que ya consumían las vistas
  * (batches, events, graphs, inbox, hosts, profiles, subscriptions); `machines` alimenta la vista Máquinas.
  */
 export function buildView(rows, history = createHistory()) {
   const state = { generated: "", hosts: {}, profiles: [], subscriptions: {}, inbox: { pending: [], results: [], watcher: null }, batches: [], events: [], graphs: [] };
-  const machines = [], agents = [], leases = [];
+  const machines = [], agents = [];
   const profiles = new Set();
   const withSnap = rows.filter((r) => r.snapshot);
   const known = new Set();
@@ -188,8 +188,7 @@ export function buildView(rows, history = createHistory()) {
     state.batches.push(...mine);
     arr(snap.projects).forEach((p) => profiles.add(p.name));
     Object.assign(state.subscriptions, snap.subscriptions || {});
-    const cap = (snap.leases && snap.leases.capacity) || {};
-    if (!state.hosts[label]) state.hosts[label] = { cap: cap.max_servers == null ? null : cap.max_servers, purpose: "", transport: "agent" };
+    if (!state.hosts[label]) state.hosts[label] = { cap: null, purpose: "", transport: "agent" };
   }
   // eventos: los del orquestador (bitácora de lotes) y los del agente (hilos, T3, métricas), más nuevos primero
   const evs = [];
@@ -210,18 +209,15 @@ export function buildView(rows, history = createHistory()) {
     agents.push({ name: r.name, label: r.label, status: r.status, error: r.error || "", message: statusMessage(r.status, r.error), stale: !!r.stale, age: r.age || 0, info, warning });
     const h = history.get(r.label);
     const m = (snap && snap.machine) || {};
-    const lz = (snap && snap.leases) || {};
-    for (const l of [...arr(lz.active), ...arr(lz.queued)]) leases.push({ ...l, machine: r.label, agent: r.name });
     machines.push({
       name: r.label, agent: r.name, ok, stale: !!r.stale, reason: ok ? "" : statusMessage(r.status, r.error), os: m.os || "", role: "",
       cpus: num(m.cpus), load: arr(m.load), ramTotalMB: num(m.ram_total_mb), ramAvailMB: num(m.ram_avail_mb), swapUsedMB: num(m.swap_used_mb),
       disk: m.disk_total_gb ? `${num(m.disk_used_gb)}/${num(m.disk_total_gb)} GB` : "", diskPct: num(m.disk_pct), uptime: num(m.uptime),
       cpu: h.cpu, ram: h.ram, load1: h.load1, run: h.run,
-      apps: arr(snap && snap.apps), projects: arr(snap && snap.projects),
-      leases: { active: arr(lz.active), queued: arr(lz.queued), capacity: lz.capacity || {} }, info,
+      apps: arr(snap && snap.apps), projects: arr(snap && snap.projects), info,
     });
   }
-  return { state, machines, agents, leases, hasData: withSnap.length > 0 };
+  return { state, machines, agents, hasData: withSnap.length > 0 };
 }
 
 /**

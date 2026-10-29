@@ -8,7 +8,7 @@ const machine = (o = {}) => ({ cpus: 8, load: [1.5, 1, 0.8], cpu_pct: 20, ram_to
   disk_used_gb: 100, disk_total_gb: 400, disk_pct: 25, os: "Linux", uptime: 1000, ...o });
 const snap = (id, o = {}) => ({
   api_version: 1, machine_id: id, ts: NOW, generated: "2026-10-28T09:40:00-0600", machine: machine(), apps: [], projects: [], threads: [],
-  pending_questions: [], leases: { active: [], queued: [], capacity: { max_servers: 4, used: 0 } }, events: [], subscriptions: {}, orchestrator: null,
+  pending_questions: [], events: [], subscriptions: {}, orchestrator: null,
   agent: { version: "0.6.0", uptime: 5, t3_ok: true, last_sample_age: 1, last_poll_age: 1 }, ...o,
 });
 const thread = (id, o = {}) => ({ thread_id: id, project: "proyecto-demo", title: "Hilo " + id, status: "running", settled: false, pending: [], worktree: "/wt/" + id, updated: NOW - 60, ...o });
@@ -44,7 +44,7 @@ test("normQuestion: forma del orquestador y forma cruda de T3", () => {
 test("una sola máquina: lotes del orquestador + lote sintético con los hilos que solo ve el agente", () => {
   const s = snap("host-a", {
     orchestrator: orch(),
-    projects: [{ name: "proyecto-demo", cpu_pct: 10, rss_mb: 100, procs: 3, threads_running: 2, threads_pending: 1, leases_active: 0, leases_queued: 0 }],
+    projects: [{ name: "proyecto-demo", cpu_pct: 10, rss_mb: 100, procs: 3, threads_running: 2, threads_pending: 1 }],
     threads: [thread("th-1"), thread("th-2", { status: "waiting", pending: [{}] }), thread("th-3", { status: "completed", settled: true, updated: NOW - 100 }),
       thread("th-viejo", { status: "completed", updated: NOW - 3 * 86400 })],
     pending_questions: [{ thread_id: "th-2", project: "proyecto-demo", request_id: "rq-1", questions: [{ question: "¿Continuar?", options: [{ label: "Sí" }, { label: "No" }] }] }],
@@ -73,8 +73,7 @@ test("permisos pendientes (sin pregunta) se cuentan como approvals", () => {
 
 test("dos máquinas se combinan: etiquetas por machine_id, eventos ordenados y mezclados", () => {
   const a = snap("host-a", { orchestrator: orch(), events: [{ seq: 1, ts: NOW - 10, machine_id: "host-a", event: "thread_started", project: "proyecto-demo", body: { thread_id: "th-1", title: "x" } }] });
-  const b = snap("host-b", { threads: [thread("th-b1")], events: [{ seq: 7, ts: NOW, machine_id: "host-b", event: "thread_done", project: "proyecto-demo", body: { thread_id: "th-b1", status: "completed" } }],
-    leases: { active: [{ id: "L1", kind: "test_server", project: "proyecto-demo", state: "active", port: 41000 }], queued: [{ id: "L2", kind: "test_server", project: "proyecto-demo", state: "queued" }], capacity: { max_servers: 2, used: 1 } } });
+  const b = snap("host-b", { threads: [thread("th-b1")], events: [{ seq: 7, ts: NOW, machine_id: "host-b", event: "thread_done", project: "proyecto-demo", body: { thread_id: "th-b1", status: "completed" } }] });
   const v = createStore().update([{ name: "mac-host-a", status: "ok", snapshot: a }, { name: "host-b", status: "ok", snapshot: b }]);
   assert.equal(v.state.multi, true);
   assert.deepEqual(v.machines.map((m) => [m.name, m.agent, m.ok]), [["host-a", "mac-host-a", true], ["host-b", "host-b", true]]);
@@ -82,8 +81,9 @@ test("dos máquinas se combinan: etiquetas por machine_id, eventos ordenados y m
   assert.equal(v.state.events[0].batch, "host-b/proyecto-demo", "el evento de hilo apunta al lote sintético");
   assert.equal(v.state.events[0].machine, "host-b");
   assert.ok(v.state.events.some((e) => e.event === "task_done" && e.machine === "host-a"));
-  assert.deepEqual(v.leases.map((l) => [l.id, l.machine, l.agent]), [["L1", "host-b", "host-b"], ["L2", "host-b", "host-b"]]);
-  assert.equal(v.state.hosts["host-b"].cap, 2, "el host del agente sin orquestador toma el tope de capacidad");
+  assert.equal(v.state.hosts["host-b"].cap, null, "el host del agente sin orquestador no tiene tope propio");
+  assert.equal("leases" in v, false);
+  assert.equal("leases" in v.machines[1], false);
   assert.equal(v.state.hosts["host-a"].cap, 2);
 });
 
@@ -133,7 +133,7 @@ test("historial: una muestra por sondeo, acotado, y precarga con seed", () => {
 });
 
 test("máquina: campos de la vista Máquinas desde snapshot.machine, apps y proyectos", () => {
-  const s = snap("host-a", { apps: [{ name: "node", cpu_pct: 12, rss_mb: 800, procs: 14, cgroups: [] }], projects: [{ name: "proyecto-demo", cpu_pct: 3, rss_mb: 9, procs: 1, threads_running: 1, threads_pending: 0, leases_active: 0, leases_queued: 0 }] });
+  const s = snap("host-a", { apps: [{ name: "node", cpu_pct: 12, rss_mb: 800, procs: 14, cgroups: [] }], projects: [{ name: "proyecto-demo", cpu_pct: 3, rss_mb: 9, procs: 1, threads_running: 1, threads_pending: 0 }] });
   const m = createStore().update([{ name: "a", status: "ok", snapshot: s }]).machines[0];
   assert.equal(m.cpus, 8);
   assert.equal(m.ramTotalMB, 32768);

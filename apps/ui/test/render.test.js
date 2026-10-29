@@ -55,14 +55,13 @@ test("Preguntas incluye las del orquestador y las de hilos que solo ve el agente
   assert.equal(c.questions.length >= 2, true);
 });
 
-test("Máquinas: apps, proyectos y servidores de prueba con «Liberar»", () => {
+test("Máquinas: apps y proyectos, de solo lectura (sin servidores de prueba)", () => {
   const { v, snap } = base();
   const a = render(ui.Machines, { metrics: v.machines, snap, sel: "host-a", pick() {} });
   assert.match(a, /Por app/);
   assert.match(a, /claude/);
-  assert.match(a, /Servidores de prueba/);
-  assert.match(a, /:41020/);
-  assert.match(a, /Liberar/);
+  assert.doesNotMatch(a, /Servidores de prueba/);
+  assert.doesNotMatch(a, /Liberar/);
   const b = render(ui.Machines, { metrics: v.machines, snap, sel: "host-b", pick() {} });
   assert.match(b, /chrome/);
   assert.match(b, /app-ejemplo/);

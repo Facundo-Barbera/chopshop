@@ -1,6 +1,6 @@
 # Construir y usar Chopshop.app (macOS)
 
-`Chopshop.app` es un **cliente puro** de la API del agente ([`agent-api.md`](agent-api.md)): se conecta por Tailscale al `chopshop-agent` de cada máquina, pinta su estado y envía las acciones (responder, cerrar hilos, liberar servidores de prueba). No lleva Python ni motor embebido y no habla con T3 directamente.
+`Chopshop.app` es un **cliente puro** de la API del agente ([`agent-api.md`](agent-api.md)): se conecta por Tailscale al `chopshop-agent` de cada máquina, pinta su estado y envía las únicas acciones que tiene (responder y cerrar hilos pendientes); todo lo demás es de solo lectura. No lleva Python ni motor embebido y no habla con T3 directamente.
 
 Todos los nombres, IPs y rutas de esta guía son de ejemplo (`host-a`, `100.64.0.10`...).
 
@@ -61,7 +61,7 @@ También se puede configurar por entorno (tiene prioridad sobre el archivo): `CH
 
 ### Token del agente
 
-Las lecturas (`GET`) se autorizan por identidad Tailscale; las **acciones** (`POST`: responder, `settle`, servidores de prueba) exigen además el token del agente (o ser el propio dueño por origen local). El token es el contenido del archivo `agent.token_file` del agente (por defecto `~/.chopshop/agent/token`). Cópialo a este Mac por `scp`, con permisos restrictivos:
+Las lecturas (`GET`) se autorizan por identidad Tailscale; las **acciones** (`POST`: responder y `settle`) exigen además el token del agente (o ser el propio dueño por origen local). El token es el contenido del archivo `agent.token_file` del agente (por defecto `~/.chopshop/agent/token`). Cópialo a este Mac por `scp`, con permisos restrictivos:
 
 ```sh
 mkdir -p ~/.chopshop/agent

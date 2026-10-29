@@ -57,18 +57,6 @@ struct AgentAction {
         case "settle":
             guard str("thread_id") != nil else { return nil }
             return AgentAction(method: "POST", path: "/settle", body: copy(["thread_id"]))
-        case "leaseRequest":
-            guard str("project") != nil else { return nil }
-            return AgentAction(method: "POST", path: "/leases/request", body: copy(["project", "worktree", "thread_id", "kind", "cmd", "wait_seconds"]))
-        case "leaseRelease":
-            let b = copy(["lease_id", "worktree", "thread_id", "project"])
-            guard !b.isEmpty else { return nil }
-            return AgentAction(method: "POST", path: "/leases/release", body: b)
-        case "leaseTouch":
-            guard str("lease_id") != nil else { return nil }
-            return AgentAction(method: "POST", path: "/leases/touch", body: copy(["lease_id"]))
-        case "sweep":
-            return AgentAction(method: "POST", path: "/sweep", body: ["dry_run": (payload["dry_run"] as? Bool) ?? true])
         default:
             return nil
         }

@@ -34,9 +34,6 @@ const EVENT_META = {
   thread_settled: { label: "Hilo cerrado", tone: "teal", icon: "◆" },
   t3_unreachable: { label: "T3 no responde", tone: "orange", icon: "!" },
   machine_alert: { label: "Alerta de máquina", tone: "orange", icon: "!" },
-  lease_granted: { label: "Servidor de pruebas activo", tone: "mint", icon: "▲" },
-  lease_queued: { label: "Servidor en cola", tone: "gray", icon: "…" },
-  lease_released: { label: "Servidor liberado", tone: "gray", icon: "▼" },
 };
 
 // ---------- niveles de reacción ----------
@@ -965,8 +962,6 @@ function alertsFor(m) {
   const i = m.info || {};
   if (i.t3_ok === false) out.push({ tone: "orange", text: "T3 no responde", sub: "el agente no logra hablar con el servidor de T3 de esta máquina" });
   if (i.last_sample_age > 60) out.push({ tone: "orange", text: "Muestreo atrasado", sub: `última muestra hace ${Math.round(i.last_sample_age)} s` });
-  const cap = m.leases && m.leases.capacity;
-  if (m.leases && m.leases.queued.length) out.push({ tone: "orange", text: "Servidores de prueba en cola", sub: `${m.leases.queued.length} esperando capacidad${cap && cap.max_servers != null ? ` (máx. ${cap.max_servers})` : ""}` });
   return out;
 }
 
@@ -994,54 +989,7 @@ function UsageTable({ rows, cols }) {
 }
 
 const APP_COLS = [["Proc.", (r) => r.procs]];
-const PROJECT_COLS = [["Hilos", (r) => `${r.threads_running || 0}${r.threads_pending ? ` · ${r.threads_pending}?` : ""}`], ["Serv.", (r) => `${r.leases_active || 0}${r.leases_queued ? ` +${r.leases_queued}` : ""}`]];
-
-/** Servidores de prueba (leases) de una máquina; "Liberar" hace POST /leases/release. */
-function Leases({ m }) {
-  const [busy, setBusy] = useState(null);
-  const [msg, setMsg] = useState(null);
-  const rows = [...m.leases.active, ...m.leases.queued];
-  const cap = m.leases.capacity || {};
-  const release = async (l) => {
-    setBusy(l.id);
-    setMsg(null);
-    try {
-      const r = await request("leaseRelease", { agent: m.agent, lease_id: l.id });
-      setMsg(r.payload);
-    } catch (e) {
-      setMsg({ ok: false, message: String(e.message || e) });
-    }
-    setBusy(null);
-  };
-  return (
-    <>
-      {cap.max_servers != null && <p className="meta pad-b">{cap.used || 0} de {cap.max_servers} servidores en uso{cap.ram_avail_mb != null ? ` · ${mb(cap.ram_avail_mb)} de RAM libres` : ""}</p>}
-      {rows.length === 0 ? (
-        <PaneEmpty mark="◦" title="Sin servidores de prueba" text="Los hilos los piden por MCP (chopshop_request_test_server)." />
-      ) : (
-        <ul className="list">
-          {rows.map((l) => (
-            <li key={l.id}>
-              <div className="row static">
-                <div className="row-top">
-                  <Chip tone={l.state === "active" ? "green" : "gray"} pulse={l.state === "active"}>{l.state === "active" ? "Activo" : "En cola"}</Chip>
-                  <span className="grow" />
-                  <span className="meta">{l.kind === "port" ? "puerto" : "servidor"}{l.port ? ` · :${l.port}` : ""}</span>
-                </div>
-                <div className="row-title">{l.project}</div>
-                {l.worktree && <div className="meta ell" title={l.worktree}>{l.worktree}</div>}
-                <div className="detail-foot">
-                  <button className="pill small" disabled={busy === l.id} onClick={() => release(l)}>{busy === l.id ? <span className="spin" /> : null}Liberar</button>
-                </div>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-      {msg && <p className={`note ${msg.ok ? "ok" : "err"}`}>{msg.ok ? "Liberado." : "Error: " + msg.message}</p>}
-    </>
-  );
-}
+const PROJECT_COLS = [["Hilos", (r) => `${r.threads_running || 0}${r.threads_pending ? ` · ${r.threads_pending}?` : ""}`]];
 
 function Machines({ metrics, snap, sel, pick }) {
   const ms = metrics || [];
@@ -1105,7 +1053,6 @@ function Machines({ metrics, snap, sel, pick }) {
                 </ul>
               )}
             </Pane>
-            <Pane title="Servidores de prueba" count={m.leases.active.length + m.leases.queued.length || null} className="short"><Leases key={m.name} m={m} /></Pane>
             <Pane title="Hilos en esta máquina" count={threads.length || null} flush>
               {threads.length === 0 ? (
                 <PaneEmpty mark="◦" title="Ningún hilo activo" text={`${doneN} tareas completadas aquí en total`} />
