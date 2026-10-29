@@ -152,6 +152,9 @@ class TestProvider(Base):
         self.assertEqual(st["url"], "https://github.com/" + R)
         self.assertEqual(base.light(st), "amber")
         n = len(self.gh.calls)
+        self.assertEqual(p.repo_status(R), st)                          # recién pedido: sin preguntar
+        self.assertEqual(len(self.gh.calls), n)
+        self.clock.t += 60
         st2 = p.repo_status(R)                                          # todo 304: mismo estado desde meta
         self.assertEqual(st2, st)
         self.assertEqual(len(self.gh.calls), n + 3)
@@ -190,8 +193,10 @@ class TestRack(Base):
         self.assertEqual(body, {"provider": "github", "repo": R, "project": "widget", "kind": "main", "label": "Widget",
                                 "light": "green", "default_branch": "main", "ci": "success",
                                 "url": "https://github.com/" + R, "error": None, "active_runs": 0, "pr_failing": []})
+        self.clock.t += 60
         self.assertEqual(rk.poll_once()["emitted"], 0)                  # nada cambió (304)
         self.gh.repo(R, [run(2, conclusion="failure"), run(1)], etag="2")
+        self.clock.t += 60
         rk.poll_once()
         self.assertEqual(len(self.emitted), 2)
         self.assertEqual((self.emitted[1][2]["light"], self.emitted[1][3]), ("red", "warn"))
@@ -206,6 +211,7 @@ class TestRack(Base):
         self.assertEqual([b["light"] for _t, _p, b, _s in self.emitted], ["green", "green"])
         self.gh.routes.clear()
         self.gh.fail = [(429, {"Retry-After": "300"})]
+        self.clock.t += 60
         n = len(self.gh.calls)
         res = rk.poll_once()
         self.assertEqual(len(self.gh.calls), n + 1)                     # al segundo repo ya no se le pregunta

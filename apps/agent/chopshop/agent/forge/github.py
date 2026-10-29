@@ -2,11 +2,18 @@
 límites, ETag y limpieza de credenciales) más `actions/runs` para el rack.
 
 - `poll_events(repo, project)`: delega en `GitHubPoller._poll_repo` (emite los `github.*` de siempre; cursores `gh_*`).
-- `poll_runs(repo, branch)`: `GET /repos/{r}/actions/runs` con `If-None-Match`; la última respuesta se guarda en `meta`
-  (`forge_etag:github:<repo>:runs[@rama]` + `forge_body:…`, ya normalizada) para que un 304 devuelva lo mismo sin gastar cuota.
+- `poll_runs(repo, branch)`: `GET /repos/{r}/actions/runs` vía `RunsFeed` (abajo) y normalizado con `map_run`.
 - `repo_status(repo)`: `GET /repos/{r}` (rama por defecto, también con ETag) + runs de todas las ramas + runs de la rama por
   defecto -> `{default_branch, url, ci, active, pr_failing, error: None}`.
-Los errores de `gh`/HTTP salen como `ProviderError` (404 no degrada: solo ese repo queda gris)."""
+Los errores de `gh`/HTTP salen como `ProviderError` (404 no degrada: solo ese repo queda gris).
+
+`RunsFeed` es el único sondeo de `actions/runs` y `/repos/{r}` del agente: lo comparten el rack (este adaptador) y el hilo
+`actions` (`agent/actions.py`), así un repo cuesta una petición por ronda y no dos con ETags cruzados. Cada recurso lleva su
+ETag en `meta` (`forge_etag:<clave>`) y su última respuesta ya recortada (`forge_body:<clave>`, campos crudos de GitHub que
+usan ambos consumidores) para servir el 304; una respuesta de hace menos de `max_age` s se reutiliza sin preguntar. La
+versión devuelta es el ETag: igual = nada cambió desde la última 200 (lo que antes era el 304 de cada consumidor)."""
+import threading
+import time
 from urllib.parse import quote
 
 from .. import db, github as gh
@@ -14,6 +21,10 @@ from . import base
 
 RUNS_PAGE = 50                    # runs recientes de todas las ramas (en curso + PRs)
 BRANCH_RUNS_PAGE = 20             # runs de la rama por defecto (CI)
+
+
+RUN_KEYS = ("id", "name", "path", "workflow_id", "display_title", "status", "conclusion", "event", "head_branch",
+            "head_sha", "html_url", "run_attempt", "created_at", "updated_at")
 
 
 def map_run(r):
@@ -27,9 +38,22 @@ def map_run(r):
             "created_at": r.get("created_at"), "updated_at": r.get("updated_at")}
 
 
-def _runs(data):
+def trim_runs(data):
+    """Respuesta de `actions/runs` -> lista de runs crudos con solo lo que usan `map_run` y `actions.map_run`."""
     runs = data.get("workflow_runs") if isinstance(data, dict) else None
-    return [map_run(r) for r in runs or [] if isinstance(r, dict) and r.get("id") is not None]
+    out = []
+    for r in runs or []:
+        if isinstance(r, dict) and r.get("id") is not None:
+            t = {k: r.get(k) for k in RUN_KEYS}
+            t["actor"] = {"login": gh._login(r.get("actor"))} if gh._login(r.get("actor")) else None
+            t["triggering_actor"] = ({"login": gh._login(r.get("triggering_actor"))}
+                                     if gh._login(r.get("triggering_actor")) else None)
+            out.append(t)
+    return out
+
+
+def _runs(raw):
+    return [map_run(r) for r in raw or [] if isinstance(r, dict) and r.get("id") is not None]
 
 
 def _repo(data):
@@ -37,15 +61,64 @@ def _repo(data):
     return {"default_branch": d.get("default_branch"), "html_url": d.get("html_url")}
 
 
+class RunsFeed:
+    """Caché compartida (entre hilos) de `actions/runs` y `/repos/{r}` con ETag. `client` = el `GitHubPoller` de quien
+    pregunta (su `gh`, su `X-Poll-Interval`); los errores salen tal cual (`github.GitHubError`)."""
+
+    def __init__(self, clock=time.time, max_age=30.0):
+        self.clock, self.max_age = clock, float(max_age)
+        self.memo = {}                # clave -> (instante, etag, datos) de la última respuesta (200 o 304)
+        self._lock = threading.Lock()
+        self._locks = {}              # clave -> Lock: dos hilos no piden lo mismo a la vez
+
+    def _key_lock(self, key):
+        with self._lock:
+            return self._locks.setdefault(key, threading.Lock())
+
+    def fetch(self, client, key, path, shrink):
+        """-> (datos recortados, versión). GET con ETag salvo que la última respuesta tenga menos de `max_age` s."""
+        with self._key_lock(key):
+            now = self.clock()
+            hit = self.memo.get(key)
+            if hit and 0 <= now - hit[0] < self.max_age:
+                return hit[2], hit[1]
+            k_etag, k_body = "forge_etag:" + key, "forge_body:" + key
+            body = client._get(k_body)
+            etag = client._get(k_etag) if body is not None else None
+            status, headers, data = client._api(path, etag)
+            if status == 304:
+                out = db.jload(body, None)
+            else:
+                out, etag = shrink(data), headers.get("etag")
+                client._set({k_etag: etag, k_body: db.jdump(out)})
+            self.memo[key] = (now, etag, out)
+            return out, etag
+
+    def runs(self, client, repo, branch=None):
+        """Runs crudos recortados (los más nuevos primero) de `repo` (slug canónico); `branch` filtra por rama."""
+        path = "/repos/%s/actions/runs?per_page=%d" % (repo, BRANCH_RUNS_PAGE if branch else RUNS_PAGE)
+        if branch:
+            path += "&branch=" + quote(branch, safe="")
+        key = "github:%s:runs/raw%s" % (repo, "@" + branch if branch else "")   # `/raw`: el `:runs` viejo era otro formato
+        out, version = self.fetch(client, key, path, trim_runs)
+        return out or [], version
+
+    def repo(self, client, repo):
+        """`{default_branch, html_url}` de `repo`."""
+        out, _v = self.fetch(client, "github:%s:repo" % repo, "/repos/%s" % repo, _repo)
+        return out or {}
+
+
 class GitHubProvider(base.ForgeProvider):
     name = "github"
 
-    def __init__(self, conn, cfg, emit=None, runner=None, clock=None, projects_fn=None):
+    def __init__(self, conn, cfg, emit=None, runner=None, clock=None, projects_fn=None, feed=None):
         kw = {"runner": runner, "projects_fn": projects_fn}
         if clock is not None:
             kw["clock"] = clock
         self.conn = conn
         self.client = gh.GitHubPoller(conn, cfg, emit or (lambda *a: None), **kw)
+        self.feed = feed or RunsFeed(clock=self.client.clock)
 
     def norm_repo(self, value):
         return gh.norm_repo(value)
@@ -53,34 +126,20 @@ class GitHubProvider(base.ForgeProvider):
     def repo_url(self, repo):
         return "https://github.com/%s" % repo
 
-    def _api(self, path, etag=None):
+    def _feed(self, method, *args):
         try:
-            return self.client._api(path, etag)
+            return getattr(self.feed, method)(self.client, *args)
         except gh.GitHubError as e:
             raise base.ProviderError(e.kind, e.status, e.wait, degraded=e.kind not in ("not_found",))
-
-    def _cached(self, key, path, shrink):
-        """GET con ETag. `shrink(datos)` de la última 200 vive en `meta` (`forge_body:<key>`) para servir el 304."""
-        k_etag, k_body = "forge_etag:" + key, "forge_body:" + key
-        body = self.client._get(k_body)
-        status, headers, data = self._api(path, self.client._get(k_etag) if body is not None else None)
-        if status == 304:
-            return db.jload(body, None)
-        out = shrink(data)
-        self.client._set({k_etag: headers.get("etag"), k_body: db.jdump(out)})
-        return out
 
     def poll_events(self, repo, project):
         return self.client._poll_repo(repo, project, {"seeded": []})
 
     def poll_runs(self, repo, branch=None):
-        path = "/repos/%s/actions/runs?per_page=%d" % (repo, BRANCH_RUNS_PAGE if branch else RUNS_PAGE)
-        if branch:
-            path += "&branch=" + quote(branch, safe="")
-        return self._cached("github:%s:runs%s" % (repo, "@" + branch if branch else ""), path, _runs) or []
+        return _runs(self._feed("runs", repo, branch)[0])
 
     def repo_status(self, repo):
-        meta = self._cached("github:%s:repo" % repo, "/repos/%s" % repo, _repo) or {}
+        meta = self._feed("repo", repo)
         branch = meta.get("default_branch")
         runs = self.poll_runs(repo)
         mine = self.poll_runs(repo, branch) if branch else []

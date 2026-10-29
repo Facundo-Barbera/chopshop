@@ -25,7 +25,7 @@ import time
 from .. import engine as engine_mod, events as legacy_events, graph, home, settings, state
 from . import __version__, actions as actions_mod, automations as automations_mod, collector as collector_mod, config, db, envelope, \
     events, github, halflife, listeners, notes, office as office_mod, pairing, roles as roles_mod, server, t3watch
-from .forge import rack as forge_rack
+from .forge import github as forge_github, rack as forge_rack
 
 log = logging.getLogger("chopshop.agent")
 
@@ -268,14 +268,17 @@ class AgentService:
             self.github = github.GitHubPoller(self.conn, cfg, self.emit, runner=gh_runner, clock=clock,
                                               projects_fn=gh_projects_fn)
         self.fader = halflife.Fader(self.conn, self.app.projector.current, self._fade_emit, clock=clock)
+        # un solo sondeo de `actions/runs` para el rack y `actions`: lo que uno pidió hace poco lo reutiliza el otro
+        intervals = [float((cfg.get(k) or {}).get("interval_s") or d) for k, d in (("github", 45), ("forge", 60))]
+        self.gh_feed = forge_github.RunsFeed(clock=clock, max_age=0.8 * max(10.0, min(intervals)))
         self.forge = None
         if forge_rack.enabled(cfg):
-            self.forge = forge_rack.Rack(self.conn, cfg, self.emit_forge, clock=clock, provider_opts={"runner": gh_runner},
-                                         entries_fn=forge_entries_fn)
+            self.forge = forge_rack.Rack(self.conn, cfg, self.emit_forge, clock=clock, entries_fn=forge_entries_fn,
+                                         provider_opts={"runner": gh_runner, "feed": self.gh_feed})
         self.actions = None
         if (cfg.get("github") or {}).get("enabled") and (cfg.get("github") or {}).get("actions", True):
             self.actions = actions_mod.ActionsPoller(self.conn, cfg, self.emit_forge, runner=gh_runner, clock=clock,
-                                                     profiles_fn=gh_profiles_fn)
+                                                     profiles_fn=gh_profiles_fn, feed=self.gh_feed)
         self.listeners = listeners.Listeners(self.emit, clock) if cfg.get("listeners", True) else None
         self.stop_event = threading.Event()
         self.servers, self.threads, self._serving = [], [], []
