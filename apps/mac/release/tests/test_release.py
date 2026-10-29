@@ -1241,6 +1241,7 @@ class TestEmbedAgent(WorkDir):
         self.assertTrue(os.path.isfile(os.path.join(dest, "chopshop", "agent", "pairing.py")))
         self.assertFalse(any(d == "tests" for d in os.listdir(dest)))
         self.assertIn("from chopshop.cli import main", slurp(os.path.join(dest, "chopshop-agent.py")))
+        self.assertIn('os.environ["SSL_CERT_FILE"] = "/etc/ssl/cert.pem"', slurp(os.path.join(dest, "chopshop-agent.py")))
         self.assertEqual(sorted(os.listdir(os.path.join(dest, "python", "bin"))), ["python3"])
         for gone in ("include", "share", "lib/python3.13/test", "lib/python3.13/tkinter"):
             self.assertFalse(os.path.exists(os.path.join(dest, "python", gone)), gone)
@@ -1270,6 +1271,13 @@ class TestEmbedAgent(WorkDir):
         self.assertIn("<key>BundleProgram</key><string>Contents/MacOS/chopshop-agent</string>", build)
         self.assertLess(build.index("embed-agent.sh"), build.index("codesign --force --deep"))
         self.assertIn('SMAppService.agent(plistName: Self.plistName)', read(MAC, "Sources", "ChopshopUI", "BundledAgent.swift"))
+        self.assertTrue(os.access(os.path.join(RELEASE, "embed-agent.sh"), os.X_OK))
+        # el release comprueba el agente ya firmado, después de firmar y antes de notarizar
+        wf = read(WORKFLOWS, "release-mac.yml")
+        step = wf.index("Comprobar el agente incrustado")
+        self.assertLess(wf.index("sign-app.sh"), step)
+        self.assertLess(step, wf.index("notarize.sh"))
+        self.assertIn('"$app/Contents/MacOS/chopshop-agent" pair --help', wf)
 
 
 # ---------------------------------------------------------------------------
