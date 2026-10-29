@@ -24,7 +24,8 @@ final class SnapshotMapperTests: XCTestCase {
     }
 
     func testMidSequence() throws {
-        let snap = SnapshotMapper.snapshot(try fold(upTo: 1820))
+        // hora congelada (la del sobre 1820): con la del reloj, ThreadVisibility ocultaría los hilos parados del fixture
+        let snap = SnapshotMapper.snapshot(try fold(upTo: 1820), now: SnapshotMapper.date("2026-10-29T16:02:07.000Z")!)
         XCTAssertEqual(snap.projects, ["bixku-utilities", "chopshop", "nuskills"])
 
         // nuskills: lote real, grafo real enlazado a las tareas vivas por (batch, node)
@@ -101,6 +102,58 @@ final class SnapshotMapperTests: XCTestCase {
         XCTAssertEqual(snap.batches(of: "p").first?.host, "host-b")
         XCTAssertEqual(snap.graph(for: "p")?.nodes.map(\.label), ["A"])
         XCTAssertEqual(SnapshotMapper.snapshot(LiveState()).projects, [])
+    }
+
+    // MARK: Escritorios visibles (ThreadVisibility)
+
+    func testThreadVisibilityRule() {
+        let now = SnapshotMapper.date("2026-10-29T20:00:00.000Z")!
+        let fresh = "2026-10-29T19:30:00.000Z", old = "2026-10-29T17:00:00.000Z"
+        let edge = "2026-10-29T18:00:00.000Z"       // justo `idleAfter` (2 h) antes
+        func vis(_ t: JSONValue.Object, attention: Bool = false) -> Bool {
+            ThreadVisibility.isVisible(t, needsAttention: attention, now: now)
+        }
+        XCTAssertEqual(ThreadVisibility.idleAfter, 2 * 60 * 60)
+        // asentado: nunca
+        XCTAssertFalse(vis(["phase": "settled", "updated": .string(fresh)]))
+        XCTAssertFalse(vis(["phase": "running", "settled": true, "updated": .string(fresh)]), "settled: true gana a la fase")
+        XCTAssertFalse(vis(["phase": "waiting", "settled": true, "updated": .string(fresh)], attention: true))
+        // activo: siempre, por viejo que sea su último sobre
+        XCTAssertTrue(vis(["phase": "running", "settled": false, "updated": .string(old)]))
+        XCTAssertTrue(vis(["phase": "preparing", "updated": .string(old)]))
+        XCTAssertTrue(vis(["phase": "waiting", "updated": .string(old)], attention: true), "te espera")
+        // parado: hasta `idleAfter`
+        XCTAssertTrue(vis(["phase": "done", "updated": .string(fresh)]))
+        XCTAssertFalse(vis(["phase": "done", "updated": .string(old)]))
+        XCTAssertFalse(vis(["phase": "failed", "updated": .string(edge)]), "a las 2 h justas ya no")
+        XCTAssertFalse(vis(["phase": "waiting", "updated": .string(old)]), "waiting sin atención")
+        XCTAssertFalse(vis(["phase": "queued", "updated": .string(old)]))
+        XCTAssertTrue(vis(["phase": "done"]), "sin `updated` no se sabe: se pinta")
+        XCTAssertTrue(ThreadVisibility.isVisible(["phase": "done", "updated": .string(old)], needsAttention: false, now: now,
+                                                 idleAfter: 4 * 60 * 60), "umbral inyectable")
+        // la atención propia de `waiting` cuenta aunque la cola no la traiga
+        let p = LiveState.Project(name: "p")
+        XCTAssertTrue(ThreadVisibility.isVisible(["id": "t", "phase": "waiting", "attention": "ask", "updated": .string(old)], in: p, now: now))
+        XCTAssertFalse(ThreadVisibility.isVisible(["id": "t", "phase": "done", "attention": "ask", "updated": .string(old)], in: p, now: now))
+    }
+
+    func testSettledAndIdleThreadsLeaveTheOffice() throws {
+        let s = try fold()
+        // al final del fixture (10 min después): a1 está asentado; el resto, reciente
+        let snap = SnapshotMapper.snapshot(s, now: SnapshotMapper.date("2026-10-29T16:16:38.000Z")!)
+        let g = try XCTUnwrap(snap.graph(for: "nuskills"))
+        XCTAssertEqual(Set(g.nodes.map(\.id)), ["n-3", "n-4"], "n-2 (mcp:a1, asentado) no es escritorio")
+        XCTAssertNotNil(snap.tasks(of: "nuskills").first { $0.id == "mcp:a1" }, "pero sigue en su lote (lista, resumen)")
+        XCTAssertEqual(Set(snap.graph(for: "chopshop")?.nodes.compactMap(\.task) ?? []), ["mcp:c41", "mcp:c42"])
+
+        // 3 h después: los parados (b7 fallida, a036 y c42 hechas) también se van; lo que corre se queda
+        let late = SnapshotMapper.snapshot(s, now: SnapshotMapper.date("2026-10-29T19:16:38.000Z")!)
+        let lg = try XCTUnwrap(late.graph(for: "nuskills"), "el grafo real se queda aunque no tenga escritorios")
+        XCTAssertEqual(lg.id, "g-2")
+        XCTAssertEqual(lg.nodes, [])
+        XCTAssertEqual(late.tasks(of: "nuskills").count, snap.tasks(of: "nuskills").count, "los lotes no cambian")
+        XCTAssertEqual(late.graph(for: "chopshop")?.nodes.compactMap(\.task), ["mcp:c41"], "grafo sintético: solo lo visible")
+        XCTAssertEqual(late.graph(for: "bixku-utilities")?.nodes.compactMap(\.task), ["mcp:x9"], "corriendo: se queda")
     }
 
     func testShortLabel() {

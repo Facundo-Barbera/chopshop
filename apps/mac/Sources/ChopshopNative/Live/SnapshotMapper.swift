@@ -5,7 +5,9 @@ import Foundation
 /// - Tarea: `task.state` + la cola de atención del proyecto (`needs`) + la pregunta abierta que recuerda `LiveState`.
 /// - Lote: `batches` del proyecto; las tareas sin lote (o de un lote que no llegó) van a un lote sintético "(sueltas)".
 /// - Grafo: `graphs`; el `task` de un nodo es un id de lote (`t-0007-1`), así que se resuelve a la tarea viva por
-///   `(batch, node)` de `task.state`. Un proyecto sin grafo recibe uno sintético (un nodo por tarea): la oficina nunca queda vacía.
+///   `(batch, node)` de `task.state`. Un proyecto sin grafo recibe uno sintético (un nodo por tarea visible).
+/// - Escritorios: los hilos que oculta `ThreadVisibility` (asentados, o parados sin actividad) no salen en los grafos (ni oficina
+///   ni grafo), pero siguen en sus lotes (lista compacta, resumen).
 public enum SnapshotMapper {
     /// Id (y nombre) del lote sintético de las tareas sin lote.
     public static let looseBatch = "(sueltas)"
@@ -18,6 +20,8 @@ public enum SnapshotMapper {
         var graphs: [MockGraph] = []
         for p in s.projects {
             let tasks = p.tasks.compactMap { task($0, project: p, state: s, now: now) }
+            let hidden = Set(p.tasks.filter { !ThreadVisibility.isVisible($0, in: p, now: now) }.compactMap { $0["id"]?.string })
+            let desks = tasks.filter { !hidden.contains($0.id) }
             let raw = Dictionary(p.tasks.compactMap { t in t["id"]?.string.map { ($0, t) } }, uniquingKeysWith: { a, _ in a })
             func batchOf(_ id: String) -> String? { nonEmpty(raw[id]?["batch"]?.string) }
 
@@ -41,13 +45,13 @@ public enum SnapshotMapper {
                 pb.append(MockBatch(id: looseBatch, project: p.name, host: host, maxParallel: max(1, loose.count), minutesAgo: 0, tasks: loose))
             }
 
-            var pg = p.graphs.compactMap { graph($0, project: p.name, tasks: tasks, raw: raw, batches: pb) }
+            var pg = p.graphs.compactMap { graph($0, project: p.name, tasks: tasks, raw: raw, batches: pb, hidden: hidden) }
             // El primero es el que pinta la vista de proyecto: el que corre, y si no, el más reciente.
             pg = pg.enumerated().sorted { a, b in
                 let ra = a.element.status == "running" ? 0 : 1, rb = b.element.status == "running" ? 0 : 1
                 return ra != rb ? ra < rb : a.offset > b.offset
             }.map(\.element)
-            if pg.isEmpty, !tasks.isEmpty { pg = [syntheticGraph(project: p.name, tasks: tasks, batches: pb)] }
+            if pg.isEmpty, !desks.isEmpty { pg = [syntheticGraph(project: p.name, tasks: desks, batches: pb)] }
             for i in pb.indices { pb[i].graph = pg.first { $0.batch == pb[i].id }?.id }
             batches += pb
             graphs += pg
@@ -126,7 +130,9 @@ public enum SnapshotMapper {
         }
     }
 
-    static func graph(_ g: JSONValue.Object, project: String, tasks: [MockTask], raw: [String: JSONValue.Object], batches: [MockBatch]) -> MockGraph? {
+    /// `hidden`: ids de los hilos que no se pintan (`ThreadVisibility`); su nodo sale del grafo (el grafo se queda aunque quede vacío).
+    static func graph(_ g: JSONValue.Object, project: String, tasks: [MockTask], raw: [String: JSONValue.Object], batches: [MockBatch],
+                      hidden: Set<String> = []) -> MockGraph? {
         guard let gid = g["id"]?.string else { return nil }
         let nodesRaw = (g["nodes"]?.array ?? []).compactMap(\.object)
         let nodeIDs = Set(nodesRaw.compactMap { $0["id"]?.string })
@@ -135,16 +141,18 @@ public enum SnapshotMapper {
             t["node"]?.string.map { nodeIDs.contains($0) } ?? false
         }.flatMap { nonEmpty($0["batch"]?.string) }
         let byID = Dictionary(tasks.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        func live(_ node: String) -> MockTask? {
+        func live(_ node: String) -> String? {
             let hit = raw.filter { $0.value["node"]?.string == node && (batch == nil || $0.value["batch"]?.string == batch) }
             // si hay varias (reintento), la más nueva
-            return hit.max { ($0.value["seq"]?.int ?? 0) < ($1.value["seq"]?.int ?? 0) }.flatMap { byID[$0.key] }
+            return hit.max { ($0.value["seq"]?.int ?? 0) < ($1.value["seq"]?.int ?? 0) }?.key
         }
         var seen = Set<String>()
         var nodes: [MockGraphNode] = []
         for n in nodesRaw {
             guard let nid = n["id"]?.string, seen.insert(nid).inserted else { continue }
-            let t = live(nid)
+            let tid = live(nid)
+            if let tid, hidden.contains(tid) { continue }
+            let t = tid.flatMap { byID[$0] }
             let label = nonEmpty(n["label"]?.string) ?? nid
             nodes.append(MockGraphNode(id: nid, parent: nil, depth: 0, kind: "task", label: label, title: t?.title ?? label,
                                        status: nodeStatus(n["phase"]?.string), deps: n["deps"]?.strings ?? [], task: t?.id,
