@@ -7,16 +7,19 @@
 - `matches(sub, env)` es puro: proyecto (globs, `*`), `types` (globs), `exclude_types`, `min_severity`, `needs`.
 - `Dispatcher` añade lo que tiene estado: `only_changes` (por suscripción y sujeto), `debounce_s` (ventana fija por
   sujeto, se entrega el último), reintentos 2/10/60 s programados (no ocupan hilo), un carril (hilo) por destino para
-  que uno lento o caído no retrase a otro, `body.context` y la firma HMAC. Reloj inyectable; `pump()` ejecuta lo que
-  ya venció (los tests avanzan un reloj falso y llaman a `pump`).
-- Nunca se guardan, registran ni devuelven la URL ni el secreto: se leen del archivo en cada intento y `deliveries`
-  solo lleva `HTTP <código>` o el nombre del tipo de excepción."""
+  que uno lento o caído no retrase a otro, `body.context`, la firma HMAC y las cabeceras de `headers_file`. Reloj
+  inyectable; `pump()` ejecuta lo que ya venció (los tests avanzan un reloj falso y llaman a `pump`).
+- Cada intento queda en `deliveries` y en el log (`chopshop.agent.webhooks`: suscripción, seq, tipo, intento,
+  resultado, latencia y si se reintenta).
+- Nunca se guardan, registran ni devuelven la URL, el secreto ni los valores de `headers_file`: se leen del archivo
+  en cada intento y `deliveries`/log solo llevan `HTTP <código>` o el nombre del tipo de excepción."""
 import fnmatch
 import hashlib
 import heapq
 import hmac
 import inspect
 import itertools
+import logging
 import os
 import re
 import threading
@@ -35,6 +38,10 @@ MAX_DEBOUNCE = 3600
 MAX_ITEMS = 32
 _PATTERN = re.compile(r"^[A-Za-z0-9_.*?\[\]!-]{1,128}$")
 _URL = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
+_HEADER_NAME = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$")        # token de RFC 9110
+RESERVED_HEADERS = ("content-type", "content-length", "host", "user-agent", "transfer-encoding", "connection")
+MAX_HEADERS = 32
+log = logging.getLogger("chopshop.agent.webhooks")
 
 
 class WebhookError(Exception):
@@ -110,6 +117,7 @@ def validate(opts):
         "exclude_types": _strlist(o.get("exclude_types"), "exclude_types", _PATTERN),
         "needs": _strlist(o.get("needs"), "needs"),
         "secret_file": _path(o.get("secret_file"), "secret_file"),
+        "headers_file": _path(o.get("headers_file"), "headers_file"),
     }
     if out["needs"] and not set(out["needs"]) <= set(NEEDS + (NEEDS_NONE,)):
         raise WebhookError("needs admite: %s" % ", ".join(NEEDS + (NEEDS_NONE,)))
@@ -132,7 +140,7 @@ def validate(opts):
 
 
 FIELDS = ("projects", "types", "exclude_types", "min_severity", "needs", "only_changes", "context", "debounce_s",
-          "secret_file")
+          "secret_file", "headers_file")
 JSON_FIELDS = ("projects", "types", "exclude_types", "needs")
 
 
@@ -145,6 +153,7 @@ def effective(row):
     projects = jl("projects")
     return {
         "name": r["name"], "webhook_file": r.get("webhook_file"), "secret_file": r.get("secret_file"),
+        "headers_file": r.get("headers_file"),
         "projects": projects if projects else [r.get("project") or "*"],
         "events": jl("events") or [], "types": jl("types"), "exclude_types": jl("exclude_types") or [],
         "min_severity": r.get("min_severity"), "needs": jl("needs") or [],
@@ -154,10 +163,11 @@ def effective(row):
 
 
 def public(sub):
-    """Lo que se puede mostrar de una suscripción: filtros, sin rutas ni URL."""
+    """Lo que se puede mostrar de una suscripción: filtros, sin rutas ni URL (`headers` = tiene `headers_file`)."""
     return {"projects": sub["projects"], "types": sub["types"], "exclude_types": sub["exclude_types"],
             "min_severity": sub["min_severity"], "needs": sub["needs"], "only_changes": sub["only_changes"],
-            "context": sub["context"], "debounce_s": sub["debounce_s"], "signed": bool(sub["secret_file"])}
+            "context": sub["context"], "debounce_s": sub["debounce_s"], "signed": bool(sub["secret_file"]),
+            "headers": bool(sub.get("headers_file"))}
 
 
 def _glob(value, pat):
@@ -246,6 +256,35 @@ def read_secret(path):
     return s
 
 
+def read_headers(path):
+    """{Nombre: valor} de un archivo 0600 con líneas `Nombre: valor` (vacías y `#...` se ignoran). Los errores nunca
+    incluyen valores ni el contenido de la línea, solo su número. No se pueden pisar las cabeceras de transporte
+    (`RESERVED_HEADERS`) ni las `X-Chopshop-*`."""
+    p = os.path.expanduser(path)
+    if os.stat(p).st_mode & 0o077:
+        raise PermissionError("permisos abiertos")
+    out, seen = {}, set()
+    with open(p, encoding="utf-8") as f:
+        for i, line in enumerate(f, 1):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            name, sep, value = line.partition(":")
+            name, value = name.strip(), value.strip()
+            low = name.lower()
+            if not sep or not _HEADER_NAME.match(name) or not value or any(c in value for c in "\r\n\0"):
+                raise ValueError("línea %d: se espera `Nombre: valor`" % i)
+            if low in RESERVED_HEADERS or low.startswith("x-chopshop-"):
+                raise ValueError("línea %d: cabecera reservada" % i)
+            if low in seen:
+                raise ValueError("línea %d: cabecera repetida" % i)
+            seen.add(low)
+            out[name] = value
+    if len(out) > MAX_HEADERS:
+        raise ValueError("más de %d cabeceras" % MAX_HEADERS)
+    return out
+
+
 def sign(secret, data):
     return "sha256=" + hmac.new(secret.encode("utf-8"), data, hashlib.sha256).hexdigest()
 
@@ -269,13 +308,20 @@ def _accepts_headers(poster):
     return any(p.name == "headers" or p.kind == p.VAR_KEYWORD for p in ps)
 
 
-def attempt(webhook_file, secret_file, data, headers, poster, timeout):
-    """(ok, detail, reintentable). Nunca lanza; el detail no incluye la URL, el secreto ni mensajes de excepción."""
+def attempt(webhook_file, secret_file, data, headers, poster, timeout, headers_file=None):
+    """(ok, detail, reintentable). Nunca lanza; el detail no incluye la URL, el secreto, las cabeceras de
+    `headers_file` ni mensajes de excepción."""
     try:
         url = read_url(webhook_file)
     except Exception as e:  # noqa: BLE001
         return False, "archivo de webhook ilegible (%s)" % type(e).__name__, False
-    headers = dict(headers)
+    extra = {}
+    if headers_file:
+        try:
+            extra = read_headers(headers_file)
+        except Exception as e:  # noqa: BLE001 - sin las cabeceras que pide el receptor no se manda nada
+            return False, "archivo de cabeceras ilegible (%s)" % type(e).__name__, False
+    headers = dict(extra, **headers)
     if secret_file:
         try:
             headers["X-Chopshop-Signature"] = sign(read_secret(secret_file), data)
@@ -329,8 +375,8 @@ class Lanes:
                 fn = lane.popleft()
             try:
                 fn()
-            except Exception:  # noqa: BLE001 - un fallo de entrega no debe matar al hilo
-                pass
+            except Exception as e:  # noqa: BLE001 - un fallo de entrega no debe matar al hilo
+                log.error("webhook: fallo inesperado en la entrega (%s)", type(e).__name__)   # sin str(e): puede traer la URL
             finally:
                 with self._cv:
                     self._pending -= 1
@@ -377,8 +423,8 @@ class Scheduler:
                 fn = heapq.heappop(self._heap)[2]
                 try:
                     fn()
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception as e:  # noqa: BLE001
+                    log.error("webhook: fallo inesperado en una tarea diferida (%s)", type(e).__name__)
 
     def cancel(self):
         with self._cv:
@@ -425,12 +471,14 @@ class Dispatcher:
                     prev = self._last.get((name, key))
                     self._last[(name, key)] = cur
                 if prev == cur:
+                    log.debug("webhook %s: seq=%s omitido (only_changes, sin cambio)", name, env.get("seq"))
                     continue
             out.append(name)
             if sub["debounce_s"] > 0 and key:
                 with self._lock:
                     first = (name, key) not in self._held
                     self._held[(name, key)] = (conn, sub, env, poster, timeout)
+                log.debug("webhook %s: seq=%s retenido (debounce %ss)", name, env.get("seq"), sub["debounce_s"])
                 if first:
                     self.scheduler.schedule(self.clock() + sub["debounce_s"], lambda k=(name, key): self._release(k))
                 continue
@@ -452,12 +500,19 @@ class Dispatcher:
                 state["data"] = db.jdump(payload(env, ctx)).encode("utf-8")
             headers = {"X-Chopshop-Event": str(env.get("type")), "X-Chopshop-Id": str(env.get("id")),
                        "X-Chopshop-Delivery": str(n)}
-            ok, detail, retry = attempt(sub["webhook_file"], sub["secret_file"], state["data"], headers, poster, timeout)
+            t0 = time.monotonic()
+            ok, detail, retry = attempt(sub["webhook_file"], sub["secret_file"], state["data"], headers, poster, timeout,
+                                        sub.get("headers_file"))
+            ms = (time.monotonic() - t0) * 1000
             nxt = None
             if retry and n <= len(self.retry_delays):
                 nxt = self.clock() + self.retry_delays[n - 1]
                 self.scheduler.schedule(nxt, lambda: self.lanes.put(name, lambda: run(n + 1)))
             record(conn, env.get("seq"), name, ok, detail, n, nxt, self.clock)
+            outcome = "ok" if ok else ("reintento %d en %ss" % (n + 1, self.retry_delays[n - 1]) if nxt is not None
+                                       else "sin reintento" if not retry else "reintentos agotados")
+            log.log(logging.INFO if ok else logging.WARNING, "webhook %s: seq=%s type=%s intento=%d/%d %s %.0fms %s",
+                    name, env.get("seq"), env.get("type"), n, len(self.retry_delays) + 1, detail, ms, outcome)
         self.lanes.put(name, lambda: run(1))
 
     def pump(self):

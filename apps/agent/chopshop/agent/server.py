@@ -626,6 +626,16 @@ class AgentApp:
                 raise ApiError(400, "secret_file no existe o no es un archivo (en esta máquina)")
             if os.stat(os.path.expanduser(sfile)).st_mode & 0o077:
                 raise ApiError(400, "secret_file es legible por otros: chmod 600")
+        hfile = opts.get("headers_file")
+        if hfile is not None:
+            if not isinstance(hfile, str) or not os.path.isfile(os.path.expanduser(hfile)):
+                raise ApiError(400, "headers_file no existe o no es un archivo (en esta máquina)")
+            try:
+                webhooks.read_headers(hfile)
+            except PermissionError:
+                raise ApiError(400, "headers_file es legible por otros: chmod 600")
+            except (OSError, ValueError) as e:
+                raise ApiError(400, "headers_file inválido: %s" % (e if isinstance(e, ValueError) else type(e).__name__))
         try:
             events.subscribe(self.conn, name, wfile, _text(body, "project", False, 128) or "*", body.get("events"), **opts)
         except events.EventsError as e:
