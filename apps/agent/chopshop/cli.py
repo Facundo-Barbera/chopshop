@@ -7,7 +7,7 @@ import time
 
 from . import engine, events, graph, home, inbox, integrate, metrics, miniyaml, profile, state, t3
 
-HELP_EPILOG = """comandos: profile list|show|check | fanout | run | poll | watch | status | snapshot | metrics | wait | gather | answer [--queue] | stop | settle | integrate | subscribe | graph new|run|status | agent run|status|token|check-config|print-unit"""
+HELP_EPILOG = """comandos: profile list|show|check | fanout | run | poll | watch | status | snapshot | metrics | wait | gather | answer [--queue] | stop | settle | integrate | subscribe | graph new|run|status | agent run|status|token|check-config|print-unit | pair create|list|revoke|prune"""
 
 
 def _load_tasks(args):
