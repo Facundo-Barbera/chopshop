@@ -24,6 +24,8 @@ public struct LiveState: Equatable, Sendable {
         public var tasks: [JSONValue.Object] = []
         public var graphs: [JSONValue.Object] = []
         public var attention: [Attention] = []
+        /// v3: oficina por escritorios (nil = el proyecto no declara `office:` o el agente es anterior a la v3).
+        public var office: Office?
     }
 
     public static let apiVersion = 3
@@ -36,8 +38,10 @@ public struct LiveState: Equatable, Sendable {
     public var projects: [Project] = []
     /// Últimos 50 sobres, el más nuevo primero.
     public var recent: [Envelope] = []
-    /// Sala de máquinas (v3): listeners, automatizaciones, webhooks y rack (`MachineRoom/MachineRoomModel.swift`).
-    public var machineRoom = MachineRoomState()
+    /// v3: hilos activos sin rol (y los que esperan escritorio), de todos los proyectos. Orden `(company, project, since)`.
+    public var lobby: [LobbyEntry] = []
+    /// v3: listeners, automatizaciones, suscripciones y rack (LiveStateOffice.swift).
+    public var machineRoom = MachineRoom()
 
     // Lo siguiente NO viene en la proyección del agente (la proyección solo guarda el resumen de la atención): el cliente lo recuerda
     // de los sobres que ve, para pintar las opciones de una pregunta, el historial de respuestas y las gráficas de la máquina.
@@ -97,7 +101,7 @@ public struct LiveState: Equatable, Sendable {
         if let i = items.firstIndex(where: { $0[key]?.string == value }) { items[i] = obj } else { items.append(obj) }
     }
 
-    private mutating func projectIndex(_ name: String) -> Int {
+    mutating func projectIndex(_ name: String) -> Int {
         if let i = projects.firstIndex(where: { $0.name == name }) { return i }
         projects.append(Project(name: name))
         projects.sort { $0.name < $1.name }
@@ -117,7 +121,6 @@ public struct LiveState: Equatable, Sendable {
             push(&sr.cpu, body["cpu_pct"]?.double); push(&sr.ram, body["ram_pct"]?.double); push(&sr.run, body["threads_running"]?.double)
             series[name] = sr
         }
-        machineRoom.apply(env)
         if env.type == "question.opened", let key = env.subjectKey {
             questions[key] = Question(request: body["request_id"]?.string ?? "", summary: body["summary"]?.string ?? env.subject?.title ?? "",
                                       options: Self.optionLabels(body["options"]), level: body["level"]?.string, escalateAfter: body["escalate_after_s"]?.int)
@@ -172,6 +175,7 @@ public struct LiveState: Equatable, Sendable {
                 }
                 projects[pi].graphs[gi!]["nodes"] = .array(nodes)
             }
+            applyOffice(env, project: pi)
             if !Self.noAttention.contains(typ), let key = env.subjectKey {
                 let old = projects[pi].attention.first { $0.key == key }
                 projects[pi].attention.removeAll { $0.key == key }
@@ -187,11 +191,12 @@ public struct LiveState: Equatable, Sendable {
             }
             projects[pi].counts = Self.counts(projects[pi])
         }
+        applyMachineRoom(env)
         recent.insert(env, at: 0)
         if recent.count > Self.recentLimit { recent.removeLast(recent.count - Self.recentLimit) }
     }
 
-    private static func nonEmpty(_ s: String?) -> String? { s.flatMap { $0.isEmpty ? nil : $0 } }
+    static func nonEmpty(_ s: String?) -> String? { s.flatMap { $0.isEmpty ? nil : $0 } }
 
     /// Opciones de una pregunta: cadenas, u objetos `{label, …}` (forma de T3).
     static func optionLabels(_ v: JSONValue?) -> [String] {
@@ -232,6 +237,7 @@ public struct LiveState: Equatable, Sendable {
             p.batches = (pj["batches"]?.array ?? []).compactMap(\.object)
             p.tasks = (pj["tasks"]?.array ?? []).compactMap(\.object)
             p.graphs = (pj["graphs"]?.array ?? []).compactMap(\.object)
+            p.office = pj["office"].flatMap(Office.init(json:))
             p.attention = (pj["attention"]?.array ?? []).compactMap { a in
                 guard let key = a["key"]?.string, let needs = a["needs"]?.string else { return nil }
                 return Attention(key: key, id: a["id"]?.string, seq: a["seq"]?.int ?? 0, type: a["type"]?.string ?? "", needs: needs,
@@ -241,7 +247,8 @@ public struct LiveState: Equatable, Sendable {
             return p
         }
         recent = (o["recent"]?.array ?? []).compactMap(Envelope.init(json:))
-        machineRoom = MachineRoomState(json: o["machine_room"])
+        lobby = (o["lobby"]?.array ?? []).compactMap(LobbyEntry.init(json:))
+        machineRoom = o["machine_room"].map(MachineRoom.init(json:)) ?? MachineRoom()
         // Reconstruye lo que no trae la proyección con los sobres recientes (del más viejo al más nuevo).
         var replay = LiveState(machine: machine)
         for e in recent.reversed() where e.type == "question.opened" || e.type == "question.answered" || e.type == "machine.health" {

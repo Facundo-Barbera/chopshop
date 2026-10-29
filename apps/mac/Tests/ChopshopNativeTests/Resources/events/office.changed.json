@@ -1,0 +1,67 @@
+{
+  "v": 1,
+  "id": "01M646XHEM0W40J2GB1G6GW4E0",
+  "seq": 1904,
+  "ts": "2026-10-29T16:12:03.412Z",
+  "machine": "contabo-dev",
+  "project": "awesome-gb",
+  "type": "office.changed",
+  "severity": "info",
+  "needs": null,
+  "subject": {
+    "kind": "office",
+    "id": "awesome-gb"
+  },
+  "cause": {
+    "id": null,
+    "depth": 0
+  },
+  "body": {
+    "project": "awesome-gb",
+    "by": "profile",
+    "company": "Awesome GB",
+    "half_life_s": 1800,
+    "floors": [
+      {
+        "index": 0,
+        "name": "Producto",
+        "rooms": [
+          {
+            "role": "triage",
+            "permanent": true,
+            "desks": [
+              {
+                "id": "awesome-gb/0/triage/0",
+                "slot": 0,
+                "retired": false
+              }
+            ]
+          },
+          {
+            "role": "backend",
+            "permanent": false,
+            "desks": [
+              {
+                "id": "awesome-gb/0/backend/0",
+                "slot": 0,
+                "retired": false
+              },
+              {
+                "id": "awesome-gb/0/backend/1",
+                "slot": 1,
+                "retired": false
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "diff": {
+      "added": [
+        "awesome-gb/0/backend/1"
+      ],
+      "retired": [],
+      "reactivated": []
+    }
+  }
+}
