@@ -1,7 +1,8 @@
 """Runs de GitHub Actions con disparador y origen (docs/plans/office-redesign.md §4): hilo `actions` del agente.
 
 Por cada repo de `[agent.github] repos` y de `rack.repos` de los perfiles (proveedor `github`):
-- `GET /repos/{o}/{r}/actions/runs?per_page=N` con `If-None-Match` (ETag en `meta` `forge_etag:github:<repo>:runs`).
+- `GET /repos/{o}/{r}/actions/runs` por el `RunsFeed` compartido con el rack (`forge/github.py`: ETag, un solo sondeo por
+  repo); la versión (ETag) ya procesada vive en `meta` `actions_seen:github:<repo>`.
 - Cada run se normaliza (`map_run`) y se le atribuye un **origen** (`attribute`), por prioridad:
   1. `thread`: la rama del run es la de un hilo de T3 (`t3_threads.branch`, nunca `main`/`master`/la rama por defecto),
      o, en `push`/`pull_request*`, el sha es el HEAD del worktree del hilo;
@@ -13,13 +14,14 @@ Por cada repo de `[agent.github] repos` y de `rack.repos` de los perfiles (prove
   5. `human` (hay actor; etiqueta de `rack.actors` si lo declara) o `unknown`.
   Un origen `thread`/`automation` ya guardado no se degrada (el HEAD del worktree avanza después del push).
 - Se emite `forge.run.state` (severidad `warn` si el run terminó mal) cuando un run es nuevo o cambia su estado,
-  conclusión u origen; solo para runs en curso y los `KEEP_DONE` completados más recientes de cada repo. Con un 304 se
-  reatribuyen los runs en curso guardados (un hilo puede aparecer después de su push).
+  conclusión u origen; solo para runs en curso y los `KEEP_DONE` completados más recientes de cada repo. Si el feed
+  no cambió (304 o respuesta reutilizada) se reatribuyen los runs en curso guardados (un hilo puede aparecer después de
+  su push).
 - Estado en la tabla `forge_runs` (se crea aquí, aditiva; se podan los runs fuera de los `KEEP_ROWS` más recientes).
 
 Mismas reglas que `github.py`: `gh` ya autenticado (el token nunca se toca), backoff y `machine.health` degradado
 heredados de `GitHubPoller`, cuerpos sin credenciales. Inyectable: `runner`, `clock`, `emit(type, project, body,
-severity)`, `profiles_fn()` -> {proyecto: perfil}, `head_fn(worktree)` -> sha o None."""
+severity)`, `profiles_fn()` -> {proyecto: perfil}, `head_fn(worktree)` -> sha o None, `feed` (`RunsFeed`)."""
 import calendar
 import logging
 import os
@@ -27,11 +29,11 @@ import re
 import time
 
 from . import db, github, layout
+from .forge import github as forge_gh
 
 log = logging.getLogger("chopshop.agent.actions")
 
 PROVIDER = "github"
-PER_PAGE = 30                     # runs por pasada (los más recientes)
 KEEP_DONE = 5                     # completados que se publican por repo (los de la proyección)
 KEEP_ROWS = 100                   # filas de `forge_runs` por repo
 DISPATCH_WINDOW = 600.0           # s entre un `forge.dispatch` y el run que lanza
@@ -201,11 +203,11 @@ def load_profiles():
 class ActionsPoller(github.GitHubPoller):
     """`poll_once()` = una pasada por todos los repos (nunca lanza por errores de GitHub); `next_delay()` = espera."""
 
-    def __init__(self, conn, cfg, emit, runner=None, clock=time.time, profiles_fn=load_profiles, head_fn=None):
+    def __init__(self, conn, cfg, emit, runner=None, clock=time.time, profiles_fn=load_profiles, head_fn=None, feed=None):
         super().__init__(conn, cfg, emit, runner=runner, clock=clock, projects_fn=None)
         self.profiles_fn = profiles_fn
         self.head_fn = head_fn or self._git_head
-        self.default_branch = {}       # repo -> rama por defecto (una consulta por repo y proceso)
+        self.feed = feed or forge_gh.RunsFeed(clock=clock)
         ensure_schema(conn)
 
     def _emit(self, event, project, body, severity=None):
@@ -339,25 +341,18 @@ class ActionsPoller(github.GitHubPoller):
             self._recover(now)
         return res
 
-    def _default_branch(self, api):
-        if api not in self.default_branch:
-            _s, _h, data = self._api("/repos/%s" % api)
-            self.default_branch[api] = (data or {}).get("default_branch") if isinstance(data, dict) else None
-        return self.default_branch[api]
-
     def _poll_repo(self, repo, project, api, ctx):
-        k_etag = "forge_etag:%s:%s:runs" % (PROVIDER, api)
+        k_seen = "actions_seen:%s:%s" % (PROVIDER, api)
         stored = self._stored(repo)
-        status, headers, data = self._api("/repos/%s/actions/runs?per_page=%d" % (api, PER_PAGE),
-                                          self._get(k_etag) if stored else None)
-        if status == 304:
+        raw, version = self.feed.runs(self, api)
+        if stored and version is not None and version == self._get(k_seen):
             fresh = [dict(b) for b in stored.values() if b.get("status") != "completed"]
         else:
-            fresh = [b for b in (map_run(r, repo, project) for r in (data or {}).get("workflow_runs") or []) if b]
-            self._set({k_etag: headers.get("etag")})
+            fresh = [b for b in (map_run(r, repo, project) for r in raw) if b]
         if not fresh:
+            self._set({k_seen: version})
             return 0
-        default = self._default_branch(api)
+        default = self.feed.repo(self, api).get("default_branch")
         if not ctx["heads"] and any(b.get("event") in SHA_EVENTS for b in fresh):
             self._with_heads(ctx["threads"])
             ctx["heads"] = True
@@ -385,4 +380,5 @@ class ActionsPoller(github.GitHubPoller):
                 emitted += 1
         if changed:
             self._store(repo, changed)
+        self._set({k_seen: version})
         return emitted

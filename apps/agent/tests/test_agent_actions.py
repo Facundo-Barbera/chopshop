@@ -11,6 +11,7 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from chopshop import settings  # noqa: E402
 from chopshop.agent import actions, db, envelope, service  # noqa: E402
+from chopshop.agent.forge import github as fgh  # noqa: E402
 from test_agent_github import Clock, FakeGh, base_cfg  # noqa: E402
 
 REPO = "Acme/Widget"
@@ -151,10 +152,12 @@ class TestPolling(Base):
         p.poll_once()
         self.assertEqual({k: v[0] for k, v in self.origins().items()}, {"1": "human", "2": "human"})
         self.emitted.clear()
+        self.clock.t += 45
         p.poll_once()
         self.assertIn('If-None-Match: "e1"', [a for c in self.gh.calls for a in c if c[-1].startswith(RUNS)])
         self.assertEqual(self.emitted, [])
         self.thread("mcp:late", branch="be/late")                     # el hilo aparece después del push
+        self.clock.t += 45
         p.poll_once()
         self.assertEqual({k: v[0] for k, v in self.origins().items()}, {"1": "thread"})   # el completado no se toca
 
@@ -163,10 +166,12 @@ class TestPolling(Base):
         p = self.poller()
         p.poll_once()
         self.runs([run(1, conclusion="failure", updated="2027-01-15T08:05:00Z")], '"e2"')
+        self.clock.t += 45
         p.poll_once()
         self.assertEqual([(e["body"]["status"], e["severity"]) for e in self.emitted],
                          [("in_progress", "info"), ("completed", "warn")])
         self.runs([run(1, conclusion="failure", updated="2027-01-15T08:05:00Z")], '"e3"')   # misma foto, ETag nuevo
+        self.clock.t += 45
         p.poll_once()
         self.assertEqual(len(self.emitted), 2)
 
@@ -205,6 +210,51 @@ class TestPolling(Base):
         self.assertEqual(self.emitted, [])
 
 
+class TestFeedCompartido(Base):
+    """El rack y `actions` comparten un `RunsFeed`: una petición de runs por ronda y nada de ETags cruzados."""
+
+    def setUp(self):
+        super().setUp()
+        self.feed = fgh.RunsFeed(clock=self.clock, max_age=30)
+        self.rack = fgh.GitHubProvider(self.conn, self.cfg, runner=self.gh, clock=self.clock, feed=self.feed)
+
+    def poller(self, profiles=None):
+        p = super().poller(profiles)
+        p.feed = self.feed
+        return p
+
+    def calls(self, path):
+        return [c for c in self.gh.calls if c[-1] == path]
+
+    def test_una_peticion_por_ronda(self):
+        self.runs([run(1, status="in_progress", conclusion=None)], '"e1"')
+        self.poller().poll_once()
+        st = self.rack.repo_status(R)
+        self.assertEqual((st["default_branch"], st["active"]), ("trunk", 1))
+        self.assertEqual(len(self.calls(RUNS + "?per_page=%d" % fgh.RUNS_PAGE)), 1)
+        self.assertEqual(len(self.calls("/repos/%s" % R)), 1)
+        self.clock.t += 31                                             # ronda siguiente: un 304 con el ETag de la 200
+        self.rack.repo_status(R)
+        self.poller().poll_once()
+        later = self.calls(RUNS + "?per_page=%d" % fgh.RUNS_PAGE)
+        self.assertEqual(len(later), 2)
+        self.assertIn('If-None-Match: "e1"', later[1])
+
+    def test_lo_nuevo_que_trae_el_rack_lo_procesa_actions(self):
+        self.runs([run(1, status="in_progress", conclusion=None)], '"e1"')
+        p = self.poller()
+        p.poll_once()
+        self.clock.t += 31
+        self.runs([run(1, conclusion="failure", updated="2027-01-15T08:05:00Z")], '"e2"')
+        self.assertEqual(self.rack.repo_status(R)["active"], 0)        # el rack ve la 200 primero
+        n = len(self.gh.calls)
+        p.poll_once()                                                  # actions reutiliza esa respuesta...
+        self.assertEqual(len(self.calls(RUNS + "?per_page=%d" % fgh.RUNS_PAGE)), 2)
+        self.assertEqual(self.gh.calls[n:], [])
+        self.assertEqual([(e["body"]["status"], e["severity"]) for e in self.emitted],   # ...y la procesa
+                         [("in_progress", "info"), ("completed", "warn")])
+
+
 class TestServicio(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="chopshop-actions-svc-")
@@ -231,6 +281,8 @@ class TestServicio(unittest.TestCase):
                                   gh_profiles_fn=lambda: {}, gh_runner=gh)
         self.addCleanup(on.stop)
         self.assertEqual(on.actions.poll_once()["emitted"], 1)
+        self.assertIs(on.actions.feed, on.gh_feed)
+        self.assertIs(on.forge._provider("github").feed, on.gh_feed)    # el rack pregunta por el mismo feed
         row = on.conn.execute("SELECT type, severity, body FROM events WHERE type='forge.run.state'").fetchone()
         self.assertEqual((row["type"], json.loads(row["body"])["origin"]["kind"]), ("forge.run.state", "schedule"))
 
