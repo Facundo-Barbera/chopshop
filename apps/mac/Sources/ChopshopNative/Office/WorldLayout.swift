@@ -4,8 +4,9 @@ import Foundation
 /// máquinas, cada uno como una losa sobre el mismo suelo, a la vista a la vez (sin pestañas). Cada región conserva el
 /// `FloorLayout` de su piso, desplazado: un escritorio está siempre en el mismo sitio dentro de su piso. Puro (macOS 13).
 ///
-/// Las regiones se colocan en una rejilla cuyo número de columnas sale de la proporción de la vista (`aspect` = ancho / alto):
-/// una ventana ancha recibe más columnas y, con ello, escritorios más grandes.
+/// Las regiones se colocan en filas **de pantalla** (cada fila, horizontal y centrada; no en la rejilla del mundo, que en
+/// isométrico es una diagonal), con el corte que mejor llena una vista de esa proporción (`aspect` = ancho / alto): una ventana
+/// ancha recibe más regiones por fila y, con ello, escritorios más grandes.
 public struct WorldLayout: Equatable, Sendable {
     /// Hueco entre losas de regiones y margen de la losa alrededor de sus salas.
     public static let gap = 96.0, margin = 30.0
@@ -60,16 +61,32 @@ public struct WorldLayout: Equatable, Sendable {
             let maxX = l.rooms.map { $0.x0 + $0.w }.max() ?? 1, maxY = l.rooms.map { $0.y0 + $0.d }.max() ?? 1
             return (minX, minY, maxX - minX + 2 * Self.margin, maxY - minY + 2 * Self.margin)
         }
-        // columnas: las que mejor llenan una vista de esa proporción
-        var best: (cols: Int, score: Double) = (1, -1)
-        for cols in 1...items.count {
-            let (_, b) = Self.place(boxes, cols: cols)
-            let score = min(aspect / max(1, b.maxU - b.minU), 1 / max(1, b.maxV - b.minV))
-            if score > best.score * 1.0001 { best = (cols, score) }
+        // filas en el plano de la pantalla (no a lo largo de +x / +y del mundo: eso es una diagonal en pantalla)
+        let plates = boxes.map { Self.screenBox(w: $0.w, d: $0.d) }
+        let rows = Self.rows(plates.map { $0.maxU - $0.minU }, heights: plates.map { $0.maxV - $0.minV }, aspect: aspect)
+        columns = rows.map(\.count).max() ?? 1
+        let rowW = rows.map { r in r.reduce(0) { $0 + plates[$1].maxU - plates[$1].minU } + Double(r.count - 1) * Self.gap }
+        let full = rowW.max() ?? 0
+        var pos = Array(repeating: (0.0, 0.0), count: items.count)
+        var top = 0.0
+        for (k, r) in rows.enumerated() {
+            var left = (full - rowW[k]) / 2
+            for i in r {
+                // desplazamiento en pantalla (du, dv) que lleva la caja de la losa a su sitio → esquina de la losa en el mundo
+                let du = left - plates[i].minU, dv = top - plates[i].minV
+                pos[i] = (du / 2 + dv, dv - du / 2)
+                left += plates[i].maxU - plates[i].minU + Self.gap
+            }
+            top += r.map { plates[$0].maxV - plates[$0].minV }.max()! + Self.gap * 0.6
         }
-        columns = best.cols
-        let (pos, b) = Self.place(boxes, cols: columns)
-        bounds = b
+        var us: [Double] = [], vs: [Double] = []
+        for i in items.indices {
+            let (x, y) = pos[i], bx = boxes[i]
+            for (cx, cy) in [(x, y), (x + bx.w, y), (x, y + bx.d), (x + bx.w, y + bx.d)] {
+                for z in [0.0, 52.0] { us.append(cx - cy); vs.append((cx + cy) * 0.5 - z) }
+            }
+        }
+        bounds = IsoBounds(minU: us.min()! - 14, maxU: us.max()! + 14, minV: vs.min()! - 6, maxV: vs.max()! + 6)
         regions = items.indices.map { i in
             let (x, y) = pos[i], bx = boxes[i]
             let ox = x + Self.margin - bx.minX, oy = y + Self.margin - bx.minY
@@ -78,24 +95,40 @@ public struct WorldLayout: Equatable, Sendable {
         }
     }
 
-    /// Rejilla fila a fila (filas a lo largo de +x; la siguiente fila, más +y). Devuelve la esquina de cada losa y los límites iso.
-    static func place(_ boxes: [(minX: Double, minY: Double, w: Double, d: Double)], cols: Int) -> ([(Double, Double)], IsoBounds) {
-        var pos: [(Double, Double)] = []
-        var y = 0.0, us: [Double] = [], vs: [Double] = []
-        for row in stride(from: 0, to: boxes.count, by: cols) {
-            var x = 0.0, depth = 0.0
-            for i in row..<min(row + cols, boxes.count) {
-                pos.append((x, y))
-                let b = boxes[i]
-                for (cx, cy) in [(x, y), (x + b.w, y), (x, y + b.d), (x + b.w, y + b.d)] {
-                    for z in [0.0, 52.0] { us.append(cx - cy); vs.append((cx + cy) * 0.5 - z) }
-                }
-                x += b.w + gap; depth = max(depth, b.d)
+    /// Caja en pantalla (u, v) de una losa `w × d` con su esquina en el origen, con lo que levantan sus muros (52).
+    static func screenBox(w: Double, d: Double) -> IsoBounds {
+        var b = IsoBounds.empty
+        for (x, y) in [(0.0, 0.0), (w, 0.0), (0.0, d), (w, d)] { b.add(x, y, 0); b.add(x, y, 52) }
+        return b
+    }
+
+    /// Regiones en orden, en filas de pantalla. De todos los cortes posibles se queda con el que deja el mundo más grande en una
+    /// vista de proporción `aspect` (a igualdad, menos filas).
+    static func rows(_ ws: [Double], heights hs: [Double], aspect: Double) -> [[Int]] {
+        func split(_ width: Double) -> [[Int]] {
+            var rows: [[Int]] = [[]]
+            var x = 0.0
+            for (i, w) in ws.enumerated() {
+                if !rows[rows.count - 1].isEmpty && x + w > width + 1e-9 { rows.append([]); x = 0 }
+                rows[rows.count - 1].append(i)
+                x += w + gap
             }
-            y += depth + gap
+            return rows
         }
-        let bounds = IsoBounds(minU: (us.min() ?? 0) - 14, maxU: (us.max() ?? 1) + 14, minV: (vs.min() ?? 0) - 6, maxV: (vs.max() ?? 1) + 6)
-        return (pos, bounds)
+        var widths: Set<Double> = []
+        for i in ws.indices {
+            var w = 0.0
+            for j in i..<ws.count { w += ws[j] + (j > i ? gap : 0); widths.insert(w) }
+        }
+        var best: (rows: [[Int]], score: Double) = ([Array(ws.indices)], -1)
+        for width in widths.sorted(by: >) where width >= (ws.max() ?? 0) {
+            let rows = split(width)
+            let W = rows.map { r in r.reduce(0) { $0 + ws[$1] } + Double(r.count - 1) * gap }.max() ?? 1
+            let H = rows.map { r in r.map { hs[$0] }.max()! }.reduce(0, +) + Double(rows.count - 1) * gap * 0.6
+            let score = min(aspect / max(1, W), 1 / max(1, H))
+            if score > best.score * (1 + 1e-9) { best = (rows, score) }
+        }
+        return best.rows
     }
 }
 
