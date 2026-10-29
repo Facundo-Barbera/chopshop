@@ -121,6 +121,20 @@ class TestSettings(unittest.TestCase):
         self.assertEqual(c["agent"]["allowed_logins"], ["z@"])
         self.assertEqual(c["general"]["overflow_host"], "otro")
 
+    def test_t3_defaults_and_old_keys(self):
+        c = settings.load()
+        self.assertEqual(c["hosts"]["local"], {"cap": 2, "purpose": "dev", "t3_bin": "t3", "access": "approval-required"})
+        self.assertEqual(c["agent"]["t3"], {"origin": "", "t3_bin": "t3", "access": "full-access", "credential_file": ""})
+        self.assertNotIn("fleet_bin", c["general"])
+        # config vieja: transport/node/helper/fleet_bin se leen sin error y no afectan al cliente
+        self.write('[general]\nfleet_bin = "/opt/fleet"\n[hosts.uno]\ntransport = "fleet"\nnode = "node"\n'
+                   'helper = "~/x/t3mcp.mjs"\ncap = 3\n[agent.t3]\nhelper = "~/x/t3mcp.mjs"\nnode = "node"\n')
+        c = settings.load()
+        self.assertEqual(c["hosts"]["uno"]["cap"], 3)
+        self.assertEqual(c["agent"]["t3"]["t3_bin"], "t3")
+        from chopshop import t3
+        self.assertTrue(t3.is_local(c["hosts"]["uno"]))
+
     def test_bad_file_raises(self):
         self.write("a = \n")
         with self.assertRaises(settings.SettingsError):

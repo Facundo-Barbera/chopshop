@@ -1,21 +1,16 @@
 """Monitor de máquinas: CPU≈load1/cpus, RAM, load y disco.
-- Host con transporte `local`: se lee del propio sistema (stdlib; macOS vía sysctl/vm_stat, Linux vía /proc), sin red.
-- Host remoto (`fleet`): se toma de `fleet status` y se deja en ~/.chopshop/metrics-remote.json. Lo recoge `watch`
-  (proceso aparte con red); la app de escritorio solo lee ese archivo y nunca abre conexiones."""
-import json
+- Host local (sin `origin`): se lee del propio sistema (stdlib; macOS vía sysctl/vm_stat, Linux vía /proc), sin red.
+- Host remoto (con `origin`): no se recolecta desde aquí. Cada máquina corre su propio chopshop-agent y la app
+  de Mac combina sus métricas."""
 import os
 import re
 import shutil
 import subprocess
 import time
 
-from . import home, profile, settings
+from . import profile, t3
 
-STALE_AFTER = 120  # s: un dato remoto más viejo se marca obsoleto
-
-
-def _remote_path():
-    return os.path.join(home.home(), "metrics-remote.json")
+REMOTE_REASON = "sin métricas: consulta el agente de esa máquina"
 
 
 def _sh(*cmd):
@@ -62,80 +57,14 @@ def local():
             "ts": time.time()}
 
 
-def parse_fleet_status(text):
-    """Parsea la salida de `fleet status` -> {host: {...}}."""
-    out, cur = {}, None
-    for line in text.splitlines():
-        m = re.match(r"==\s*(\S+)\s*\(([^)]*)\)", line)
-        if m:
-            cur = out.setdefault(m.group(1), {"ok": True, "role": m.group(2).split(",")[0].strip(), "ts": time.time()})
-            continue
-        if cur is None:
-            continue
-        for k, v in re.findall(r"(\w+)=(\S+(?: \S+)*?)(?=\s+\w+=|$)", line):
-            if k == "load":
-                parts = v.split()
-                cur["load"] = [float(x) for x in parts[:3]] if parts else None
-            elif k == "cpus":
-                cur["cpus"] = int(v)
-            elif k in ("ram_mb_total", "ram_mb_avail"):
-                cur[k] = int(v)
-            elif k == "disk_used":
-                m2 = re.match(r"(\S+)\s*\((\d+)%\)", v)
-                if m2:
-                    cur["disk"], cur["disk_pct"] = m2.group(1), int(m2.group(2))
-            elif k in ("macOS", "host"):
-                cur["os"] = "Darwin" if k == "macOS" else cur.get("os", "Linux")
-            elif k == "t3_version":
-                cur["t3"] = v
-    for v in out.values():
-        v.setdefault("os", "Linux")
-    return out
-
-
-def collect_remote(fleet_bin=None, timeout=40):
-    """Ejecuta `fleet status` y guarda el resultado. Requiere red: llamarlo solo desde `watch` o a mano."""
-    fleet_bin = fleet_bin or os.environ.get("CHOPSHOP_FLEET") or settings.general("fleet_bin") or shutil.which("fleet")
-    if not fleet_bin:
-        return None
-    try:
-        r = subprocess.run([fleet_bin, "status"], capture_output=True, text=True, timeout=timeout)
-    except (OSError, subprocess.SubprocessError):
-        return None
-    data = parse_fleet_status(r.stdout)
-    if data:
-        tmp = _remote_path() + ".tmp"
-        os.makedirs(home.home(), mode=0o700, exist_ok=True)
-        with open(tmp, "w") as f:
-            json.dump({"ts": time.time(), "hosts": data}, f)
-        os.replace(tmp, _remote_path())
-    return data
-
-
-def _read_remote():
-    try:
-        with open(_remote_path()) as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return {"ts": 0, "hosts": {}}
-
-
 def read(now=None):
     """Métricas de todos los hosts configurados. Sin red."""
     now = now or time.time()
-    rem = _read_remote()
     out = {}
     for name, cfg in profile.hosts().items():
-        if cfg.get("transport", "local") == "local":
-            d = local()
-        else:
-            d = dict(rem["hosts"].get(cfg.get("fleet_host", name)) or {})
-            if not d:
-                d = {"ok": False, "reason": "sin datos (ejecuta `chopshop metrics --collect` o `watch` donde exista el CLI fleet)"}
-            else:
-                d["age"] = round(now - d.get("ts", rem.get("ts", 0)))
-                d["stale"] = d["age"] > STALE_AFTER
-        d["transport"] = cfg.get("transport", "local")
+        loc = t3.is_local(cfg)
+        d = local() if loc else {"ok": False, "reason": REMOTE_REASON}
+        d["transport"] = "local" if loc else "remote"
         d["purpose"] = cfg.get("purpose")
         if d.get("ok") and d.get("load") and d.get("cpus"):
             d["cpu_pct"] = round(100 * d["load"][0] / d["cpus"])

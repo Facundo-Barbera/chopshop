@@ -163,9 +163,12 @@ def check_config(cfg, runner=None, which=shutil.which):
         elif os.stat(p).st_mode & 0o077:
             warns.append("webhook_files.%s: el archivo es legible por otros: chmod 600 %s" % (name, path))
     if cfg.get("t3_enabled", True):
-        helper = os.path.expanduser((cfg.get("t3") or {}).get("helper") or "")
-        if not helper or not os.path.isfile(helper):
-            warns.append("el helper de T3 no existe (agent.t3.helper = %r): el sondeo de T3 avisará t3_unreachable" % helper)
+        t3c = cfg.get("t3") or {}
+        if not (t3c.get("t3_bin") or t3c.get("origin")):
+            warns.append("define agent.t3.t3_bin o agent.t3.origin: sin ellos el sondeo de T3 avisará t3_unreachable")
+        old = [k for k in ("helper", "node", "transport") if k in t3c]
+        if old:
+            warns.append("agent.t3.%s ya no se usa (sin helper node ni fleet): bórralo de la config" % "/".join(old))
     if not os.path.isdir(cfg.get("projects_root") or ""):
         warns.append("projects_root no existe: %s" % cfg.get("projects_root"))
     for k, v in (cfg.get("retention") or {}).items():

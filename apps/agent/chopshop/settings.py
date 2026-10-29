@@ -5,7 +5,8 @@ Orden de precedencia (de menor a mayor): valores por defecto genéricos < config
 - Entorno: `CHOPSHOP_<SECCION>__<CLAVE>[__<SUBCLAVE>]` (doble guion bajo separa niveles; el guion `-` de un nombre se escribe `_`).
   Ejemplos: `CHOPSHOP_AGENT__PORT=3791`, `CHOPSHOP_GENERAL__OVERFLOW_HOST=host-b`, `CHOPSHOP_HOSTS__HOST_B__CAP=6`.
   Valores: entero/decimal/true/false, `[json, ...]` para listas, o texto.
-- Atajos históricos: `CHOPSHOP_HOME` (directorio de estado), `CHOPSHOP_FLEET` (binario fleet).
+- Atajo histórico: `CHOPSHOP_HOME` (directorio de estado).
+Claves de transporte viejas que ya no existen se ignoran sin error: T3 se habla con el cliente nativo (chopshop/t3.py).
 Las URLs de webhook nunca van aquí: solo rutas a archivos que las contienen."""
 import copy
 import json
@@ -19,11 +20,10 @@ DEFAULTS = {
         "home": "~/.chopshop",         # estado local: perfiles, lotes, eventos (CHOPSHOP_HOME tiene prioridad)
         "default_host": "local",       # host de T3 por defecto de los perfiles
         "overflow_host": "",           # host donde se desbordan lotes grandes (vacío = no hay)
-        "fleet_bin": "",               # ruta del CLI `fleet` si algún host usa transporte fleet (vacío = buscar en PATH)
     },
     "hosts": {
-        "local": {"transport": "local", "cap": 2, "purpose": "dev", "node": "node",
-                  "t3_bin": "~/.t3/bin/t3", "helper": "~/.local/share/fleet/t3mcp.mjs", "access": "approval-required"},
+        # sin `origin` = el T3 de esta máquina; con `origin` = el MCP de T3 de otra (ver chopshop/t3.py)
+        "local": {"cap": 2, "purpose": "dev", "t3_bin": "t3", "access": "approval-required"},
     },
     "app": {                           # la app de macOS
         "agent_url": "",               # URL del chopshop-agent remoto (p. ej. http://<ip-tailscale>:3790)
@@ -48,7 +48,7 @@ DEFAULTS = {
         "db_path": "~/.chopshop/agent/agent.db",
         "sample_interval": 10,
         "t3_poll_interval": 5,
-        "t3": {"node": "node", "helper": "~/.local/share/fleet/t3mcp.mjs", "t3_bin": "~/.local/bin/t3", "access": "full-access"},
+        "t3": {"origin": "", "t3_bin": "t3", "access": "full-access", "credential_file": ""},
         "projects_root": "~/projects",
         "worktrees_root": "~/.t3/worktrees",
         "projects": {},

@@ -43,7 +43,7 @@ Es una capa delgada sobre T3: **no** lanza servidores de prueba, no reparte puer
    | `machine_id` | nombre de la máquina en la API (vacío = hostname) |
    | `bind`, `port` | dónde escucha. **`127.0.0.1` por defecto** (solo local). Para otras máquinas: `"auto"` (IP de Tailscale) o la IP concreta, p. ej. `"100.64.0.10"`. `0.0.0.0` y `::` se rechazan |
    | `auth`, `owner_login`, `allowed_logins`, `token_file` | ver [Autenticación](#autenticación) |
-   | `t3.*`, `t3_enabled` | cómo hablar con T3 de esta máquina (`false` = máquina solo sensor) |
+   | `t3.*`, `t3_enabled` | cómo hablar con T3 de esta máquina (`false` = máquina solo sensor): `t3.origin` (vacío = se lee de `~/.t3/userdata/server-runtime.json`), `t3.access`, `t3.t3_bin` (CLI que emite el pairing local) y `t3.credential_file`. El cliente MCP nativo se autentica solo por pairing local (OAuth+PKCE) y cachea el token en `<CHOPSHOP_HOME>/t3-credential.json` (0600); sin helper node ni `fleet` |
    | `projects.<p>.root`, `worktrees` | dónde vive cada proyecto, para atribuirle métricas e hilos (opcional: por defecto `projects_root`/`worktrees_root`) |
    | `webhook_files.<nombre>` | **ruta** a un archivo 0600 que contiene la URL del webhook (la URL nunca va en la config) |
 
@@ -53,7 +53,7 @@ Es una capa delgada sobre T3: **no** lanza servidores de prueba, no reparte puer
    apps/agent/bin/chopshop agent check-config
    ```
 
-   Muestra errores (exit 1) y avisos: token flojo de permisos, `owner_login` que parece un marcador, helper de T3 ausente, etc.
+   Muestra errores (exit 1) y avisos: token flojo de permisos, `owner_login` que parece un marcador, `agent.t3` sin `t3_bin` ni `origin`, claves viejas (`helper`, `node`) que ya no se usan, etc.
 
 3. **Token** (bearer para escrituras remotas y para el modo `token`). Se crea con permisos 0600 y **no se imprime**:
 
@@ -157,7 +157,7 @@ El agente **no ejecuta comandos que le pida un cliente**: no hay ninguna ruta qu
 | `403 sin identidad válida` desde otra máquina | `owner_login`/`allowed_logins` no coincide con el login real (`tailscale whois 100.64.0.x`), o `tailscale whois` no responde (falta `tailscale set --operator`). Con `auth = "token"` falta el bearer |
 | `403 las escrituras exigen el bearer` | añade `Authorization: Bearer $(cat token)`; el token del cliente debe ser el mismo archivo del agente |
 | `403 esta identidad es de solo lectura` | el login está en `allowed_logins`; solo `owner_login` escribe |
-| `agent.t3_ok` es `false` / evento `t3_unreachable` | revisa `agent.t3.helper`, `node`, `t3_bin` y que T3 esté arriba; el agente reintenta con backoff (10 s → 5 min) y avisa `t3_recovered` |
+| `agent.t3_ok` es `false` / evento `t3_unreachable` | revisa `agent.t3.t3_bin` / `origin`, la credencial cacheada en `<CHOPSHOP_HOME>/t3-credential.json` (bórrala para forzar un pairing nuevo) y que T3 esté arriba; el agente reintenta con backoff (10 s → 5 min) y avisa `t3_recovered` |
 | `503 T3 desactivado` | `agent.t3_enabled = false` en esa máquina |
 | `404 ruta desconocida` | la ruta no existe en esta versión (ver [`agent-api.md`](agent-api.md)); servidores de prueba y puertos los gestiona T3 |
 | El agente no puede escribir en alguna carpeta | `ProtectSystem=strict` deja todo en solo lectura salvo `ReadWritePaths`: añade `--rw` en `print-unit` o `[agent.service] read_write_paths` y reinstala |

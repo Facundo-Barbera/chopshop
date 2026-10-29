@@ -80,18 +80,11 @@ def cmd_poll(a):
 
 def cmd_watch(a):
     print("watch cada %ss (Ctrl-C para salir)" % a.interval)
-    last_metrics = 0
     try:
         while True:
             inbox.heartbeat(a.interval)
             inbox.drain(engine.answer)
             engine.tick(None, a.webhook_file)
-            if time.time() - last_metrics > 30:
-                last_metrics = time.time()
-                try:
-                    metrics.collect_remote()
-                except Exception as e:  # el monitor nunca debe tumbar al watch
-                    print("métricas remotas: %s" % e)
             inbox.heartbeat(a.interval)
             time.sleep(a.interval)
     except KeyboardInterrupt:
@@ -99,8 +92,6 @@ def cmd_watch(a):
 
 
 def cmd_metrics(a):
-    if a.collect:
-        metrics.collect_remote()
     print(json.dumps(metrics.read(), ensure_ascii=False))
     return 0
 
@@ -265,7 +256,7 @@ def build():
     x.add_argument("--wait", action="store_true"); x.add_argument("--timeout", type=int, default=900); x.add_argument("--interval", type=int, default=10); hook(x); x.set_defaults(f=cmd_run)
     x = sp.add_parser("poll"); x.add_argument("batch", nargs="?"); hook(x); x.set_defaults(f=cmd_poll)
     x = sp.add_parser("watch"); x.add_argument("--interval", type=int, default=20); hook(x); x.set_defaults(f=cmd_watch)
-    x = sp.add_parser("metrics"); x.add_argument("--collect", action="store_true", help="antes consulta `fleet status` (red) y guarda los hosts remotos"); x.set_defaults(f=cmd_metrics)
+    x = sp.add_parser("metrics"); x.set_defaults(f=cmd_metrics)
     x = sp.add_parser("status"); x.add_argument("batch", nargs="?"); x.set_defaults(f=cmd_status)
     x = sp.add_parser("wait"); x.add_argument("batch"); x.add_argument("--timeout", type=int, default=900); x.add_argument("--interval", type=int, default=10); hook(x); x.set_defaults(f=cmd_wait)
     x = sp.add_parser("gather"); x.add_argument("batch"); x.add_argument("--json", action="store_true"); x.set_defaults(f=cmd_gather)

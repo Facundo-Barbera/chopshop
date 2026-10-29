@@ -16,15 +16,12 @@ default_host = "host-a"
 overflow_host = "host-b"
 
 [hosts.host-a]
-transport = "local"
 cap = 2
 purpose = "dev"
-node = "node"
-t3_bin = "~/.t3/bin/t3"
-helper = "~/.local/share/fleet/t3mcp.mjs"
+t3_bin = "t3"
 
 [hosts.host-b]
-transport = "fleet"
+origin = "http://100.64.0.10:3773"
 cap = 4
 purpose = "tests-only"
 """
@@ -38,6 +35,11 @@ class Env(unittest.TestCase):
         with open(os.environ["CHOPSHOP_CONFIG"], "w") as f:
             f.write(TEST_CONFIG)
         os.makedirs(home.profiles_dir())
+        self.addCleanup(t3.set_client_factory, None)
+
+    def use_t3(self, fake):
+        """Inyecta `fake(host_cfg, host, tool, args, timeout)` como cliente MCP de cada host."""
+        use_fake(fake)
 
     def prof(self, name, text):
         with open(os.path.join(home.profiles_dir(), name + ".yaml"), "w") as f:
@@ -89,6 +91,18 @@ class Hook(http.server.BaseHTTPRequestHandler):
         pass
 
 
+class _FakeClient:
+    def __init__(self, fake, host_cfg, host, timeout):
+        self.fake, self.host_cfg, self.host, self.timeout = fake, host_cfg, host, timeout
+
+    def call(self, tool, args=None):
+        return self.fake(self.host_cfg, self.host, tool, args, self.timeout)
+
+
+def use_fake(fake):
+    t3.set_client_factory(lambda hc, host, timeout: _FakeClient(fake, hc, host, timeout))
+
+
 class FakeT3:
     """Transporte falso: un hilo que primero 'waiting' con una pregunta y luego completed."""
     def __init__(self):
@@ -126,7 +140,7 @@ class TestFlow(Env):
             f.write("http://127.0.0.1:%d/secret-path" % srv.server_port)
         os.chmod(hookfile, 0o600)
         self.prof("s", "project: s\nscratch: true\nmodel: claudeAgent/claude-haiku-5-5\ncannot_run: [deploy]\n")
-        fake = FakeT3(); t3.call = fake; engine.t3.call = fake
+        fake = FakeT3(); self.use_t3(fake)
         prof = profile.load("s")
         bid = engine.create_batch(prof, ["uno", "dos", "tres"], "host-a", 2, [])
         buf = io.StringIO()
@@ -187,7 +201,7 @@ class TestApprovalAndSnapshot(Env):
         with open(hookfile, "w") as f:
             f.write("http://127.0.0.1:%d/x" % srv.server_port)
         self.prof("s", "project: s\nscratch: true\n")
-        fake = FakeApproval(); engine.t3.call = fake
+        fake = FakeApproval(); self.use_t3(fake)
         bid = engine.create_batch(profile.load("s"), ["uno"], "host-a", 2, [])
         with redirect_stdout(io.StringIO()):
             for _ in range(3):
@@ -238,51 +252,24 @@ class TestInbox(Env):
         self.assertTrue(inbox.status()["watcher"]["alive"])
 
 
-FLEET_OUT = """== host-b (heavy, 100.64.0.11)
-host=vmi1
-load=0.50 0.30 0.10 cpus=12
-ram_mb_total=48000 ram_mb_avail=36000
-disk_used=18G/387G (5%)
-docker_running=0
-== host-a (hub, 100.64.0.10)
-host=mac.lan macOS=27.2
-load=4.00 5.00 6.00 cpus=8
-ram_mb_total=24576 ram_mb_avail=6144
-disk_used=13Gi/228Gi (16%)
-t3_server=listening:3773
-"""
-
-
 class TestMetrics(Env):
-    def test_parse_fleet_status(self):
-        from chopshop import metrics
-        d = metrics.parse_fleet_status(FLEET_OUT)
-        self.assertEqual(sorted(d), ["host-a", "host-b"])
-        self.assertEqual(d["host-b"]["cpus"], 12)
-        self.assertEqual(d["host-b"]["load"], [0.5, 0.3, 0.1])
-        self.assertEqual(d["host-b"]["disk_pct"], 5)
-        self.assertEqual(d["host-a"]["os"], "Darwin")
-        self.assertEqual(d["host-a"]["ram_mb_avail"], 6144)
-
     def test_read_local_and_remote(self):
-        import json as _j, time as _t
-        from chopshop import metrics, home
+        from chopshop import metrics
         m = metrics.read()
-        loc = [h for h, v in m["hosts"].items() if v["transport"] == "local"]
-        self.assertTrue(loc)
-        self.assertTrue(m["hosts"][loc[0]]["ok"])
-        self.assertIn("cpu_pct", m["hosts"][loc[0]])
-        rem = [h for h, v in m["hosts"].items() if v["transport"] != "local"]
-        self.assertTrue(rem)
-        self.assertFalse(m["hosts"][rem[0]]["ok"])  # sin archivo remoto: sin datos, no inventa
-        d = metrics.parse_fleet_status(FLEET_OUT)
-        with open(os.path.join(home.home(), "metrics-remote.json"), "w") as f:
-            _j.dump({"ts": _t.time(), "hosts": d}, f)
-        v = metrics.read()["hosts"][rem[0]]
-        self.assertTrue(v["ok"])
-        self.assertFalse(v["stale"])
-        self.assertEqual(v["cpu_pct"], 4)
-        self.assertEqual(v["ram_pct"], 25)
+        self.assertEqual(m["hosts"]["host-a"]["transport"], "local")
+        self.assertTrue(m["hosts"]["host-a"]["ok"])
+        self.assertIn("cpu_pct", m["hosts"]["host-a"])
+        rem = m["hosts"]["host-b"]                 # con origin: no se recolecta desde aquí, no inventa datos
+        self.assertEqual(rem["transport"], "remote")
+        self.assertFalse(rem["ok"])
+        self.assertEqual(rem["reason"], metrics.REMOTE_REASON)
+        self.assertNotIn("cpu_pct", rem)
+        self.assertFalse(hasattr(metrics, "collect_remote"))
+        self.assertFalse(hasattr(metrics, "parse_fleet_status"))
+
+    def test_snapshot_transport(self):
+        hosts = engine.snapshot()["hosts"]
+        self.assertEqual((hosts["host-a"]["transport"], hosts["host-b"]["transport"]), ("local", "remote"))
 
 
 if __name__ == "__main__":
