@@ -3,8 +3,9 @@ import Foundation
 // Sala de máquinas (docs/plans/office-redesign.md §4; forma en docs/agent-api.md «api_version 3»). Puro (sin SwiftUI, macOS 13).
 // `machine_room` de `GET /state` plegado con la MISMA regla `apply` que projection.py para `listener.state`, `automation.ran`,
 // `forge.repo.state` y `forge.run.state`. `subscriptions` no sale de sobres: solo cambia con cada `state` completo.
-// No es una vista aparte: es una SALA del piso de cada proyecto (`FloorPlan.machineRoom`), con `scoped(to:)` = lo de ese proyecto
-// (misma regla que `machine_room.scope` del agente, que publica el resultado en `projects[].machine_room`).
+// No es una vista aparte: cada proyecto declara en su perfil 0..N salas (`MachineRoomConfig`, `office.machine_rooms`), cada una
+// una SALA de un piso (`FloorPlan.machineRooms`), con `scoped(to:_:)` = lo que aloja (misma regla que `machine_room.scope` del
+// agente, que publica el resultado en `projects[].machine_rooms`).
 
 /// Luz de un módulo del rack: la decide el agente (verde = CI de la rama por defecto bien; ámbar = runs en curso o en cola;
 /// rojo = último run fallido o PR con CI rojo; gris = sin datos o proveedor degradado).
@@ -258,9 +259,42 @@ public struct SubscriptionStatus: Hashable, Sendable, Identifiable {
     }
 }
 
+/// Sala declarada en el perfil (`machine_rooms:`; llega en `office.machine_rooms`): piso y lo que aloja, por nombre o glob.
+public struct MachineRoomConfig: Equatable, Sendable {
+    public var name: String
+    public var floor: Int
+    /// `<dueño>/<repo>` de los módulos del rack del proyecto.
+    public var repos: [String]
+    public var listeners: [String]
+    /// Automatizaciones del proyecto.
+    public var automations: [String]
+    public var subscriptions: [String]
+
+    public init(name: String, floor: Int = 0, repos: [String] = [], listeners: [String] = [], automations: [String] = [],
+                subscriptions: [String] = []) {
+        self.name = name; self.floor = floor; self.repos = repos; self.listeners = listeners; self.automations = automations
+        self.subscriptions = subscriptions
+    }
+
+    init?(json: JSONValue) {
+        guard let name = json["name"]?.string else { return nil }
+        func list(_ k: String) -> [String] { (json[k]?.array ?? []).compactMap(\.string) }
+        self.init(name: name, floor: json["floor"]?.int ?? 0, repos: list("repos"), listeners: list("listeners"),
+                  automations: list("automations"), subscriptions: list("subscriptions"))
+    }
+
+    /// ¿Algún patrón (`fnmatch`, como `fnmatchcase` del agente) casa con `name`?
+    static func picks(_ name: String?, _ patterns: [String]) -> Bool {
+        patterns.contains { fnmatch($0, name ?? "", 0) == 0 }
+    }
+}
+
 public struct MachineRoom: Equatable, Sendable {
     public static let completedRunsKept = 5
 
+    /// Nombre y piso de la sala (los del perfil); nil/0 en la sala de toda la máquina.
+    public var name: String?
+    public var floor = 0
     public var listeners: [ListenerStatus] = []
     public var automations: [AutomationStatus] = []
     public var subscriptions: [SubscriptionStatus] = []
@@ -276,10 +310,12 @@ public struct MachineRoom: Equatable, Sendable {
         headSeq = json["head_seq"]?.int ?? 0
     }
 
-    /// Desde un objeto `machine_room` (el de arriba del estado o el `projects[].machine_room` de un proyecto).
+    /// Desde un objeto `machine_room` (el de arriba del estado o una sala de `projects[].machine_rooms`).
     public init(room mr: JSONValue.Object) {
         self.init(listeners: mr["listeners"]?.array ?? [], automations: mr["automations"]?.array ?? [],
                   subscriptions: mr["subscriptions"]?.array ?? [], rack: mr["rack"]?.array ?? [])
+        name = mr["name"]?.string
+        floor = mr["floor"]?.int ?? 0
     }
 
     /// Desde la sala ya plegada de `LiveState` (lo que usa la app).
@@ -297,13 +333,16 @@ public struct MachineRoom: Equatable, Sendable {
         sortRack()
     }
 
-    /// La sala vista desde el piso de `project`: su rack, sus automatizaciones y los webhooks que lo reparten; los listeners son
-    /// del agente y sirven a todos, así que van enteros. Misma regla que `machine_room.scope` del agente.
-    public func scoped(to project: String) -> MachineRoom {
+    /// La sala `cfg` de `project` (sobre la sala de toda la máquina): los módulos del rack del proyecto cuyo repo casa con `repos`,
+    /// sus automatizaciones por nombre y los listeners y webhooks por nombre. Misma regla que `machine_room.scope` del agente.
+    public func scoped(to project: String, _ cfg: MachineRoomConfig) -> MachineRoom {
         var r = self
-        r.automations = automations.filter { $0.project == project }
-        r.subscriptions = subscriptions.filter { $0.serves(project) }
-        r.rack = rack.filter { $0.project == project }
+        r.name = cfg.name
+        r.floor = cfg.floor
+        r.listeners = listeners.filter { MachineRoomConfig.picks($0.name, cfg.listeners) }
+        r.automations = automations.filter { $0.project == project && MachineRoomConfig.picks($0.name, cfg.automations) }
+        r.subscriptions = subscriptions.filter { MachineRoomConfig.picks($0.name, cfg.subscriptions) }
+        r.rack = rack.filter { $0.project == project && MachineRoomConfig.picks($0.repo, cfg.repos) }
         return r
     }
 

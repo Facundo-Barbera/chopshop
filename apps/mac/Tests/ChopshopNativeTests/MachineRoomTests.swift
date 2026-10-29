@@ -186,16 +186,27 @@ final class MachineRoomTests: XCTestCase {
 
     // MARK: por proyecto
 
-    func testScopedToProject() throws {
+    func testScopedToProjectRoom() throws {
         let r = MachineRoom(state: try Fixture.json("machine-room/state.json"))
-        let a = r.scoped(to: "awesome-gb")
+        let all = MachineRoomConfig(name: "Todo", repos: ["*"], listeners: ["*"], automations: ["*"], subscriptions: ["*"])
+        let a = r.scoped(to: "awesome-gb", all)
+        XCTAssertEqual((a.name, a.floor), ("Todo", 0))
         XCTAssertEqual(a.rack.count, 2)
-        XCTAssertEqual(a.automations.map(\.name), ["triage"])
-        XCTAssertEqual(a.subscriptions.map(\.name), ["bots", "chat"], "sin `projects` (agente anterior) = todos")
+        XCTAssertEqual(a.automations.map(\.name), ["triage"], "solo las de su proyecto")
+        XCTAssertEqual(a.subscriptions.map(\.name), ["bots", "chat"])
         XCTAssertEqual(a.listeners, r.listeners)
-        let o = r.scoped(to: "otro")
+        let o = r.scoped(to: "otro", all)
         XCTAssertTrue(o.rack.isEmpty && o.automations.isEmpty)
         XCTAssertEqual(o.listeners.count, 2)
+        // por nombre o glob; sin patrones = nada de ese tipo
+        let some = r.scoped(to: "awesome-gb", MachineRoomConfig(name: "Docs", floor: 1, repos: [a.rack[1].repo], subscriptions: ["b*"]))
+        XCTAssertEqual(some.floor, 1)
+        XCTAssertEqual(some.rack.map(\.repo), [a.rack[1].repo])
+        XCTAssertEqual(some.subscriptions.map(\.name), ["bots"])
+        XCTAssertTrue(some.listeners.isEmpty && some.automations.isEmpty)
+        XCTAssertEqual(MachineRoomConfig(json: ["name": "S", "floor": 2, "repos": ["o/*"]]),
+                       MachineRoomConfig(name: "S", floor: 2, repos: ["o/*"]))
+        XCTAssertNil(MachineRoomConfig(json: ["floor": 0]))
     }
 
     func testSubscriptionServesGlobs() throws {

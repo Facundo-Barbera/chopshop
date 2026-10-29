@@ -3,8 +3,8 @@ import AppKit
 
 #if NATIVE_PREVIEWS
 /// Capturas del panel de la sala de máquinas de un piso (las usa `ChopshopSnap <salida> machine-room`): `machine-room-fixture.jsonl`
-/// plegado con `MachineRoom.fold` y recortado a Awesome GB (`scoped(to:)`, lo que abre su piso: su rack con runs, sus scripts, sus
-/// webhooks y los listeners del agente). La sala dentro del piso sale en las capturas `floor`.
+/// plegado con `LiveState.fold` y la primera sala que declara Awesome GB (`FloorPlan.machineRooms`: lo que aloja esa sala de su
+/// piso: rack con runs, scripts, webhooks y listeners). La sala dentro del piso sale en las capturas `floor`.
 @available(macOS 26.0, *)
 @MainActor
 public extension Snapshots {
@@ -15,7 +15,8 @@ public extension Snapshots {
         let envs = FixtureStream.parse(data)
         // reloj fijo en el último sobre del fixture: los «hace N min» no dependen de cuándo se hace la captura
         let now = envs.lazy.compactMap { SnapshotMapper.date($0.ts) }.max() ?? Date()
-        let v = MachineRoomInspector(room: MachineRoom.fold(envs).scoped(to: project), project: project, unit: nil, now: now, frozen: true,
+        let room = FloorPlan.floors(in: LiveState.fold(envs), project: project).flatMap(\.machineRooms).first ?? MachineRoom()
+        let v = MachineRoomInspector(room: room, project: project, unit: nil, now: now, frozen: true,
                                      flat: true) {}
             .frame(width: FloorOfficeView.machinePanelWidth)
             .padding(24)

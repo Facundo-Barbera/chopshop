@@ -39,9 +39,11 @@ public struct FloorOfficeView: View {
         }
         .sorted { ($0.2 == .needsYou ? 0 : 1, $0.0.id) < ($1.2 == .needsYou ? 0 : 1, $1.0.id) }
         .map { IsoAlert(id: $0.0.id, label: label(plan, $0.0.id), title: $0.1.title ?? $0.1.threadID, visual: $0.2) }
-        // repos en rojo de la sala de máquinas, detrás de los escritorios
-        let red = (plan.machineRoom?.rack ?? []).filter { $0.light == .red }.map {
-            IsoAlert(id: FloorLayout.cabinetID($0.id), label: $0.title, title: MachineRoomText.light(.red), visual: .stuck)
+        // repos en rojo de las salas de máquinas, detrás de los escritorios
+        let red = plan.machineRooms.enumerated().flatMap { (k, mr) in
+            mr.rack.filter { $0.light == .red }.map {
+                IsoAlert(id: FloorLayout.cabinetID(k, $0.id), label: $0.title, title: MachineRoomText.light(.red), visual: .stuck)
+            }
         }
         return desks + red
     }
@@ -50,7 +52,7 @@ public struct FloorOfficeView: View {
 
     /// Etiqueta corta del hueco: `rol·n` en un piso, el rol que espera (o «sin rol») en el vestíbulo.
     static func label(_ plan: FloorPlan, _ id: String) -> String {
-        if id == FloorLayout.consoleID { return "Sala de máquinas" }
+        if let m = FloorLayout.machinePart(id), m.unit == nil { return plan.machineRoom(of: id)?.name ?? "Sala de máquinas" }
         if let u = unit(plan, id) { return u.title }
         if id.hasPrefix("lobby:") {
             let g = plan.guest(String(id.dropFirst(6)))
@@ -60,10 +62,10 @@ public struct FloorOfficeView: View {
         return "\(r.role) · \(d.slot + 1)"
     }
 
-    /// Repo del armario `rack:<unidad>` (nil si `id` no es un armario).
+    /// Repo del armario `rack:<k>:<unidad>` (nil si `id` no es un armario).
     static func unit(_ plan: FloorPlan, _ id: String) -> RackUnit? {
-        guard id.hasPrefix("rack:") else { return nil }
-        return plan.machineRoom?.unit(String(id.dropFirst(5)))
+        guard let u = FloorLayout.machinePart(id)?.unit else { return nil }
+        return plan.machineRoom(of: id)?.unit(u)
     }
 
     private func isMachine(_ id: String?) -> Bool { id.flatMap { layout.spot($0)?.isMachine } ?? false }
@@ -94,7 +96,7 @@ public struct FloorOfficeView: View {
                 withAnimation(.snappy(duration: 0.22)) { selected = (h == selected) ? nil : h }
             })
 
-            if (plan.kind == .lobby && plan.lobby.isEmpty) || (plan.kind != .lobby && plan.rooms.isEmpty && plan.machineRoom == nil) {
+            if (plan.kind == .lobby && plan.lobby.isEmpty) || (plan.kind != .lobby && plan.rooms.isEmpty && plan.machineRooms.isEmpty) {
                 VStack(spacing: 6) {
                     Text(plan.kind == .lobby ? "Vestíbulo vacío" : "Piso sin departamentos").font(.system(size: 15, weight: .medium))
                     Text(plan.kind == .lobby ? "Aquí esperan los hilos activos sin rol y los que esperan escritorio."
@@ -119,7 +121,7 @@ public struct FloorOfficeView: View {
             .animation(.spring(duration: 0.5, bounce: 0.22), value: alertsNow.map(\.id))
             .frame(maxWidth: .infinity)
 
-            if let id = selected, isMachine(id), let room = plan.machineRoom {
+            if let id = selected, isMachine(id), let room = plan.machineRoom(of: id) {
                 MachineRoomInspector(room: room, project: plan.project, unit: Self.unit(plan, id)?.id, now: now0, frozen: frozenNow != nil,
                                      flat: flatChrome) {
                     withAnimation(.snappy(duration: 0.25)) { selected = nil }
@@ -185,14 +187,14 @@ public struct FloorOfficeView: View {
             let v: NodeVisual = u.light == .red ? .stuck : (u.light == .amber ? .running : (u.light == .green ? .done : .pending))
             return ([MachineRoomText.light(u.light), n > 0 ? "\(n) run\(n == 1 ? "" : "s") en curso" : nil].compactMap { $0 }.joined(separator: " · "), v)
         }
-        guard let mr = plan.machineRoom else { return ("", .pending) }
+        guard let mr = plan.machineRoom(of: id) else { return ("", .pending) }
         let bad = mr.unhealthyListeners.count + mr.failingAutomations.count + mr.subscriptions.filter(\.failing).count
         let parts = ["\(mr.listeners.count) listeners", "\(mr.automations.count) scripts", "\(mr.subscriptions.count) webhooks"]
         return (parts.joined(separator: " · ") + (bad > 0 ? " · \(bad) con problemas" : ""),
                 mr.listeners.contains { $0.state == .down } ? .stuck : (bad > 0 ? .needsYou : .done))
     }
 
-    /// Etiquetas de escritorios (`d:<id>`), departamentos (`r:<i>`; la sala de máquinas es `r:-1`) y armarios (`m:<id>`) que
+    /// Etiquetas de escritorios (`d:<id>`), departamentos (`r:<i>`; la sala de máquinas k es `r:<-1-k>`) y armarios (`m:<id>`) que
     /// resuelve FloorRenderer (la ciudad las usa en el zoom).
     @ViewBuilder static func labels(_ plan: FloorPlan, layout lay: FloorLayout, now: Date, dark: Bool) -> some View {
         ForEach(lay.spots.filter { !$0.isMachine }, id: \.id) { sp in
@@ -215,16 +217,16 @@ public struct FloorOfficeView: View {
                 .foregroundStyle(Color.primary.opacity(0.75))
                 .tag("r:\(r.index)")
         }
-        if lay.machine != nil {
-            Text("SALA DE MÁQUINAS")
+        ForEach(lay.machines, id: \.index) { m in
+            Text(machineTitle(plan, m.index))
                 .font(.system(size: 9, weight: .medium, design: .monospaced)).tracking(1.3)
                 .padding(.horizontal, 8).padding(.vertical, 3)
                 .background(Capsule().fill(dark ? Color(white: 0.11).opacity(0.92) : Color.white.opacity(0.9)))
                 .overlay(Capsule().strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.7))
                 .foregroundStyle(Color.primary.opacity(0.75))
-                .tag("r:\(FloorLayout.machineRoomIndex)")
+                .tag("r:\(FloorLayout.machineRoomIndex(m.index))")
         }
-        ForEach(lay.machine?.cabinets ?? [], id: \.id) { sp in
+        ForEach(lay.machines.flatMap(\.cabinets), id: \.id) { sp in
             let u = unit(plan, sp.id)
             Text(u?.title ?? sp.id)
                 .font(.system(size: 9, weight: .semibold))
@@ -237,6 +239,12 @@ public struct FloorOfficeView: View {
     }
 
     private func roomTitle(_ r: FloorLayout.RoomBox) -> String { Self.roomTitle(plan, r) }
+
+    /// Rótulo de la sala de máquinas k: su nombre del perfil en mayúsculas.
+    static func machineTitle(_ plan: FloorPlan, _ k: Int) -> String {
+        guard plan.machineRooms.indices.contains(k), let n = plan.machineRooms[k].name, !n.isEmpty else { return "SALA DE MÁQUINAS" }
+        return n.uppercased()
+    }
 
     static func roomTitle(_ plan: FloorPlan, _ r: FloorLayout.RoomBox) -> String {
         if plan.kind == .lobby { return ["VESTÍBULO", plan.company?.uppercased()].compactMap { $0 }.joined(separator: " · ") }
@@ -428,7 +436,8 @@ enum FloorFixture {
     ]
     static let state: JSONValue = {
         let floor: JSONValue = ["index": 0, "name": "Producto", "rooms": .array(rooms)]
-        let office: JSONValue = ["company": "Awesome GB", "half_life_s": 1800, "floors": .array([floor])]
+        let office: JSONValue = ["company": "Awesome GB", "half_life_s": 1800, "floors": .array([floor]),
+                                 "machine_rooms": .array(machineRoomConfigs)]
         let project: JSONValue = ["name": "awesome-gb", "office": office]
         let lobby: [JSONValue] = [
             guest("mcp:c3", "Revisar dependencias", "running", since: 10),
@@ -442,7 +451,13 @@ enum FloorFixture {
         ["run_id": .string(id), "workflow": .string(wf), "status": .string(status), "conclusion": conclusion, "event": .string(event),
          "head_branch": .string(ref), "head_sha": "3f2a9c1e", "updated_at": iso(ago), "origin": origin]
     }
-    /// Sala de máquinas de toda la máquina: el piso la recorta a Awesome GB (lo de `otro` no sale).
+    /// Dos salas declaradas en Producto: la principal (repo principal, todos los listeners, scripts y webhooks) y la de docs.
+    static let machineRoomConfigs: [JSONValue] = [
+        ["name": "Sala de máquinas", "floor": 0, "repos": ["<org>/<repo-principal>"], "listeners": ["*"], "automations": ["*"],
+         "subscriptions": ["*"]],
+        ["name": "Sala de docs", "floor": 0, "repos": ["<org>/<engine-cx>"], "listeners": ["forge"], "automations": ["docs-*"]],
+    ]
+    /// Sala de máquinas de toda la máquina: cada sala del piso la recorta a lo suyo de Awesome GB (lo de `otro` no sale).
     static let listeners: [JSONValue] = [
         ["name": "forge", "state": "degraded", "backoff_s": 120, "error": "rate limit", "ts": iso(1)],
         ["name": "t3watch", "state": "ok", "ts": iso(0.5)],
@@ -499,7 +514,7 @@ enum FloorFixture {
 #endif
 #if NATIVE_PREVIEWS
 #Preview("Piso · sala de máquinas seleccionada", traits: .fixedLayout(width: 1100, height: 760)) {
-    FloorOfficeView(plan: FloorFixture.floor, frozenNow: FloorFixture.now, selected: FloorLayout.cabinetID("github:<org>/<repo-principal>"),
+    FloorOfficeView(plan: FloorFixture.floor, frozenNow: FloorFixture.now, selected: FloorLayout.cabinetID(0, "github:<org>/<repo-principal>"),
                     flatChrome: true)
         .background(IsoBackdrop()).preferredColorScheme(.dark)
 }

@@ -38,19 +38,30 @@ final class OfficeEquivalenceTests: XCTestCase {
                        (g["rack"]?.array ?? []).map { ($0["runs"]?.array ?? []).compactMap { $0["run_id"]?.string } })
     }
 
-    /// La sala de cada piso (`MachineRoom.scoped(to:)` sobre la sala plegada) == `projects[].machine_room` del agente
-    /// (`machine_room.scope`; dorada `machine-room-fixture.rooms.json`, sin `subscriptions` porque no salen de sobres).
-    func testPerProjectRoomMatchesPythonScope() throws {
+    /// Las salas de cada proyecto (las que declara su perfil en `office.machine_rooms`, `MachineRoom.scoped(to:_:)` sobre la sala
+    /// plegada) == `projects[].machine_rooms` del agente (`machine_room.scope`; dorada `machine-room-fixture.rooms.json`, sin
+    /// `subscriptions` porque no salen de sobres). Un proyecto sin salas declaradas no tiene ninguna.
+    func testPerProjectRoomsMatchPythonScope() throws {
         let envs = try envelopes("machine-room-fixture.jsonl")
-        let all = MachineRoom(LiveState.fold(envs).machineRoom)
+        let live = LiveState.fold(envs)
+        let all = MachineRoom(live.machineRoom)
         let g = try XCTUnwrap(Fixture.json("machine-room-fixture.rooms.json").object)
-        XCTAssertEqual(Set(g.keys), Set(LiveState.fold(envs).projects.map(\.name)))
-        for (project, room) in g {
-            let mine = all.scoped(to: project), theirs = MachineRoom(room: room.object ?? [:])
-            XCTAssertEqual(room["floor"]?.int, 0, project)
-            XCTAssertEqual(mine.rack, theirs.rack, project)
-            XCTAssertEqual(mine.automations, theirs.automations, project)
-            XCTAssertEqual(mine.listeners, theirs.listeners, project)
+        XCTAssertEqual(Set(g.keys), Set(live.projects.map(\.name)))
+        XCTAssertEqual(g["chopshop"]?.array?.count, 0)
+        XCTAssertEqual(g["awesome-gb"]?.array?.count, 2)
+        for (project, rooms) in g {
+            let cfgs = live.projects.first { $0.name == project }?.office?.machineRooms ?? []
+            let mine = cfgs.map { all.scoped(to: project, $0) }
+            let theirs = (rooms.array ?? []).map { MachineRoom(room: $0.object ?? [:]) }
+            XCTAssertEqual(mine.count, theirs.count, project)
+            for (a, b) in zip(mine, theirs) {
+                XCTAssertEqual(a.name, b.name, project)
+                XCTAssertEqual(a.floor, b.floor, project)
+                XCTAssertEqual(a.rack, b.rack, project)
+                XCTAssertEqual(a.automations, b.automations, project)
+                XCTAssertEqual(a.listeners, b.listeners, project)
+            }
+            XCTAssertEqual(FloorPlan.floors(in: live, project: project).flatMap(\.machineRooms).map(\.name), mine.map(\.name), project)
         }
     }
 }

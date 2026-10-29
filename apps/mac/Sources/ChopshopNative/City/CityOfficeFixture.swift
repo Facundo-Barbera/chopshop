@@ -1,7 +1,7 @@
 import Foundation
 
-/// Escena v3 de la ciudad: Awesome GB con `office` de dos pisos (Producto, con su sala de máquinas, y Docs) y un hilo en el
-/// vestíbulo; chopshop sin `office` (un piso, empresa por `CompanyDirectory`). La usan `CityOfficeTests` y `ChopshopSnap <salida> city-office`.
+/// Escena v3 de la ciudad: Awesome GB con `office` de dos pisos (Producto y Docs, cada uno con una sala de máquinas declarada en
+/// `machine_rooms`) y un hilo en el vestíbulo; chopshop sin `office` ni salas (un piso, empresa por `CompanyDirectory`). La usan `CityOfficeTests` y `ChopshopSnap <salida> city-office`.
 enum CityOfficeFixture {
     static func desk(_ id: String, _ thread: String?) -> String {
         let occ = thread.map { #"{"thread_id": "\#($0)", "phase": "running"}"# } ?? "null"
@@ -20,7 +20,11 @@ enum CityOfficeFixture {
             {"role": "triage", "permanent": true, "desks": [\(desk("awesome-gb/0/triage/0", nil))]},
             {"role": "backend", "permanent": false, "desks": [\(desk("awesome-gb/0/backend/0", "th-a")), \(desk("awesome-gb/0/backend/1", "th-b"))]}]},
           {"index": 1, "name": "Docs", "rooms": [
-            {"role": "docs", "permanent": false, "desks": [\(desk("awesome-gb/1/docs/0", "th-c"))]}]}]}
+            {"role": "docs", "permanent": false, "desks": [\(desk("awesome-gb/1/docs/0", "th-c"))]}]}],
+         "machine_rooms": [
+          {"name": "Sala de máquinas", "floor": 0, "repos": ["<org>/<repo-principal>"], "listeners": ["*"], "automations": ["*"],
+           "subscriptions": ["*"]},
+          {"name": "Sala de docs", "floor": 1, "repos": ["<org>/<engine-cx>"], "listeners": ["forge"], "automations": [], "subscriptions": []}]}
         """
         return """
         {"api_version": 3, "machine": "contabo-dev", "head_seq": 9, "projects": [

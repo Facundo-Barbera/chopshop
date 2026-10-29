@@ -13,10 +13,12 @@
 `rack` se ordena por `(project, kind == main ? 0 : 1, repo)` (lo mismo que `MachineRoomModel.swift`).
 Los emisores son `forge/rack.py` (`forge.repo.state`) y `actions.py` (`forge.run.state`).
 
-Sala por proyecto (la sala de máquinas es una SALA del piso de su proyecto, no una vista aparte): `rooms(state)` deja en cada
-`projects[]` un `machine_room` = `scope(sala, proyecto, piso)`: `floor` (el piso más bajo de su `office`, 0 sin `office`), su
-`rack` y sus `automations`, los `subscriptions` cuyo filtro `projects` lo cubre (`*` o glob) y todos los `listeners` (son del
-agente y sirven a todos). `projection._apply` lo recalcula tras cada sobre y `live` tras rellenar `subscriptions`."""
+Salas por proyecto (cada sala de máquinas es una SALA de un piso de su proyecto, no una vista aparte): opcionales, 0..N, las
+declara el perfil local en `machine_rooms:` (`layout.machine_rooms`) y llegan con `office.changed` a `projects[].office.machine_rooms`.
+`rooms(state)` deja en cada `projects[]` `machine_rooms` = [`scope(sala, proyecto, cfg)`]: `name`, `floor` y lo que la sala aloja
+según su configuración (nombres o globs): los módulos del `rack` del proyecto por `repos` (`<dueño>/<repo>`), las `automations`
+del proyecto por nombre, los `listeners` y las `subscriptions` por nombre. Sin salas declaradas -> `[]`. `machine_room` = la
+primera o null (clientes anteriores). `projection._apply` lo recalcula tras cada sobre y `live` tras rellenar `subscriptions`."""
 import fnmatch
 import re
 
@@ -113,32 +115,29 @@ def filter_project(mr, project):
                 rack=[u for u in mr.get("rack") or [] if u.get("project") == project])
 
 
-def floor_of(project):
-    """Piso donde está la sala: el más bajo del `office` del proyecto (0 si no tiene)."""
-    floors = ((project or {}).get("office") or {}).get("floors") or []
-    idx = [f.get("index") if isinstance(f.get("index"), int) else i for i, f in enumerate(floors)]
-    return min(idx) if idx else 0
+def _picks(name, pats):
+    return any(fnmatch.fnmatchcase(name or "", p) for p in pats or [])
 
 
-def serves(sub, project):
-    """¿La suscripción reparte sobres de ese proyecto? (`projects` con `*` o globs; sin `projects` = todos)."""
-    return any(p == "*" or fnmatch.fnmatchcase(project or "", p) for p in sub.get("projects") or ["*"])
-
-
-def scope(mr, project, floor=0):
-    """Sala de máquinas de un proyecto (la que pinta su piso). No muta `mr`."""
-    mr = mr if isinstance(mr, dict) else empty()
-    return {"floor": floor, "listeners": list(mr.get("listeners") or []),
-            "automations": [a for a in mr.get("automations") or [] if a.get("project") == project],
-            "subscriptions": [s for s in mr.get("subscriptions") or [] if serves(s, project)],
-            "rack": [u for u in mr.get("rack") or [] if u.get("project") == project]}
+def scope(mr, project, cfg):
+    """Sala de máquinas `cfg` ({name, floor, repos, listeners, automations, subscriptions}) de un proyecto. No muta `mr`."""
+    mr, cfg = mr if isinstance(mr, dict) else empty(), cfg or {}
+    return {"name": cfg.get("name"), "floor": cfg.get("floor", 0),
+            "listeners": [l for l in mr.get("listeners") or [] if _picks(l.get("name"), cfg.get("listeners"))],
+            "automations": [a for a in mr.get("automations") or []
+                            if a.get("project") == project and _picks(a.get("name"), cfg.get("automations"))],
+            "subscriptions": [s for s in mr.get("subscriptions") or [] if _picks(s.get("name"), cfg.get("subscriptions"))],
+            "rack": [u for u in mr.get("rack") or [] if u.get("project") == project and _picks(u.get("repo"), cfg.get("repos"))]}
 
 
 def rooms(state):
-    """`projects[].machine_room` desde `machine_room`. En sitio; devuelve `state`."""
+    """`projects[].machine_rooms` (y `machine_room` = la primera o None) desde `machine_room` y la configuración de cada
+    proyecto. En sitio; devuelve `state`."""
     mr = state.get("machine_room")
     for p in state.get("projects") or []:
-        p["machine_room"] = scope(mr, p.get("name"), floor_of(p))
+        cfgs = (p.get("office") or {}).get("machine_rooms") or []
+        p["machine_rooms"] = [scope(mr, p.get("name"), c) for c in cfgs]
+        p["machine_room"] = p["machine_rooms"][0] if p["machine_rooms"] else None
     return state
 
 

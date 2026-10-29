@@ -130,13 +130,8 @@
         "waiting_bot": 0
       },
       "graphs": [],
-      "machine_room": {
-        "automations": [],
-        "floor": 0,
-        "listeners": [],
-        "rack": [],
-        "subscriptions": []
-      },
+      "machine_room": null,
+      "machine_rooms": [],
       "name": "bixku-utilities",
       "office": null,
       "tasks": [
@@ -206,25 +201,8 @@
         "waiting_bot": 1
       },
       "graphs": [],
-      "machine_room": {
-        "automations": [
-          {
-            "duration_ms": 1830,
-            "error": null,
-            "exit": 0,
-            "name": "triage",
-            "next_run": null,
-            "project": "chopshop",
-            "severity": "info",
-            "trigger": "github.issue.opened",
-            "ts": "2026-10-29T16:03:44.000Z"
-          }
-        ],
-        "floor": 0,
-        "listeners": [],
-        "rack": [],
-        "subscriptions": []
-      },
+      "machine_room": null,
+      "machine_rooms": [],
       "name": "chopshop",
       "office": null,
       "tasks": [
@@ -336,13 +314,8 @@
           "status": "failed"
         }
       ],
-      "machine_room": {
-        "automations": [],
-        "floor": 0,
-        "listeners": [],
-        "rack": [],
-        "subscriptions": []
-      },
+      "machine_room": null,
+      "machine_rooms": [],
       "name": "nuskills",
       "office": null,
       "tasks": [

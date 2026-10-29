@@ -6,6 +6,9 @@
 - `desks(prof) -> [desk]`: escritorios declarados, con id estable `<proyecto>/<piso>/<rol>/<n>` (piso y n desde 0).
 - `structure(prof)`: forma de `office` para el sobre `office.changed` y para `GET /state` (sin ocupantes).
 - `roles(prof)`, `wake_triggers(prof, role)`, `match_rules(prof)`, `half_life_s(prof)`, `rack_repos(prof)`, `rack_actors(prof)`.
+- `machine_rooms(prof)`: salas de máquinas del bloque opcional `machine_rooms:` (0..N por proyecto; cada una en un piso de
+  `office.floors`, con los repos del rack, listeners, automatizaciones y webhooks que aloja, por nombre o glob). Van en
+  `structure()` como `machine_rooms` (y de ahí al sobre `office.changed` y a `projects[].office`).
 Puro: sin I/O (el perfil ya viene cargado por `chopshop.profile.load`)."""
 import re
 
@@ -31,6 +34,8 @@ PROVIDERS = ("github",)           # se suman con su adaptador en agent/forge/
 REPO_KINDS = ("main", "docs", "service", "lib", "other")
 ACTOR_KEYS = ("kind", "label")
 ACTOR_KINDS = ("bot", "human")
+MACHINE_ROOM_KEYS = ("name", "floor", "repos", "listeners", "automations", "subscriptions")
+MACHINE_ROOM_LISTS = MACHINE_ROOM_KEYS[2:]
 WAKE_EVENT = "desk.note"          # disparador extra de `wake`: una nota nueva en el escritorio
 
 _ROLE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
@@ -54,7 +59,7 @@ def parse_duration(v):
 
 def validate(prof):
     """Problemas de los bloques `office:` y `rack:` (lista vacía si están bien o no existen)."""
-    return _office_errs(prof) + _rack_errs(prof)
+    return _office_errs(prof) + _rack_errs(prof) + _machine_errs(prof)
 
 
 def _office_errs(prof):
@@ -215,6 +220,43 @@ def _rack_errs(prof):
     return errs
 
 
+def _machine_errs(prof):
+    m = prof.get("machine_rooms")
+    if m is None:
+        return []
+    if not isinstance(m, list):
+        return ["machine_rooms: se esperaba una lista de {name, floor, repos, listeners, automations, subscriptions}"]
+    fl = floors(prof)
+    depts = [len(f.get("rooms") or []) if isinstance(f.get("rooms"), list) else 0 for f in fl]
+    errs, seen = [], set()
+    for i, r in enumerate(m):
+        at = "machine_rooms[%d]" % i
+        if not _mapping(r):
+            errs.append("%s: se esperaba un mapa {name, floor, ...}" % at)
+            continue
+        errs += ["%s.%s desconocido (%s)" % (at, k, ", ".join(MACHINE_ROOM_KEYS)) for k in r if k not in MACHINE_ROOM_KEYS]
+        name = r.get("name")
+        if not isinstance(name, str) or not name.strip():
+            errs.append("%s.name debe ser un nombre" % at)
+        elif name in seen:
+            errs.append("%s.name repetido: %s" % (at, name))
+        else:
+            seen.add(name)
+        f = r.get("floor", 0)
+        if not _int(f) or not 0 <= f < len(fl):
+            errs.append("%s.floor debe ser un piso de office.floors (0..%d)" % (at, len(fl) - 1) if fl else
+                        "%s: una sala de máquinas necesita office.floors" % at)
+        else:
+            depts[f] += 1
+        for k in MACHINE_ROOM_LISTS:
+            v = r.get(k, [])
+            if not isinstance(v, list) or not all(isinstance(x, str) and x for x in v):
+                errs.append("%s.%s: se esperaba una lista de nombres (o globs)" % (at, k))
+    errs += ["office.floors[%d]: %d departamentos + salas de máquinas (máximo %d por piso)" % (i, n, MAX_ROOMS_PER_FLOOR)
+             for i, n in enumerate(depts) if n > MAX_ROOMS_PER_FLOOR]
+    return errs
+
+
 def validate_building(profiles):
     """Tope de pisos de proyecto por edificio: `profiles` = perfiles cargados; agrupa por `company(prof)`."""
     per = {}
@@ -308,7 +350,22 @@ def structure(prof, retired=()):
         if not any(d["id"] == did for d in room["desks"]):
             room["desks"].append({"id": did, "slot": slot, "retired": True})
             room["desks"].sort(key=lambda d: d["slot"])
-    return {"company": company(prof), "half_life_s": half_life_s(prof), "floors": fl}
+    return {"company": company(prof), "half_life_s": half_life_s(prof), "floors": fl, "machine_rooms": machine_rooms(prof)}
+
+
+def machine_rooms(prof):
+    """[{name, floor, repos, listeners, automations, subscriptions}] del perfil (solo las válidas; vacío si no declara)."""
+    m, n, out = prof.get("machine_rooms"), len(floors(prof)), []
+    for r in m if isinstance(m, list) else []:
+        f = r.get("floor", 0) if _mapping(r) else None
+        if not _mapping(r) or not isinstance(r.get("name"), str) or not r["name"].strip() or not _int(f) or not 0 <= f < n:
+            continue
+        if any(x["name"] == r["name"] for x in out):
+            continue
+        out.append(dict({"name": r["name"], "floor": f},
+                        **{k: [x for x in r.get(k) or [] if isinstance(x, str) and x] if isinstance(r.get(k), list) else []
+                           for k in MACHINE_ROOM_LISTS}))
+    return out
 
 
 def roles(prof):
