@@ -25,7 +25,7 @@ import threading
 import time
 
 from .. import profile as profile_mod
-from . import db, envelope, events, layout
+from . import db, envelope, events, layout, notes
 
 log = logging.getLogger("chopshop.agent.office")
 
@@ -316,7 +316,8 @@ class Office:
         self._x("DELETE FROM desk_waiting WHERE thread_id=?", (tid,))
         self._emit("desk.assigned", project, {
             "desk": d["id"], "thread_id": tid, "role": d["role"], "reason": reason or ("inherited" if occ else "start"),
-            "title": body.get("title"), "since": _iso(now), "inheritance": inh})
+            "title": body.get("title"), "since": _iso(now), "inheritance": inh,
+            "notes_pending": notes.count(self.conn, d["id"], now)})
         if old:
             self._promote(old["project"], old["role"])
         return d["id"]

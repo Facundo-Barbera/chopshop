@@ -2,7 +2,9 @@
 
 - Un departamento `permanent: true` cuyo rol declara `office.roles.<rol>.wake` se **despierta** con los disparadores de
   `automations.py`: `schedule` (`cron`/`every`, hora local de la box), `type: <evento>` con `where` sobre los sobres del bus
-  (p. ej. `github.issue.opened` del polling de GitHub) y `manual`. `desk.note` no se atiende aquí (bandeja de notas, otra rama).
+  (p. ej. `github.issue.opened` del polling de GitHub), `manual` y `desk.note` (una nota de bot en ese escritorio: lo despierta
+  si está libre; si está ocupado la nota se queda en la bandeja de `notes.py`). Las notas vivas del escritorio entran en el
+  prompt del despertar y se consumen al lanzarlo.
 - Al despertar se elige el primer escritorio permanente libre del rol (piso más bajo primero) y se crea un **lote de una
   tarea** en el motor (`engine.create_batch`, con `role`/`desk`/`wake` en la tarea) con el prompt del rol (`prompt_file`,
   relativo a `~/.chopshop/automations/<proyecto>/`) + el disparador + la herencia del ocupante anterior. El hilo de
@@ -20,7 +22,7 @@ import logging
 import os
 import time
 
-from . import automations, db, envelope, layout
+from . import automations, db, envelope, layout, notes as notes_mod
 
 log = logging.getLogger("chopshop.agent.roles")
 
@@ -126,7 +128,7 @@ def describe(env):
     return " ".join(p for p in parts if p)[:500]
 
 
-def compose(role, desk, trigger, prompt_text, inheritance, trigger_env=None, pending=None):
+def compose(role, desk, trigger, prompt_text, inheritance, trigger_env=None, pending=None, notes_text=None):
     """Prompt del despertar: rol + disparador + herencia + restricciones (el motor antepone las reglas del perfil)."""
     out = ["[Chopshop] Rol permanente `%s` en el escritorio %s. Te despertó: %s." % (role, desk, describe(trigger_env) or trigger)]
     out.append("")
@@ -145,6 +147,8 @@ def compose(role, desk, trigger, prompt_text, inheritance, trigger_env=None, pen
     if pending:
         out += ["", "## Disparos mientras el ocupante anterior trabajaba (%d)" % pending["count"]]
         out += ["- %s" % d for d in pending["seen"]]
+    if notes_text:
+        out += ["", "## Notas", notes_text]
     out += ["", "## Restricciones",
             "- Propón; no comentes, etiquetes, cierres ni envíes mensajes fuera (GitHub, chats, correos) sin aprobación humana:"
             " pide permiso con la herramienta de preguntas.",
@@ -255,6 +259,10 @@ class Roles:
         if not env or env["cause"]["depth"] >= automations.MAX_DEPTH:
             return []
         ty = env.get("type") or ""
+        if ty == layout.WAKE_EVENT:                       # nota de bot: despierta ese escritorio si su rol la declara
+            desk = (env.get("body") or {}).get("desk")
+            return [(r, t, desk) for r in self.roles if env.get("project") == r["project"] and desk in r["desks"]
+                    for t in r["triggers"] if t.get("type") == layout.WAKE_EVENT][:1]
         if ty.startswith(("desk.", "office.")):
             return []
         out = []
@@ -265,7 +273,7 @@ class Roles:
                 if t.get("type") in ("schedule", "manual", layout.WAKE_EVENT):
                     continue
                 if fnmatch.fnmatchcase(ty, t["type"]) and automations.where_match(t.get("where"), env):
-                    out.append((r, t))
+                    out.append((r, t, None))
                     break
         return out
 
@@ -276,7 +284,7 @@ class Roles:
         env = automations.normalize(env)
         if not env:
             return []
-        return [(r["project"], r["role"], self.wake(r, env.get("type"), env)) for r, _ in self.matches(env)]
+        return [(r["project"], r["role"], self.wake(r, env.get("type"), env, desk=d)) for r, _, d in self.matches(env)]
 
     def tick(self, now=None):
         """Horarios (`schedule`) de los roles. Primera vez = siembra sin disparar; tras una caída larga dispara una sola vez."""
@@ -328,6 +336,8 @@ class Roles:
         live = {w["desk_id"] for w in wakes(self.conn, None, LIVE, 500)}
         free = [d for d in r["desks"] if d not in live] if desk is None else ([desk] if desk not in live else [])
         if not free:
+            if trigger == layout.WAKE_EVENT:              # la nota ya espera en la bandeja; la lee el próximo despertar
+                return "noted"
             self._add_pending(desk or r["desks"][0], "%s: %s" % (trigger, describe(env) or by or trigger))
             return "pending"
         target = free[0]
@@ -337,7 +347,9 @@ class Roles:
         wid = envelope.new_id(now)
         pending = self._take_pending(target)
         inh = self.inheritance(target)
-        prompt = compose(r["role"], target, trigger, read_prompt(r["project"], r["prompt_file"], self.root), inh, env, pending)
+        inbox = notes_mod.pending(self.conn, target, now)
+        prompt = compose(r["role"], target, trigger, read_prompt(r["project"], r["prompt_file"], self.root), inh, env, pending,
+                         notes_mod.prompt_block(inbox))
         item = {"title": "[%s] despertar · %s" % (r["role"], trigger), "prompt": prompt, "role": r["role"], "desk": target,
                 "wake": wid}
         try:
@@ -351,6 +363,8 @@ class Roles:
                                   " VALUES(?,?,?,?,?,?,?,?,?,?)", (wid, target, r["project"], r["role"], trigger,
                                                                     (env or {}).get("id"), "failed", now, now, str(e)[:300]))
             return "failed"
+        if inbox:
+            notes_mod.consume(self.conn, target, now, by=wid)
         with db.tx():
             self.conn.execute("INSERT INTO desk_wakes(id, desk_id, project, role, trigger, cause_id, batch_id, task_id, state, created)"
                               " VALUES(?,?,?,?,?,?,?,?,?,?)", (wid, target, r["project"], r["role"], trigger, (env or {}).get("id"),

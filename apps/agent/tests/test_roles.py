@@ -135,12 +135,23 @@ class TestWake(RolesBase):
         self.assertEqual(r.tick(), [])
         self.assertEqual(self.eng.items, [])
 
-    def test_note_trigger_is_not_handled_here(self):
+    def test_note_wakes_free_desk_and_is_consumed(self):
+        """Integración con notes.py: `desk.note` despierta el escritorio libre; las notas vivas van al prompt y se consumen."""
+        from chopshop.agent import notes  # noqa: PLC0415
         r = self.make()
+        now = self.clock()
+        notes.add(self.conn, TRIAGE, "Grok · Facundo", "Prioriza pagos", None, now)
         env = {"id": "N1", "type": "desk.note", "project": "awesome-gb", "cause": {"id": None, "depth": 0},
-               "body": {"desk": TRIAGE, "from": "Grok · Facundo", "text": "hola", "pending": 1}}
-        self.assertEqual(r.on_event(env), [])                               # la bandeja de notas es de otra rama
-        self.assertEqual(self.eng.items, [])
+               "body": {"desk": TRIAGE, "from": "Grok · Facundo", "text": "Prioriza pagos", "pending": 1}}
+        self.assertEqual(r.on_event(env), [("awesome-gb", "triage", "launched")])
+        self.assertIn("Prioriza pagos", self.eng.items[0]["prompt"])
+        self.assertEqual(notes.count(self.conn, TRIAGE, now), 0)
+        notes.add(self.conn, TRIAGE, "Grok · Facundo", "Y revisa el CI", None, now)  # ocupado: la nota espera en la bandeja
+        self.assertEqual(r.on_event(dict(env, id="N2")), [("awesome-gb", "triage", "noted")])
+        self.assertEqual(len(self.eng.items), 1)
+        self.assertEqual(notes.count(self.conn, TRIAGE, now), 1)
+        other = dict(env, id="N3", body=dict(env["body"], desk="awesome-gb/0/backend/0"))
+        self.assertEqual(r.on_event(other), [])                              # escritorio sin rol permanente
 
     def test_single_instance_pending_and_rewake(self):
         r = self.make()
