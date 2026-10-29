@@ -70,7 +70,10 @@ class TestMachineRoomProjection(unittest.TestCase):
         self.assertEqual([(a["project"], a["name"], a["exit"], a["severity"]) for a in mr["automations"]],
                          [("awesome-gb", "docs-sync", 1, "error"), ("chopshop", "triage", 0, "info")])
         self.assertEqual(mr["automations"][0]["next_run"], "2026-10-30T07:30:00.000Z")
-        self.assertEqual((mr["rack"], mr["subscriptions"]), ([], []))
+        self.assertEqual(mr["subscriptions"], [])                           # no sale de sobres
+        self.assertEqual([(u["label"], u["kind"], u["light"], [r["origin"]["kind"] for r in u["runs"]]) for u in mr["rack"]],
+                         [("repo-principal", "main", "red", ["thread", "schedule", "bot"]),
+                          ("Engine CX", "docs", "amber", ["automation"])])
         self.assertEqual(projection.fold(envs + envs, "contabo-dev"), st)
         self.assertEqual(projection.fold(envs[4:], "contabo-dev", projection.fold(envs[:4], "contabo-dev")), st)
         self.assertTrue(all(not p["attention"] for p in st["projects"]))      # no abren atención
