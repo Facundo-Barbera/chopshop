@@ -11,7 +11,7 @@ diseño: [`agent-architecture.md`](agent-architecture.md). Todos los nombres de 
 
 Un proceso Python (solo stdlib, >= 3.9) con: API HTTP (`/health`, `/snapshot`, `/metrics`, `/events`, `/threads`, `/answer`,
 `/settle`, `/subscriptions`), muestreo de CPU/RAM/disco por app y proyecto desde `/proc` (solo lectura), vigilancia de los hilos de T3,
-eventos y webhooks. La base de datos es SQLite (WAL) en `agent.db_path`.
+eventos y webhooks y, opcional, ingreso de GitHub por polling (ver [más abajo](#ingreso-de-github-agentgithub)). La base de datos es SQLite (WAL) en `agent.db_path`.
 
 Es una capa delgada sobre T3: **no** lanza servidores de prueba, no reparte puertos, no barre procesos ni ejecuta comandos. Todo eso
 (worktrees, servidores, comandos de cada hilo) lo gestiona T3; el agente solo observa, resume y, por `answer`/`settle`, habla con T3.
@@ -116,11 +116,17 @@ Es una capa delgada sobre T3: **no** lanza servidores de prueba, no reparte puer
    curl -s http://127.0.0.1:3790/snapshot | python3 -m json.tool | head -40
    ```
 
-   Desde otra máquina de tu tailnet contra `host-a` (IP de ejemplo; identidad Tailscale para leer, más bearer para escribir):
+   Desde otra máquina de tu tailnet contra `host-a` (IP de ejemplo; identidad Tailscale **y** una credencial en toda petición
+   salvo `/health`: la de un dispositivo emparejado o el bearer legado del paso 3):
 
    ```sh
-   TOKEN="$(cat ~/.chopshop/agent/token)"      # el archivo copiado en el paso 3
-   curl -s http://100.64.0.10:3790/snapshot | head -c 300
+   # en host-a:            chopshop pair create --name "portátil"     -> código de un solo uso, p. ej. K7QM-93XD (10 min)
+   # en la otra máquina:   canjearlo una vez y guardar la credencial cs1_… (la app de Mac lo hace sola y la guarda en el Keychain)
+   curl -s -X POST http://100.64.0.10:3790/pair -H 'Content-Type: application/json' \
+        -d '{"code": "K7QM-93XD", "device_name": "portátil"}'
+   TOKEN="cs1_..."                             # o el bearer legado: "$(cat ~/.chopshop/agent/token)"
+   curl -s -H "Authorization: Bearer $TOKEN" http://100.64.0.10:3790/snapshot | head -c 300
+   curl -sN -H "Authorization: Bearer $TOKEN" http://100.64.0.10:3790/stream      # eventos en vivo (SSE)
    curl -s -X POST http://100.64.0.10:3790/settle \
         -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"thread_id": "<id del hilo>"}'
    ```
@@ -140,7 +146,7 @@ Es una capa delgada sobre T3: **no** lanza servidores de prueba, no reparte puer
 
 | Modo | Quién entra |
 |---|---|
-| `tailscale+token` | identidad de Tailscale (`tailscale whois --json <ip>`, cache 60 s): `owner_login` lee y escribe, `allowed_logins` solo leen. **Escribir exige además el bearer.** |
+| `tailscale+token` | identidad de Tailscale (`tailscale whois --json <ip>`, cache 60 s): `owner_login` lee y escribe, `allowed_logins` solo leen. **Toda petición (salvo `GET /health` y `POST /pair`) exige además una credencial**: la de un dispositivo emparejado (`chopshop pair create|list|revoke|prune`, ver docs/agent-api.md) o el bearer legado. |
 | `token` | solo el bearer, en toda petición. Para clientes sin identidad Tailscale o si no usas Tailscale |
 | `none-local` | nadie por red; solo el origen local |
 
@@ -149,8 +155,59 @@ si en la máquina hay otros usuarios en los que no confíes. Los logins se escri
 (el `usuario@` de `config.example.toml` es un marcador). Para `whois` el usuario del servicio debe poder hablar con `tailscaled`
 (`sudo tailscale set --operator=$USER`). Si `bind` no es loopback, el agente abre además `127.0.0.1:<port>` (`local_listener`).
 
-El agente **no ejecuta comandos que le pida un cliente**: no hay ninguna ruta que lance procesos; las únicas escrituras son
+El agente **no ejecuta comandos que le pida un cliente**: no hay ninguna ruta que lance procesos (el único proceso propio,
+con `[agent.github] enabled`, es `gh api` de solo lectura con argumentos fijos); las únicas escrituras son
 `answer`/`settle` en T3 y las suscripciones de webhooks.
+
+## Ingreso de GitHub (`[agent.github]`)
+
+Hilo `github` opcional (`enabled = false` por defecto: sin él no se crea el hilo) que convierte la actividad de los repos de
+`repos` en eventos `github.*` por **polling con ETag**. No abre puertos ni recibe webhooks: llama al `gh` ya autenticado de la
+máquina (`gh auth login` una vez, como el usuario del servicio) con `gh api -i`. El agente **nunca** lee, pasa ni imprime el token.
+
+```toml
+[agent.github]
+enabled = true
+repos = ["dueño/repo"]
+interval_s = 45        # GitHub puede pedir más con X-Poll-Interval; se respeta
+gh_bin = "gh"
+ci = true              # check-runs del HEAD de los PRs abiertos
+```
+
+Cada pasada, por repo:
+
+- `GET /repos/{o}/{r}/events` con `If-None-Match` (un 304 no gasta cuota y no emite). Cursor en la tabla `meta` de la DB:
+  `gh_etag:<repo>` y `gh_last_event_id:<repo>`; solo se emiten eventos con id mayor que el cursor, así que reiniciar el agente
+  no repite nada. **La primera pasada siembra los cursores sin emitir.**
+- Con `ci = true`: `GET /repos/{o}/{r}/pulls?state=open` y `GET /repos/{o}/{r}/commits/<HEAD>/check-runs` de cada PR abierto
+  (hasta 30), también con ETag. Estado en `meta` `gh_ci:<repo>`. Se emite `github.ci.completed` cuando el agregado de los
+  check-runs de un HEAD pasa a `success` o `failure` (`pending` no emite; un HEAD nuevo vuelve a empezar).
+
+| GitHub | Evento |
+|---|---|
+| `IssuesEvent` `opened` / `closed` / otro (`reopened`, `labeled`...) | `github.issue.opened` / `github.issue.closed` / `github.issue.updated` |
+| `PullRequestEvent` `opened` / `closed` con merge / otro (`synchronize`, `closed` sin merge...) | `github.pr.opened` / `github.pr.merged` / `github.pr.updated` |
+| `PullRequestReviewEvent` | `github.pr.review` (`review` = `approved`, `changes_requested`, `commented`) |
+| `PushEvent` | `github.push` (`head` = rama, `sha`, `commits`) |
+| check-runs del HEAD de un PR abierto | `github.ci.completed` (`ci` = `success` \| `failure`) |
+
+Cuerpo común: `{repo, number, title, url, actor, action, labels, head, base, state, ci, etag_source}` (+ `text` truncado a 2 KB
+con el cuerpo del issue/PR/revisión, `review`, `sha`, `commits` según el tipo). Solo metadatos; a todo texto se le quitan
+patrones de credenciales (`ghp_…`, `github_pat_…`, `Authorization: …`, `usuario:clave@` en URLs). El resto de tipos de GitHub
+(`WatchEvent`, comentarios...) no se publican. `repo` va normalizado en minúsculas (`dueño/repo`).
+
+**Proyecto**: se resuelve por repo, primero con `repo:` de los perfiles (`~/.chopshop/profiles/<proyecto>.yaml`) y si no con
+`repo = "dueño/repo"` en `[agent.projects.<proyecto>]` (vale también una URL de GitHub https o ssh). Sin coincidencia, `project` es nulo.
+
+**Errores**: un 403 por cuota (`X-RateLimit-Remaining: 0`), un 429, un 5xx o un `gh` que no responde paran la pasada y aplican
+backoff exponencial desde `interval_s` (tope 15 min; respeta `Retry-After` y `X-RateLimit-Reset`). Se emite **un solo**
+`machine.health` con `{"state":"degraded","source":"github","reason":"rate_limit|forbidden|server_error|gh|http"}` y otro con
+`"state":"ok"` y `down_seconds` al recuperarse; el hilo nunca muere. Un repo inexistente o sin acceso (404) solo deja un aviso
+en el log y no degrada. Los logs llevan repo, código HTTP y motivo; nunca la salida de error de `gh`.
+
+`chopshop agent check-config` valida `repos` e `interval_s` y avisa si no encuentra `gh_bin`. Con la unidad systemd
+(`ProtectSystem=strict`) `gh` lee su config de `~/.config/gh` sin problema; si tu `gh` necesita escribir su estado
+(`~/.local/state/gh`), añádelo con `--rw` o `[agent.service] read_write_paths`.
 
 ## Troubleshooting
 
@@ -159,7 +216,8 @@ El agente **no ejecuta comandos que le pida un cliente**: no hay ninguna ruta qu
 | `chopshop agent check-config` dice `bind = "auto" pero no pude obtener la IP de Tailscale` | `tailscaled` no está activo o `tailscale_bin` no es el correcto. Arráncalo o pon la IP en `agent.bind` |
 | La unidad falla al arrancar y reintenta cada 10 s | `journalctl --user -u chopshop-agent -n 50`. Típico: puerto ocupado, `bind` inválido o IP de Tailscale aún sin levantar al iniciar sesión (reintenta solo) |
 | `403 sin identidad válida` desde otra máquina | `owner_login`/`allowed_logins` no coincide con el login real (`tailscale whois 100.64.0.x`), o `tailscale whois` no responde (falta `tailscale set --operator`). Con `auth = "token"` falta el bearer |
-| `403 las escrituras exigen el bearer` | añade `Authorization: Bearer $(cat token)`; el token del cliente debe ser el mismo archivo del agente |
+| `401 falta una credencial válida` | empareja el dispositivo (`chopshop pair create` en el agente + `POST /pair`) o usa `Authorization: Bearer $(cat token)` con el mismo archivo del agente; si el dispositivo fue revocado, vuelve a emparejarlo |
+| `403 Host no reconocido` / `cabecera Origin` / `Content-Type` | conecta por IP o por `machine_id`/hostname (o añade el nombre a `agent.allowed_hosts`); no llames al agente desde un navegador; las escrituras van con `Content-Type: application/json` |
 | `403 esta identidad es de solo lectura` | el login está en `allowed_logins`; solo `owner_login` escribe |
 | `agent.t3_ok` es `false` / evento `t3_unreachable` | revisa `agent.t3.t3_bin` / `origin`, la credencial cacheada en `<CHOPSHOP_HOME>/t3-credential.json` (bórrala para forzar un pairing nuevo) y que T3 esté arriba; el agente reintenta con backoff (10 s → 5 min) y avisa `t3_recovered` |
 | `503 T3 desactivado` | `agent.t3_enabled = false` en esa máquina |

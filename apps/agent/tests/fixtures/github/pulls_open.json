@@ -1,0 +1,5 @@
+[
+  {"number": 7, "title": "BUG-3 · Racha", "state": "open", "html_url": "https://github.com/Acme/Widget/pull/7",
+   "user": {"login": "bot-dev"}, "labels": [{"name": "bug"}],
+   "head": {"ref": "wt-3", "sha": "2222222222222222"}, "base": {"ref": "main", "sha": "0000"}}
+]

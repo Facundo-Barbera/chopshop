@@ -168,9 +168,14 @@ def _children(g, nid):
     return [n for n in g["nodes"].values() if n["parent"] == nid]
 
 
+PHASE = {"pending": "queued", "running": "running", "done": "done", "failed": "failed", "skipped": "skipped"}   # nodo -> phase
+
+
 def _exception(st, b, g, node, why):
     _log(g, "exception", why, node["id"])
-    events.emit(st, "graph_exception", b["project"], {"graph": g["id"], "node": node["id"], "label": node["label"], "reason": why})
+    events.send(st, "graph_exception", b["project"], {"graph": g["id"], "node": node["id"], "label": node["label"], "reason": why,
+                                                      "phase": PHASE.get(node.get("status"), "failed"), "deps": node.get("deps") or [],
+                                                      "task": node.get("task")})
 
 
 def _add_task(b, n, prompt):
@@ -240,7 +245,13 @@ def _rollup(st, b, g):
             changed = True
 
 
-def step(st, b, prof, log=print, adhoc=None):
+def step(st, b, prof, log=print, adhoc=None, emit_fn=None):
+    """Una pasada del grafo del lote. `emit_fn` (firma de `events.emit`) sustituye la emisión; si no, la del contexto."""
+    with events.using(emit_fn):
+        return _step(st, b, prof, log, adhoc)
+
+
+def _step(st, b, prof, log, adhoc):
     g = st.get("graphs", {}).get(b.get("graph"))
     if not g or g["status"] != "running":
         return
@@ -306,7 +317,7 @@ def step(st, b, prof, log=print, adhoc=None):
         kinds = [n["status"] for n in g["nodes"].values() if n["kind"] in ("bug", "child")]
         g["summary"] = {"done": kinds.count("done"), "failed": kinds.count("failed"), "skipped": kinds.count("skipped"),
                         "threads": len(b["tasks"])}
-        events.emit(st, "graph_done", b["project"], {"graph": g["id"], "batch": b["id"], "status": g["status"],
+        events.send(st, "graph_done", b["project"], {"graph": g["id"], "batch": b["id"], "status": g["status"],
                                                       "summary": "%d listos, %d fallidos, %d omitidos, %d hilos" % (g["summary"]["done"], g["summary"]["failed"], g["summary"]["skipped"], g["summary"]["threads"]), "result": (root.get("result") or "")[:800]})
         _log(g, "end", "grafo %s: %d listos, %d fallidos, %d omitidos, %d hilos" % (g["status"], g["summary"]["done"], g["summary"]["failed"], g["summary"]["skipped"], g["summary"]["threads"]))
         log("grafo %s terminado: %s %s" % (g["id"], g["status"], g["summary"]))

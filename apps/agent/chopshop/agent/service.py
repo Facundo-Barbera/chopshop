@@ -1,7 +1,9 @@
 """Servicio chopshop-agent: arranque, hilos de fondo y subcomandos `chopshop agent run|status|token|check-config|print-unit`.
 
 `AgentService` ensambla los módulos (colector, T3, eventos) y el servidor HTTP (`server.py`):
-  hilos: muestreo (+ compactación) · sondeo de T3 · mantenimiento (retención de eventos, checkpoint WAL).
+  hilos: muestreo (+ compactación) · sondeo de T3 · motor (`engine.tick` con el bus inyectado, solo si hay lotes en
+  state.json) · importación periódica de events.jsonl (CLI externa) · automatizaciones (sobres del bus + horarios) ·
+  GitHub (si `[agent.github] enabled`) · mantenimiento (retención de eventos, checkpoint WAL).
   Un fallo en un hilo se registra (sin repetirlo cada ciclo) y el hilo sigue; `stop()` los para a todos de forma ordenada.
 `run` instala SIGTERM/SIGINT para la parada limpia. Nada aquí habla con systemd salvo `status` (solo lectura, inyectable) y
 `print-unit` solo IMPRIME la unidad: no escribe, no habilita y no arranca nada.
@@ -19,8 +21,8 @@ import sys
 import threading
 import time
 
-from .. import home, settings
-from . import __version__, collector as collector_mod, config, db, events, server, t3watch
+from .. import engine as engine_mod, events as legacy_events, graph, home, settings, state
+from . import __version__, automations as automations_mod, collector as collector_mod, config, db, envelope, events, github, pairing, server, t3watch
 
 log = logging.getLogger("chopshop.agent")
 
@@ -32,6 +34,9 @@ COMPACT_EVERY = 300.0             # s entre compactaciones de métricas
 MAINT_INTERVAL = 3600.0           # s entre tareas de mantenimiento
 MAINT_FIRST = 60.0                # primera pasada de mantenimiento tras arrancar
 STOP_TIMEOUT = 10.0               # s totales para esperar a los hilos al parar
+AUTOMATIONS_RELOAD = 60.0         # s entre relecturas de los perfiles por el hilo de automatizaciones
+AUTOMATIONS_CURSOR = "automations_cursor"
+AUTOMATIONS_BATCH = 500           # sobres por pasada
 
 
 class ServiceError(Exception):
@@ -171,6 +176,9 @@ def check_config(cfg, runner=None, which=shutil.which):
             warns.append("agent.t3.%s es una clave vieja que ya no se usa: bórrala de la config" % "/".join(old))
     if not os.path.isdir(cfg.get("projects_root") or ""):
         warns.append("projects_root no existe: %s" % cfg.get("projects_root"))
+    gerrs, gwarns = github.check(cfg, which)
+    errs += gerrs
+    warns += gwarns
     for k, v in (cfg.get("retention") or {}).items():
         if isinstance(v, bool) or not isinstance(v, (int, float)) or v <= 0:
             errs.append("retention.%s debe ser un número > 0 (es %r)" % (k, v))
@@ -188,31 +196,78 @@ def prune_events(conn, days, now=None):
     return max(0, n)
 
 
+# ---------------------------------------------------------------- puente del motor
+
+def engine_emitter(conn, cfg, poster=None, on_emit=None):
+    """`emit_fn` para el motor dentro del agente (misma firma y resultado que `chopshop.events.emit`): primero guarda el
+    sobre en el bus (con el mismo `ts` en segundos que la línea de events.jsonl, así `import_legacy` la reconoce y no la
+    duplica) y después hace lo de siempre (events.jsonl + suscripciones de state.json, p. ej. el `notify` de reacciones)."""
+    def emit_fn(st, event, project, body, adhoc_files=None, log=True, only=None):
+        ts = state.now()
+        try:
+            seq = events.emit(conn, cfg, event, project, body, poster=poster, ts=envelope.epoch(ts))
+            if on_emit:
+                on_emit(seq)                     # despierta a /stream
+        except Exception:  # noqa: BLE001 - el bus no debe frenar al motor
+            logging.getLogger("chopshop.agent").exception("no pude registrar %s en el bus", event)
+        return legacy_events.emit(st, event, project, body, adhoc_files, log=log, only=only, ts=ts)
+    return emit_fn
+
+
+def engine_has_work(st=None):
+    """Hay algún lote que `engine.tick` todavía procesaría (mismo criterio con el que tick los salta)."""
+    st = st if st is not None else state.read()
+    for b in st.get("batches", {}).values():
+        if not (all(t["done"] for t in b["tasks"]) and (b.get("done_notified") or (b.get("graph") and graph.finished(st, b)))):
+            return True
+    return False
+
+
 # ---------------------------------------------------------------- servicio
 
 class AgentService:
     """Ensambla módulos + servidor + hilos. `start()` → escucha y trabaja; `stop()` → parada ordenada (idempotente)."""
 
     def __init__(self, cfg, conn=None, collector=None, t3=None, runner=None, poster=None,
-                 orchestrator_fn=None, clock=time.time, maint_interval=MAINT_INTERVAL, maint_first=MAINT_FIRST, compact_every=COMPACT_EVERY):
+                 orchestrator_fn=None, clock=time.time, maint_interval=MAINT_INTERVAL, maint_first=MAINT_FIRST, compact_every=COMPACT_EVERY,
+                 engine_tick=None, stream_opts=None, automations=None,
+                 gh_runner=None, gh_projects_fn=github.profile_repos):
         self.cfg, self.clock, self.runner, self.poster = cfg, clock, runner, poster
+        self.engine_tick = engine_tick or engine_mod.tick
         self.owns_conn = conn is None
         self.conn = conn if conn is not None else db.connect(cfg["db_path"])
         self.collector = collector or collector_mod.Collector(cfg, self.conn)
         self.t3 = t3 or t3watch.T3(cfg)
         self.runtime = server.Runtime(clock)
-        self.auth = server.Authenticator(cfg, runner)
+        self.pairing = pairing.Pairing(self.conn, clock)
+        self.auth = server.Authenticator(cfg, runner, pairing=self.pairing)
         self.app = server.AgentApp(cfg, self.conn, self.collector, self.t3, self.auth, self.runtime,
-                                   self.emit, orchestrator_fn, clock)
+                                   self.emit, orchestrator_fn, clock, pairing=self.pairing, stream_opts=stream_opts)
+        self.engine_emit = engine_emitter(self.conn, cfg, poster, self.app.stream.bus.publish)
         self.maint_interval, self.maint_first = maint_interval, maint_first
         self.compact_every = compact_every
+        acfg = cfg.get("automations") or {}
+        self.automations = automations or automations_mod.Automations(
+            self.emit_envelope, clock=clock, store=automations_mod.MetaStore(self.conn), enabled=acfg.get("enabled", True))
+        self._auto_cursor = None
+        self._auto_loaded = None
+        self.github = None
+        if (cfg.get("github") or {}).get("enabled"):
+            self.github = github.GitHubPoller(self.conn, cfg, self.emit, runner=gh_runner, clock=clock,
+                                              projects_fn=gh_projects_fn)
         self.stop_event = threading.Event()
         self.servers, self.threads, self._serving = [], [], []
         self._stopped = False
 
     # -- API común de los módulos
     def emit(self, event, project, body=None):
-        return events.emit(self.conn, self.cfg, event, project, body, poster=self.poster)
+        seq = events.emit(self.conn, self.cfg, event, project, body, poster=self.poster)
+        self.app.stream.bus.publish(seq)            # despierta a los clientes de /stream
+        return seq
+
+    def emit_envelope(self, env):
+        """Sobre parcial de una automatización -> bus (mismo `emit`, con los metadatos del sobre)."""
+        return automations_mod.bus_emit(self.conn, self.cfg, env, poster=self.poster)
 
     @property
     def address(self):
@@ -234,11 +289,21 @@ class AgentService:
         except BaseException:
             self._close_servers()
             raise
+        self.app.listen_ips = {str(server.parse_ip(s.server_address[0])) for s in self.servers}
         self._import_legacy()
         if background:
             self._spawn("sampler", self._run_sampler)
             if self.cfg.get("t3_enabled", True):
                 self._spawn("t3", self._loop, "t3", self._poll_once, lambda: self.cfg.get("t3_poll_interval") or 5)
+            if self.cfg.get("engine_enabled", True):
+                self._spawn("engine", self._loop, "engine", self.engine_once, lambda: self.cfg.get("engine_interval") or 5)
+            if self.cfg.get("import_legacy", True):
+                self._spawn("legacy", self._loop, "legacy", self.import_legacy_once, lambda: self.cfg.get("legacy_interval") or 5)
+            if (self.cfg.get("automations") or {}).get("enabled", True):
+                self._spawn("automations", self._loop, "automations", self.automations_once,
+                            lambda: (self.cfg.get("automations") or {}).get("interval") or 2)
+            if self.github is not None:
+                self._spawn("github", self._loop, "github", self.github.poll_once, self.github.next_delay)
             self._spawn("maintenance", self._maintenance)
         for s in self.servers:
             self._serving.append(s)
@@ -260,11 +325,23 @@ class AgentService:
         if not self.cfg.get("import_legacy", True):
             return
         try:
-            res = events.import_legacy(self.conn, home.events_log(), self.cfg.get("machine_id"))
-            if res["imported"]:
-                log.info("importados %d eventos de events.jsonl (%d omitidos)", res["imported"], res["skipped"])
+            self.import_legacy_once()
         except Exception:  # noqa: BLE001 - la migración es opcional
             log.exception("no pude importar events.jsonl")
+
+    def import_legacy_once(self):
+        """Importa lo añadido a events.jsonl desde la última vez (idempotente por desplazamiento + deduplicación)."""
+        res = events.import_legacy(self.conn, home.events_log(), self.cfg.get("machine_id"))
+        if res["imported"]:
+            log.info("importados %d eventos de events.jsonl (%d omitidos)", res["imported"], res["skipped"])
+            self.app.stream.bus.publish()
+        return res
+
+    def engine_once(self):
+        """Una pasada del motor con el bus inyectado; nada si no hay lotes con trabajo en state.json."""
+        if not os.path.exists(home.state_path()) or not engine_has_work():
+            return None
+        return self.engine_tick(None, None, lambda m: log.info("motor: %s", m), emit_fn=self.engine_emit)
 
     # -- hilos
     def _loop(self, name, fn, interval):
@@ -286,6 +363,31 @@ class AgentService:
         if not res.get("skipped"):
             self.runtime.last_poll = self.clock()
         return res
+
+    def automations_once(self):
+        """Una pasada: relee perfiles (cada AUTOMATIONS_RELOAD s), despacha los sobres nuevos del bus y revisa horarios.
+        El cursor vive en `meta`; la primera vez en una DB nueva empieza en la cabeza (no reprocesa el historial)."""
+        now = self.clock()
+        if self._auto_loaded is None or now - self._auto_loaded >= AUTOMATIONS_RELOAD:
+            self.automations.reload()
+            self._auto_loaded = now
+        if self._auto_cursor is None:
+            with db.tx():
+                row = self.conn.execute("SELECT value FROM meta WHERE key=?", (AUTOMATIONS_CURSOR,)).fetchone()
+            self._auto_cursor = int(row["value"]) if row and str(row["value"]).isdigit() else events.last_seq(self.conn)
+            if not row:
+                with db.tx():
+                    self.conn.execute("INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)", (AUTOMATIONS_CURSOR, str(self._auto_cursor)))
+        fired = []
+        rows = events.list_after(self.conn, self._auto_cursor, AUTOMATIONS_BATCH)
+        for r in rows:
+            fired += self.automations.on_event(r)
+            self._auto_cursor = r["seq"]
+        if rows:
+            with db.tx():
+                self.conn.execute("INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)", (AUTOMATIONS_CURSOR, str(self._auto_cursor)))
+        fired += self.automations.tick(now)
+        return fired
 
     def _maintenance(self):
         if self.stop_event.wait(self.maint_first):
@@ -324,14 +426,17 @@ class AgentService:
             return
         self._stopped = True
         self.stop_event.set()
+        self.app.stream.close()                     # corta las conexiones SSE (sus hilos son daemon)
         self._close_servers()
         end = time.monotonic() + STOP_TIMEOUT
         for t in self.threads:
             t.join(max(0.1, end - time.monotonic()))
+        self.automations.wait_idle(max(0.1, end - time.monotonic()))   # los scripts en curso tienen su propio timeout
         alive = [t.name for t in self.threads if t.is_alive()]
         if alive:
             log.warning("hilos que no terminaron a tiempo: %s", ", ".join(alive))
         events.flush(5)
+        events.cancel_pending()                 # reintentos/debounce pendientes no sobreviven a la conexión
         if self.owns_conn and not alive:
             try:
                 self.conn.close()
