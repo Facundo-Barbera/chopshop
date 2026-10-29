@@ -182,7 +182,7 @@ class TestMigration(unittest.TestCase):
             self.make_v2(path)
             conn = db.connect(path)
             try:
-                self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 3)
+                self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], db.SCHEMA_VERSION)
                 rs = [dict(r) for r in conn.execute("SELECT * FROM events ORDER BY seq")]
                 self.assertEqual([r["event"] for r in rs], ["thread_done", "pending_question", "t3_unreachable", "raro"])
                 self.assertEqual([r["type"] for r in rs], ["task.state", "question.opened", "machine.health", "legacy.raro"])

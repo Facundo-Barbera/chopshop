@@ -384,6 +384,7 @@ class AgentService:
         if alive:
             log.warning("hilos que no terminaron a tiempo: %s", ", ".join(alive))
         events.flush(5)
+        events.cancel_pending()                 # reintentos/debounce pendientes no sobreviven a la conexión
         if self.owns_conn and not alive:
             try:
                 self.conn.close()
