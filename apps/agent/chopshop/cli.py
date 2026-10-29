@@ -242,7 +242,7 @@ def cmd_snapshot(a):
     return 0
 
 
-V2_FLAGS = ("types", "exclude_types", "min_severity", "needs", "only_changes", "context", "debounce", "secret_file")
+V2_FLAGS = ("types", "exclude_types", "min_severity", "needs", "only_changes", "context", "debounce", "secret_file", "headers_file")
 
 
 def _agent_client():
@@ -294,6 +294,8 @@ def _subscribe_agent(a):
             body["debounce_s"] = a.debounce
         if a.secret_file:
             body["secret_file"] = _file_arg(a.secret_file, "secreto")
+        if a.headers_file:
+            body["headers_file"] = _file_arg(a.headers_file, "cabeceras")
         res = c.post("/subscriptions", body)
     except client.AgentError as e:
         raise profile.ProfileError("agente: %s" % e)
@@ -365,7 +367,9 @@ def build():
     x.add_argument("--only-changes", action="store_true", help="omite task.state sin cambio de phase/attention")
     x.add_argument("--context", action="store_true", help="añade body.context (sobres previos del sujeto + contadores)")
     x.add_argument("--debounce", type=float, help="segundos: colapsa ráfagas por sujeto (se entrega el último)")
-    x.add_argument("--secret-file", help="archivo 0600 con el secreto HMAC (X-Chopshop-Signature)"); x.set_defaults(f=cmd_subscribe)
+    x.add_argument("--secret-file", help="archivo 0600 con el secreto HMAC (X-Chopshop-Signature)")
+    x.add_argument("--headers-file", help="archivo 0600 con cabeceras extra, una por línea `Nombre: valor` (p. ej. Authorization)")
+    x.set_defaults(f=cmd_subscribe)
     return p
 
 

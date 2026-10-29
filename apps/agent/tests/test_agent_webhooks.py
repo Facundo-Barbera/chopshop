@@ -22,6 +22,7 @@ from test_agent_server import ServerBase  # noqa: E402
 
 URL = "https://hooks.example.invalid/url-canario-7f3e"
 SECRET = "secreto-hmac-canario-91ab"
+TOKEN = "Bearer token-canario-c0ffee"
 
 
 class Clock:
@@ -245,6 +246,96 @@ class TestDeliveryV2(Base):
         self.assertIsNone(d[(seq, "falta")]["next_retry"])                        # no se reintenta
         self.assertNotIn(SECRET, self.dump())
 
+    def test_headers_file_adds_authorization(self):
+        hfile = self.file("h.headers", "# Grok pide Authorization\n\nAuthorization: %s\nX-Tenant:  chop " % TOKEN)
+        events.subscribe(self.conn, "grok", self.hook("a"), headers_file=hfile, secret_file=self.file("s.key", SECRET))
+        events.subscribe(self.conn, "plano", self.hook("b", "https://hooks.example.invalid/b"))
+        p = Poster(200)
+        with self.assertLogs("chopshop.agent.webhooks", "INFO") as cm:
+            seq = self.emit("x", poster=p)
+        h = p.to(URL)[0][2]
+        self.assertEqual((h["Authorization"], h["X-Tenant"]), (TOKEN, "chop"))
+        self.assertEqual(h["X-Chopshop-Delivery"], "1")
+        self.assertTrue(h["X-Chopshop-Signature"].startswith("sha256="))
+        self.assertNotIn("Authorization", p.to("https://hooks.example.invalid/b")[0][2])
+        self.assertEqual(self.deliveries()[(seq, "grok")]["ok"], 1)
+        subs = events.list_subscriptions(self.conn)
+        self.assertEqual((subs["grok"]["headers"], subs["plano"]["headers"]), (True, False))
+        shown = repr(subs) + "\n".join(self.logs + cm.output)
+        for leak in ("token-canario", URL, SECRET):
+            self.assertNotIn(leak, shown + self.dump())
+        self.assertNotIn("h.headers", shown)                        # la ruta solo vive en la DB
+
+    def test_bad_headers_file_is_not_sent(self):
+        cases = {"abierto": ("Authorization: %s" % TOKEN, 0o644, "PermissionError"),
+                 "malo": ("Authorization %s" % TOKEN, 0o600, "ValueError"),
+                 "reservado": ("Content-Type: text/plain", 0o600, "ValueError"),
+                 "propio": ("X-Chopshop-Signature: sha256=00", 0o600, "ValueError"),
+                 "repetido": ("Authorization: a\nauthorization: b", 0o600, "ValueError")}
+        for name, (content, mode, _err) in cases.items():
+            events.subscribe(self.conn, name, self.hook(name), headers_file=self.file(name + ".h", content, mode))
+        events.subscribe(self.conn, "falta", self.hook("falta"), headers_file=os.path.join(self.tmp.name, "nada.h"))
+        p = Poster()
+        with self.assertLogs("chopshop.agent.webhooks", "WARNING") as cm:
+            seq = self.emit("x", poster=p)
+        self.assertEqual(p.calls, [])
+        d = self.deliveries()
+        for name, (_c, _m, err) in dict(cases, falta=(None, None, "FileNotFoundError")).items():
+            self.assertEqual(d[(seq, name)]["detail"], "archivo de cabeceras ilegible (%s)" % err, name)
+            self.assertIsNone(d[(seq, name)]["next_retry"])
+        self.assertNotIn("token-canario", self.dump() + "\n".join(cm.output))
+
+    def test_read_headers(self):
+        f = self.file("ok.h", "Authorization: Bearer a:b \r\n# x\nX-Api-Key:k")
+        self.assertEqual(webhooks.read_headers(f), {"Authorization": "Bearer a:b", "X-Api-Key": "k"})
+        for bad in ("Mal nombre: x", "Vacio:", ": x", "Host: evil", "User-Agent: x"):
+            with self.subTest(bad=bad), self.assertRaises(ValueError) as cm:
+                webhooks.read_headers(self.file("bad.h", "Ok: 1\n" + bad))
+            self.assertEqual(str(cm.exception).split(":")[0], "línea 2")       # solo el número, nunca el contenido
+            self.assertNotIn("evil", str(cm.exception))
+
+    def test_every_attempt_is_logged_without_url(self):
+        events.subscribe(self.conn, "a", self.hook("a"), headers_file=self.file("h", "Authorization: %s" % TOKEN))
+        with self.assertLogs("chopshop.agent.webhooks", "INFO") as cm:
+            ok = self.emit("x", poster=Poster(204))
+            rejected = self.emit("x", poster=Poster(401))
+        self.assertRegex(cm.output[0], r"^INFO:chopshop\.agent\.webhooks:webhook a: seq=%d type=\S+ intento=1/4 "
+                                       r"HTTP 204 \d+ms ok$" % ok)
+        self.assertRegex(cm.output[1], r"^WARNING:.*webhook a: seq=%d .*intento=1/4 HTTP 401 \d+ms sin reintento$"
+                         % rejected)
+
+        def boom(url, data, timeout, headers=None):
+            raise urllib.error.URLError(ConnectionRefusedError("%s %s" % (url, headers)))
+        with self.assertLogs("chopshop.agent.webhooks", "INFO") as cm:
+            seq = self.emit("x", poster=boom)
+            for s in (2, 10, 60):
+                self.advance(s)
+        self.assertEqual(len(cm.output), 4)
+        self.assertIn("intento=1/4 URLError/ConnectionRefusedError", cm.output[0])
+        self.assertTrue(cm.output[0].endswith("reintento 2 en 2s"))
+        self.assertTrue(cm.output[2].endswith("reintento 4 en 60s"))
+        self.assertIn("seq=%d" % seq, cm.output[3])
+        self.assertTrue(cm.output[3].endswith("reintentos agotados"))
+        for leak in ("url-canario", "token-canario"):
+            self.assertNotIn(leak, "\n".join(cm.output) + self.dump())
+
+    def test_only_changes_with_debounce_logs_the_attempt(self):
+        """Caso de contabo-dev: `*`, only_changes, debounce 30 s; un thread_done (task.state completed) que el receptor
+        rechaza con 401 se intenta al cerrar la ventana y queda en el log (antes solo en `deliveries`)."""
+        events.subscribe(self.conn, "grok-chopshop", self.hook("g"), "*", None, only_changes=True, debounce_s=30)
+        p = Poster(401)
+        self.emit("thread_started", "chopshop", {"thread_id": "t-plan", "title": "Plan rediseño oficina"}, p)
+        self.advance(30)
+        with self.assertLogs("chopshop.agent.webhooks", "INFO") as cm:
+            seq = self.emit("thread_done", "chopshop", {"thread_id": "t-plan", "status": "completed"}, p)
+            self.advance(29)
+            self.assertEqual(len(p.calls), 1)
+            self.advance(1)
+        self.assertEqual([c[1]["seq"] for c in p.calls], [seq - 1, seq])
+        self.assertEqual(self.deliveries()[(seq, "grok-chopshop")]["detail"], "HTTP 401")
+        self.assertIn("webhook grok-chopshop: seq=%d type=task.state intento=1/4 HTTP 401" % seq,
+                      [o for o in cm.output if o.startswith("WARNING")][0])
+
     def test_exceptions_never_leak_url_or_secret(self):
         events.subscribe(self.conn, "a", self.hook("a"), secret_file=self.file("s.key", SECRET))
 
@@ -445,6 +536,24 @@ class TestMigrationV4(unittest.TestCase):
                     conn.close()
                 db.connect(path).close()                                      # reabrir una v4 no toca nada
 
+    def test_v4_database_gets_headers_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "agent", "agent.db")
+            db.connect(path).close()
+            old = sqlite3.connect(path)
+            old.execute("ALTER TABLE subscriptions DROP COLUMN headers_file")
+            old.execute("INSERT INTO subscriptions(name,webhook_file,created,debounce_s) VALUES('v4','/x',1.0,30)")
+            old.execute("PRAGMA user_version=4")
+            old.commit()
+            old.close()
+            conn = db.connect(path)
+            try:
+                self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 5)
+                s = events.list_subscriptions(conn)["v4"]
+                self.assertEqual((s["debounce_s"], s["headers"]), (30.0, False))
+            finally:
+                conn.close()
+
 
 class TestApi(ServerBase):
     def setUp(self):
@@ -469,6 +578,26 @@ class TestApi(ServerBase):
                           True, True, 5.0, True))
         everything = "\n".join(self.responses) + "\n".join(self.logs)
         for leak in (self.sfile, self.wfile, SECRET, "canary-url-secreta"):
+            self.assertNotIn(leak, everything)
+
+    def test_post_headers_file(self):
+        hfile = os.path.join(self.tmp, "grok.headers")
+        with open(hfile, "w") as f:
+            f.write("Authorization: %s\n" % TOKEN)
+        os.chmod(hfile, 0o600)
+        st, body, _ = self.post("/subscriptions", {"name": "grok", "webhook_file": self.wfile, "headers_file": hfile})
+        self.assertEqual(st, 200, body)
+        self.assertTrue(self.get("/subscriptions")[1]["subscriptions"]["grok"]["headers"])
+        for content, mode in (("Authorization: %s" % TOKEN, 0o644), ("Authorization %s" % TOKEN, 0o600)):
+            with open(hfile, "w") as f:
+                f.write(content)
+            os.chmod(hfile, mode)
+            st, body, _ = self.post("/subscriptions", {"name": "otro", "webhook_file": self.wfile, "headers_file": hfile})
+            self.assertEqual(st, 400, body)
+        st, body, _ = self.post("/subscriptions", {"name": "otro", "webhook_file": self.wfile, "headers_file": "/no/h"})
+        self.assertEqual(st, 400, body)
+        everything = "\n".join(self.responses) + "\n".join(self.logs)
+        for leak in ("token-canario", hfile):
             self.assertNotIn(leak, everything)
 
     def test_post_validation(self):
@@ -536,6 +665,22 @@ class TestCli(unittest.TestCase):
             rc, calls, out = self.run_cli(["subscribe", "--list", "--agent"])
             self.assertEqual((rc, calls[0][:2]), (0, ("GET", "/subscriptions")))
             self.assertIn("question.*", out)
+
+    def test_subscribe_headers_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            hook, hdrs = os.path.join(tmp, "h.url"), os.path.join(tmp, "grok.headers")
+            for p, c in ((hook, URL), (hdrs, "Authorization: " + TOKEN)):
+                with open(p, "w") as f:
+                    f.write(c)
+                os.chmod(p, 0o600)
+            rc, calls, out = self.run_cli(["subscribe", "grok", "--webhook-file", hook, "--headers-file", hdrs,
+                                           "--only-changes", "--debounce", "30"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(calls[0][2], {"name": "grok", "webhook_file": hook, "project": "*", "only_changes": True,
+                                           "debounce_s": 30.0, "headers_file": hdrs})
+            self.assertNotIn("token-canario", out)
+            rc, calls, _ = self.run_cli(["subscribe", "grok", "--webhook-file", hook, "--headers-file", "/no/h"])
+            self.assertEqual((rc, calls), (1, []))
 
     def test_missing_file_is_an_error(self):
         rc, calls, _ = self.run_cli(["subscribe", "bot", "--types", "x", "--webhook-file", "/no/existe.url"])

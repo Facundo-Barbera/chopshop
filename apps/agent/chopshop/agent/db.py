@@ -5,7 +5,7 @@ import os
 import sqlite3
 import threading
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS machine_samples (      -- crudo (retención raw_hours)
@@ -65,6 +65,8 @@ def migrate(conn):
         _migrate_v4(conn)
     if v < 5:
         _migrate_v5_office(conn)
+    if v < 6:
+        _migrate_v6(conn)
     if v < SCHEMA_VERSION:
         conn.execute("PRAGMA user_version=%d" % SCHEMA_VERSION)
 
@@ -113,13 +115,17 @@ V4_COLUMNS = {
 }
 
 
-def _migrate_v4(conn):
+def _add_columns(conn, spec):
     """Añade las columnas que falten (idempotente: no depende del orden respecto de otras migraciones)."""
-    for table, cols in V4_COLUMNS.items():
+    for table, cols in spec.items():
         have = {r[1] for r in conn.execute("PRAGMA table_info(%s)" % table)}
         for name, typ in cols:
             if name not in have:
                 conn.execute("ALTER TABLE %s ADD COLUMN %s %s" % (table, name, typ))
+
+
+def _migrate_v4(conn):
+    _add_columns(conn, V4_COLUMNS)
 
 
 # v5: escritorios por rol (agent/office.py, docs/plans/office-redesign.md). `desk_occupancy` con `until` nulo = ocupante
@@ -144,11 +150,15 @@ V5_COLUMNS = {"t3_threads": (("role", "TEXT"), ("ended_at", "REAL"))}
 def _migrate_v5_office(conn):
     """Tablas de la oficina y columnas `role`/`ended_at` de `t3_threads` (idempotente)."""
     conn.executescript(OFFICE_SCHEMA)
-    for table, cols in V5_COLUMNS.items():
-        have = {r[1] for r in conn.execute("PRAGMA table_info(%s)" % table)}
-        for name, typ in cols:
-            if name not in have:
-                conn.execute("ALTER TABLE %s ADD COLUMN %s %s" % (table, name, typ))
+    _add_columns(conn, V5_COLUMNS)
+
+
+# v6: cabeceras HTTP extra por suscripción (ruta a un archivo 0600 con líneas `Nombre: valor`; NULL = ninguna).
+V6_COLUMNS = {"subscriptions": (("headers_file", "TEXT"),)}
+
+
+def _migrate_v6(conn):
+    _add_columns(conn, V6_COLUMNS)
 
 
 def tx():
