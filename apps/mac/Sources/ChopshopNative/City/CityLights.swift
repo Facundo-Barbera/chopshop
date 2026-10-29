@@ -42,18 +42,28 @@ public struct CityLights: Equatable, Sendable {
         return h
     }
 
-    public static func delay(_ id: String) -> Double { Double(hash(id) % 1000) / 1000 * maxDelay }
+    public static func delay(_ id: String) -> Double {
+        let h: UInt64 = hash(id) % 1000
+        let f: Double = Double(h) / 1000
+        return f * maxDelay
+    }
 
     /// Nivel de una ventana (0 apagada … 1 encendida) en `t`.
     public static func windowLevel(id: String, onAt: Double, offAt: Double?, t: Double) -> Double {
-        let up = cityEIO((t - onAt - delay(id)) / ramp)
+        let x: Double = t - onAt - delay(id)
+        let up: Double = cityEIO(x / ramp)
         guard let off = offAt else { return up }
-        return up * (1 - cityEIO((t - off) / ramp))
+        let down: Double = cityEIO((t - off) / ramp)
+        return up * (1 - down)
     }
 
     /// Orden en que un piso reparte sus ventanas.
     public static func slotOrder(project: String, slots: Int) -> [Int] {
-        (0..<slots).sorted { (hash("\(project)#\($0)"), $0) < (hash("\(project)#\($1)"), $1) }
+        let keys: [UInt64] = (0..<slots).map { (i: Int) -> UInt64 in hash("\(project)#\(i)") }
+        return (0..<slots).sorted { (a: Int, b: Int) -> Bool in
+            let ka: UInt64 = keys[a], kb: UInt64 = keys[b]
+            return ka != kb ? ka < kb : a < b
+        }
     }
 
     // MARK: Memoria
@@ -64,7 +74,11 @@ public struct CityLights: Equatable, Sendable {
             seen.insert(f.project)
             var ls = lights[f.project] ?? [:]
             // apagados del todo: liberan su ventana
-            ls = ls.filter { $0.value.offAt.map { t < $0 + Self.ramp + Self.maxDelay } ?? true }
+            ls = ls.filter { (entry: (key: String, value: Light)) -> Bool in
+                guard let off: Double = entry.value.offAt else { return true }
+                let end: Double = off + Self.ramp + Self.maxDelay
+                return t < end
+            }
             let alive = Set(f.activeThreads)
             for (id, l) in ls where l.offAt == nil && !alive.contains(id) { ls[id]?.offAt = t }
             for id in f.activeThreads {
@@ -72,7 +86,9 @@ public struct CityLights: Equatable, Sendable {
                     if let off = l.offAt {
                         // vuelve antes de apagarse: sigue desde el nivel que tenía (sin saltos)
                         let lv = Self.windowLevel(id: id, onAt: l.onAt, offAt: off, t: t)
-                        ls[id] = Light(slot: l.slot, onAt: t - Self.delay(id) - Self.ramp * Self.inverseEIO(lv), offAt: nil)
+                        let back: Double = Self.ramp * Self.inverseEIO(lv)
+                        let onAt: Double = t - Self.delay(id) - back
+                        ls[id] = Light(slot: l.slot, onAt: onAt, offAt: nil)
                     }
                     continue
                 }
@@ -97,7 +113,8 @@ public struct CityLights: Equatable, Sendable {
     public func windows(_ project: String, t: Double) -> [Double] {
         var out = [Double](repeating: 0, count: slots)
         for (id, l) in lights[project] ?? [:] where l.slot < slots {
-            out[l.slot] = max(out[l.slot], Self.windowLevel(id: id, onAt: l.onAt, offAt: l.offAt, t: t))
+            let lv: Double = Self.windowLevel(id: id, onAt: l.onAt, offAt: l.offAt, t: t)
+            out[l.slot] = max(out[l.slot], lv)
         }
         return out
     }
@@ -108,17 +125,24 @@ public struct CityLights: Equatable, Sendable {
     /// Mezcla de tinte (ámbar, rojo) del piso en `t`, cada uno 0 … 1.
     public func tint(_ project: String, t: Double) -> (amber: Double, red: Double) {
         guard let tn = tints[project] else { return (0, 0) }
-        let k = citySmooth((t - tn.since) / Self.tintRamp)
-        func w(_ s: CityFloorStatus) -> Double { (tn.status == s ? k : 0) + (tn.previous == s ? 1 - k : 0) }
+        let k: Double = citySmooth((t - tn.since) / Self.tintRamp)
+        func w(_ s: CityFloorStatus) -> Double {
+            let now: Double = tn.status == s ? k : 0
+            let before: Double = tn.previous == s ? 1 - k : 0
+            return now + before
+        }
         return (w(.needsYou), w(.stuck))
     }
 
     /// Pulso lento del brillo de un piso ámbar/rojo (sin parpadeo: ~4 s por ciclo, ±20 %).
-    public static func pulse(_ t: Double) -> Double { 0.8 + 0.2 * sin(t * 1.6) }
+    public static func pulse(_ t: Double) -> Double { let w: Double = sin(t * 1.6); return 0.8 + 0.2 * w }
 
     /// Inversa de ease-in-out cúbico.
     static func inverseEIO(_ y: Double) -> Double {
-        let v = cityClamp(y)
-        return v < 0.5 ? pow(v / 4, 1.0 / 3) : 1 - pow(2 * (1 - v), 1.0 / 3) / 2
+        let v: Double = cityClamp(y)
+        let third: Double = 1.0 / 3
+        if v < 0.5 { return pow(v / 4, third) }
+        let q: Double = 2 * (1 - v)
+        return 1 - pow(q, third) / 2
     }
 }

@@ -86,7 +86,11 @@ public struct CityBuilding: Hashable, Sendable, Identifiable {
     /// Altura del techo (sin la azotea).
     public var height: Double { Double(floors.count) * CityGeo.floorH }
     /// Profundidad para pintar de atrás hacia delante.
-    public var depthKey: Double { x0 + w / 2 + y0 + d / 2 }
+    public var depthKey: Double {
+        let hw: Double = w / 2, hd: Double = d / 2
+        let a: Double = x0 + hw + y0
+        return a + hd
+    }
 }
 
 /// Medidas de la ciudad en unidades del mundo (las mismas que la proyección isométrica 2:1 de la oficina:
@@ -183,7 +187,10 @@ public struct CityModel: Equatable, Sendable {
 
     public static func makeFloor(_ p: LiveState.Project, company: String, level: Int) -> CityFloor {
         let st = status(p)
-        let running = p.tasks.filter { ($0["phase"]?.string).map { Self.running.contains($0) } ?? false }.count
+        let running: Int = p.tasks.filter { t in
+            guard let ph: String = t["phase"]?.string else { return false }
+            return Self.running.contains(ph)
+        }.count
         return CityFloor(project: p.name, company: company, level: level, status: st, activeThreads: activeThreads(p),
                          running: running, needsYou: needsYou(p), stuck: stuck(p), alert: alert(p, status: st))
     }
@@ -197,16 +204,23 @@ public struct CityModel: Equatable, Sendable {
         let cols = max(1, Int(Double(companies.count).squareRoot().rounded(.up)))
         var buildings: [CityBuilding] = []
         for (i, c) in companies.enumerated() {
-            let ps = groups[c]!.sorted { ($0.name.lowercased(), $0.name) < ($1.name.lowercased(), $1.name) }
-            let floors = ps.enumerated().map { makeFloor($0.element, company: c, level: $0.offset) }
+            let ps: [LiveState.Project] = groups[c]!.sorted { (a: LiveState.Project, b: LiveState.Project) -> Bool in
+                (a.name.lowercased(), a.name) < (b.name.lowercased(), b.name)
+            }
+            var floors: [CityFloor] = []
+            for (level, p) in ps.enumerated() { floors.append(makeFloor(p, company: c, level: level)) }
             let col = i % cols, row = i / cols
-            buildings.append(CityBuilding(company: c, index: i, x0: CityGeo.margin + Double(col) * CityGeo.pitchX,
-                                          y0: CityGeo.margin + Double(row) * CityGeo.pitchY,
+            let x0: Double = CityGeo.margin + Double(col) * CityGeo.pitchX
+            let y0: Double = CityGeo.margin + Double(row) * CityGeo.pitchY
+            buildings.append(CityBuilding(company: c, index: i, x0: x0, y0: y0,
                                           w: CityGeo.footprintW, d: CityGeo.footprintD, floors: floors))
         }
         let rows = max(1, (companies.count + cols - 1) / cols)
-        let gx = 2 * CityGeo.margin + Double(cols - 1) * CityGeo.pitchX + CityGeo.footprintW
-        let gy = 2 * CityGeo.margin + Double(rows - 1) * CityGeo.pitchY + CityGeo.footprintD
+        let m2: Double = 2 * CityGeo.margin
+        let spanX: Double = Double(cols - 1) * CityGeo.pitchX
+        let spanY: Double = Double(rows - 1) * CityGeo.pitchY
+        let gx: Double = m2 + spanX + CityGeo.footprintW
+        let gy: Double = m2 + spanY + CityGeo.footprintD
         return CityModel(buildings: buildings, groundX: gx, groundY: gy)
     }
 
@@ -215,7 +229,7 @@ public struct CityModel: Equatable, Sendable {
         var b = IsoBounds.empty
         for (x, y) in [(0.0, 0.0), (groundX, 0.0), (0.0, groundY), (groundX, groundY)] { b.add(x, y, 0) }
         for bd in buildings {
-            let top = bd.height + CityGeo.roofH
+            let top: Double = bd.height + CityGeo.roofH
             for (x, y) in [(bd.x0, bd.y0), (bd.x1, bd.y0), (bd.x0, bd.y1), (bd.x1, bd.y1)] { b.add(x, y, top) }
         }
         return b
