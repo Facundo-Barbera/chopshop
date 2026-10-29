@@ -537,22 +537,23 @@ class TestMigrationV4(unittest.TestCase):
                 db.connect(path).close()                                      # reabrir una v4 no toca nada
 
     def test_v4_database_gets_headers_file(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = os.path.join(tmp, "agent", "agent.db")
-            db.connect(path).close()
-            old = sqlite3.connect(path)
-            old.execute("ALTER TABLE subscriptions DROP COLUMN headers_file")
-            old.execute("INSERT INTO subscriptions(name,webhook_file,created,debounce_s) VALUES('v4','/x',1.0,30)")
-            old.execute("PRAGMA user_version=4")
-            old.commit()
-            old.close()
-            conn = db.connect(path)
-            try:
-                self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 5)
-                s = events.list_subscriptions(conn)["v4"]
-                self.assertEqual((s["debounce_s"], s["headers"]), (30.0, False))
-            finally:
-                conn.close()
+        for version in (4, 5):                                                # 5 = oficina sin headers_file (ahora v6)
+            with self.subTest(version=version), tempfile.TemporaryDirectory() as tmp:
+                path = os.path.join(tmp, "agent", "agent.db")
+                db.connect(path).close()
+                old = sqlite3.connect(path)
+                old.execute("ALTER TABLE subscriptions DROP COLUMN headers_file")
+                old.execute("INSERT INTO subscriptions(name,webhook_file,created,debounce_s) VALUES('v4','/x',1.0,30)")
+                old.execute("PRAGMA user_version=%d" % version)
+                old.commit()
+                old.close()
+                conn = db.connect(path)
+                try:
+                    self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], db.SCHEMA_VERSION)
+                    s = events.list_subscriptions(conn)["v4"]
+                    self.assertEqual((s["debounce_s"], s["headers"]), (30.0, False))
+                finally:
+                    conn.close()
 
 
 class TestApi(ServerBase):
