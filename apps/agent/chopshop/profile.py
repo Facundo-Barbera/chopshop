@@ -6,7 +6,8 @@ from . import home, miniyaml, settings
 
 KNOWN = {"project", "company", "repo", "host", "overflow_host", "remote_repos", "t3_project", "scratch",
          "provider", "model", "runtime_mode", "workspace", "base_ref", "tracker", "ready", "branches",
-         "decider", "approvers", "can_run", "cannot_run", "autonomy", "reactions", "max_parallel", "graph", "integration"}
+         "decider", "approvers", "can_run", "cannot_run", "autonomy", "reactions", "max_parallel", "graph", "integration",
+         "automations"}
 
 
 class ProfileError(Exception):
@@ -77,6 +78,8 @@ def validate(d):
     from . import graph
     errs += graph.validate(d)
     errs += validate_integration(d)
+    from .agent import automations
+    errs += automations.validate(d)
     m = d.get("model")
     if m and "/" not in str(m):
         errs.append("model debe ser 'instancia/modelo' (p. ej. claudeAgent/claude-haiku-5-5)")
