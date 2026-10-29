@@ -64,6 +64,9 @@ DEFAULTS = {
         "roles": {"enabled": False, "interval": 5, "max_wakes_per_hour": 6},
         # ingreso de GitHub por polling con ETag (agent/github.py); usa el `gh` ya autenticado, nunca un token aquí
         "github": {"enabled": False, "repos": [], "interval_s": 45, "gh_bin": "gh", "ci": True},
+        # rack de repos de la sala de máquinas (agent/forge/): luz por repo de `rack.repos` + [agent.github] repos;
+        # enabled "auto" = lo mismo que [agent.github] enabled (usa el mismo `gh`)
+        "forge": {"enabled": "auto", "interval_s": 60},
         "retention": {"raw_hours": 24, "m1_days": 30, "h1_days": 365, "events_days": 90},
     },
 }
