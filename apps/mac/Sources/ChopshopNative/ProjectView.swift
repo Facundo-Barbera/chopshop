@@ -110,8 +110,8 @@ public struct ProjectContent: View {
         var t = Text("")
         var first = true
         func add(_ s: String, _ c: Color?) {
-            if !first { t = t + Text("   ·   ").foregroundStyle(Color.secondary.opacity(0.5)) }
-            t = t + Text(s).foregroundStyle(c ?? Color.secondary); first = false
+            if !first { t = Text("\(t)\(Text("   ·   ").foregroundStyle(Color.secondary.opacity(0.5)))") }
+            t = Text("\(t)\(Text(s).foregroundStyle(c ?? Color.secondary))"); first = false
         }
         if summary.needsYou > 0 { add("\(summary.needsYou) \(summary.needsYou == 1 ? "decisión te espera" : "decisiones te esperan")", Attention.needsYou) }
         if summary.stuck > 0 { add("\(summary.stuck) \(summary.stuck == 1 ? "tarea trabada" : "tareas trabadas")", Attention.stuck) }
