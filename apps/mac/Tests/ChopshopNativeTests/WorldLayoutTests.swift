@@ -92,7 +92,9 @@ final class WorldLayoutTests: XCTestCase {
         var s = ProjectOfficeFixture.state(office: true)
         s.machineRoom.listeners = [["name": "t3watch", "state": "down"]]
         XCTAssertEqual(MachineRoomPlan.light(of: m.desks[2], in: s), "red")
-        XCTAssertNil(MachineRoomPlan.plan(in: ProjectOfficeFixture.state(office: true), project: project), "sin máquinas, sin sala")
+        s.machineRoom.rack = []
+        s.machineRoom.listeners = []
+        XCTAssertNil(MachineRoomPlan.plan(in: s, project: project), "sin máquinas, sin sala")
     }
 
     /// La «Ciudad» de la barra lateral: un edificio por proyecto (nombre en la azotea; la píldora del piso no lo repite).
