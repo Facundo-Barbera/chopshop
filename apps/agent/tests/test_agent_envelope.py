@@ -56,7 +56,8 @@ class TestTime(unittest.TestCase):
 
 class TestGolden(unittest.TestCase):
     def test_one_fixture_per_type_and_all_valid(self):
-        files = sorted(glob.glob(os.path.join(FIXTURES, "*.json")))
+        files = sorted(p for p in glob.glob(os.path.join(FIXTURES, "*.json"))
+                       if "-fixture." not in os.path.basename(p))   # ui-fixture.state.json = estado dorado (fold), no un sobre
         types = set()
         for p in files:
             env = load(os.path.basename(p))
