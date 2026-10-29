@@ -1,5 +1,8 @@
 """Eventos del agente: registro monotónico en SQLite (`events`) y entrega por webhook (`subscriptions` + `cfg["webhook_files"]`).
 
+- Cada fila es un sobre (`agent/envelope.py`, columnas v3): `emit(event, project, body)` acepta el nombre viejo y lo traduce
+  (`LEGACY_MAP`, `body.legacy`); `emit_envelope(type, ...)` emite tipos nuevos con `subject`/`needs`/`severity`/`cause`.
+  `list_after`/`recent` devuelven sobres (+ `event` y `machine_id` viejos). El webhook recibe el sobre + `event`/`machine_id`.
 - `emit` inserta y devuelve `seq`; la entrega va a una cola con hilos de fondo (no bloquea) y deja su resultado en `deliveries`.
 - La URL del webhook se lee del archivo (primera línea) en cada entrega; nunca se guarda, se imprime ni se registra.
   `deliveries.detail` solo lleva `HTTP <código>` o el NOMBRE del tipo de excepción (los mensajes de urllib pueden traer la URL).
@@ -15,7 +18,7 @@ import urllib.error
 import urllib.request
 from collections import deque
 
-from . import db
+from . import db, envelope
 
 TIMEOUT = 3                       # segundos por POST
 WORKERS = 4                       # hilos de entrega (un webhook lento no frena a los demás)
@@ -138,67 +141,140 @@ def _record(conn, seq, name, ok, detail):
         pass
 
 
-def _matches(project, events, event, proj):
-    return project in ("*", proj) and (not events or event in events)
+def _matches(project, events, event, proj, typ=None):
+    return project in ("*", proj) and (not events or event in events or (typ is not None and typ in events))
 
 
-def _targets(conn, cfg, event, project):
-    """{nombre: archivo}: webhook_files de la config (sin filtro) + suscripciones cuyo filtro coincide (pisan al mismo nombre)."""
+def _targets(conn, cfg, event, project, typ=None):
+    """{nombre: archivo}: webhook_files de la config (sin filtro) + suscripciones cuyo filtro coincide (pisan al mismo nombre).
+    El filtro de eventos acepta el nombre viejo o el tipo nuevo."""
     out = {str(n): f for n, f in (cfg.get("webhook_files") or {}).items() if f}
     with db.tx():
         subs = db.rows(conn.execute("SELECT name, webhook_file, project, events FROM subscriptions"))
     for s in subs:
-        if _matches(s["project"], db.jload(s["events"], []), event, project):
+        if _matches(s["project"], db.jload(s["events"], []), event, project, typ):
             out[s["name"]] = s["webhook_file"]
     return out
 
 
-def emit(conn, cfg, event, project, body=None, poster=None, timeout=TIMEOUT, wait=False):
-    """Registra el evento y devuelve `seq`. La entrega es asíncrona (`wait=True` espera a que termine, para CLI/tests)."""
-    ts = time.time()
-    machine = cfg.get("machine_id") or socket.gethostname()
+def _machine(cfg):
+    return cfg.get("machine_id") or socket.gethostname()
+
+
+def _insert(conn, env, event, ts):
+    """Inserta el sobre (con el nombre `event` en la columna vieja) y le pone `seq`. Llamar con db.tx() tomado."""
+    s, c = env["subject"], env["cause"]
+    cur = conn.execute(
+        "INSERT INTO events(ts,machine_id,event,project,body,id,type,severity,needs,subject_kind,subject_id,subject,"
+        "cause_id,cause_depth) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (ts, env["machine"], event, env["project"], db.jdump(env["body"]), env["id"], env["type"], env["severity"],
+         env["needs"], s["kind"], s["id"], db.jdump(s), c["id"], c["depth"]))
+    env["seq"] = cur.lastrowid
+    return env
+
+
+def _store(conn, machine, items, project, ts, cause):
+    """[(nombre_columna_event, campos)] -> sobres guardados (en orden; ids ULID y seq crecientes juntos)."""
+    out = []
     with db.tx():
-        cur = conn.execute("INSERT INTO events(ts,machine_id,event,project,body) VALUES(?,?,?,?,?)",
-                           (ts, machine, event, project, db.jdump(body or {})))
-        seq = cur.lastrowid
-    targets = _targets(conn, cfg, event, project)
-    if targets:
-        data = db.jdump({"seq": seq, "ts": ts, "machine_id": machine, "event": event, "project": project,
-                         "body": body or {}}).encode("utf-8")
-        post = poster or _default_poster
+        for event, f in items:
+            env = envelope.build(f["type"], project, f["body"], f["severity"], f["needs"], f["subject"], cause,
+                                 machine, ts)
+            out.append((event, _insert(conn, env, event, ts)))
+    return out
+
+
+def payload(env, event=None):
+    """Lo que recibe un webhook: el sobre + los campos viejos `event` y `machine_id` (compatibilidad un ciclo)."""
+    return dict(env, event=event or (env.get("body") or {}).get("legacy") or env["type"], machine_id=env["machine"])
+
+
+def _publish(conn, cfg, stored, poster, timeout, wait):
+    post = poster or _default_poster
+    n = 0
+    for event, env in stored:
+        targets = _targets(conn, cfg, event, env["project"], env["type"])
+        if not targets:
+            continue
+        data = db.jdump(payload(env, event)).encode("utf-8")
+        seq = env["seq"]
         for name, wfile in targets.items():
-            def job(name=name, wfile=wfile):
+            def job(name=name, wfile=wfile, data=data, seq=seq):
                 ok, detail = _deliver(wfile, data, post, timeout)
                 _record(conn, seq, name, ok, detail)
             _queue.put(job)
-        if wait:
-            _queue.flush(timeout * (len(targets) + 1))
-    return seq
+            n += 1
+    if wait and n:
+        _queue.flush(timeout * (n + 1))
+
+
+def emit(conn, cfg, event, project, body=None, poster=None, timeout=TIMEOUT, wait=False, ts=None, cause=None):
+    """Registra el evento (nombre viejo o tipo nuevo) como sobre y devuelve su `seq`. El nombre viejo se traduce con
+    `envelope.LEGACY_MAP` y viaja en `body.legacy`; una pregunta o un permiso añaden antes un `task.state` con
+    `attention`. La entrega es asíncrona (`wait=True` espera a que termine, para CLI/tests)."""
+    ts = time.time() if ts is None else float(ts)
+    machine = _machine(cfg)
+    main = envelope.from_legacy(event, body, machine)
+    items = [(c["type"], c) for c in envelope.companions(main)] + [(event, main)]
+    stored = _store(conn, machine, items, project, ts, cause)
+    _publish(conn, cfg, stored, poster, timeout, wait)
+    return stored[-1][1]["seq"]
+
+
+def emit_envelope(conn, cfg, type, project=None, body=None, subject=None, severity=None, needs=envelope.DEFAULT,
+                  cause=None, poster=None, timeout=TIMEOUT, wait=False, ts=None):
+    """Emite un tipo nuevo. `cause` = sobre padre (el hijo va un nivel más hondo) o {"id","depth"}. Valida el sobre
+    (`EnvelopeError` si no cuadra) y lo devuelve con `seq`; None si `cause.depth` > MAX_DEPTH (anti-bucles)."""
+    ts = time.time() if ts is None else float(ts)
+    machine = _machine(cfg)
+    env = envelope.build(type, project, body, severity, needs, subject, cause, machine, ts, id="0" * 26)
+    if env["cause"]["depth"] > envelope.MAX_DEPTH:
+        return None
+    envelope.validate(env)
+    f = {k: env[k] for k in ("type", "severity", "needs", "subject", "body")}
+    stored = _store(conn, machine, [(type, f)], project, ts, env["cause"])
+    _publish(conn, cfg, stored, poster, timeout, wait)
+    return stored[0][1]
 
 
 # ---------------------------------------------------------------- lectura
 
-def _row(r):
+COLUMNS = "seq,ts,machine_id,event,project,body,id,type,severity,needs,subject_kind,subject_id,subject,cause_id,cause_depth"
+
+
+def to_envelope(r):
+    """Fila de `events` -> sobre (+ `event` y `machine_id` viejos). Filas sin columnas v3 se traducen al vuelo."""
     d = dict(r)
-    d["body"] = db.jload(d.get("body"), {})
-    return d
+    body = db.jload(d.get("body"), {})
+    body = body if isinstance(body, dict) else {}
+    machine = d.get("machine_id")
+    if d.get("type"):
+        subj = db.jload(d.get("subject"), None) or {"kind": d.get("subject_kind") or "agent",
+                                                     "id": d.get("subject_id") or "?"}
+        typ, sev, needs = d["type"], d.get("severity") or "info", d.get("needs")
+    else:
+        f = envelope.from_legacy(d.get("event"), body, machine)
+        typ, sev, needs, subj, body = f["type"], f["severity"], f["needs"], f["subject"], f["body"]
+    return {"v": envelope.V, "id": d.get("id"), "seq": d["seq"], "ts": envelope.iso(d["ts"]), "machine": machine,
+            "project": d.get("project"), "type": typ, "severity": sev, "needs": needs, "subject": subj,
+            "cause": {"id": d.get("cause_id"), "depth": d.get("cause_depth") or 0}, "body": body,
+            "event": d.get("event"), "machine_id": machine}
 
 
 def list_after(conn, after=0, limit=200):
-    """Eventos con seq > after, del más viejo al más nuevo, con `body` ya parseado."""
+    """Sobres con seq > after, del más viejo al más nuevo."""
     limit = max(1, min(int(limit), MAX_LIMIT))
     with db.tx():
-        cur = conn.execute("SELECT seq,ts,machine_id,event,project,body FROM events WHERE seq>? ORDER BY seq LIMIT ?",
-                           (int(after), limit))
-        return [_row(r) for r in cur.fetchall()]
+        cur = conn.execute("SELECT %s FROM events WHERE seq>? ORDER BY seq LIMIT ?" % COLUMNS, (int(after), limit))
+        return [to_envelope(r) for r in cur.fetchall()]
 
 
 def recent(conn, limit=80):
-    """Últimos eventos, el más nuevo primero (para el snapshot)."""
+    """Últimos sobres, el más nuevo primero (para el snapshot)."""
     limit = max(1, min(int(limit), MAX_LIMIT))
     with db.tx():
-        cur = conn.execute("SELECT seq,ts,machine_id,event,project,body FROM events ORDER BY seq DESC LIMIT ?", (limit,))
-        return [_row(r) for r in cur.fetchall()]
+        cur = conn.execute("SELECT %s FROM events ORDER BY seq DESC LIMIT ?" % COLUMNS, (limit,))
+        return [to_envelope(r) for r in cur.fetchall()]
 
 
 def last_seq(conn):
@@ -294,8 +370,11 @@ def import_legacy(conn, path, machine_id=None):
                     res["skipped"] += 1
                     continue
                 body = {k: v for k, v in o.items() if k not in ("event", "project", "ts", "delivery")}
-                conn.execute("INSERT INTO events(ts,machine_id,event,project,body) VALUES(?,?,?,?,?)",
-                             (ts, machine, event, project, db.jdump(body)))
+                main = envelope.from_legacy(event, body, machine)
+                for name, f in [(c["type"], c) for c in envelope.companions(main)] + [(event, main)]:
+                    env = envelope.build(f["type"], project, f["body"], f["severity"], f["needs"], f["subject"], None,
+                                         machine, ts)
+                    _insert(conn, env, name, ts)
                 res["imported"] += 1
             conn.execute("INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)", (LEGACY_KEY, str(offset + end)))
             conn.execute("COMMIT")
