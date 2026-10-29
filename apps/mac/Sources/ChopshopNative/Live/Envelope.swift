@@ -7,6 +7,9 @@ public struct Envelope: Hashable, Sendable {
         public var id: String?
         public var title: String?
         public var url: String?
+        public init(kind: String, id: String? = nil, title: String? = nil, url: String? = nil) {
+            self.kind = kind; self.id = id; self.title = title; self.url = url
+        }
     }
 
     public var v: Int
@@ -20,12 +23,15 @@ public struct Envelope: Hashable, Sendable {
     /// nil | human | bot | approval
     public var needs: String?
     public var subject: Subject?
+    /// `{id, depth}` del evento que lo provocó (se conserva tal cual).
+    public var cause: JSONValue?
     public var body: JSONValue.Object
 
     public init(v: Int = 1, id: String? = nil, seq: Int? = nil, ts: String? = nil, machine: String? = nil, project: String? = nil,
-                type: String, severity: String? = "info", needs: String? = nil, subject: Subject? = nil, body: JSONValue.Object = [:]) {
+                type: String, severity: String? = "info", needs: String? = nil, subject: Subject? = nil, cause: JSONValue? = nil,
+                body: JSONValue.Object = [:]) {
         self.v = v; self.id = id; self.seq = seq; self.ts = ts; self.machine = machine; self.project = project
-        self.type = type; self.severity = severity; self.needs = needs; self.subject = subject; self.body = body
+        self.type = type; self.severity = severity; self.needs = needs; self.subject = subject; self.cause = cause; self.body = body
     }
 
     /// Lectura tolerante: ignora campos que no conoce y exige solo `type` (un sobre sin `type` no se puede aplicar).
@@ -37,6 +43,7 @@ public struct Envelope: Hashable, Sendable {
                   subject: o["subject"].flatMap { sj in
                       sj.object == nil ? nil : Subject(kind: sj["kind"]?.string ?? "", id: sj["id"]?.string, title: sj["title"]?.string, url: sj["url"]?.string)
                   },
+                  cause: o["cause"].flatMap { $0.isNull ? nil : $0 },
                   body: o["body"]?.object ?? [:])
     }
 
@@ -46,20 +53,18 @@ public struct Envelope: Hashable, Sendable {
     }
 
     /// Clave del sujeto (`kind:id`), con la que la cola de atención sigue lo abierto/cerrado.
-    var subjectKey: String? {
+    public var subjectKey: String? {
         guard let s = subject, let id = s.id else { return nil }
         return "\(s.kind):\(id)"
     }
 
-    var json: JSONValue {
-        var o: JSONValue.Object = ["v": .number(Double(v)), "type": .string(type), "body": .object(body)]
-        if let id { o["id"] = .string(id) }
-        if let seq { o["seq"] = .number(Double(seq)) }
-        if let ts { o["ts"] = .string(ts) }
-        if let machine { o["machine"] = .string(machine) }
-        if let project { o["project"] = .string(project) }
-        if let severity { o["severity"] = .string(severity) }
-        o["needs"] = needs.map { .string($0) } ?? .null
+    /// El sobre como JSON, con todos los campos del contrato (los que faltan van como `null`).
+    public var json: JSONValue {
+        func opt(_ s: String?) -> JSONValue { s.map { .string($0) } ?? .null }
+        var o: JSONValue.Object = ["v": .number(Double(v)), "type": .string(type), "body": .object(body),
+                                   "id": opt(id), "seq": seq.map { .number(Double($0)) } ?? .null, "ts": opt(ts),
+                                   "machine": opt(machine), "project": opt(project), "severity": opt(severity), "needs": opt(needs),
+                                   "cause": cause ?? .null, "subject": .null]
         if let s = subject {
             var so: JSONValue.Object = ["kind": .string(s.kind)]
             if let i = s.id { so["id"] = .string(i) }

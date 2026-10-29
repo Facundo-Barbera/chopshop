@@ -63,13 +63,18 @@ struct GraphInspector: View {
 
     @ViewBuilder private var panelBackground: some View {
         let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
-        if flat {
-            shape.fill(scheme == .dark ? Color(white: 0.16).opacity(0.92) : Color.white.opacity(0.88))
-                .overlay(shape.strokeBorder(LinearGradient(colors: scheme == .dark ? [.white.opacity(0.35), .white.opacity(0.06)] : [.black.opacity(0.14), .black.opacity(0.05)],
-                                                          startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 0.8))
-        } else {
-            Color.clear.glassEffect(.regular, in: shape)
-        }
+        // Sin el SDK de macOS 26 (Xcode < 26) no existe glassEffect: se queda el sustituto plano.
+        #if compiler(>=6.2)
+        if flat { flatPanel(shape) } else { Color.clear.glassEffect(.regular, in: shape) }
+        #else
+        flatPanel(shape)
+        #endif
+    }
+
+    private func flatPanel(_ shape: RoundedRectangle) -> some View {
+        shape.fill(scheme == .dark ? Color(white: 0.16).opacity(0.92) : Color.white.opacity(0.88))
+            .overlay(shape.strokeBorder(LinearGradient(colors: scheme == .dark ? [.white.opacity(0.35), .white.opacity(0.06)] : [.black.opacity(0.14), .black.opacity(0.05)],
+                                                      startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 0.8))
     }
 }
 

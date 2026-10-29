@@ -19,7 +19,9 @@ let package = Package(
     ],
     targets: [
         // Librería a propósito: Xcode Previews funciona mucho mejor con librerías que con executableTarget.
-        .target(name: "ChopshopNative", path: "Sources/ChopshopNative", swiftSettings: [.define("NATIVE_PREVIEWS")]),
+        // Resources/ui-fixture.jsonl = copia de apps/agent/tests/fixtures/events/ui-fixture.jsonl (FixtureStream.bundled() en Previews).
+        .target(name: "ChopshopNative", path: "Sources/ChopshopNative", resources: [.copy("Resources/ui-fixture.jsonl")],
+                swiftSettings: [.define("NATIVE_PREVIEWS")]),
         .executableTarget(name: "ChopshopPlayground", dependencies: ["ChopshopNative"], path: "Sources/ChopshopPlayground"),
         .executableTarget(name: "ChopshopSnap", dependencies: ["ChopshopNative"], path: "Sources/ChopshopSnap"),
     ],

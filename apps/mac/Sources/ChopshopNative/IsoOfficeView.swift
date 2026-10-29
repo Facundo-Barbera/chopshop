@@ -214,14 +214,19 @@ struct IsoAttentionBar: View {
     }
 
     @ViewBuilder private var barBackground: some View {
-        if flat {
-            Capsule().fill(scheme == .dark ? Color(white: 0.16).opacity(0.9) : Color.white.opacity(0.82))
-                .overlay(Capsule().strokeBorder(LinearGradient(colors: scheme == .dark ? [.white.opacity(0.35), .white.opacity(0.06)] : [.black.opacity(0.14), .black.opacity(0.05)],
-                                                               startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 0.8))
-                .shadow(color: .black.opacity(scheme == .dark ? 0.35 : 0.10), radius: 10, y: 4)
-        } else {
-            Color.clear.glassEffect(.regular, in: Capsule())
-        }
+        // Sin el SDK de macOS 26 (Xcode < 26) no existe glassEffect: se queda el sustituto plano.
+        #if compiler(>=6.2)
+        if flat { flatBar } else { Color.clear.glassEffect(.regular, in: Capsule()) }
+        #else
+        flatBar
+        #endif
+    }
+
+    private var flatBar: some View {
+        Capsule().fill(scheme == .dark ? Color(white: 0.16).opacity(0.9) : Color.white.opacity(0.82))
+            .overlay(Capsule().strokeBorder(LinearGradient(colors: scheme == .dark ? [.white.opacity(0.35), .white.opacity(0.06)] : [.black.opacity(0.14), .black.opacity(0.05)],
+                                                           startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 0.8))
+            .shadow(color: .black.opacity(scheme == .dark ? 0.35 : 0.10), radius: 10, y: 4)
     }
 }
 
