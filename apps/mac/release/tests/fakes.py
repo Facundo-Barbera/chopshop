@@ -172,8 +172,14 @@ if op == "Delete":
     del data[key]
 elif op == "Add":
     parts = shlex.split(rest)
-    key, typ, val = parts[0].lstrip(":"), parts[1], parts[2]
-    data[key] = (val == "true") if typ == "bool" else int(val) if typ == "integer" else val
+    key, typ = parts[0].lstrip(":"), parts[1]
+    if typ == "array":
+        data[key] = []
+    elif ":" in key:  # elemento de un array: Key:0
+        data[key.split(":")[0]].append(parts[2])
+    else:
+        val = parts[2]
+        data[key] = (val == "true") if typ == "bool" else int(val) if typ == "integer" else val
 json.dump(data, open(path, "w"))
 '''
 

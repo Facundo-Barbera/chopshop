@@ -536,6 +536,16 @@ class TestPairingUnit(unittest.TestCase):
         self.assertEqual(cm.exception.status, 410)
         self.assertEqual(self.p.list()["codes"], [])
 
+    def test_cli_create_json_for_the_local_app(self):
+        out = io.StringIO()
+        self.assertEqual(pairing.main(["create", "--name", "Mac (app)", "--ttl", "2m", "--json"], stdout=out, conn=self.conn,
+                                      clock=self.clock), 0)
+        res = json.loads(out.getvalue())
+        self.assertEqual(sorted(res), ["code", "expires_at", "id", "name"])
+        self.assertEqual(res["name"], "Mac (app)")
+        self.assertEqual(res["expires_at"], self.clock() + 120)
+        self.assertEqual(self.p.redeem(res["code"], "Mac", "dev-app", "127.0.0.1")["device_id"], "dev-app")
+
     def test_only_hashes_are_stored_and_cli_hides_secrets(self):
         out = io.StringIO()
         self.assertEqual(pairing.main(["create", "--name", "Mac", "--ttl", "5m"], stdout=out, conn=self.conn, clock=self.clock), 0)

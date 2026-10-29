@@ -44,6 +44,9 @@ struct SettingsView: View {
             }
 
             Divider()
+            BundledAgentSection(bundled: model.bundled)
+
+            Divider()
             Text("Emparejamiento").font(.headline)
             if model.agents.isEmpty {
                 Text("Guarda primero la URL del agente; después empareja este Mac con un código de `chopshop pair create`.")
