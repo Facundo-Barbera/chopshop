@@ -165,7 +165,8 @@ extension LiveState {
     }
 
     /// Sala de máquinas. Se guarda como JSON (igual que `tasks`): `MachineRoomModel` la convierte en lo que pinta la vista.
-    public struct MachineRoom: Equatable, Sendable {
+    /// No se llama `MachineRoom` para no tapar, dentro de `LiveState`, al `MachineRoom` tipado de nivel superior.
+    public struct MachineRoomState: Equatable, Sendable {
         /// `{name, state, last_ok, last_cycle, backoff_s, error, ts}` por nombre.
         public var listeners: [JSONValue.Object] = []
         /// `{project, name, trigger, exit, duration_ms, error, ts, next_run, severity}` por (project, name).

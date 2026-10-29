@@ -41,7 +41,7 @@ public struct LiveState: Equatable, Sendable {
     /// v3: hilos activos sin rol (y los que esperan escritorio), de todos los proyectos. Orden `(company, project, since)`.
     public var lobby: [LobbyEntry] = []
     /// v3: listeners, automatizaciones, suscripciones y rack (LiveStateOffice.swift).
-    public var machineRoom = MachineRoom()
+    public var machineRoom = MachineRoomState()
 
     // Lo siguiente NO viene en la proyección del agente (la proyección solo guarda el resumen de la atención): el cliente lo recuerda
     // de los sobres que ve, para pintar las opciones de una pregunta, el historial de respuestas y las gráficas de la máquina.
@@ -248,7 +248,7 @@ public struct LiveState: Equatable, Sendable {
         }
         recent = (o["recent"]?.array ?? []).compactMap(Envelope.init(json:))
         lobby = (o["lobby"]?.array ?? []).compactMap(LobbyEntry.init(json:))
-        machineRoom = o["machine_room"].map(MachineRoom.init(json:)) ?? MachineRoom()
+        machineRoom = o["machine_room"].map(MachineRoomState.init(json:)) ?? MachineRoomState()
         // Reconstruye lo que no trae la proyección con los sobres recientes (del más viejo al más nuevo).
         var replay = LiveState(machine: machine)
         for e in recent.reversed() where e.type == "question.opened" || e.type == "question.answered" || e.type == "machine.health" {
