@@ -3,7 +3,8 @@
 `AgentService` ensambla los módulos (colector, T3, eventos) y el servidor HTTP (`server.py`):
   hilos: muestreo (+ compactación) · sondeo de T3 · motor (`engine.tick` con el bus inyectado, solo si hay lotes en
   state.json) · importación periódica de events.jsonl (CLI externa) · automatizaciones (sobres del bus + horarios) ·
-  GitHub (si `[agent.github] enabled`) · mantenimiento (retención de eventos, checkpoint WAL).
+  GitHub (si `[agent.github] enabled`) · roles permanentes (si `[agent.roles] enabled`: despertar por horario/eventos y
+  seguimiento del hilo en su escritorio) · mantenimiento (retención de eventos, checkpoint WAL).
   Un fallo en un hilo se registra (sin repetirlo cada ciclo) y el hilo sigue; `stop()` los para a todos de forma ordenada.
 `run` instala SIGTERM/SIGINT para la parada limpia. Nada aquí habla con systemd salvo `status` (solo lectura, inyectable) y
 `print-unit` solo IMPRIME la unidad: no escribe, no habilita y no arranca nada.
@@ -22,7 +23,8 @@ import threading
 import time
 
 from .. import engine as engine_mod, events as legacy_events, graph, home, settings, state
-from . import __version__, automations as automations_mod, collector as collector_mod, config, db, envelope, events, github, pairing, server, t3watch
+from . import __version__, automations as automations_mod, collector as collector_mod, config, db, envelope, events, github, pairing, \
+    roles as roles_mod, server, t3watch
 
 log = logging.getLogger("chopshop.agent")
 
@@ -231,7 +233,7 @@ class AgentService:
     def __init__(self, cfg, conn=None, collector=None, t3=None, runner=None, poster=None,
                  orchestrator_fn=None, clock=time.time, maint_interval=MAINT_INTERVAL, maint_first=MAINT_FIRST, compact_every=COMPACT_EVERY,
                  engine_tick=None, stream_opts=None, automations=None,
-                 gh_runner=None, gh_projects_fn=github.profile_repos):
+                 gh_runner=None, gh_projects_fn=github.profile_repos, roles=None):
         self.cfg, self.clock, self.runner, self.poster = cfg, clock, runner, poster
         self.engine_tick = engine_tick or engine_mod.tick
         self.owns_conn = conn is None
@@ -251,6 +253,10 @@ class AgentService:
             self.emit_envelope, clock=clock, store=automations_mod.MetaStore(self.conn), enabled=acfg.get("enabled", True))
         self._auto_cursor = None
         self._auto_loaded = None
+        rcfg = cfg.get("roles") or {}
+        self.roles = roles or roles_mod.Roles(
+            self.conn, self._emit_role, clock=clock, enabled=bool(rcfg.get("enabled", False)),
+            max_wakes_per_hour=int(rcfg.get("max_wakes_per_hour") or roles_mod.MAX_WAKES_PER_HOUR))
         self.github = None
         if (cfg.get("github") or {}).get("enabled"):
             self.github = github.GitHubPoller(self.conn, cfg, self.emit, runner=gh_runner, clock=clock,
@@ -268,6 +274,12 @@ class AgentService:
     def emit_envelope(self, env):
         """Sobre parcial de una automatización -> bus (mismo `emit`, con los metadatos del sobre)."""
         return automations_mod.bus_emit(self.conn, self.cfg, env, poster=self.poster)
+
+    def _emit_role(self, env):
+        """Sobre de los roles (`desk.*`) -> bus (valida el esquema del tipo) y despierta a /stream."""
+        stored = self.emit_envelope(env)
+        self.app.stream.bus.publish(stored.get("seq") if stored else None)
+        return stored
 
     @property
     def address(self):
@@ -302,6 +314,8 @@ class AgentService:
             if (self.cfg.get("automations") or {}).get("enabled", True):
                 self._spawn("automations", self._loop, "automations", self.automations_once,
                             lambda: (self.cfg.get("automations") or {}).get("interval") or 2)
+            if self.roles.enabled:
+                self._spawn("roles", self._loop, "roles", self.roles_once, lambda: (self.cfg.get("roles") or {}).get("interval") or 5)
             if self.github is not None:
                 self._spawn("github", self._loop, "github", self.github.poll_once, self.github.next_delay)
             self._spawn("maintenance", self._maintenance)
@@ -388,6 +402,10 @@ class AgentService:
                 self.conn.execute("INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)", (AUTOMATIONS_CURSOR, str(self._auto_cursor)))
         fired += self.automations.tick(now)
         return fired
+
+    def roles_once(self):
+        """Una pasada de los roles permanentes (sobres nuevos del bus con cursor propio, horarios y despertares vivos)."""
+        return self.roles.once(events.list_after, events.last_seq, self.clock())
 
     def _maintenance(self):
         if self.stop_event.wait(self.maint_first):
