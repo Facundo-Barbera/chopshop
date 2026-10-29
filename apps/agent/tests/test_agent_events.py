@@ -38,6 +38,7 @@ class Base(unittest.TestCase):
         self.conn = db.connect(os.path.join(self.tmp.name, "agent", "agent.db"))
         self.addCleanup(self.conn.close)
         self.addCleanup(events.flush)
+        self.addCleanup(events.cancel_pending)          # reintentos programados de este test
         self.cfg = {"machine_id": "host-a", "webhook_files": {}}
 
     def hook(self, name, url=SECRET):

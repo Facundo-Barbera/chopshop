@@ -25,7 +25,7 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import API_VERSION, __version__, collector as collector_mod, db, events, t3watch
+from . import API_VERSION, __version__, collector as collector_mod, db, events, t3watch, webhooks
 
 log = logging.getLogger("chopshop.agent")
 
@@ -417,8 +417,17 @@ class AgentApp:
         name, wfile = _text(body, "name", True, 64), _text(body, "webhook_file", True, 1024)
         if not os.path.isfile(os.path.expanduser(wfile)):
             raise ApiError(400, "webhook_file no existe o no es un archivo (en esta máquina)")
+        opts = {k: body[k] for k in webhooks.FIELDS if body.get(k) is not None}
+        if body.get("batch_window_s"):
+            opts["batch_window_s"] = body["batch_window_s"]
+        sfile = opts.get("secret_file")
+        if sfile is not None:
+            if not isinstance(sfile, str) or not os.path.isfile(os.path.expanduser(sfile)):
+                raise ApiError(400, "secret_file no existe o no es un archivo (en esta máquina)")
+            if os.stat(os.path.expanduser(sfile)).st_mode & 0o077:
+                raise ApiError(400, "secret_file es legible por otros: chmod 600")
         try:
-            events.subscribe(self.conn, name, wfile, _text(body, "project", False, 128) or "*", body.get("events"))
+            events.subscribe(self.conn, name, wfile, _text(body, "project", False, 128) or "*", body.get("events"), **opts)
         except events.EventsError as e:
             raise ApiError(400, str(e))
         return {"ok": True, "name": name, "subscription": events.list_subscriptions(self.conn).get(name)}
