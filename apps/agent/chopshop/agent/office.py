@@ -353,8 +353,8 @@ class Office:
             self._release(desk_id, occ, reason)
             return occ["thread_id"]
 
-    def assign(self, desk_id, thread_id):
-        """Asignación manual. Lanza OfficeError(404/409/400) si no se puede."""
+    def assign(self, desk_id, thread_id, reason="manual"):
+        """Asignación manual (`reason: manual`) o de un rol permanente despertado (`wake`). Lanza OfficeError(404/409/400)."""
         with self._lock:
             d = self._q("SELECT * FROM desks WHERE id=?", (desk_id,))
             if not d:
@@ -378,7 +378,7 @@ class Office:
             snap["role"] = d["role"]
             self._x("UPDATE office_threads SET body=? WHERE thread_id=?", (db.jdump(snap), thread_id))
             self._x("UPDATE t3_threads SET role=? WHERE thread_id=?", (d["role"], thread_id))
-            self._place(thread_id, d["project"], d["role"], snap, desk=d, reason="manual")
+            self._place(thread_id, d["project"], d["role"], snap, desk=d, reason=reason)
             return desk_id
 
     def desk(self, desk_id):
