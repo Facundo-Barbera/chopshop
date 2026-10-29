@@ -1,0 +1,129 @@
+"""Pruebas del registro de la sala de máquinas en el agente: `listener.state` (`listeners.py` y los hilos del servicio),
+reductor `machine_room` (listeners y automatizaciones; fold de tests/fixtures/events/machine-room-fixture.jsonl contra su
+proyección dorada, la misma que usa la app), webhooks en vivo desde SQLite y `next_run` de `automation.ran`."""
+import json
+import os
+import shutil
+import sys
+import tempfile
+import time
+import unittest
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from chopshop.agent import automations, db, envelope, listeners, machine_room, projection, service  # noqa: E402
+from test_agent_github import Clock, base_cfg  # noqa: E402
+
+FIX = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "events")
+MR_FIXTURE = os.path.join(FIX, "machine-room-fixture.jsonl")
+MR_GOLDEN = os.path.join(FIX, "machine-room-fixture.state.json")
+
+
+def load_mr():
+    with open(MR_FIXTURE, encoding="utf-8") as f:
+        return [json.loads(line) for line in f if line.strip()]
+
+
+class TestListeners(unittest.TestCase):
+    def test_transitions_and_heartbeat(self):
+        out, clock = [], Clock()
+        ls = listeners.Listeners(lambda *a: out.append(a) or len(out), clock, heartbeat=600)
+        self.assertEqual(ls.report("t3"), 1)
+        self.assertIsNone(ls.report("t3"))                     # sin cambios
+        self.assertIsNone(ls.report("legacy"))                 # hilo interno sin nombre público
+        clock.t += 10
+        ls.report("t3", "down", "T3Error: caído", 30)
+        clock.t += 10
+        ls.report("t3", "down", "T3Error: caído", 60)          # mismo estado y error: no emite
+        clock.t += 700
+        ls.report("t3", "down", "T3Error: caído", 60)          # latido
+        ls.report("github", "degraded", "rate_limit", 90)
+        names = [(b["name"], b["state"], b["backoff_s"]) for _t, _p, b in out]
+        self.assertEqual(names, [("t3watch", "ok", 0), ("t3watch", "down", 30), ("t3watch", "down", 60), ("forge", "degraded", 90)])
+        self.assertEqual(out[2][2]["last_ok"], envelope.iso(Clock().t))
+        for t, p, b in out:
+            envelope.validate(envelope.build(t, p, b, machine="m"))
+
+
+class TestMachineRoomProjection(unittest.TestCase):
+    def test_fold_matches_golden(self):
+        """fold(machine-room-fixture.jsonl) == machine-room-fixture.state.json (CHOPSHOP_UPDATE_GOLDEN=1 lo regenera; la app
+        usa el mismo)."""
+        envs = load_mr()
+        for e in envs:
+            envelope.validate(e)
+        st = projection.fold(envs, "contabo-dev")
+        text = json.dumps(st["machine_room"], sort_keys=True, indent=2, ensure_ascii=False) + "\n"
+        if os.environ.get("CHOPSHOP_UPDATE_GOLDEN") == "1":
+            with open(MR_GOLDEN, "w", encoding="utf-8") as f:
+                f.write(text)
+        with open(MR_GOLDEN, encoding="utf-8") as f:
+            self.assertEqual(f.read(), text)
+
+    def test_rules(self):
+        envs = load_mr()
+        st = projection.fold(envs, "contabo-dev")
+        mr = st["machine_room"]
+        self.assertEqual([(l["name"], l["state"]) for l in mr["listeners"]],
+                         [("automations", "ok"), ("forge", "ok"), ("t3watch", "down")])
+        self.assertEqual(mr["listeners"][2]["backoff_s"], 30)
+        self.assertEqual([(a["project"], a["name"], a["exit"], a["severity"]) for a in mr["automations"]],
+                         [("awesome-gb", "docs-sync", 1, "error"), ("chopshop", "triage", 0, "info")])
+        self.assertEqual(mr["automations"][0]["next_run"], "2026-10-30T07:30:00.000Z")
+        self.assertEqual((mr["rack"], mr["subscriptions"]), ([], []))
+        self.assertEqual(projection.fold(envs + envs, "contabo-dev"), st)
+        self.assertEqual(projection.fold(envs[4:], "contabo-dev", projection.fold(envs[:4], "contabo-dev")), st)
+        self.assertTrue(all(not p["attention"] for p in st["projects"]))      # no abren atención
+        f = projection.filter_project(st, "chopshop")["machine_room"]
+        self.assertEqual(([a["name"] for a in f["automations"]], len(f["listeners"])), (["triage"], 3))
+
+    def test_subscriptions_live(self):
+        tmp = tempfile.mkdtemp(prefix="chopshop-mr-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        conn = db.connect(os.path.join(tmp, "agent.db"))
+        self.addCleanup(conn.close)
+        conn.execute("INSERT INTO subscriptions(name, webhook_file, created, secret_file) VALUES('bots','/x/hook',1,'/x/secret')")
+        conn.execute("INSERT INTO subscriptions(name, webhook_file, created) VALUES('chat','/x/hook2',1)")
+        conn.execute("INSERT INTO deliveries(event_seq,name,ok,detail,ts) VALUES(1,'bots',1,'204',100)")
+        conn.execute("INSERT INTO deliveries(event_seq,name,ok,detail,ts) VALUES(2,'chat',0,'HTTP 500 https://hooks.example/abc',200)")
+        subs = machine_room.subscriptions(conn)
+        self.assertEqual(subs[0], {"name": "bots", "last_ok": envelope.iso(100), "last_error": None, "last_error_at": None,
+                                   "signed": True})
+        self.assertEqual((subs[1]["last_error"], subs[1]["signed"]), ("HTTP 500 [url]", False))
+        st = projection.Projector(conn, {"machine_id": "m"}).current()
+        self.assertEqual([s["name"] for s in st["machine_room"]["subscriptions"]], ["bots", "chat"])
+        self.assertEqual(projection.state(conn, {"machine_id": "m"})["machine_room"]["subscriptions"], [])  # fold puro
+
+
+class TestNextRun(unittest.TestCase):
+    def test_every_and_cron(self):
+        s = {"project": "p", "name": "a", "on": [{"type": "schedule", "_every": 600, "_cron": None}]}
+        self.assertEqual(automations.next_run(s, {"sched:p:a:0": 1000.0}, 1200.0), 1600.0)
+        self.assertEqual(automations.next_run(s, {}, 1200.0), 1800.0)
+        c = {"project": "p", "name": "a", "on": [{"type": "schedule", "_every": None,
+                                                  "_cron": automations.parse_cron("30 8 * * *")}]}
+        now = envelope.epoch("2026-10-29T12:00:00Z")
+        nxt = automations.next_run(c, {}, now)                 # cron en hora local de la box
+        self.assertTrue(0 < nxt - now <= 86400)
+        self.assertEqual(time.localtime(nxt)[3:6], (8, 30, 0))
+        self.assertIsNone(automations.next_run({"project": "p", "name": "a", "on": [{"type": "manual"}]}, {}, now))
+
+
+class TestService(unittest.TestCase):
+    def test_listener_state_from_loops(self):
+        tmp = tempfile.mkdtemp(prefix="chopshop-svc-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        svc = service.AgentService(base_cfg(tmp), maint_first=3600)
+        self.addCleanup(svc.stop)
+        svc._listener("t3", {"reachable": False, "backoff": 30})
+        svc._listener("engine", None, RuntimeError("boom"))
+        svc._listener("legacy", None)                            # sin nombre público: no se publica
+        st = svc.app.projector.current()
+        self.assertEqual([(l["name"], l["state"], l["backoff_s"]) for l in st["machine_room"]["listeners"]],
+                         [("engine", "degraded", 0), ("t3watch", "down", 30)])
+        self.assertEqual(st["machine_room"]["listeners"][0]["error"], "RuntimeError: boom")
+        self.assertEqual(st["api_version"], 3)
+
+
+if __name__ == "__main__":
+    unittest.main()
