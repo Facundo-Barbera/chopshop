@@ -58,7 +58,7 @@ env:
   DELTA_COMPRESSION: lzma
   PHASED_ROLLOUT_INTERVAL: "" # segundos entre tandas del rollout gradual (solo canal estable); vacío = sin rollout
   FULL_RELEASE_NOTES_URL: ""
-  XCODE_VERSION: "26.3" # /Applications/Xcode_26.3.app (SDK macOS 26: ChopshopNative usa APIs 26; con vacío el runner usa 16.4 sin ese SDK)
+  XCODE_VERSION: "27.1" # /Applications/Xcode_27.1.app en la imagen xcode-27 (SDK macOS 27: ChopshopNative usa APIs 26+; igual que el Mac de desarrollo)
 
 jobs:
   preflight:
@@ -138,7 +138,7 @@ jobs:
     name: Build, firma y notarización
     needs: preflight
     # runner fijado (no *-latest): las builds de release deben ser reproducibles entre ejecuciones
-    runs-on: macos-15
+    runs-on: xcode-27 # imagen GA con Xcode 27.x (solo arm64; el build universal sigue cruzando a x86_64)
     timeout-minutes: 75
     env:
       DRY_RUN: ${{ needs.preflight.outputs.dry_run }}
