@@ -1,7 +1,8 @@
 """Servicio chopshop-agent: arranque, hilos de fondo y subcomandos `chopshop agent run|status|token|check-config|print-unit`.
 
 `AgentService` ensambla los módulos (colector, T3, eventos) y el servidor HTTP (`server.py`):
-  hilos: muestreo (+ compactación) · sondeo de T3 · mantenimiento (retención de eventos, checkpoint WAL).
+  hilos: muestreo (+ compactación) · sondeo de T3 · automatizaciones (sobres del bus + horarios) ·
+  mantenimiento (retención de eventos, checkpoint WAL).
   Un fallo en un hilo se registra (sin repetirlo cada ciclo) y el hilo sigue; `stop()` los para a todos de forma ordenada.
 `run` instala SIGTERM/SIGINT para la parada limpia. Nada aquí habla con systemd salvo `status` (solo lectura, inyectable) y
 `print-unit` solo IMPRIME la unidad: no escribe, no habilita y no arranca nada.
@@ -20,7 +21,7 @@ import threading
 import time
 
 from .. import home, settings
-from . import __version__, collector as collector_mod, config, db, events, server, t3watch
+from . import __version__, automations as automations_mod, collector as collector_mod, config, db, events, server, t3watch
 
 log = logging.getLogger("chopshop.agent")
 
@@ -32,6 +33,9 @@ COMPACT_EVERY = 300.0             # s entre compactaciones de métricas
 MAINT_INTERVAL = 3600.0           # s entre tareas de mantenimiento
 MAINT_FIRST = 60.0                # primera pasada de mantenimiento tras arrancar
 STOP_TIMEOUT = 10.0               # s totales para esperar a los hilos al parar
+AUTOMATIONS_RELOAD = 60.0         # s entre relecturas de los perfiles por el hilo de automatizaciones
+AUTOMATIONS_CURSOR = "automations_cursor"
+AUTOMATIONS_BATCH = 500           # sobres por pasada
 
 
 class ServiceError(Exception):
@@ -194,7 +198,8 @@ class AgentService:
     """Ensambla módulos + servidor + hilos. `start()` → escucha y trabaja; `stop()` → parada ordenada (idempotente)."""
 
     def __init__(self, cfg, conn=None, collector=None, t3=None, runner=None, poster=None,
-                 orchestrator_fn=None, clock=time.time, maint_interval=MAINT_INTERVAL, maint_first=MAINT_FIRST, compact_every=COMPACT_EVERY):
+                 orchestrator_fn=None, clock=time.time, maint_interval=MAINT_INTERVAL, maint_first=MAINT_FIRST, compact_every=COMPACT_EVERY,
+                 automations=None):
         self.cfg, self.clock, self.runner, self.poster = cfg, clock, runner, poster
         self.owns_conn = conn is None
         self.conn = conn if conn is not None else db.connect(cfg["db_path"])
@@ -206,6 +211,11 @@ class AgentService:
                                    self.emit, orchestrator_fn, clock)
         self.maint_interval, self.maint_first = maint_interval, maint_first
         self.compact_every = compact_every
+        acfg = cfg.get("automations") or {}
+        self.automations = automations or automations_mod.Automations(
+            self.emit_envelope, clock=clock, store=automations_mod.MetaStore(self.conn), enabled=acfg.get("enabled", True))
+        self._auto_cursor = None
+        self._auto_loaded = None
         self.stop_event = threading.Event()
         self.servers, self.threads, self._serving = [], [], []
         self._stopped = False
@@ -213,6 +223,10 @@ class AgentService:
     # -- API común de los módulos
     def emit(self, event, project, body=None):
         return events.emit(self.conn, self.cfg, event, project, body, poster=self.poster)
+
+    def emit_envelope(self, env):
+        """Sobre parcial de una automatización -> bus (mismo `emit`, con los metadatos del sobre)."""
+        return automations_mod.bus_emit(self.conn, self.cfg, env, poster=self.poster)
 
     @property
     def address(self):
@@ -239,6 +253,9 @@ class AgentService:
             self._spawn("sampler", self._run_sampler)
             if self.cfg.get("t3_enabled", True):
                 self._spawn("t3", self._loop, "t3", self._poll_once, lambda: self.cfg.get("t3_poll_interval") or 5)
+            if (self.cfg.get("automations") or {}).get("enabled", True):
+                self._spawn("automations", self._loop, "automations", self.automations_once,
+                            lambda: (self.cfg.get("automations") or {}).get("interval") or 2)
             self._spawn("maintenance", self._maintenance)
         for s in self.servers:
             self._serving.append(s)
@@ -287,6 +304,31 @@ class AgentService:
             self.runtime.last_poll = self.clock()
         return res
 
+    def automations_once(self):
+        """Una pasada: relee perfiles (cada AUTOMATIONS_RELOAD s), despacha los sobres nuevos del bus y revisa horarios.
+        El cursor vive en `meta`; la primera vez en una DB nueva empieza en la cabeza (no reprocesa el historial)."""
+        now = self.clock()
+        if self._auto_loaded is None or now - self._auto_loaded >= AUTOMATIONS_RELOAD:
+            self.automations.reload()
+            self._auto_loaded = now
+        if self._auto_cursor is None:
+            with db.tx():
+                row = self.conn.execute("SELECT value FROM meta WHERE key=?", (AUTOMATIONS_CURSOR,)).fetchone()
+            self._auto_cursor = int(row["value"]) if row and str(row["value"]).isdigit() else events.last_seq(self.conn)
+            if not row:
+                with db.tx():
+                    self.conn.execute("INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)", (AUTOMATIONS_CURSOR, str(self._auto_cursor)))
+        fired = []
+        rows = events.list_after(self.conn, self._auto_cursor, AUTOMATIONS_BATCH)
+        for r in rows:
+            fired += self.automations.on_event(r)
+            self._auto_cursor = r["seq"]
+        if rows:
+            with db.tx():
+                self.conn.execute("INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)", (AUTOMATIONS_CURSOR, str(self._auto_cursor)))
+        fired += self.automations.tick(now)
+        return fired
+
     def _maintenance(self):
         if self.stop_event.wait(self.maint_first):
             return
@@ -328,6 +370,7 @@ class AgentService:
         end = time.monotonic() + STOP_TIMEOUT
         for t in self.threads:
             t.join(max(0.1, end - time.monotonic()))
+        self.automations.wait_idle(max(0.1, end - time.monotonic()))   # los scripts en curso tienen su propio timeout
         alive = [t.name for t in self.threads if t.is_alive()]
         if alive:
             log.warning("hilos que no terminaron a tiempo: %s", ", ".join(alive))

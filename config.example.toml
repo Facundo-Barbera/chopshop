@@ -86,6 +86,11 @@ t3_project_id = "00000000-0000-0000-0000-000000000000"
 [agent.webhook_files]
 bot = "~/.config/chopshop/webhooks/bot.url"
 
+# Automatizaciones por proyecto (bloque `automations:` del perfil; ver docs/automations.md).
+[agent.automations]
+enabled = true                            # interruptor global: false = el hilo `automations` no ejecuta nada
+interval = 2                              # s entre pasadas (sobres nuevos del bus + horarios)
+
 # Retención del historial de métricas y de eventos.
 [agent.retention]
 raw_hours = 24
