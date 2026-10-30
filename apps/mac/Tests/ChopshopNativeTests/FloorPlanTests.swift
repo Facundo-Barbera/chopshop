@@ -76,19 +76,6 @@ final class FloorPlanTests: XCTestCase {
         XCTAssertEqual(a, b, "los escritorios no se mueven cuando cambia el ocupante")
         XCTAssertEqual(a.rooms.count, 2)
         XCTAssertEqual(a.spots.filter { !$0.isMachine }.count, 3, "el retirado conserva su hueco")
-        let s0 = a.spot("awesome-gb/0/backend/0")!, s1 = a.spot("awesome-gb/0/backend/1")!
-        XCTAssertEqual(s0.cy, s1.cy); XCTAssertLessThan(s0.cx, s1.cx)
-        XCTAssertGreaterThan(a.rooms[1].x0, a.rooms[0].x0 + a.rooms[0].w)
-    }
-
-    func testSixRoomsMakeTwoRows() {
-        var f = FloorPlan(kind: .floor(project: "p", index: 0), company: nil, name: nil, halfLife: 1800)
-        f.rooms = (0..<6).map { i in
-            FloorPlan.Room(role: "r\(i)", permanent: false, desks: [FloorPlan.Desk(id: "p/0/r\(i)/0", slot: 0, retired: false, occupant: nil, notesPending: 0, lineage: [])])
-        }
-        let l = FloorLayout(plan: f)
-        XCTAssertEqual(Set(l.rooms.map(\.y0)).count, 2)
-        XCTAssertEqual(l.rooms[3].x0, 0)
     }
 
     func testLobbyFiltersByCompanyOrProject() throws {
@@ -196,10 +183,6 @@ final class FloorPlanTests: XCTestCase {
         XCTAssertEqual(l.spots.filter(\.isMachine).map(\.id),
                        ["rack:0:github:o/main", "rack:0:github:o/docs", "machine:0", "rack:1:github:o/docs", "machine:1"])
         XCTAssertEqual(l.spots.filter(\.isMachine).map(\.room), [-1, -1, -1, -2, -2])
-        XCTAssertEqual(m.y0, l.rooms[0].y0, "la primera en la misma fila que los departamentos")
-        XCTAssertGreaterThan(m.x0, l.rooms[1].x0 + l.rooms[1].w, "después del último departamento")
-        XCTAssertEqual(n.x0, 0, "la segunda pasa a la fila siguiente (3 por fila)")
-        XCTAssertGreaterThan(n.y0, m.y0)
         for c in m.cabinets { XCTAssertTrue(c.cx > m.x0 && c.cx < m.x0 + m.w && c.cy > m.y0 && c.cy < m.y0 + m.d) }
         XCTAssertGreaterThanOrEqual(l.maxU, m.x0 + m.w - m.y0, "el encuadre incluye las salas")
         // las luces y los runs no mueven nada: solo cuántos repos hay

@@ -62,7 +62,7 @@ final class CityStyleTests: XCTestCase {
     func testModelUsesStyledGeometry() throws {
         let m = CityModel.build(try XCTUnwrap(CityOfficeFixture.state))
         for b in m.buildings {
-            XCTAssertEqual(b.style, CityBuildingStyle(seed: b.company))
+            XCTAssertEqual(b.style, CityBuildingStyle(seed: WorldGenerator.styleSeed(m.seed, b.company)))
             var z = b.style.plinthH
             for f in b.floors {
                 XCTAssertEqual(b.floorZ(f.level), z, accuracy: 1e-9)
@@ -82,7 +82,10 @@ final class CityStyleTests: XCTestCase {
             for fl in b.floors {
                 let r = b.rect(fl.level)
                 let p = f.pt((r.x0 + r.x1) / 2, r.y1 + CityGeo.overhang, b.floorZ(fl.level) + b.floorHeight(fl.level) / 2)
-                XCTAssertEqual(CityHit.floorID(at: p, in: m, frame: f), fl.id, fl.id)
+                let hidden = m.buildings.contains { o in
+                    o.depthKey > b.depthKey && o.floors.contains { CityHit.contains(CityHit.floorPolygon(o, level: $0.level, frame: f), p) }
+                }
+                if !hidden { XCTAssertEqual(CityHit.floorID(at: p, in: m, frame: f), fl.id, fl.id) }
                 let e = OfficeEmbedding(rooms: CGRect(x: 0, y: -114, width: 716, height: 228), building: b, level: fl.level)
                 XCTAssertEqual(e.ez, b.floorZ(fl.level) + CityGeo.slabH, accuracy: 1e-9)
                 XCTAssertLessThanOrEqual(e.k * 716, r.w)

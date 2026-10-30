@@ -38,9 +38,11 @@ final class WorldLayoutTests: XCTestCase {
             for aspect in [0.6, 1.0, 1.6, 2.4, 3.5] {
                 let w = WorldLayout(floors: fs, aspect: aspect)
                 let plates = w.regions.map { CGRect(x: $0.x0, y: $0.y0, width: $0.w, height: $0.d) }
+                let screens = w.regions.map { CGRect(x: $0.bounds.minU, y: $0.bounds.minV, width: $0.bounds.maxU - $0.bounds.minU,
+                                                     height: $0.bounds.maxV - $0.bounds.minV) }
                 for i in plates.indices {
                     for j in plates.indices where j > i {
-                        XCTAssertFalse(plates[i].intersects(plates[j]), "\(w.regions[i].id) pisa \(w.regions[j].id) (\(aspect))")
+                        XCTAssertFalse(screens[i].intersects(screens[j]), "\(w.regions[i].id) pisa \(w.regions[j].id) (\(aspect))")
                     }
                     let r = w.regions[i]
                     let rooms = r.layout.rooms.map { ($0.x0, $0.y0, $0.w, $0.d) } + r.layout.machines.map { ($0.x0, $0.y0, $0.w, $0.d) }
@@ -56,15 +58,6 @@ final class WorldLayoutTests: XCTestCase {
                 }
             }
         }
-    }
-
-    /// Ventana ancha → más columnas; el mundo encuadrado se parece más a la ventana que la franja de una sola columna.
-    func testColumnsFollowTheWindowShape() {
-        let fs = floors(office: true)
-        let wide = WorldLayout(floors: fs, aspect: 3.5), tall = WorldLayout(floors: fs, aspect: 0.6)
-        XCTAssertGreaterThanOrEqual(wide.columns, tall.columns)
-        func ratio(_ w: WorldLayout) -> Double { (w.bounds.maxU - w.bounds.minU) / (w.bounds.maxV - w.bounds.minV) }
-        XCTAssertGreaterThan(ratio(wide), ratio(tall))
     }
 
     /// Cada hueco (escritorio, invitado o armario) es único en el mundo: los símbolos y los clics no se confunden de piso.
@@ -108,6 +101,6 @@ final class WorldLayoutTests: XCTestCase {
         let m = CityModel.build(ProjectOfficeFixture.state(office: true), perProject: true)
         XCTAssertEqual(m.buildings.map(\.company), [project])
         XCTAssertEqual(m.buildings[0].floors.map(\.label), ["Vestíbulo", project])
-        XCTAssertEqual(CityModel.build(ProjectOfficeFixture.state(office: true)).buildings.map(\.company), ["Personal"])
+        XCTAssertEqual(CityModel.build(ProjectOfficeFixture.state(office: true)).buildings.map(\.campus), ["Personal"])
     }
 }

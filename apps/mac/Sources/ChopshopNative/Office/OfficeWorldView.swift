@@ -148,66 +148,91 @@ struct WorldRenderer {
     let hovered: String?
 
     private func regionCam(_ r: WorldLayout.Region) -> IsoCam {
-        IsoCam(s: cam.s, cu: cam.cu - (r.ox - r.oy), cv: cam.cv - (r.ox + r.oy) / 2, ax: cam.ax, ay: cam.ay)
+        IsoCam(s: cam.s, cu: cam.cu - (r.ox - r.oy), cv: cam.cv - ((r.ox + r.oy) / 2 - r.oz), ax: cam.ax, ay: cam.ay)
     }
 
     func draw(_ ctx: inout GraphicsContext) {
         box.hits.removeAll(keepingCapacity: true)
         let fbox = box.floorBox
         fbox.hits.removeAll(keepingCapacity: true); fbox.heads.removeAll(keepingCapacity: true)
-        let regions = world.regions.sorted { ($0.x0 + $0.y0) < ($1.x0 + $1.y0) }
+        let regions = world.regions.sorted { $0.oz < $1.oz }
         let rs = regions.map { r in
             FloorRenderer(plan: r.plan, layout: r.layout, cam: regionCam(r), box: fbox, dark: dark, t: t, now: now,
                           selected: selected, hovered: hovered, prefix: "\(r.id)|")
         }
         let looks = rs.map { $0.looks() }
-        // losas de las regiones (suelo del piso) con su sombra: una sola capa desenfocada para todo el mundo
         ctx.drawLayer { l in
             l.addFilter(.blur(radius: 9 * cam.s))
             for r in regions {
                 l.fill(plateShadow(r), with: .color(.black.opacity(dark ? 0.5 : 0.16)))
-                }
+            }
             for f in rs { f.slabShadows(&l) }
         }
-        for r in regions { plate(&ctx, r) }
-        for (i, f) in rs.enumerated() { f.drawRooms(&ctx, looks: looks[i]) }
-        ctx.drawLayer { l in
-            l.addFilter(.blur(radius: 2.4 * cam.s))
-            for (i, f) in rs.enumerated() { f.contactShadows(&l, looks: looks[i]) }
+        for i in regions.indices {
+            if i > 0 { link(&ctx, regions[i - 1], regions[i]) }
+            plate(&ctx, regions[i])
+            rs[i].drawRooms(&ctx, looks: looks[i])
+            let f = rs[i], lk = looks[i]
+            ctx.drawLayer { l in
+                l.addFilter(.blur(radius: 2.4 * cam.s))
+                f.contactShadows(&l, looks: lk)
+            }
+            rs[i].drawContents(&ctx, looks: looks[i])
         }
-        for (i, f) in rs.enumerated() { f.drawContents(&ctx, looks: looks[i]) }
         for (i, f) in rs.enumerated() { f.drawLabels(&ctx, looks: looks[i]) }
-        // nombre del piso sobre la esquina del fondo de su losa (el vestíbulo ya lo dice su sala)
-        for r in regions where r.kind != .lobby {
+        for r in regions {
             guard let s = ctx.resolveSymbol(id: "\(r.id)|title") else { continue }
-            let p = cam.pt(r.x0, r.y0, 2)
-            ctx.draw(s, at: CGPoint(x: p.x, y: p.y - 8), anchor: .bottom)
+            let p = P(r.x0, r.y0 + r.d, r.oz)
+            ctx.draw(s, at: CGPoint(x: p.x - 12, y: p.y), anchor: .trailing)
         }
         box.hits = fbox.hits
     }
 
     private func P(_ x: Double, _ y: Double, _ z: Double = 0) -> CGPoint { cam.pt(x, y, z) }
 
+    private func poly(_ q: [CGPoint]) -> Path { var p = Path(); p.addLines(q); p.closeSubpath(); return p }
+
     private func plateShadow(_ r: WorldLayout.Region) -> Path {
-        let h = 10.0, sx = h * 0.55, sy = -h * 0.30
-        var p = Path()
-        p.addLines([P(r.x0, r.y0), P(r.x0 + sx, r.y0 + sy), P(r.x0 + r.w + sx, r.y0 + sy), P(r.x0 + r.w + sx, r.y0 + r.d + sy),
-                    P(r.x0 + r.w, r.y0 + r.d), P(r.x0, r.y0 + r.d)])
-        p.closeSubpath()
-        return p
+        let h = 10.0, sx = h * 0.55, sy = -h * 0.30, z = r.oz
+        return poly([P(r.x0, r.y0, z), P(r.x0 + sx, r.y0 + sy, z), P(r.x0 + r.w + sx, r.y0 + sy, z), P(r.x0 + r.w + sx, r.y0 + r.d + sy, z),
+                     P(r.x0 + r.w, r.y0 + r.d, z), P(r.x0, r.y0 + r.d, z)])
     }
 
-    /// Losa baja bajo todas las salas de la región: agrupa un piso (o el vestíbulo) sin muros ni rótulos encima.
     private func plate(_ ctx: inout GraphicsContext, _ r: WorldLayout.Region) {
-        let z = -1.0, h = 3.0
+        let z = r.oz - 1.0, h = 3.0
         let a = P(r.x0, r.y0, z + h), b = P(r.x0 + r.w, r.y0, z + h), c = P(r.x0 + r.w, r.y0 + r.d, z + h), e = P(r.x0, r.y0 + r.d, z + h)
         let c0 = P(r.x0 + r.w, r.y0 + r.d, z), e0 = P(r.x0, r.y0 + r.d, z), b0 = P(r.x0 + r.w, r.y0, z)
-        func poly(_ q: [CGPoint]) -> Path { var p = Path(); p.addLines(q); p.closeSubpath(); return p }
         let top: Color = dark ? Color(white: 0.105) : Color(red: 0.93, green: 0.915, blue: 0.885)
         ctx.fill(poly([e, c, c0, e0]), with: .color(dark ? Color(white: 0.075) : Color(red: 0.86, green: 0.84, blue: 0.80)))
         ctx.fill(poly([b, c, c0, b0]), with: .color(dark ? Color(white: 0.055) : Color(red: 0.80, green: 0.78, blue: 0.74)))
         ctx.fill(poly([a, b, c, e]), with: .color(top))
         ctx.stroke(poly([a, b, c, e]), with: .color(.primary.opacity(dark ? 0.08 : 0.10)), lineWidth: 0.7)
+    }
+
+    private func link(_ ctx: inout GraphicsContext, _ lo: WorldLayout.Region, _ hi: WorldLayout.Region) {
+        let s = lo.layout.shell
+        let z0 = lo.oz + Iso.slabH, z1 = hi.oz - 1
+        guard z1 > z0 else { return }
+        let ink: Color = dark ? .white : Color(red: 0.2, green: 0.18, blue: 0.15)
+        var edges = Path()
+        for (x, y) in [(s.x0, s.y0), (s.x1, s.y0), (s.x0, s.y1), (s.x1, s.y1)] {
+            edges.move(to: P(x, y, z0)); edges.addLine(to: P(x, y, z1))
+        }
+        ctx.stroke(edges, with: .color(ink.opacity(dark ? 0.12 : 0.14)), style: StrokeStyle(lineWidth: 0.9, lineCap: .round, dash: [5, 4]))
+        guard let c = lo.layout.core else { return }
+        let cz0 = lo.oz + FloorLayout.topH, cz1 = z1
+        guard cz1 > cz0 else { return }
+        let x0 = c.x0, y0 = c.y0, x1 = c.x0 + c.w, y1 = c.y0 + c.d
+        let left = poly([P(x0, y1, cz1), P(x1, y1, cz1), P(x1, y1, cz0), P(x0, y1, cz0)])
+        let right = poly([P(x1, y0, cz1), P(x1, y1, cz1), P(x1, y1, cz0), P(x1, y0, cz0)])
+        let tone: Color = dark ? Color(red: 0.55, green: 0.62, blue: 0.72) : Color(red: 0.52, green: 0.58, blue: 0.66)
+        ctx.fill(left, with: .color(tone.opacity(dark ? 0.07 : 0.08)))
+        ctx.fill(right, with: .color(tone.opacity(dark ? 0.05 : 0.06)))
+        var rim = Path()
+        rim.move(to: P(x0, y1, cz0)); rim.addLine(to: P(x0, y1, cz1))
+        rim.move(to: P(x1, y1, cz0)); rim.addLine(to: P(x1, y1, cz1))
+        rim.move(to: P(x1, y0, cz0)); rim.addLine(to: P(x1, y0, cz1))
+        ctx.stroke(rim, with: .color(tone.opacity(dark ? 0.22 : 0.26)), lineWidth: 0.8)
     }
 }
 

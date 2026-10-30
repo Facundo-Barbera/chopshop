@@ -179,7 +179,7 @@ final class ShellModelTests: XCTestCase {
         XCTAssertEqual(m.blocks.count, model.buildings.count)
         let bounds = CGRect(origin: .zero, size: size)
         for b in m.blocks { XCTAssertTrue(bounds.insetBy(dx: -0.5, dy: -0.5).contains(b.rect), "\(b.company) dentro del minimapa") }
-        let awesome = try XCTUnwrap(m.blocks.first { $0.company == "Awesome GB" })
+        let awesome = try XCTUnwrap(m.blocks.first { $0.company == "awesome-gb" })
         XCTAssertEqual(m.project(at: CGPoint(x: awesome.rect.midX, y: awesome.rect.midY)), "awesome-gb")
         XCTAssertNil(m.project(at: CGPoint(x: -50, y: -50)))
         XCTAssertTrue(ShellMinimap.layout(CityModel(buildings: [], groundX: 1, groundY: 1), size: size).blocks.isEmpty)
