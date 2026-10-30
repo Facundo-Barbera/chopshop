@@ -2,9 +2,10 @@ import json
 import os
 import threading
 
-from .. import home, minitoml, profile, settings
+from .. import cloudsync, home, minitoml, profile, settings
 
 DEFAULT_COMPANY = "Personal"
+CLOUD_MANAGED = "gestionado en la nube"
 FIELDS = ("company", "t3_project", "repo", "host", "enabled")
 
 _lock = threading.Lock()
@@ -38,7 +39,10 @@ def _entry(name, raw):
 def _from_profiles():
     from . import layout
     out = {}
+    cloud = set(cloudsync.names())
     for name in profile.list_projects():
+        if name in cloud:
+            continue
         try:
             prof = profile.load(name)
         except profile.ProfileError:
@@ -60,7 +64,28 @@ def _read():
 _cache = {}
 
 
+def _cloud():
+    return {p["name"]: _entry(p["name"], {"company": p.get("company"), "t3_project": p.get("t3_project"), "repo": p.get("repo"),
+                                          "host": "local", "enabled": not p.get("disabled")})
+            for p in cloudsync.projects()}
+
+
 def load():
+    out = _local()
+    out.update(_cloud())
+    return out
+
+
+def filtering():
+    return exists() or cloudsync.active()
+
+
+def guard_local(name):
+    if cloudsync.is_cloud(name):
+        raise RegistryError(409, "%s: %s" % (CLOUD_MANAGED, name))
+
+
+def _local():
     try:
         st = os.stat(path())
     except OSError:
@@ -108,19 +133,19 @@ def enabled_names():
 
 
 def counts(name):
-    return not exists() or name in enabled_names()
+    return not filtering() or name in enabled_names()
 
 
 def profiles(names=None):
     names = names if names is not None else profile.list_projects()
-    if not exists():
+    if not filtering():
         return list(names)
     allowed = enabled_names()
     return [n for n in names if n in allowed]
 
 
 def visible(st):
-    if not exists():
+    if not filtering():
         return st
     allowed = enabled_names()
     out = dict(st)
@@ -134,7 +159,7 @@ def visible(st):
 
 
 def t3_matcher():
-    if not exists():
+    if not filtering():
         return None
     entries = [e for e in load().values() if e["enabled"]]
 
@@ -208,9 +233,10 @@ def register(name, company=None, t3_project=None, repo=None, host=None, model=No
         raise RegistryError(400, "host desconocido: %s" % host)
     if model and "/" not in model:
         raise RegistryError(400, "model debe ser 'instancia/modelo' (p. ej. claudeAgent/claude-haiku-5-5)")
+    guard_local(name)
     _check_model(name, t3_project, repo, host, model)
     with _lock:
-        entries = load()
+        entries = _local()
         old = entries.get(name)
         if old is None and not company:
             raise RegistryError(400, "company es obligatorio")
@@ -238,8 +264,9 @@ def _check_model(name, t3_project, repo, host, model):
 
 def set_enabled(name, flag):
     name = _name(name)
+    guard_local(name)
     with _lock:
-        entries = load()
+        entries = _local()
         if name not in entries:
             raise RegistryError(404, "proyecto no registrado: %s" % name)
         entries[name] = dict(entries[name], enabled=bool(flag))
