@@ -4,6 +4,7 @@ public enum RelayLoginOutcome: Equatable, Sendable {
     case ok(account: String, machines: Int)
     case unauthorized
     case rateLimited(retryAfter: Int?)
+    case unavailable(retryAfter: Int?)
     case forbidden
     case wrongScope(String)
     case invalidURL
@@ -18,6 +19,8 @@ public enum RelayLoginOutcome: Equatable, Sendable {
             return "401 · El relay no reconoce el token: revisa que esté completo o pide uno nuevo (puede estar revocado)."
         case .rateLimited(let s):
             return "429 · Demasiados intentos. " + (s.map { "Espera \($0) s y vuelve a probar." } ?? "Espera un minuto y vuelve a probar.")
+        case .unavailable(let s):
+            return "503 · El relay no está disponible ahora. " + (s.map { "Espera \($0) s y vuelve a probar." } ?? "Vuelve a probar en un rato.")
         case .forbidden:
             return "403 · El relay rechazó este token para leer."
         case .wrongScope(let scope):
@@ -53,8 +56,9 @@ public struct RelayLoginView: View {
     }
 
     private var trimmedToken: String { token.trimmingCharacters(in: .whitespacesAndNewlines) }
+    @State private var blockedUntil: Date?
     private var canSubmit: Bool {
-        phase != .checking && trimmedToken.hasPrefix("cr1_") && trimmedToken.count > 4
+        phase != .checking && blockedUntil == nil && trimmedToken.hasPrefix("cr1_") && trimmedToken.count > 4
             && !url.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
@@ -102,7 +106,19 @@ public struct RelayLoginView: View {
         }
     }
 
-    private func isRateLimited(_ o: RelayLoginOutcome) -> Bool { if case .rateLimited = o { return true } else { return false } }
+    private func isRateLimited(_ o: RelayLoginOutcome) -> Bool {
+        switch o {
+        case .rateLimited, .unavailable: return true
+        default: return false
+        }
+    }
+
+    private func retryAfter(_ o: RelayLoginOutcome) -> Int? {
+        switch o {
+        case .rateLimited(let s), .unavailable(let s): return s
+        default: return nil
+        }
+    }
 
     private func submit() {
         guard canSubmit else { return }
@@ -112,6 +128,12 @@ public struct RelayLoginView: View {
             let outcome = await validate(u, t)
             phase = .done(outcome)
             if outcome.isOK { token = "" }
+            if let s = retryAfter(outcome), s > 0 {
+                let until = Date().addingTimeInterval(TimeInterval(s))
+                blockedUntil = until
+                try? await Task.sleep(for: .seconds(s))
+                if blockedUntil == until { blockedUntil = nil }
+            }
         }
     }
 }
