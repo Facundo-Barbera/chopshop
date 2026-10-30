@@ -1,7 +1,9 @@
 import { type AuthEnv, csrfHash, resolvePrincipal } from "./auth";
 import { json } from "./http";
 import { authHandlers } from "./routes/auth";
+import { projectHandlers } from "./routes/projects";
 import { sessionHandlers } from "./routes/sessions";
+import { workspaceHandlers } from "./routes/workspaces";
 import { createApi, dispatchHost } from "./router";
 
 export const VERSION = "0.1.0";
@@ -9,7 +11,7 @@ export const VERSION = "0.1.0";
 export interface Env extends AuthEnv {}
 
 const api = createApi<Env>(
-  { health: () => json({ ok: true, version: VERSION }), ...authHandlers, ...sessionHandlers },
+  { health: () => json({ ok: true, version: VERSION }), ...authHandlers, ...sessionHandlers, ...workspaceHandlers, ...projectHandlers },
   { resolvePrincipal, csrfHash },
 );
 
