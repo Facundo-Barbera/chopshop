@@ -11,9 +11,11 @@ office:
         - {role: triage, desks: 1, permanent: true}
         - {role: backend, desks: 4}
         - {role: frontend, desks: 3}
-    - name: Docs
+    - name: Docs y entrega
       rooms:
-        - {role: docs, desks: 2}
+        - {role: docs, desks: 1, permanent: true}
+        - {role: qa, desks: 1, permanent: true}
+        - {role: release, desks: 1, permanent: true}
   roles:
     triage:
       prompt_file: roles/triage.md
