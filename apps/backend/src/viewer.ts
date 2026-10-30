@@ -1,4 +1,4 @@
-import type { CachedMachine, LiveDb, StoredSnapshot } from "./agentws";
+import type { CachedMachine, LiveDb, StoredSnapshot, SyncError } from "./agentws";
 import { type ErrorCode, errorBody, errorResponse, ulid } from "./http";
 
 export const HEARTBEAT_MS = 15_000;
@@ -30,10 +30,17 @@ export interface LiveMachine {
   expires_at: string | null;
 }
 
+export interface LiveSync {
+  machine_id: string;
+  rev: number;
+  errors: SyncError[];
+}
+
 export interface LiveState {
   head: string;
   machines: LiveMachine[];
   snapshots: unknown[];
+  sync: LiveSync[];
 }
 
 interface Buffered {
@@ -122,7 +129,12 @@ export class ViewerHub {
         expires_at: newest ? new Date(newest.expiresAt).toISOString() : null,
       });
     }
-    return { head: this.head, machines, snapshots: snaps.map((s) => JSON.parse(s.frame) as unknown) };
+    const visible = new Set(machines.map((m) => m.id));
+    const sync = this.live
+      .listSyncStatus()
+      .filter((s) => visible.has(s.machineId))
+      .map((s) => ({ machine_id: s.machineId, rev: s.rev, errors: s.errors }));
+    return { head: this.head, machines, snapshots: snaps.map((s) => JSON.parse(s.frame) as unknown), sync };
   }
 
   stream(request: Request, view: ViewCtx, rev: number, now: number = Date.now()): Response {
