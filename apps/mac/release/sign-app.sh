@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Firma Chopshop.app de dentro hacia fuera (hardened runtime + sello de tiempo + entitlements mínimos).
 #   sign-app.sh <Chopshop.app>
-# Env: SIGN_IDENTITY (hash SHA-1 de Developer ID Application; "-" = ad-hoc para dry-run),
+# Env: SIGN_IDENTITY (hash SHA-1 de Developer ID Application; "-" = ad-hoc para dry-run; sin ella y con APPLE_TEAM_ID se busca en el llavero),
 #      SIGN_KEYCHAIN (keychain temporal, opcional), ENTITLEMENTS (por defecto Chopshop.entitlements),
 #      APPLE_TEAM_ID (si se define y la firma es real, el TeamIdentifier resultante debe coincidir).
 # Orden: todo el código anidado (XPC, Autoupdate, Updater.app, binarios sueltos...) del más profundo al más
@@ -14,7 +14,12 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 APP="${1:-}"
 [ -d "$APP/Contents" ] || die "uso: sign-app.sh <Chopshop.app>"
 IDENTITY="${SIGN_IDENTITY:-}"
-[ -n "$IDENTITY" ] || die "falta SIGN_IDENTITY (usa '-' para firma ad-hoc)"
+if [ -z "$IDENTITY" ] && [ -n "${APPLE_TEAM_ID:-}" ]; then
+  ids="$(security find-identity -v -p codesigning ${SIGN_KEYCHAIN:+"$SIGN_KEYCHAIN"} | grep -F "Developer ID Application" | grep -F "($APPLE_TEAM_ID)\"" || true)"
+  [ "$(printf '%s' "$ids" | grep -c .)" = 1 ] || die "no hay exactamente una identidad Developer ID Application del equipo APPLE_TEAM_ID en el llavero"
+  IDENTITY="$(printf '%s' "$ids" | awk '{print $2}')"
+fi
+[ -n "$IDENTITY" ] || die "falta SIGN_IDENTITY (usa '-' para firma ad-hoc) o APPLE_TEAM_ID para buscar la identidad en el llavero"
 # Una release real jamás sale con firma ad-hoc: RELEASE_MODE=release exige una identidad Developer ID
 if [ "${RELEASE_MODE:-}" = release ] && [ "$IDENTITY" = "-" ]; then die "RELEASE_MODE=release no admite firma ad-hoc"; fi
 ENTITLEMENTS="${ENTITLEMENTS:-$RELEASE_SCRIPTS/Chopshop.entitlements}"
