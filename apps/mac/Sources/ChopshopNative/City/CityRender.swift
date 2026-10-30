@@ -937,11 +937,16 @@ struct CityRenderer {
                             windows: [Double], amber: Double, red: Double, zoom z: CityZoom) {
         let wt = CityGeo.wallT, st = b.style, wall = body(st.material), ground = f.level == 0
         let op = Openings(ground ? nil : st.windows)
-        let hf = hh * CityTransition.frontWalls(p)
-        box(&g, R.x0, R.y0, R.x0 + wt, R.y1, zb, zb + hh, wall, edge: pal.bodyEdge)
-        box(&g, R.x0, R.y0, R.x1, R.y0 + wt, zb, zb + hh, wall, edge: pal.bodyEdge)
-        drawWindows(&g, R, face: .backX, op, zb: zb, hh: hh, levels: [], amber: 0, red: 0, alpha: 1)
-        drawWindows(&g, R, face: .backY, op, zb: zb, hh: hh, levels: [], amber: 0, red: 0, alpha: 1)
+        let hf = hh * CityTransition.frontWalls(p), hb = hh * CutawayFraming.backWall
+        let cut: Faces = (pal.slabT, wall.1, wall.2)
+        box(&g, R.x0, R.y0, R.x0 + wt, R.y1, zb, zb + hb, cut, edge: pal.bodyEdge)
+        box(&g, R.x0, R.y0, R.x1, R.y0 + wt, zb, zb + hb, cut, edge: pal.bodyEdge)
+        var gb = g
+        var back = poly([P(R.x0 + wt, R.y0, zb + hb), P(R.x0 + wt, R.y1, zb + hb), P(R.x0 + wt, R.y1, zb), P(R.x0 + wt, R.y0, zb)])
+        back.addPath(poly([P(R.x0, R.y0 + wt, zb + hb), P(R.x1, R.y0 + wt, zb + hb), P(R.x1, R.y0 + wt, zb), P(R.x0, R.y0 + wt, zb)]))
+        gb.clip(to: back)
+        drawWindows(&gb, R, face: .backX, op, zb: zb, hh: hh, levels: [], amber: 0, red: 0, alpha: 1)
+        drawWindows(&gb, R, face: .backY, op, zb: zb, hh: hh, levels: [], amber: 0, red: 0, alpha: 1)
         // la oficina, con el MISMO dibujo que la vista que se monta al final (FloorOfficeView o IsoOfficeView)
         let rr = CityTransition.roomRise(p), dp = CityTransition.deskPop(p)
         if rr > 0.001 {
@@ -952,8 +957,10 @@ struct CityRenderer {
             case .floor(let plan, let lay, let now):
                 // los escritorios son fijos: el piso entero aparece con el zoom
                 go.opacity = g.opacity * rr
-                FloorRenderer(plan: plan, layout: lay, cam: ocam, box: z.floorBox ?? FloorCameraBox(), dark: dark, t: t, now: now,
-                              selected: nil, hovered: z.hoveredSpot).draw(&go)
+                go.fill(poly([P(R.x0 + wt, R.y0 + wt, zb), P(R.x1 - wt, R.y0 + wt, zb), P(R.x1 - wt, R.y1 - wt, zb), P(R.x0 + wt, R.y1 - wt, zb)]),
+                        with: .color(Color(red: 0.942, green: 0.926, blue: 0.893)))
+                FloorRenderer(plan: plan, layout: lay, cam: ocam, box: z.floorBox ?? FloorCameraBox(), dark: false, t: t, now: now,
+                              selected: nil, hovered: z.hoveredSpot, embedded: true).draw(&go)
             case .graph(var sc):
                 // las salas se extruyen y los escritorios brotan con el zoom
                 for i in sc.rooms.indices { sc.rooms[i].rise = rr; sc.rooms[i].wallRise = rr }
@@ -963,7 +970,6 @@ struct CityRenderer {
             }
         }
         guard hf > 0.3 else { return }
-        let cut: Faces = (pal.slabT, wall.1, wall.2)
         box(&g, R.x1 - wt, R.y0, R.x1, R.y1 - wt, zb, zb + hf, cut, edge: pal.bodyEdge)
         box(&g, R.x0, R.y1 - wt, R.x1, R.y1, zb, zb + hf, cut, edge: pal.bodyEdge)
         var gw = g
