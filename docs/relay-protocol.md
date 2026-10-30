@@ -141,11 +141,12 @@ Un visor (token `viewer`) no abre WebSocket: lee por HTTP. Ninguna de estas resp
 | `GET /state` | `{v, type: "state", id, ts, head, machines[], snapshots[]}` | `state` |
 | `GET /stream` | SSE (`text/event-stream`), ver abajo | `stream-hello` (primer frame) |
 
-- **`GET /state`**: `machines[]` = `{machine_id, seq, snapshot_age_s, expires_at}` de cada máquina de la cuenta con snapshot
-  vivo (dentro de su TTL), ordenadas por `machine_id`; `snapshots[]` = esos snapshots tal como los mandó el agente (schema
-  `snapshot`). `head` es la posición actual del stream (`<época>-<n>`, ver abajo): un visor puede pedir `GET /state` y luego abrir
-  `GET /stream` con `Last-Event-ID: <head>` para seguir sin huecos. Una máquina con el snapshot caducado no aparece. `/state` no
-  dice si una máquina está conectada (`online`) ni distingue «caducada» de «nunca vista» (BUG-10 en `docs/plans/contract-audit.md`).
+- **`GET /state`**: `machines[]` = `{machine_id, online, stale, seq, snapshot_age_s, expires_at}` de cada máquina de la
+  cuenta que tenga snapshot vivo (dentro de su TTL), token de agente sin revocar o el WebSocket abierto, ordenadas por
+  `machine_id`. `online` = el agente tiene el WebSocket abierto y su `hello` fue aceptado. `stale` = no hay snapshot vivo
+  (caducó o nunca llegó); entonces `seq`, `snapshot_age_s` y `expires_at` son `null`. `snapshots[]` = los snapshots vivos tal
+  como los mandó el agente (schema `snapshot`). `head` es la posición actual del stream (`<época>-<n>`, ver abajo): un visor
+  puede pedir `GET /state` y luego abrir `GET /stream` con `Last-Event-ID: <head>` para seguir sin huecos.
 - **`GET /stream`**: SSE de la cuenta del token. Empieza con `retry: 3000` y un `event: hello` cuyo `data` es
   `{v, type: "hello", ts, head, resume}` (schema `stream-hello`; se llama como el `hello` del agente pero es otro mensaje y no
   lleva `id`). Después:
