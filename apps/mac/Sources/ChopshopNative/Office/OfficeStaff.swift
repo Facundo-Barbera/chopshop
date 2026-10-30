@@ -6,6 +6,9 @@ public enum OfficeStaff {
     public static let rideBase = 1.5, ridePerFloor = 0.8
     public static let doorLead = 0.6
     static let workPhases: Set<String> = ["running", "preparing", "starting", "failed"]
+    static let leaving: Set<String> = ["settled", "skipped"]
+    public static let entrance = "lobby:"
+    public static let exitKey = "exit"
     static let idleKinds: [FloorPlanGenerator.Commons] = [.reception, .lounge, .kitchenette, .cafe, .open]
 
     public struct Point: Equatable, Hashable, Sendable {
@@ -110,7 +113,7 @@ public enum OfficeStaff {
         }
         var idle: [(String, FloorPlan.Occupant, Point)] = []
         for d in plan.desks {
-            guard let o = d.occupant, !o.gone(at: now), let sp = lay.spot(d.id) else { continue }
+            guard let o = d.occupant, !o.gone(at: now), !leaving.contains(o.phase), let sp = lay.spot(d.id) else { continue }
             if atWork(o) { out[o.threadID] = Home(spot: d.id, point: chair(sp), atDesk: true, occupant: o) }
             else { idle.append((d.id, o, chair(sp))) }
         }
@@ -209,7 +212,7 @@ public enum OfficeStaff {
     }
 
     public struct Ledger: Sendable {
-        struct Seen: Sendable { var floor: String; var home: Home; var liftLen: Double }
+        struct Seen: Sendable { var floor: String; var home: Home; var liftLen: Double; var left = false }
         var seen: [String: Seen] = [:]
         public private(set) var trips: [String: Trip] = [:]
 
@@ -223,7 +226,13 @@ public enum OfficeStaff {
             let homes = OfficeStaff.homes(plan, lay, now: date)
             let ss = OfficeStaff.slots(lay)
             for (tid, h) in homes.sorted(by: { $0.key < $1.key }) {
-                if let s = seen[tid] {
+                if let s = seen[tid], s.left {
+                    if s.floor == key { trips[tid] = nil }
+                    else if let old = trips[tid], old.toFloor == OfficeStaff.exitKey {
+                        trips[tid] = Trip(threadID: tid, spot: h.spot, occupant: h.occupant, fromFloor: s.floor, from: old.from,
+                                          fromDesk: old.fromDesk, fromLen: s.liftLen, toFloor: key, start: old.start)
+                    }
+                } else if let s = seen[tid] {
                     let moved = s.floor != key || s.home.spot != h.spot || s.home.atDesk != h.atDesk
                         || hypot(s.home.point.x - h.point.x, s.home.point.y - h.point.y) > 1
                     if moved {
@@ -240,6 +249,25 @@ public enum OfficeStaff {
                 }
                 let lift = nav.liftOut.map { OfficeStaff.length(nav.route(h.point, desk: h.atDesk, $0, desk: false)) } ?? 0
                 seen[tid] = Seen(floor: key, home: h, liftLen: lift)
+            }
+            if plan.kind != .lobby {
+                for (tid, s) in seen.sorted(by: { $0.key < $1.key }) where s.floor == key && homes[tid] == nil && !s.left {
+                    seen[tid]?.left = true
+                    if let old = trips[tid], old.toFloor == key, case .hidden = leg(old, key: key, home: s.home, nav: nav, now: now) {
+                        trips[tid] = nil
+                        continue
+                    }
+                    var o = s.home.occupant
+                    if !plan.desks.contains(where: { $0.occupant?.threadID == tid && $0.occupant?.gone(at: date) == true }) {
+                        o.endedAt = nil; o.touchedAt = nil
+                    }
+                    var from = s.home.point, fromDesk = s.home.atDesk
+                    if let old = trips[tid], old.toFloor == key, case .walker(let w) = leg(old, key: key, home: s.home, nav: nav, now: now) {
+                        from = Point(w.x, w.y); fromDesk = false
+                    }
+                    trips[tid] = Trip(threadID: tid, spot: s.home.spot, occupant: o, fromFloor: key, from: from, fromDesk: fromDesk,
+                                      fromLen: 0, toFloor: OfficeStaff.exitKey, start: now)
+                }
             }
             var out: [Walker] = []
             for (tid, h) in homes.sorted(by: { $0.key < $1.key }) {
@@ -266,6 +294,14 @@ public enum OfficeStaff {
         static func hint(_ tid: String, _ h: Home, plan: FloorPlan, lay: FloorLayout, nav: Nav, slots ss: [Point], key: String,
                          now: Double) -> Trip? {
             guard plan.kind != .lobby else { return nil }
+            if h.occupant.endedAt == nil, let lout = nav.liftOut, let since = FloorPlan.epoch(h.occupant.since), now >= since {
+                let l = OfficeStaff.length(nav.route(lout, desk: false, h.point, desk: h.atDesk))
+                let total = OfficeStaff.ride(OfficeStaff.entrance, key) + 2 * OfficeStaff.doorTime + l / OfficeStaff.speed
+                if now - since < total {
+                    return Trip(threadID: tid, spot: h.spot, occupant: h.occupant, fromFloor: OfficeStaff.entrance, from: lout,
+                                fromDesk: false, fromLen: 0, toFloor: key, start: since)
+                }
+            }
             if h.atDesk, !ss.isEmpty, let since = FloorPlan.epoch(h.occupant.since), now >= since {
                 let from = ss[OfficeStaff.slot(tid, ss)]
                 let l = OfficeStaff.length(nav.route(from, desk: false, h.point, desk: true))

@@ -29,10 +29,10 @@ guard FileManager.default.isExecutableFile(atPath: python), FileManager.default.
     fail("falta el runtime incrustado en \(agentDir.path) (build sin EMBED_AGENT)")
 }
 
-// launchd arranca con un PATH mínimo: el agente llama a `t3`, `gh` y `tailscale`, que suelen vivir en Homebrew o ~/.local/bin.
+// launchd arranca con un PATH mínimo: el agente llama a `t3`, `gh` y `tailscale`, que suelen vivir en Homebrew, ~/.local/bin o ~/.t3/bin.
 let home = NSHomeDirectory()
 var path = (ProcessInfo.processInfo.environment["PATH"] ?? "").split(separator: ":").map(String.init)
-for p in ["\(home)/.local/bin", "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin",
+for p in ["\(home)/.local/bin", "\(home)/.t3/bin", "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin",
           "/Applications/Tailscale.app/Contents/MacOS"] where !path.contains(p) {
     path.append(p)
 }
