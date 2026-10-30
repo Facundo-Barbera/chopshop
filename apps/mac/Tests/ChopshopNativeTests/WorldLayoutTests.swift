@@ -62,12 +62,14 @@ final class WorldLayoutTests: XCTestCase {
 
     /// Cada hueco (escritorio, invitado o armario) es único en el mundo: los símbolos y los clics no se confunden de piso.
     func testSpotIDsAreUniqueAcrossRegions() {
-        var fs = floors(office: false)
-        if #available(macOS 26.0, *) { fs.append(FloorFixture.floor) }
-        let w = WorldLayout(floors: fs)
-        let ids = w.regions.flatMap { r in r.layout.spots.map { "\(r.id)|\($0.id)" } }
-        XCTAssertEqual(ids.count, Set(ids).count)
-        XCTAssertEqual(Set(w.regions.map(\.id)).count, w.regions.count)
+        var sets = [floors(office: true), floors(office: false)]
+        if #available(macOS 26.0, *) { sets.append(machineFloors) }
+        for fs in sets {
+            let w = WorldLayout(floors: fs)
+            let ids = w.regions.flatMap { r in r.layout.spots.map { "\(r.id)|\($0.id)" } }
+            XCTAssertEqual(ids.count, Set(ids).count)
+            XCTAssertEqual(Set(w.regions.map(\.id)).count, w.regions.count)
+        }
     }
 
     /// Lo desvanecido no entra: los 16 hilos visibles ahora; seis horas después solo el que sigue corriendo.
