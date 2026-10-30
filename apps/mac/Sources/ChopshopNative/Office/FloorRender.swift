@@ -203,7 +203,7 @@ struct FloorRenderer {
 
     private var isLobby: Bool { plan.kind == .lobby }
     private var floorZ: Double { Iso.slabH }
-    static let wallFull = 44.0, wallCut = 20.0, glassFull = 36.0, glassCut = 16.0
+    static let wallFull = 30.0, wallCut = 14.0, glassFull = 28.0, glassCut = 12.0
     static let coreH = wallFull
     private var walkers: [OfficeStaff.Walker] { box.walkers(plan, layout, now: now) }
     private var pal: CityPalette { CityPalette(dark: dark) }

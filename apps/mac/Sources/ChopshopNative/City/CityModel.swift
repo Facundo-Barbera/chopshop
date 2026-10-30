@@ -115,6 +115,7 @@ public struct CityBuilding: Hashable, Sendable, Identifiable {
     public var campus: String
     public var contractorOf: String? = nil
     public var title: String? = nil
+    public var heightScale = 1.0
 
     public init(company: String, index: Int, x0: Double, y0: Double, w: Double, d: Double, floors: [CityFloor],
                 style: CityBuildingStyle? = nil, campus: String = "", contractorOf: String? = nil, title: String? = nil) {
