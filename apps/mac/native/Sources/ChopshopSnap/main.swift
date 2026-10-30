@@ -1,7 +1,7 @@
 import AppKit
 import ChopshopNative
 
-// uso: ChopshopSnap <directorio de salida> [demo|demo-keys|city-keys|city-video [vídeo.mp4]|machine-room|floor|city-office|shell]
+// uso: ChopshopSnap <directorio de salida> [demo|demo-keys|city-keys|city-video [vídeo.mp4]|machine-room|floor|city-office|real-office|shell]
 //   sin 2º argumento: capturas de proyecto/oficina
 //   demo: fotogramas clave de la demo (key-*.png) + secuencia seq/f0000.jpg a 12 fps (demo-keys: solo las claves)
 //   city-keys: claves de la ciudad (city-0N-*.png, 1400×900 @1x) desde city-fixture.jsonl
@@ -65,6 +65,10 @@ if let mode = args.dropFirst().first, mode == "machine-room" {
 }
 if let mode = args.dropFirst().first, mode == "shell" {
     MainActor.assumeIsolated { Snapshots.renderShell(to: out) }
+    exit(0)
+}
+if let mode = args.dropFirst().first, mode == "real-office" {
+    MainActor.assumeIsolated { Snapshots.renderRealOffice(to: out) }
     exit(0)
 }
 if let mode = args.dropFirst().first, mode == "floor" || mode == "city-office" {
