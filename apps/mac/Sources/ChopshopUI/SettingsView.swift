@@ -1,4 +1,5 @@
 import SwiftUI
+import ChopshopNative
 
 /// Hoja de ajustes: las máquinas (agentes) a las que se conecta la app, cada una con nombre, URL, interruptor de activada, estado de
 /// conexión y emparejamiento (credencial en el Keychain, nunca en el config). Se guardan como `[app.agents.<nombre>]` con
@@ -17,6 +18,7 @@ struct SettingsView: View {
     @State private var formError: String?
     @State private var message: String?
     @State private var removing: AgentSpec?
+    @State private var relayLogin = false
 
     /// Variables de entorno que pisan al archivo (para avisar de que guardar puede no cambiar nada).
     private var envOverrides: Bool {
@@ -44,8 +46,19 @@ struct SettingsView: View {
             }
             .frame(minHeight: 300, maxHeight: 460)
 
-            if editing == nil {
-                Button { startEditing(nil) } label: { Label("Añadir máquina", systemImage: "plus") }
+            if relayLogin {
+                RelayLoginView(validate: { u, t in
+                    let outcome = await model.loginRelay(url: u, token: t)
+                    if outcome.isOK { load() }
+                    return outcome
+                }, onCancel: { relayLogin = false })
+                .padding(12)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
+            } else if editing == nil {
+                HStack(spacing: 10) {
+                    Button { startEditing(nil) } label: { Label("Añadir máquina", systemImage: "plus") }
+                    Button { relayLogin = true } label: { Label("Conectar relay…", systemImage: "antenna.radiowaves.left.and.right") }
+                }
             }
 
             Text("Se guarda en \(AppConfig.configPath()) como [app.agents.<nombre>]; el resto del archivo no se toca. Las credenciales van al Llavero de este Mac.")
