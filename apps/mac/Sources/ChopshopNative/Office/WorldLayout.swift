@@ -67,6 +67,7 @@ public struct WorldLayout: Equatable, Sendable {
         step = st
         var b = IsoBounds.empty
         let margin = Self.margin, topH = FloorLayout.topH
+        var seen = Set<String>()
         let built = floors.indices.map { i -> Region in
             let f = floors[i], lay = lays[i]
             let s = lay.shell
@@ -76,7 +77,10 @@ public struct WorldLayout: Equatable, Sendable {
             for (x, y) in [(x0, y0), (x0 + w, y0), (x0, y0 + d), (x0 + w, y0 + d)] {
                 b.add(x, y, oz - 2); b.add(x, y, oz + topH)
             }
-            return Region(id: f.kind == .lobby ? "lobby:\(f.name ?? "")" : "floor:\(f.floorIndex)",
+            let base = f.kind == .lobby ? "lobby:\(f.name ?? "")" : "floor:\(f.floorIndex)"
+            let id = seen.contains(base) ? "\(base)@\(f.project ?? f.company ?? String(i))" : base
+            seen.insert(id)
+            return Region(id: id,
                           kind: f.kind == .lobby ? .lobby : .floor, title: f.shortTitle.uppercased(), plan: f, layout: lay,
                           ox: 0, oy: 0, oz: oz, x0: x0, y0: y0, w: w, d: d)
         }
