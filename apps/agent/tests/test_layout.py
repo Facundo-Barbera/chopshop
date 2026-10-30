@@ -158,12 +158,12 @@ class TestDesks(unittest.TestCase):
 
     def test_ids_and_order(self):
         ds = [d for d in L.desks(self.prof) if d["role"] != L.FLEX_ROLE]
-        self.assertEqual(len(ds), 10)
+        self.assertEqual(len(ds), 11)
         self.assertEqual(ds[0], {"id": "awesome-gb/0/triage/0", "project": "awesome-gb", "floor": 0, "role": "triage",
                                  "slot": 0, "permanent": True, "zone": "room"})
         self.assertEqual([d["id"] for d in ds if d["role"] == "backend"],
                          ["awesome-gb/0/backend/%d" % i for i in range(4)])
-        self.assertEqual(ds[-1]["id"], "awesome-gb/1/docs/1")
+        self.assertEqual(ds[-1]["id"], "awesome-gb/1/release/0")
         self.assertEqual(L.parse_desk_id("awesome-gb/0/backend/2"), ("awesome-gb", 0, "backend", 2))
         self.assertIsNone(L.parse_desk_id("awesome-gb/x/backend/2"))
 
