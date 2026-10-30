@@ -9,6 +9,7 @@
     "code",
     "scope",
     "name",
+    "account",
     "expires_at"
   ],
   "properties": {
@@ -27,6 +28,10 @@
         "null"
       ],
       "maxLength": 128
+    },
+    "account": {
+      "type": "string",
+      "pattern": "^ac-[0-9a-f]{8}$"
     },
     "expires_at": {
       "$ref": "common.schema.json#/$defs/ts"

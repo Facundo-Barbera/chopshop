@@ -196,7 +196,7 @@ Modelo: `apps/agent/chopshop/agent/pairing.py`, con un prefijo de token propio (
 una no sirve en el otro sitio).
 
 1. **Crear código**: `POST /v1/pair/codes` con `{scope, name?, ttl_s?}` (`pair-create`). Solo lo pide el operador con el token
-   de operador (ver «Deploy»); un token `cr1_` (`agent` o `viewer`) recibe 403. Respuesta (`pair-code`): `{id, code, scope, name, expires_at}`. El código
+   de operador (ver «Deploy»); un token `cr1_` (`agent` o `viewer`) recibe 403. Respuesta (`pair-code`): `{id, code, scope, name, account, expires_at}`. El código
    (`K7QM-93XD`: 8 símbolos base32 de Crockford, 40 bits) se muestra **una sola vez**; TTL por defecto 600 s, máx. 3600 s. El
    relay guarda solo `sha256(sal + ":" + código)`, la sal, el scope, la cuenta y las fechas.
 2. **Canjear**: `POST /v1/pair` con `{code, client_name?, machine_id?}` (`pair-redeem`), sin credencial. El código se normaliza como
@@ -205,7 +205,8 @@ una no sirve en el otro sitio).
    `{token_id, token: "cr1_<43 car. base64url>", scope, machine_id, protocol}`: 32 bytes aleatorios; **el relay guarda solo
    `sha256(token)`** y lo devuelve una única vez. El cliente lo guarda en su llavero (agente: archivo 0600 o Keychain; Mac: Keychain).
 3. **Fallos**: código usado, caducado o invalidado → 410 `gone`; inválido → 401 `unauthorized`; 5 fallos por minuto por IP → 429
-   `rate_limited`; cada fallo cuenta contra todos los códigos vivos de la cuenta y a los 20 se invalidan. Comparación en tiempo
+   `rate_limited`; cada fallo cuenta contra todos los códigos vivos (de todas las cuentas: el canje no sabe de cuál es el código) y a
+   los 20 se invalidan. Comparación en tiempo
    constante. Re-emparejar el mismo `machine_id` emite un token nuevo y revoca el anterior.
 4. **Uso**: `Authorization: Bearer cr1_…` en el upgrade de `/v1/connect` (agente) o en `/stream`, `/state` y `/whoami` (visor). Sin expiración automática; `last_seen_at` se escribe
    como mucho una vez por minuto. **Revocar**: `DELETE /v1/tokens/<token_id>` con el token de operador (efecto inmediato, cierra sus WebSockets).
@@ -229,7 +230,8 @@ Nunca se registran ni se devuelven códigos, tokens ni hashes (salvo el código 
 ## Deploy
 
 El Worker del relay **solo se despliega por GitHub Actions**, con los secrets del repositorio `CLOUDFLARE_API_TOKEN` y
-`CLOUDFLARE_ACCOUNT_ID`, al empujar un tag de release o al hacer merge a `main`. **Nunca desde una máquina local**: nada de
+`CLOUDFLARE_ACCOUNT_ID`, al empujar un tag `relay-v*` o a mano con `workflow_dispatch` (operación paso a paso en
+`docs/relay.md`). **Nunca desde una máquina local**: nada de
 `wrangler deploy` ni `wrangler secret put` a mano; las máquinas de desarrollo no tienen esas credenciales. El token de operador
 (admin: emite códigos con `POST /v1/pair/codes` y revoca con `DELETE /v1/tokens/<token_id>` o `DELETE /v1/pair/codes/<id>`, en
 cualquier cuenta) es el secret del Worker `RELAY_OPERATOR_TOKEN`, un binding de entorno que nunca está en el repo. Su valor se
@@ -237,4 +239,5 @@ crea una sola vez al hacer el primer deploy (R7) y se guarda como secret del rep
 `RELAY_OPERATOR_TOKEN`; el workflow `.github/workflows/relay-deploy.yml` lo carga en cada deploy con el input `secrets` de
 `wrangler-action` (equivale a `wrangler secret put RELAY_OPERATOR_TOKEN` leyendo la variable de entorno, sin imprimirla). El
 Worker lo compara por SHA-256 en tiempo constante; sin el secret, nadie puede crear códigos ni revocar. Un código creado
-por el operador abre una cuenta nueva (`ac-…`) salvo que la petición lleve `?account=ac-…` para añadir a una existente.
+por el operador abre una cuenta nueva (`ac-…`) salvo que la petición lleve `?account=ac-…` para añadir a una existente (o crear
+una con ese id); la respuesta trae `account` para encadenar los siguientes códigos.
