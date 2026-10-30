@@ -35,14 +35,14 @@ public struct OfficeShell<World: View, Unpaired: View>: View {
             }
             ToolbarItem(placement: .primaryAction) {
                 Button { shell.state.go(.city) } label: { Label("Ciudad", systemImage: "building.2") }
-                    .help("Volver a la ciudad")
+                    .accessibilityHint("Volver a la ciudad")
             }
             ToolbarSpacer(.fixed, placement: .primaryAction)
             ToolbarItemGroup(placement: .primaryAction) {
                 Button { shell.perform(.palette) } label: { Label("Órdenes", systemImage: "magnifyingglass") }
-                    .help("Paleta de órdenes (\(shortcut(.palette)))")
+                    .accessibilityHint("Paleta de órdenes (\(shortcut(.palette)))")
                 Button { shell.perform(.toggleInspector) } label: { Label("Panel", systemImage: "sidebar.trailing") }
-                    .help("Mostrar u ocultar el panel (\(shortcut(.toggleInspector)))")
+                    .accessibilityHint("Mostrar u ocultar el panel (\(shortcut(.toggleInspector)))")
             }
         }
         .onAppear { shell.snapshot = store.snapshot }
