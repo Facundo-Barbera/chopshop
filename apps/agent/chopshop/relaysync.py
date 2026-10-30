@@ -11,11 +11,13 @@ TTL_DEFAULT = 120
 TTL_MIN, TTL_MAX = 30, 900
 MAX_PART_BYTES = 786432
 MAX_EVENTS = 80
+MAX_QUEUE_ITEMS = 100
 TITLE_MAX, SUMMARY_MAX, TEXT_MAX = 120, 280, 120
 
 COUNT_KEYS = ("running", "queued", "waiting", "stuck", "needs_human", "waiting_bot", "done", "failed")
 BODY_KEYS = ("phase", "attention", "settled", "title", "role", "summary", "state", "light", "status", "conclusion", "count",
-             "desk", "reason", "zone")
+             "desk", "reason", "zone", "employee", "task", "thread_id", "name", "items", "position", "queue_len", "since", "by",
+             "trigger")
 HEALTH_STATES = ("ok", "degraded", "down")
 PHASES = envelope.PHASES
 ATTENTION = envelope.ATTENTION
@@ -26,6 +28,8 @@ _TYPE = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*){1,3}$")
 _ULID = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$")
 _SUBJECT = re.compile(r"^[A-Za-z0-9_.:#@-]([A-Za-z0-9_.:#@/-]{0,127})$")
 _SECRETISH = re.compile(r"(cs1_|cr1_|t3-thread:|://|^[/~]|\\)")
+_EMPLOYEE = re.compile(r"^[^/\s]+/[0-9]+/[a-z0-9][a-z0-9_-]{0,31}/[0-9]+$")
+_TASK = re.compile(r"^q:[0-7][0-9A-HJKMNP-TV-Z]{25}$")
 
 
 def _name(v):
@@ -115,7 +119,26 @@ def hello(machine_id, projects, last_seq=None, ts=None, version=AGENT_VERSION):
     return msg
 
 
-def body(b):
+def _employee(v):
+    return v if isinstance(v, str) and _EMPLOYEE.match(v) and not _SECRETISH.search(v) else None
+
+
+def _task(v):
+    return v if isinstance(v, str) and _TASK.match(v) else None
+
+
+def _queue_items(items):
+    out = []
+    for it in items if isinstance(items, list) else ():
+        if isinstance(it, dict) and _task(it.get("task")):
+            out.append({"task": it["task"], "title": _text(it.get("title"), TITLE_MAX), "enqueued_at": _ts(it.get("enqueued_at")),
+                        "by": _text(it.get("by")), "trigger": _text(it.get("trigger"))})
+        if len(out) >= MAX_QUEUE_ITEMS:
+            break
+    return out
+
+
+def body(b, machine_id=None):
     b = b if isinstance(b, dict) else {}
     out = {}
     for k in BODY_KEYS:
@@ -126,6 +149,18 @@ def body(b):
             v = _text(v, TITLE_MAX)
         elif k == "summary":
             v = _text(v, SUMMARY_MAX)
+        elif k == "employee":
+            v = _employee(v)
+        elif k == "task":
+            v = _task(v)
+        elif k == "thread_id":
+            v = key(machine_id, v)
+        elif k == "items":
+            v = _queue_items(v)
+        elif k == "since":
+            v = _ts(v)
+        elif k in ("position", "queue_len"):
+            v = v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else None
         else:
             v = _scalar(v)
         if v is not None or b[k] is None:
@@ -160,7 +195,7 @@ def event(env, machine_id=None, ts=None):
     fields = event_fields(env, machine_id)
     if fields is None:
         return None
-    return dict(_header("event", ts), **fields, body=part("body", body(env.get("body"))))
+    return dict(_header("event", ts), **fields, body=part("body", body(env.get("body"), fields["machine_id"])))
 
 
 def events_from_bus(conn, after=0, limit=200, machine_id=None, ts=None):
@@ -248,7 +283,7 @@ def _events_part(machine_id, snap, state):
     for env in envs:
         fields = event_fields(env, machine_id)
         if fields is not None:
-            out.append(dict(fields, body=body(env.get("body"))))
+            out.append(dict(fields, body=body(env.get("body"), machine_id)))
         if len(out) >= MAX_EVENTS:
             break
     return {"events": out}
@@ -273,6 +308,29 @@ def _office_part(machine_id, state):
     if not floors:
         return None
     return {"floors": floors, "company": companies.pop() if len(companies) == 1 else None}
+
+
+def _employees_part(machine_id, snap):
+    snap = snap or {}
+    if "employees" not in snap and "queues" not in snap:
+        return None
+    employees = []
+    for e in snap.get("employees") or []:
+        eid = _employee((e or {}).get("id"))
+        if not eid:
+            continue
+        employees.append({"id": eid, "project": _name(e.get("project")), "floor": _count(e.get("floor")),
+                          "role": _name(e.get("role")), "slot": _count(e.get("slot")), "name": _text(e.get("name")),
+                          "state": e.get("state") if e.get("state") in ("idle", "working") else "idle",
+                          "location": "desk" if e.get("state") == "working" else "common",
+                          "thread_id": key(machine_id, e.get("thread_id")), "task": _task(e.get("task")),
+                          "title": _text(e.get("title"), TITLE_MAX), "since": _ts(e.get("since")),
+                          "queue_len": _count(e.get("queue_len"))})
+    queues = {}
+    for eid, q in (snap.get("queues") or {}).items():
+        if _employee(eid) and isinstance(q, dict):
+            queues[eid] = {"items": _queue_items(q.get("items")), "updated": _ts(q.get("updated"))}
+    return {"employees": employees[:1024], "queues": queues}
 
 
 def _health(snap, state):
@@ -340,5 +398,8 @@ def snapshot(snap, state=None, roles=None, machine_id=None, seq=None, ttl_s=TTL_
     office = _office_part(mid, state)
     if office is not None:
         parts.append(part("office", office))
+    employees = _employees_part(mid, snap)
+    if employees is not None:
+        parts.append(part("employees", employees))
     msg["parts"] = [p for p in parts if p is not None]
     return msg

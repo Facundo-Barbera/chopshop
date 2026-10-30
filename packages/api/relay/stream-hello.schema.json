@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/relay/v1/stream-hello.schema.json",
+  "title": "GET /stream, `event: hello`: primer frame SSE al visor (relay -> visor); no es el hello del agente",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "v",
+    "type",
+    "ts",
+    "head",
+    "resume"
+  ],
+  "properties": {
+    "v": {
+      "$ref": "common.schema.json#/$defs/v"
+    },
+    "type": {
+      "const": "hello"
+    },
+    "ts": {
+      "$ref": "common.schema.json#/$defs/ts"
+    },
+    "head": {
+      "$ref": "common.schema.json#/$defs/stream_id"
+    },
+    "resume": {
+      "enum": [
+        "events",
+        "snapshot"
+      ]
+    }
+  }
+}
