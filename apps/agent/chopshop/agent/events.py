@@ -18,7 +18,7 @@ import time
 import urllib.error
 import urllib.request
 
-from . import db, envelope, webhooks
+from . import USER_AGENT, db, envelope, webhooks
 
 TIMEOUT = 3                       # segundos por POST
 MAX_LIMIT = 1000                  # tope de list_after
@@ -34,7 +34,7 @@ class EventsError(Exception):
 
 def _default_poster(url, data, timeout, headers=None):
     """POST JSON con urllib. Devuelve el código HTTP (también para 4xx/5xx); el resto de fallos se propagan."""
-    h = {"Content-Type": "application/json", "User-Agent": "chopshop-agent/0.6"}
+    h = {"Content-Type": "application/json", "User-Agent": USER_AGENT}
     h.update(headers or {})
     req = urllib.request.Request(url, data=data, method="POST", headers=h)
     try:
