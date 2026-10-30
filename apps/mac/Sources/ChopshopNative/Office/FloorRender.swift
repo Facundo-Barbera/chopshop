@@ -395,7 +395,7 @@ struct FloorRenderer {
         for sp in layout.spots {
             guard let lk = looks[sp.id] ?? nil, let s = ctx.resolveSymbol(id: "\(prefix)d:\(sp.id)") else { continue }
             let focus = sp.id == hovered || sp.id == selected
-            if crowded && !focus {
+            if crowded && !focus && plan.desk(sp.id)?.employee == nil {
                 switch lk.visual {
                 case .running?, .needsYou?, .stuck?, .waitingBot?: break
                 default: continue
@@ -971,6 +971,7 @@ struct FloorRenderer {
         g.opacity = lk == .retired ? 0.38 : 1
         let isHover = hovered == sp.id, isSel = selected == sp.id
         let seated = walkers.contains { $0.spot == sp.id && $0.seated }
+        let still = plan.desk(sp.id)?.employee != nil
 
         if lk != .retired { chair(&g, sp.cx, sp.cy + 13, back: false) }
         let sil = prism(&g, dx, dy, z0, dw, Iso.deskD, dh, top: deskTop, topEnd: deskTopEnd, left: deskL, right: deskR, edge: dark ? 0.28 : 0.95)
@@ -996,7 +997,7 @@ struct FloorRenderer {
         switch lk {
         case .sleeping:
             // lámpara con luz propia que respira despacio; el hueco espera a que lo despierten
-            let breath = 0.55 + 0.45 * (sin(t * 0.9 + idx) + 1) / 2
+            let breath = still ? 1 : 0.55 + 0.45 * (sin(t * 0.9 + idx) + 1) / 2
             let lx = dx + Iso.deskW - 7, ly = dy + 5
             _ = prism(&g, lx - 2, ly - 2, zt, 4, 4, 1.2, top: monBody, left: monBody, right: monBody, edge: 0)
             var stem = Path(); stem.move(to: P(lx, ly, zt + 1.2)); stem.addLine(to: P(lx, ly, zt + 10))
@@ -1007,7 +1008,7 @@ struct FloorRenderer {
             g.fill(Path(ellipseIn: CGRect(x: head.x - r, y: head.y - r, width: r * 2, height: r * 2)), with: .color(lamp.opacity(0.6 + 0.4 * breath)))
             // zZ que sube y se apaga
             let ph = (t / 3.2 + idx * 0.07).truncatingRemainder(dividingBy: 1)
-            var zg = g; zg.opacity = 0.65 * (1 - ph)
+            var zg = g; zg.opacity = still ? 0 : 0.65 * (1 - ph)
             zg.draw(Text("z").font(.system(size: 8 + 4 * ph, weight: .semibold, design: .rounded)).foregroundStyle(ink.opacity(0.7)),
                     at: P(sp.cx + 4 + ph * 6, sp.cy + 10, z0 + 24 + ph * 14))
         case .occupied(let v, let fade):
@@ -1019,7 +1020,7 @@ struct FloorRenderer {
             }
             if v == .running {
                 for i in 0..<3 {
-                    let len = 4.5 + (sin(t * 2.4 + Double(i) * 1.7 + idx) + 1) * 4.2
+                    let len = 4.5 + (still ? 4.2 : (sin(t * 2.4 + Double(i) * 1.7 + idx) + 1) * 4.2)
                     var l = Path(); l.move(to: P(sp.cx - 7.2, sy, zt + 10.2 - Double(i) * 3.2)); l.addLine(to: P(sp.cx - 7.2 + len, sy, zt + 10.2 - Double(i) * 3.2))
                     on.stroke(l, with: .color(c(0.22, (0.35, 0.35, 0.34)).opacity(0.8)), style: StrokeStyle(lineWidth: 0.9, lineCap: .round))
                 }
@@ -1037,6 +1038,9 @@ struct FloorRenderer {
         if let v = lk.visual, seated {
             figure(&ctx, id: sp.id, x: sp.cx, y: sp.cy + 13, v: v, fade: lk.fade, idx: idx,
                    role: plan.role(ofDesk: sp.id).map { FloorPlan.roleColor($0, dark: dark) }, seated: true)
+        } else if still, lk != .retired {
+            figure(&ctx, id: sp.id, x: sp.cx, y: sp.cy + 13, v: lk.visual ?? .pending, fade: lk.fade, idx: idx,
+                   role: plan.role(ofDesk: sp.id).map { FloorPlan.roleColor($0, dark: dark) }, seated: true, still: true)
         }
         if lk != .retired { chair(&g, sp.cx, sp.cy + 13, back: true) }
 
@@ -1169,7 +1173,7 @@ struct FloorRenderer {
     // Muñeco -------------------------------------------------------------------
 
     private func figure(_ ctx: inout GraphicsContext, id: String, x: Double, y: Double, v: NodeVisual, fade: Double, idx: Double,
-                        role: Color? = nil, walk: Double? = nil, seated: Bool = false) {
+                        role: Color? = nil, walk: Double? = nil, seated: Bool = false, still: Bool = false) {
         if v == .skipped { return }
         let s = cam.s
         let foot = P(x, y, floorZ)
@@ -1178,6 +1182,8 @@ struct FloorRenderer {
         if let w = walk { bob = abs(sin(w)) * 1.3 * s }
         else if v == .running { bob = abs(sin(t * 9 + idx)) * 1.6 * s; lift = sin(t * 4.5 + idx) * 0.4 * s }
         if walk == nil && (v == .needsYou || v == .stuck) { bob = (sin(t * 3 + idx) + 1) / 2 * 1.4 * s }
+        let t = still ? 0 : t
+        if still { bob = 0; lift = 0 }
         var f = ctx
         f.opacity = fade * (v == .done ? 0.55 : (v == .pending ? 0.88 : 1))
         let legH = walk != nil ? 5 * s : 0
