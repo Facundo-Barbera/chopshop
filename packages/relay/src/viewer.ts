@@ -22,6 +22,7 @@ interface Buffered {
 
 interface Viewer {
   account: string;
+  tokenId: string;
   writer: WritableStreamDefaultWriter<Uint8Array>;
   pending: number;
 }
@@ -52,8 +53,12 @@ const ERROR_STATUS = {
 
 export type ErrorCode = keyof typeof ERROR_STATUS;
 
+function errorBody(code: ErrorCode, message: string) {
+  return { v: 1, type: "error", id: ulid(), ts: new Date().toISOString(), code, message };
+}
+
 export function errorResponse(code: ErrorCode, message: string, headers: Record<string, string> = {}): Response {
-  const body = { v: 1, type: "error", id: ulid(), ts: new Date().toISOString(), code, message };
+  const body = errorBody(code, message);
   return Response.json(body, { status: ERROR_STATUS[code], headers: { "Cache-Control": "no-store", ...headers } });
 }
 
@@ -121,7 +126,8 @@ export class ViewerHub {
     };
   }
 
-  stream(request: Request, account: string, now: number = Date.now()): Response {
+  stream(request: Request, record: TokenRecord, now: number = Date.now()): Response {
+    const { account, tokenId } = record;
     if (this.viewers.size >= MAX_VIEWERS) {
       return errorResponse("rate_limited", `demasiados visores conectados (máx. ${MAX_VIEWERS})`, { "Retry-After": "3" });
     }
@@ -142,7 +148,7 @@ export class ViewerHub {
       for (const s of this.db.listSnapshots(account, now)) out += sseFrame("snapshot", s.frame, head);
     }
     const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
-    const viewer: Viewer = { account, writer: writable.getWriter(), pending: 0 };
+    const viewer: Viewer = { account, tokenId, writer: writable.getWriter(), pending: 0 };
     this.viewers.add(viewer);
     this.write(viewer, out);
     request.signal?.addEventListener("abort", () => this.drop(viewer));
@@ -173,6 +179,19 @@ export class ViewerHub {
     let n = 0;
     for (const v of [...this.viewers]) {
       if (v.account === account) {
+        this.drop(v);
+        n++;
+      }
+    }
+    return n;
+  }
+
+  revoke(tokenId: string): number {
+    const text = sseFrame("error", JSON.stringify({ ...errorBody("unauthorized", "credencial revocada"), close: true }));
+    let n = 0;
+    for (const v of [...this.viewers]) {
+      if (v.tokenId === tokenId) {
+        this.write(v, text);
         this.drop(v);
         n++;
       }
