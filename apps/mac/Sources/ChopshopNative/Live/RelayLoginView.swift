@@ -13,7 +13,7 @@ public enum RelayLoginOutcome: Equatable, Sendable {
     public var message: String {
         switch self {
         case .ok(let account, let machines):
-            return "Conectado a la cuenta \(account): \(machines) \(machines == 1 ? "máquina visible" : "máquinas visibles"). Token guardado en el Llavero."
+            return "Conectado " + (account.isEmpty ? "al relay" : "a la cuenta \(account)") + ": \(machines) \(machines == 1 ? "máquina visible" : "máquinas visibles"). Token guardado en el Llavero."
         case .unauthorized:
             return "401 · El relay no reconoce el token: revisa que esté completo o pide uno nuevo (puede estar revocado)."
         case .rateLimited(let s):
