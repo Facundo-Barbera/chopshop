@@ -77,7 +77,7 @@ public struct FloorLabConfig: Equatable, Sendable {
         let phase = rng.pick(phases)
         let ago = 60 * (1 + rng.unit() * 45)
         let ended: JSONValue = FloorPlan.terminal.contains(phase) ? stamp(t0 - ago) : .null
-        let attention: JSONValue = phase == "waiting" ? "human" : .null
+        let attention: JSONValue = phase == "waiting" ? .string("human") : .null
         let o: JSONValue = [
             "thread_id": .string(id), "title": .string(title), "role": role.map(JSONValue.string) ?? .null,
             "project": project.map(JSONValue.string) ?? .null, "phase": .string(phase), "attention": attention,
@@ -105,7 +105,7 @@ public struct FloorLabConfig: Equatable, Sendable {
             if grok && k == 0 && Self.bots.indices.contains(j) {
                 let active = rng.unit() < 0.6
                 runs.append(["run_id": .string("lab-bot-\(j)"), "workflow": "review", "status": .string(active ? "in_progress" : "completed"),
-                             "conclusion": active ? .null : "success", "event": "workflow_dispatch",
+                             "conclusion": active ? JSONValue.null : JSONValue.string("success"), "event": "workflow_dispatch",
                              "origin": ["kind": "bot", "id": .string(Self.bots[j]), "label": .string(Self.bots[j])]])
             }
             rack.append(["provider": "github", "repo": .string("<org>/\(project)-\(name)"), "project": .string(project),
@@ -179,7 +179,7 @@ public struct FloorLabConfig: Equatable, Sendable {
                 entries.append((company, project, fs))
             }
         }
-        return CityModel.place(entries, seed: buildingSeed)
+        return CityModel.place(entries, seed: setupSeed)
     }
 }
 
@@ -248,8 +248,8 @@ struct FloorLabCityView: View {
                 guard !m.buildings.isEmpty else { return }
                 let goal = CityFraming.frame(focus.flatMap { m.bounds(campus: $0) } ?? m.bounds, size: size)
                 let cam = ease.frame(goal, t: t)
-                CityRenderer(model: m, lights: lt, cam: cam, dark: dark, t: t, growth: nil, hovered: nil, zoom: nil, size: size)
-                    .draw(&ctx)
+                CityRenderer(model: m, lights: lt, cam: cam, dark: dark, t: t, growth: nil, hovered: nil, zoom: nil, size: size,
+                             focusCampus: focus).draw(&ctx)
             } symbols: {
                 CitySymbols(model: m, lights: lt, t: t)
             }

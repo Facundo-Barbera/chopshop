@@ -60,7 +60,7 @@ struct CitySnapshotFrame: View {
                 ZStack(alignment: .leading) {
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
                         Text("ciudad").font(.headline)
-                        Text("\(model.buildings.count) empresas · \(model.projectCount) proyectos")
+                        Text("\(model.campuses.count) empresas · \(model.projectCount) proyectos")
                             .font(.subheadline).foregroundStyle(.secondary)
                     }
                     .opacity(CityTransition.chromeOut(ch))

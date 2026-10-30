@@ -114,7 +114,7 @@ de ahí y el test de Python comprueba que esta tabla coincide.
 | ⇧⌘M | Mostrar u ocultar el minimapa |
 | ⌘O | Abrir en T3 el hilo elegido |
 | ⌘R | Actualizar |
-| Esc | Cerrar la paleta; si no, el panel; si no, salir del piso (lo hace el mundo) |
+| Esc | Cerrar la paleta; si no, el panel; si no, subir un nivel (piso, edificio, campus, ciudad) |
 
 ## Contrato con el mundo
 

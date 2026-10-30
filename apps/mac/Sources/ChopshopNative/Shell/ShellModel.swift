@@ -41,8 +41,9 @@ public struct ShellWorldContext {
     /// No hay paleta ni panel abiertos: el Esc es del mundo (salir del piso).
     public var ownsEscape: Bool
     public var select: (ShellTarget) -> Void
-    public init(focus: ShellFocus?, ownsEscape: Bool, select: @escaping (ShellTarget) -> Void) {
-        self.focus = focus; self.ownsEscape = ownsEscape; self.select = select
+    public var back: Int
+    public init(focus: ShellFocus?, ownsEscape: Bool, back: Int = 0, select: @escaping (ShellTarget) -> Void) {
+        self.focus = focus; self.ownsEscape = ownsEscape; self.back = back; self.select = select
     }
 }
 
@@ -93,6 +94,7 @@ public struct ShellState: Equatable, Sendable {
     public var selectedThread: String?
     /// Posición en la lista de atención para ⌘J / ⇧⌘J (-1 = todavía ninguna).
     public var attentionCursor = -1
+    public var backToken = 0
 
     public init() {}
 
@@ -129,6 +131,12 @@ public struct ShellState: Equatable, Sendable {
         if paletteOpen { closePalette(); return true }
         if inspector != nil { inspector = nil; return true }
         return false
+    }
+
+    public mutating func back() { backToken += 1 }
+
+    public mutating func escapeOrBack() {
+        if !escape() { back() }
     }
 
     /// ⌘J / ⇧⌘J: siguiente (o anterior) hilo que te necesita, en el orden de `ShellAttention.items`. Va al hilo y abre su detalle.
@@ -455,7 +463,7 @@ public enum ShellKeymap {
         ShellShortcut(.toggleMinimap, "m", shift: true, "Mostrar u ocultar el minimapa"),
         ShellShortcut(.openInT3, "o", "Abrir en T3 el hilo elegido"),
         ShellShortcut(.refresh, "r", "Actualizar"),
-        ShellShortcut(.escape, "esc", "Cerrar la paleta; si no, el panel; si no, salir del piso (lo hace el mundo)"),
+        ShellShortcut(.escape, "esc", "Cerrar la paleta; si no, el panel; si no, subir un nivel (piso, edificio, campus, ciudad)"),
     ]
 
     public static func shortcut(for a: ShellAction) -> ShellShortcut? { all.first { $0.action == a } }
@@ -488,10 +496,14 @@ public struct ShellMinimap: Equatable, Sendable {
         let w = max(1e-6, maxX - minX), h = max(1e-6, maxY - minY)
         let k = min((size.width - 2 * inset) / w, (size.height - 2 * inset) / h)
         let ox = (size.width - w * k) / 2, oy = (size.height - h * k) / 2
-        let blocks = m.buildings.map { b in
-            Block(company: b.company,
-                  rect: CGRect(x: ox + (b.x0 - minX) * k, y: oy + (b.y0 - minY) * k, width: b.w * k, height: b.d * k),
-                  floors: b.floors.map { Floor(project: $0.project, status: $0.status, isLobby: $0.isLobby) })
+        let W = Double(size.width), H = Double(size.height), kk = Double(k), oxx = Double(ox), oyy = Double(oy)
+        let minSide: Double = min(5.0, (W - 2 * inset) / 2, (H - 2 * inset) / 2)
+        let blocks = m.buildings.map { b -> Block in
+            let bw: Double = max(minSide, b.w * kk), bh: Double = max(minSide, b.d * kk)
+            let cx: Double = oxx + (b.x0 + b.w / 2 - minX) * kk, cy: Double = oyy + (b.y0 + b.d / 2 - minY) * kk
+            let x: Double = min(max(0, cx - bw / 2), W - bw), y: Double = min(max(0, cy - bh / 2), H - bh)
+            return Block(company: b.company, rect: CGRect(x: x, y: y, width: bw, height: bh),
+                         floors: b.floors.map { Floor(project: $0.project, status: $0.status, isLobby: $0.isLobby) })
         }
         return ShellMinimap(blocks: blocks)
     }

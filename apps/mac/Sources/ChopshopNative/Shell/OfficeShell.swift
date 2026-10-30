@@ -31,6 +31,7 @@ public struct OfficeShell<World: View, Unpaired: View>: View {
                 ShellHUDView(hud: ShellHUD.from(store.snapshot), open: { shell.state.toggle($0) })
             }
             ToolbarItemGroup(placement: .primaryAction) {
+                Button { shell.state.go(.city) } label: { Label("Ciudad", systemImage: "building.2") }
                 Button { shell.perform(.palette) } label: { Label("Órdenes", systemImage: "command") }
                 Button { shell.perform(.toggleInspector) } label: { Label("Panel", systemImage: "sidebar.trailing") }
             }
@@ -47,7 +48,7 @@ public struct OfficeShell<World: View, Unpaired: View>: View {
         let city = CityModel.build(store.state, perProject: true)
         return ZStack(alignment: .bottomLeading) {
             world(ShellWorldContext(focus: shell.state.focus, ownsEscape: !shell.state.paletteOpen && shell.state.inspector == nil,
-                                    select: { shell.state.select($0) }))
+                                    back: shell.state.backToken, select: { shell.state.select($0) }))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             if shell.state.minimap, !city.buildings.isEmpty {
                 ShellMinimapView(model: city, focused: shell.state.focus?.target.project) { shell.state.go(.project($0)) }
@@ -68,8 +69,13 @@ public struct OfficeShell<World: View, Unpaired: View>: View {
             ShellInspectorView(shell: shell, snapshot: store.snapshot, machineRoom: MachineRoom(store.state.machineRoom))
                 .inspectorColumnWidth(min: 300, ideal: shell.state.inspector == .panel(.machineRoom) ? 640 : 380, max: 920)
         }
-        // Esc: la paleta, luego el panel; si no hay nada abierto el Esc sigue hacia el mundo (salir del piso)
-        .onKeyPress(.escape) { shell.state.escape() ? .handled : .ignored }
+        .background {
+            Button("Volver") { shell.perform(.escape) }
+                .keyboardShortcut(.cancelAction)
+                .frame(width: 0, height: 0)
+                .opacity(0)
+                .accessibilityHidden(true)
+        }
         .animation(.snappy(duration: 0.18), value: shell.state.paletteOpen)
         .animation(.easeOut(duration: 0.2), value: shell.notice)
     }
@@ -106,7 +112,7 @@ public struct ShellCityWorld: View {
                              if let f = store.snapshot.shellTask(tid) { context.select(.thread(id: f.task.id, project: f.batch.project)) }
                              else if let pr = context.focus?.target.project { context.select(.thread(id: tid, project: pr)) }
                          },
-                         focusRequest: context.focus, escapeZoomsOut: context.ownsEscape)
+                         focusRequest: context.focus, backRequest: context.back, escapeZoomsOut: false)
                     .padding(.horizontal, 18).padding(.vertical, 14)
             }
         }

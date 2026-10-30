@@ -25,6 +25,7 @@ public struct FloorOfficeView: View {
     static func label(_ plan: FloorPlan, _ id: String) -> String {
         if let m = FloorLayout.machinePart(id), m.unit == nil { return plan.machineRoom(of: id)?.name ?? "Sala de máquinas" }
         if let u = unit(plan, id) { return u.title }
+        if id.hasPrefix("bot:") { return "bot · \(id.dropFirst(4))" }
         if id.hasPrefix("lobby:") {
             let g = plan.guest(String(id.dropFirst(6)))
             return g?.waitingRole.map { "espera · \($0)" } ?? "sin rol"
@@ -45,6 +46,7 @@ public struct FloorOfficeView: View {
             let name = ProjectOffice.shortName(o.title ?? o.threadID)
             return o.waitingRole.map { "\(name) → \($0)" } ?? name
         }
+        if id.hasPrefix("bot:") { return String(id.dropFirst(4)) }
         return label(plan, id)
     }
 
@@ -70,6 +72,15 @@ public struct FloorOfficeView: View {
                 .background(Capsule().fill(dark ? Color(white: 0.11).opacity(0.92) : Color.white.opacity(0.9)))
                 .overlay(Capsule().strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.7))
                 .foregroundStyle(Color.primary.opacity(0.75))
+                .tag("\(prefix)r:\(r.index)")
+        }
+        ForEach(lay.extras.filter { $0.index != FloorLayout.corridorIndex }.map { ("\(prefix)x\($0.index)", $0) }, id: \.0) { _, r in
+            Text(extraTitle(r))
+                .font(.system(size: 9, weight: .medium, design: .monospaced)).tracking(1.3)
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(Capsule().fill(dark ? Color(white: 0.11).opacity(0.92) : Color.white.opacity(0.9)))
+                .overlay(Capsule().strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.7))
+                .foregroundStyle(Color.primary.opacity(r.index == FloorLayout.grokIndex ? 0.85 : 0.6))
                 .tag("\(prefix)r:\(r.index)")
         }
         ForEach(lay.machines.map { ("\(prefix)mr\($0.index)", $0) }, id: \.0) { _, m in
@@ -101,8 +112,16 @@ public struct FloorOfficeView: View {
 
     static func roomTitle(_ plan: FloorPlan, _ r: FloorLayout.RoomBox) -> String {
         if plan.kind == .lobby { return ["VESTÍBULO", plan.company?.uppercased()].compactMap { $0 }.joined(separator: " · ") }
+        guard plan.rooms.indices.contains(r.index) else { return extraTitle(r) }
         let room = plan.rooms[r.index]
         return room.role.uppercased() + (room.permanent ? " · PERMANENTE" : "")
+    }
+
+    static func extraTitle(_ r: FloorLayout.RoomBox) -> String {
+        if r.index == FloorLayout.grokIndex { return "GROK" }
+        if r.index == FloorLayout.coreIndex { return "NÚCLEO" }
+        if let c = r.commons { return c.title }
+        return r.role.uppercased()
     }
 }
 

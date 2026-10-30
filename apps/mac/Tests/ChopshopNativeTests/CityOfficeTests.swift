@@ -17,11 +17,11 @@ final class CityOfficeTests: XCTestCase {
 
     func testFloorsPerProjectAndLobby() throws {
         let m = CityModel.build(try state())
-        XCTAssertEqual(m.buildings.map(\.company), ["Personal", "Awesome GB"], "empresa desde office.company; la tabla de respaldo para el resto")
-        let agb = try XCTUnwrap(m.buildings.first { $0.company == "Awesome GB" })
-        XCTAssertEqual(agb.floors.map(\.id), ["lobby:Awesome GB", "awesome-gb#0", "awesome-gb#1"])
+        XCTAssertEqual(m.buildings.map(\.campus), ["Personal", "Awesome GB"], "empresa desde office.company; la tabla de respaldo para el resto")
+        let agb = try XCTUnwrap(m.buildings.first { $0.company == "awesome-gb" })
+        XCTAssertEqual(agb.floors.map(\.id), ["lobby:awesome-gb", "awesome-gb#0", "awesome-gb#1"])
         XCTAssertEqual(agb.floors.map(\.level), [0, 1, 2])
-        XCTAssertEqual(agb.floors.map(\.label), ["Vestíbulo", "awesome-gb · Producto", "awesome-gb · Docs"])
+        XCTAssertEqual(agb.floors.map(\.label), ["Vestíbulo", "Producto", "Docs"])
         XCTAssertEqual(agb.floors[0].activeThreads, ["d"], "vestíbulo: vivo y sin escritorio")
         XCTAssertEqual(agb.floors[1].activeThreads, ["a", "b"])
         XCTAssertEqual(agb.floors[2].activeThreads, ["c"])
@@ -32,7 +32,7 @@ final class CityOfficeTests: XCTestCase {
         XCTAssertEqual(m.floor("awesome-gb")?.id, "awesome-gb#0", "el zoom entra por el piso más bajo del proyecto")
         XCTAssertEqual(m.projectCount, 2)
 
-        let personal = try XCTUnwrap(m.buildings.first { $0.company == "Personal" })
+        let personal = try XCTUnwrap(m.buildings.first { $0.campus == "Personal" })
         XCTAssertEqual(personal.floors.map(\.id), ["chopshop"], "sin office: un piso, sin vestíbulo")
     }
 
@@ -40,7 +40,7 @@ final class CityOfficeTests: XCTestCase {
         let m = CityModel.build(try state())
         // "e" falló sin escritorio: no entra en el vestíbulo; su rojo queda en el piso más bajo del proyecto
         XCTAssertEqual(m.floor(id: "awesome-gb#0")?.stuck, 1)
-        XCTAssertEqual(m.floor(id: "lobby:Awesome GB")?.stuck, 0)
+        XCTAssertEqual(m.floor(id: "lobby:awesome-gb")?.stuck, 0)
     }
 
     func testLightsAreKeyedByFloor() throws {
@@ -49,6 +49,6 @@ final class CityOfficeTests: XCTestCase {
         l.observe(m, at: 0)
         XCTAssertEqual(l.litCount("awesome-gb#0"), 2)
         XCTAssertEqual(l.litCount("awesome-gb#1"), 1)
-        XCTAssertEqual(l.litCount("lobby:Awesome GB"), 1)
+        XCTAssertEqual(l.litCount("lobby:awesome-gb"), 1)
     }
 }

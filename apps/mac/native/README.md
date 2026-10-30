@@ -55,6 +55,10 @@ Oficina por departamentos (`Office/`): `swift run ChopshopSnap /tmp/of floor` �
 y `swift run ChopshopSnap /tmp/of city-office` → `city-office-*.png` (ciudad v3 de `CityOfficeFixture`: varios pisos por proyecto,
 vestíbulo en planta baja, zoom al piso Docs y ese piso montado).
 
+FloorLab (generador de pisos, `Office/FloorLabKit.swift`): `cd apps/mac && swift run FloorLab`. Barra lateral con la huella, pisos,
+roles, escritorios por rol, salas de máquinas, oficina de Grok, empresas y proyectos, y las dos semillas (edificio y setup); modos
+Piso / Edificio (pisos apilados) / Campus (la ciudad sintética; clic en un campus lo enfoca). Mismo generador y renderers que la app.
+
 ## Estructura
 
 - `Sources/ChopshopNative` es un **symlink** a `apps/mac/Sources/ChopshopNative`: el mismo código que compila la app.
