@@ -72,7 +72,7 @@ servidor (el enlace de invitación lo lleva en el fragmento `#`, que el navegado
 | importaciones ofrecidas por los agentes | D1 | se revisan y aplican desde la app (transacción con la creación de proyectos) |
 | auditoría (comandos, auth, máquinas) | D1 | consultable por la app y la web; retención con cron |
 | tareas de las colas (fase S2) | D1 | la nube es la fuente de verdad; compare-and-set por `rev` |
-| último snapshot por (máquina, workspace) con TTL | SQLite del Hub | se escribe cada pocos segundos; efímero; solo lo sirve el Hub; sobrevive a la hibernación |
+| último snapshot por (máquina, workspace) con TTL | SQLite del Hub | llega cada pocos segundos y se sirve desde memoria; al SQLite se persiste como mucho uno por minuto y par (límite gratis de filas escritas, §12); efímero; solo lo sirve el Hub; sobrevive a la hibernación |
 | estado de cada WebSocket (máquina, `hello`, cuotas) | adjunto del WebSocket (`serializeAttachment`) | igual que hoy en `agentws.ts` |
 | buffer de reanudación del stream (512 frames / 5 min) | memoria del Hub | igual que hoy en `viewer.ts`; perderlo solo fuerza `resume: "snapshot"` |
 | comandos en vuelo (esperando `cmd.result`) | memoria del Hub | vida ≤ 30 s; si el Hub reinicia, el Worker responde `timeout` y la auditoría lo refleja |
@@ -372,14 +372,73 @@ Hoy (fase S1) las colas siguen siendo locales en cada agente (K2, `chopshop/queu
 
 ## 3. Contraseñas, tokens y límites
 
-- **Hash**: WebCrypto `PBKDF2` con `SHA-256`, **100 000 iteraciones** (el máximo que acepta Cloudflare Workers), sal aleatoria de
-  16 bytes, 32 bytes de salida. Formato versionado en `users.password_hash`:
-  `pbkdf2-sha256$100000$<sal base64url>$<hash base64url>`. Al verificar, si el prefijo o las iteraciones no son los vigentes y la
-  contraseña es correcta, se rehace el hash en la misma petición (así se migra a otro algoritmo sin forzar cambios).
+Todo el backend cabe en el **plan gratis** de Cloudflare Workers (10 ms de CPU por petición HTTP del Worker; D1 y Durable
+Objects con SQLite del plan gratis). No se depende de Workers Paid en ningún punto; ver la medición de abajo y §12.
+
+- **Hash** (`src/crypto.ts`): primero `HMAC-SHA256(clave = PASSWORD_PEPPER, mensaje = contraseña NFC)` (32 bytes) y sobre eso
+  WebCrypto `PBKDF2` con `SHA-256`, **10 000 iteraciones** (`PBKDF2_ITERATIONS`), sal aleatoria de 16 bytes, 32 bytes de salida.
+  Formato versionado en `users.password_hash`: `esquema$iteraciones$sal$hash`, con
+  `esquema = pbkdf2-sha256-p<versión del pepper>` (p. ej. `pbkdf2-sha256-p1$10000$<sal base64url>$<hash base64url>`). El esquema
+  sin sufijo (`pbkdf2-sha256$…`) es el formato viejo sin pepper: se sigue verificando. Se aceptan de 1 a 100 000 iteraciones
+  (`PBKDF2_MAX_ITERATIONS`, el tope de `crypto.subtle` en producción de Cloudflare); fuera de eso, el hash no es válido.
+- **`needsRehash(hash, pepper)`** es verdadero si el esquema, la versión del pepper, las iteraciones o la longitud de la sal no
+  son los vigentes. Al verificar con éxito una contraseña cuyo hash lo necesita (login), se rehace en la misma petición. Así se
+  suben iteraciones o se rota el pepper sin forzar cambios ni romper hashes viejos.
+- **Pepper**: secret del Worker `PASSWORD_PEPPER` (≥ 32 caracteres, p. ej. `openssl rand -base64 32`), **nunca** en D1, en el repo
+  ni en `[vars]`; versión en la var `PASSWORD_PEPPER_VERSION` (por defecto `1`). Rotación: se sube la versión, el valor anterior
+  pasa a `PASSWORD_PEPPER_V<n>` y cada login correcto rehace el hash; cuando no quedan hashes `-p<n>`, se borra el secret viejo.
+  Sin `PASSWORD_PEPPER` válido las rutas de contraseña responden `503 internal` («contraseñas deshabilitadas»). El pepper hace
+  que un volcado de D1 por sí solo no permita atacar las contraseñas fuera de línea: hace falta además el secret del Worker.
+- **Solo ejecutan PBKDF2** las rutas que reciben una contraseña: `POST /v1/auth/login`, `POST /v1/invitations/accept`,
+  `POST /v1/auth/password`, `POST /v1/auth/recover` y `POST /v1/auth/recovery-code`. Sesiones, credenciales de máquina,
+  invitaciones, CSRF, operador y código de recuperación usan solo `sha256` (microsegundos). Ninguna ruta hace más de **dos**
+  derivaciones (verificar + rehacer en login con rehash o en cambio de contraseña).
 - Comparación en tiempo constante con `crypto.subtle.timingSafeEqual` sobre bytes de igual longitud (longitudes distintas → falso
-  sin comparar). Con un correo inexistente se verifica igualmente contra un hash ficticio fijo para igualar el tiempo.
-- Coste: ~100 000 iteraciones gastan decenas de ms de CPU; el plan Free de Workers (10 ms) no alcanza. **Requisito: Workers Paid**
-  en la cuenta (verificarlo antes del despliegue; si no, el login responde 500 por CPU excedida).
+  sin comparar). Con un correo inexistente, un hash ilegible o una versión de pepper desconocida se hace igualmente una
+  derivación completa con los parámetros vigentes (`DUMMY_PASSWORD_HASH`) para igualar el tiempo.
+
+**Medición de CPU** (`apps/backend/scripts/measure-pbkdf2.mjs`, reproducible, sin red ni credenciales: arranca un `workerd`
+local con el binario que trae `wrangler`, un Worker que hace una derivación por petición, y lo mata al terminar). Mide el tiempo
+de pared desde el cliente (`performance.now`) y el CPU de **todo el proceso `workerd`** (suma de `/proc/<pid>/task/*/schedstat`,
+resolución de ns; equivale a `process.cpuUsage` del proceso `workerd`); «CPU neta» = mediana menos la de una petición con 1
+iteración. Dentro del Worker `performance.now()` no avanza durante el cómputo (mitigación de Spectre de Workers), por eso se mide
+desde fuera. Uso: `node apps/backend/scripts/measure-pbkdf2.mjs` (`ITERATIONS=…`, `REPS=…`).
+
+Resultado (2026-10-30; `workerd 1.20261023.1`, AMD EPYC virtualizado, host con carga ~13 en 12 núcleos, 60 repeticiones más 3
+de calentamiento; el p95 está inflado por esa carga, la mediana es estable entre corridas):
+
+| iteraciones | pared mediana (ms) | pared p95 (ms) | CPU `workerd` mediana (ms) | CPU `workerd` p95 (ms) | CPU neta mediana (ms) | con pepper: CPU neta mediana (ms) |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 1,26 | 6,43 | 0,42 | 1,47 | 0 | 0,39 |
+| 10 000 | 5,12 | 21,97 | 3,34 | 5,11 | 2,91 | 3,06 |
+| 20 000 | 9,39 | 36,81 | 6,28 | 24,70 | 5,86 | 5,54 |
+| 30 000 | 11,03 | 65,27 | 8,45 | 47,92 | 8,03 | 7,73 |
+| 50 000 | 15,68 | 38,03 | 13,12 | 26,44 | 12,70 | 12,38 |
+| 100 000 | 28,80 | 55,84 | 24,93 | 52,24 | 24,51 | 24,20 |
+
+Coste lineal: **~0,25 ms de CPU por cada 1000 iteraciones**; el HMAC del pepper no se nota. Coincide con mediciones publicadas en
+producción (100 000 iteraciones ≈ 23 ms de CPU según `wrangler tail`). `workerd` local no aplica el tope de 100 000 (acepta
+100 001); producción sí (`NotSupportedError`), por eso el tope está en el código.
+
+**¿Cuenta WebCrypto contra los 10 ms?** Sí. La documentación oficial de límites
+(<https://developers.cloudflare.com/workers/platform/limits/>, «CPU time») define el CPU como ejecución activa y solo excluye la
+espera de red/I/O («Waiting on network requests (such as fetch() calls, KV reads, or database queries) does not count toward CPU
+time»); `crypto.subtle.deriveBits` se ejecuta en el hilo del isolate (código nativo, pero no es I/O), así que cuenta. La misma
+página: Free = 10 ms por petición HTTP, con cierta holgura («Each isolate has some built-in flexibility to allow for cases where
+your Worker infrequently runs over the configured limit»), que no se usa como margen de diseño. La página de Web Crypto
+(<https://developers.cloudflare.com/workers/runtime-apis/web-crypto/>) no documenta excepción alguna.
+
+**Conclusión y calibración**: 100 000 iteraciones (≈ 25 ms) no caben nunca en 10 ms. Con **10 000** una derivación cuesta
+≈ 3 ms; el peor caso (dos derivaciones + ≈ 1 ms de JSON, `sha256` y despacho; las consultas a D1 son I/O y no cuentan) queda en
+≈ 7 ms, con margen. 20 000 ya dejaría el cambio de contraseña en ≈ 13 ms. Recalibrar con el script si cambia el runtime y subir
+`PBKDF2_ITERATIONS` cuando haya margen: `needsRehash` migra en el siguiente login. 10 000 está por debajo de lo que pide OWASP
+para PBKDF2-SHA256 sin pepper (600 000); se compensa con: pepper fuera de D1 (un volcado de la base no basta), contraseña de
+≥ 12 caracteres, solo invitados (pocas cuentas) y los límites de intentos de abajo, que hacen inviable el ataque en línea.
+Alternativa documentada, no implementada: los Durable Objects tienen 30 s de CPU por petición también en el plan gratis
+(<https://developers.cloudflare.com/durable-objects/platform/limits/>), así que un DO dedicado a derivar permitiría 100 000
+iteraciones sin pagar; no se hace hoy porque añade una llamada por login y otra clase de DO, y el pepper ya cubre el riesgo
+principal.
+
 - **Política**: 12 a 256 caracteres tras normalizar a NFC; distinta del correo y sin contener la parte local del correo (≥ 4
   caracteres). Nada de reglas de composición. Error: 400 `bad_request` con `field: "password"`.
 - **Correo normalizado**: `trim`, NFC, minúsculas. Validación mínima: `^[^@\s]+@[^@\s]+\.[^@\s]+$`, máx. 254.
@@ -387,20 +446,26 @@ Hoy (fase S1) las colas siguen siendo locales en cada agente (K2, `chopshop/queu
   devuelven una única vez. Se validan primero con regex (`^ss1_[A-Za-z0-9_-]{43}$`, etc.) antes de tocar D1.
 - **Código de recuperación**: 20 símbolos del alfabeto Crockford (100 bits) mostrados en 4 grupos de 5. Normalización igual que el
   código de pairing actual (sin guiones ni espacios, mayúsculas, `O→0`, `I/L→1`). Se guarda `sha256` del normalizado.
-- **Límites y bloqueo progresivo** (`auth_attempts`, claves `sha256` para no guardar correos ni IPs en claro):
+- **Límites y bloqueo progresivo** (`src/ratelimit.ts` sobre la tabla D1 `auth_attempts`; claves `sha256` para no guardar correos
+  ni IPs en claro). Compensan el menor coste de PBKDF2: se consultan **antes** de derivar (una petición bloqueada no gasta CPU de
+  PBKDF2) y cuentan los fallos tanto por correo como por IP, exista o no el correo. El contador se incrementa con un único
+  `INSERT … ON CONFLICT DO UPDATE … RETURNING failures` (atómico en D1). La ventana se reinicia cuando han pasado `ventana`
+  segundos desde el último fallo o desde el fin del último bloqueo (así el bloqueo progresivo sigue creciendo tras desbloquearse):
 
 | clave | ruta | umbral | bloqueo |
 |---|---|---|---|
-| `ei:` + sha256(correo + "\|" + IP) | login | 5 fallos en 15 min | 2^(fallos−5) min, máx. 60 min; un login correcto la borra |
+| `ei:` + sha256(correo + "\|" + IP) | login, password | 5 fallos en 15 min | 2^(fallos−5) min (1, 2, 4…), máx. 60 min; un login correcto la borra |
 | `e:` + sha256(correo) | login, recover | 20 fallos en 1 h | 15 min (todas las IPs) |
 | `ip:` + sha256(IP) | login, recover, invitaciones | 100 fallos en 1 h | 60 min |
 | `rc:` + sha256(IP) | `POST /v1/auth/recover` | 5 fallos en 1 h | 60 min |
 | `inv:` + sha256(IP) | `inspect`/`accept` de invitaciones | 10 fallos en 1 min | 5 min |
 | `op:` + sha256(IP) | `/v1/operator/*` | 5 fallos en 10 min | 60 min |
 
-  Bloqueado → 429 `rate_limited` con `retry_after_s` y cabecera `Retry-After`. Credenciales malas, usuario desactivado o correo
-  inexistente dan **la misma** respuesta: 401 `unauthorized`, mensaje «correo o contraseña incorrectos». La IP es
-  `CF-Connecting-IP`.
+  Bloqueado → 429 `rate_limited` con `retry_after_s` (el mayor de las claves consultadas), cabecera `Retry-After` y mensaje fijo
+  «demasiados intentos; vuelve a intentarlo más tarde» (`rateLimitedBody`). Credenciales malas, usuario desactivado o correo
+  inexistente dan **la misma** respuesta: 401 `unauthorized`, mensaje «correo o contraseña incorrectos» (`authFailedBody`), con
+  la misma derivación de PBKDF2. La IP es `CF-Connecting-IP`. El cron purga filas sin actividad ni bloqueo vigente en 24 h
+  (`purgeAttempts`).
 - **Sesiones**: token opaco con **expiración deslizante**. `mac`/`cli`: inactividad 30 días, absoluta 90 días. `web`: inactividad
   12 h, absoluta 7 días. En cada petición válida: si `now − last_seen_at ≥ 5 min`, `last_seen_at = now` y
   `expires_at = min(now + inactividad, absolute_expires_at)`. Caducada o revocada → 401. No hay refresh token: la app vuelve a
@@ -456,8 +521,9 @@ Errores: `409 conflict` si ya existe un usuario con ese correo (para darle más 
 
 `POST /v1/auth/login {email, password, device_name, client}`:
 
-1. Límites de §3 (antes de calcular PBKDF2). 2. Busca por `email_normalized`; verifica hash (o el ficticio). 3. Usuario
-`disabled` → mismo 401. 4. Crea `sessions` con `token_hash`, `client`, `device_name` (máx. 64), `user_agent` (máx. 200),
+1. Límites de §3 (`retryAfter` con `loginKeys(correo, IP)`, antes de calcular PBKDF2; > 0 → 429). 2. Busca por
+`email_normalized`; verifica hash (o el ficticio) con el pepper; fallo → `recordFailure` y 401. 3. Usuario `disabled` → mismo 401
+(también `recordFailure`). Éxito → `clearLimit` de la clave `ei:` y, si `needsRehash`, guarda el hash nuevo. 4. Crea `sessions` con `token_hash`, `client`, `device_name` (máx. 64), `user_agent` (máx. 200),
 `expires_at`, `absolute_expires_at`; si `client = web`, además `csrf_hash`. 5. Audita `auth.login` (o `auth.login_failed` sin
 el correo en `detail`).
 
@@ -725,7 +791,8 @@ máquina entra en `workspace_machines`). Nombre ya existente → `skipped` `name
    command`, `command = name`, `result` provisional `error`) y llama `hub.command(OwnerCtx, cmd)`.
 2. **Hub**: comprueba `ctx.role === "owner"` y `ctx.user_id === ownerId` (el Hub lee y cachea el id del dueño de D1 al
    arrancar), que la máquina está conectada y no pausada en su `machine_cache`; si algo falla, no reenvía (`403`/`409`). Si pasa,
-   manda `cmd` y espera `cmd.result` hasta 30 s (`504 timeout`).
+   manda `cmd` y espera `cmd.result` hasta 30 s (`504 timeout`). Esa espera es I/O (tiempo de pared), no CPU: cabe en el plan
+   gratis.
 3. El Worker actualiza la fila de auditoría con `result` (`ok`/`error`/`timeout`/`denied`) y `status`.
 
 Catálogo v2 (`name` → ruta local del agente que ejecuta; `args` = cuerpo/query de esa ruta, validado por el agente):
@@ -945,6 +1012,7 @@ crons = ["17 4 * * *"]
 [vars]
 API_ORIGIN = "https://api.chopshop.novarix.online"
 WEB_ORIGIN = "https://chopshop.novarix.online"
+PASSWORD_PEPPER_VERSION = "1"
 ```
 
 El Worker despacha por `Host`: `chopshop.novarix.online` → `env.ASSETS.fetch(request)`; `api.chopshop.novarix.online` → API;
@@ -954,7 +1022,10 @@ Workflow `.github/workflows/backend-deploy.yml`: **solo `workflow_dispatch`** (n
 `confirm` que debe valer `deploy`; pasos: `pnpm install --frozen-lockfile --filter @chopshop/backend... --filter
 @chopshop/web-admin...`, `check`, `test`, `build` de la web, `wrangler d1 migrations apply chopshop --remote`, `wrangler deploy`
 con el secret `RELAY_OPERATOR_TOKEN` (mismo valor que hoy). Secrets del repo: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`,
-`RELAY_OPERATOR_TOKEN`.
+`RELAY_OPERATOR_TOKEN`. El secret del Worker `PASSWORD_PEPPER` (§3) **no** pasa por el repo ni por Actions: el dueño lo fija una
+vez a mano con `wrangler secret put PASSWORD_PEPPER` antes del primer despliegue (si se pierde, todas las contraseñas dejan de
+verificar y se entra por la recuperación del operador, §4.8). `PASSWORD_PEPPER_VERSION` va en `[vars]` (`"1"`). Plan de la cuenta:
+**Workers Free**; el `wrangler.toml` no lleva `[limits] cpu_ms` (solo existe en Paid).
 
 Permisos del token `CLOUDFLARE_API_TOKEN` (token con permisos acotados, no la Global API Key):
 
@@ -1208,7 +1279,8 @@ dependencia entre ellas van **en paralelo**.
 | id | dom. | alcance | archivos | dep. | aceptación | cuándo |
 |---|---|---|---|---|---|---|
 | B1 | STR/IDN | migraciones `0001`–`0003` de §2 y capa de acceso `db.ts` (helpers `now()`, `uuid()`, `batch`) | `apps/backend/migrations/*`, `src/db.ts` | X0 | las migraciones aplican en el doble de D1; tests de restricciones: dos `owner` falla, email duplicado falla, `rev` CAS | HOY |
-| B2 | IDN | `crypto.ts`: PBKDF2 (formato §3, rehash), tokens con prefijo, `sha256Hex`, `timingSafeEqual`, código de recuperación y normalización | `src/crypto.ts` | X0 | tests: verifica/rechaza, formato, 100 000 iteraciones, longitudes, normalización `O→0`/`I→1` | HOY |
+| B2 | IDN | `crypto.ts`: PBKDF2 (formato §3, rehash), tokens con prefijo, `sha256Hex`, `timingSafeEqual`, código de recuperación y normalización | `src/crypto.ts` | X0 | tests: verifica/rechaza, formato, 100 000 iteraciones, longitudes, normalización `O→0`/`I→1` (formato y iteraciones los sustituye B2b) | HOY |
+| B2b | IDN | plan gratis: medición de CPU de PBKDF2 en `workerd`, 10 000 iteraciones, pepper HMAC-SHA256 versionado (`pepperFromEnv`, esquema `pbkdf2-sha256-p<v>`), `needsRehash` por pepper e iteraciones, límites de intentos (`limitKey`, `loginKeys`, `retryAfter`, `recordFailure`, `clearLimit`, `purgeAttempts`, cuerpos uniformes 401/429) | `src/crypto.ts`, `src/ratelimit.ts`, `scripts/measure-pbkdf2.mjs` | B2 | tests: hashes viejos sin pepper (100 000 y 1000) verifican y piden rehash, pepper incorrecto no verifica, rotación de versión, bloqueo progresivo `ei:`, `e:`/`ip:` para todas las IPs/correos, ventana, purga, mensajes uniformes | HOY |
 | B3 | OPS | `http.ts` + `router.ts`: errores §5.1, tabla de rutas con 404/405, CORS, cabeceras §6, lectura de cookie, CSRF, límite de cuerpo, despacho por `Host` (web → `ASSETS`) | `src/http.ts`, `src/router.ts` | X0 | tests: CORS solo para el origen web, CSRF exige `Origin`+token, cabeceras presentes, 413 | HOY |
 | S1 | OPS | schemas JSON y fixtures de §5 (HTTP) y §5.8 (WS v2) | `packages/api/backend/*` | X0 | `contract_audit` ampliado valida fixtures contra schemas | HOY |
 | A1 | AGT | `relaycfg.py`: `machine.json` y `relay link/status/unlink`; `[relay] url` como base de API con compatibilidad | `chopshop/relaycfg.py`, tests | X0 | tests: 0600/0700, enmascarado, rechazo de formato, derivación `https→wss` y compatibilidad `wss://…/v1/connect` | HOY |
@@ -1220,14 +1292,14 @@ dependencia entre ellas van **en paralelo**.
 
 | id | dom. | alcance | archivos | dep. | aceptación | cuándo |
 |---|---|---|---|---|---|---|
-| B4 | IDN | `auth.ts` (`resolvePrincipal`, `requireOwner`), login, logout, me, password, sesiones (lista/revocar, deslizante), límites `auth_attempts`, auditoría de auth (`audit.ts`) | `src/auth.ts`, `src/audit.ts`, `src/routes/auth.ts`, `src/routes/sessions.ts` | B1, B2, B3 | tests: login ok/401 genérico, bloqueo progresivo y `Retry-After`, cookie web con atributos, `Bearer` mac, deslizamiento y absoluta, revocar cierra (stub del Hub llamado), watcher solo ve sus sesiones | HOY |
-| B5 | IDN | `/v1/operator/bootstrap` y `/recover`, `/v1/auth/recover`, `/v1/auth/recovery-code` | `src/routes/operator.ts`, `src/routes/recovery.ts` | B1, B2, B3 | tests: bootstrap 201 y luego 409, recover sin dueño 409, código de recuperación de un solo uso, todas las sesiones revocadas, límites `op:`/`rc:` | HOY |
+| B4 | IDN | `auth.ts` (`resolvePrincipal`, `requireOwner`), login, logout, me, password, sesiones (lista/revocar, deslizante), límites `auth_attempts` con `src/ratelimit.ts` (antes de PBKDF2), pepper con `pepperFromEnv(env)` (503 si falta), rehash en login, auditoría de auth (`audit.ts`) | `src/auth.ts`, `src/audit.ts`, `src/routes/auth.ts`, `src/routes/sessions.ts` | B1, B2b, B3 | tests: login ok/401 genérico (mismo cuerpo con correo inexistente, contraseña mala y usuario desactivado), bloqueado no llama a PBKDF2, hash viejo se rehace al entrar, bloqueo progresivo y `Retry-After`, cookie web con atributos, `Bearer` mac, deslizamiento y absoluta, revocar cierra (stub del Hub llamado), watcher solo ve sus sesiones | HOY |
+| B5 | IDN | `/v1/operator/bootstrap` y `/recover`, `/v1/auth/recover`, `/v1/auth/recovery-code` (límites y pepper de B2b) | `src/routes/operator.ts`, `src/routes/recovery.ts` | B1, B2b, B3 | tests: bootstrap 201 y luego 409, recover sin dueño 409, código de recuperación de un solo uso, todas las sesiones revocadas, límites `op:`/`rc:` | HOY |
 
 **Ola 3 (paralelo, tras B4)**
 
 | id | dom. | alcance | archivos | dep. | aceptación | cuándo |
 |---|---|---|---|---|---|---|
-| B6 | IDN | invitaciones: crear (link con fragmento), listar, reemitir, revocar, `inspect`, `accept` (3 tipos; workspace `Personal` y código en `owner_*`); usuarios: listar, `PATCH` status | `src/routes/invitations.ts`, `src/routes/users.ts` | B4, B5 | tests: link `https://chopshop.novarix.online/invite#t=ci1_…`, reissue invalida el anterior, 410 usada/caducada, accept watcher crea membresías, desactivar revoca sesiones y llama `viewerChanged` | HOY |
+| B6 | IDN | invitaciones: crear (link con fragmento), listar, reemitir, revocar, `inspect`, `accept` (3 tipos; workspace `Personal` y código en `owner_*`; hash con pepper; límites `inv:`/`ip:` de B2b); usuarios: listar, `PATCH` status | `src/routes/invitations.ts`, `src/routes/users.ts` | B4, B5 | tests: link `https://chopshop.novarix.online/invite#t=ci1_…`, reissue invalida el anterior, 410 usada/caducada, accept watcher crea membresías, desactivar revoca sesiones y llama `viewerChanged` | HOY |
 | B7 | WSP/STR | workspaces (CRUD, campus, watchers, máquinas del workspace), proyectos, layouts, roles; `access.ts` y `structure.ts` (`bumpStructure`, `syncDocFor`) | `src/access.ts`, `src/structure.ts`, `src/routes/workspaces.ts`, `src/routes/projects.ts` | B4 | tests: CAS 409 con `current`, watcher 404 fuera de alcance y 403 en escrituras, rol sin `prompt` para watcher, `structure_rev` sube y `structureChanged` recibe las máquinas correctas, `machine_id` fuera del workspace → 400 | HOY |
 | B8 | MCH | máquinas: `link`, token VPS, listar, renombrar, pausar/reanudar, revocar (`machineChanged`), `verifyMachine` | `src/machines.ts`, `src/routes/machines.ts` | B4 | tests: credencial solo en la respuesta de creación, `link` revoca la anterior del mismo `local_machine_id`, revocada → `verifyMachine` null, pausada → `paused: true`, auditoría `machine.*` | HOY |
 
@@ -1235,7 +1307,7 @@ dependencia entre ellas van **en paralelo**.
 
 | id | dom. | alcance | archivos | dep. | aceptación | cuándo |
 |---|---|---|---|---|---|---|
-| H1 | HUB | Hub único con RPC (§11.2): `connectAgent` v2 (adaptar `agentws.ts`), snapshots por `(máquina, workspace)`, `machine_cache`, `state`/`stream` filtrados por `ViewCtx` (adaptar `viewer.ts`), `machineChanged`, `viewerChanged`, `sessionRevoked`, `online`; rutas `/v1/connect`, `/v1/state` (CTY), `/v1/stream` | `src/hub.ts`, `src/agentws.ts`, `src/viewer.ts`, `src/state.ts`, `src/routes/live.ts` | B7, B8 | tests de §5.7 (1, 4, 5), pausa → 4403, revocar → 4401, `hello` con otro `machine_id` → cierre, primer `hello` fija `local_machine_id` (VPS), conflicto 4409 | HOY |
+| H1 | HUB | Hub único con RPC (§11.2): `connectAgent` v2 (adaptar `agentws.ts`), snapshots por `(máquina, workspace)` (en memoria al llegar; al SQLite del Hub como mucho uno por minuto y par, por el límite gratis de filas escritas, §12), `machine_cache`, `state`/`stream` filtrados por `ViewCtx` (adaptar `viewer.ts`), `machineChanged`, `viewerChanged`, `sessionRevoked`, `online`; rutas `/v1/connect`, `/v1/state` (CTY), `/v1/stream` | `src/hub.ts`, `src/agentws.ts`, `src/viewer.ts`, `src/state.ts`, `src/routes/live.ts` | B7, B8 | tests de §5.7 (1, 4, 5), pausa → 4403, revocar → 4401, `hello` con otro `machine_id` → cierre, primer `hello` fija `local_machine_id` (VPS), conflicto 4409 | HOY |
 | H2 | HUB/STR | `sync` al conectar y en `structureChanged`, `sync.ack` → `sync_errors` en el state, evento SSE `structure` | `src/hub.ts`, `src/agentws.ts`, `src/structure.ts` | H1 | tests: cambio de proyecto → `sync` solo a la máquina afectada (antes y después), `rev` monótono, `sync.ack` con errores visible en `/v1/state` | HOY |
 | H3 | STR | `import.offer` → `import_offers` (dedupe por hash), `/v1/imports*` con `apply` transaccional (empresa → workspace) | `src/routes/imports.ts`, `src/agentws.ts` | H1 | tests: oferta duplicada → `duplicate`, apply crea workspace por `company`, roles con prompt, layout, `skipped name_taken`, `structure_rev` sube | HOY |
 | A3 | AGT | endpoint local `/local/relay/*` con nonce (§9.2) y reinicio del hilo relay | `agent/server.py`, `agent/service.py`, tests | A1 | tests: 404 fuera de loopback, 403 con `Origin`, 401 nonce malo, rotación tras uso, 409 `local_machine_id` distinto, nunca devuelve la credencial | HOY |
@@ -1254,7 +1326,7 @@ dependencia entre ellas van **en paralelo**.
 | M6 | MAC | Ciudad/Workspaces: ciudad por workspaces (campus = workspace), CRUD de workspaces/campus/proyectos/layout, importar configuración local | `apps/mac/...` (City, Shell) | M2, M3 | `swift test` (`CityTests` con campus por workspace); capturas | HOY |
 | M7 | MAC | Empleados/colas: CRUD de roles; colas de la parte `employees` en solo lectura | `apps/mac/...` | M2, M3 | `swift test`; captura | HOY |
 | M8 | MAC | Ajustes: cuenta, contraseña, código de recuperación, sesiones (propias/todas), auditoría reciente, cerrar sesión | `apps/mac/...` | M2, M3 | `swift test`; captura | HOY |
-| X1 | OPS | `wrangler.toml` final (§8.5: dominios, D1, assets, cron), `backend-deploy.yml` solo manual con `confirm`, sin ejecutarlo | `apps/backend/wrangler.toml`, `.github/workflows/backend-deploy.yml` | X0 | `pnpm --filter @chopshop/backend run check`; `wrangler deploy --dry-run --outdir dist` local sin credenciales | HOY |
+| X1 | OPS | `wrangler.toml` final (§8.5: dominios, D1, assets, cron, `PASSWORD_PEPPER_VERSION`, sin `[limits]`), `backend-deploy.yml` solo manual con `confirm`, sin ejecutarlo | `apps/backend/wrangler.toml`, `.github/workflows/backend-deploy.yml` | X0 | `pnpm --filter @chopshop/backend run check`; `wrangler deploy --dry-run --outdir dist` local sin credenciales | HOY |
 | X2 | OPS | docs: `relay-protocol.md` v2 + `relay-protocol-v1.md`, `backend-api.md`, `relay.md` reescrito (dominio, permisos del token, bootstrap, recuperación, verificación) | `docs/*` | H2, B6, B8 | consistente con este plan y con `packages/api/backend` (`contract_audit` en verde) | HOY |
 | T1 | OPS | suite de aislamiento de extremo a extremo en el arnés: dueño, dos watchers, dos workspaces, una máquina por workspace; invariantes §5.7 (1–5) | `apps/backend/test/isolation.test.ts` | H1, B6 | todos los invariantes en verde | HOY |
 
@@ -1274,7 +1346,7 @@ dependencia entre ellas van **en paralelo**.
 | L3 | OPS | auditoría extendida (lecturas, exportación, IP con hash diario) | C1 |
 | R1 | OPS | fases 2 y 3 de §8.1 (retirar `cr1_`, `apps/relay`, `relay-deploy.yml`) con aprobación | despliegue fase 1 |
 
-Grafo (HOY): `X0 → {B1, B2, B3, S1, A1, A2, M1, M3}`; `{B1, B2, B3} → {B4, B5}`; `B4 → {B6 (también B5), B7, B8}`;
+Grafo (HOY): `X0 → {B1, B2, B3, S1, A1, A2, M1, M3}`; `B2 → B2b`; `{B1, B2b, B3} → {B4, B5}`; `B4 → {B6 (también B5), B7, B8}`;
 `{B7, B8} → H1 → {H2, H3, T1 (también B6)}`; `A1 → {A3, A4}`; `A4 → {A5, A6}`; `M1 → M2 → {M4, M5, M6, M7, M8}` (también M3);
 `{B3, S1} → W1`; `X0 → X1`; `{H2, B6, B8} → X2`. Los hilos de MAC y AGT pueden empezar en cuanto exista S1 (fixtures), sin
 esperar al backend.
@@ -1289,8 +1361,25 @@ esperar al backend.
 | SQL | D1 (SQLite) con migraciones por wrangler | RDS/Aurora Postgres (coste fijo mensual, VPC) o DynamoDB (no relacional) |
 | Web estática y dominio | Workers Assets + Custom Domains en la misma cuenta y despliegue | S3 + CloudFront + ACM + Route 53 |
 | Operación | un `wrangler deploy` desde Actions; secretos del Worker | IaC (CDK/Terraform), IAM, varias consolas |
-| Coste para un dueño y pocos watchers | Workers Paid (5 USD/mes) cubre todo | varias decenas de USD/mes con RDS; menos con DynamoDB pero más código |
-| Riesgo | D1 es SQLite (límites de tamaño, sin `jsonb`); PBKDF2 limitado a 100 000 iteraciones | más maduro para Postgres y Argon2 (en Lambda) |
+| Coste para un dueño y pocos watchers | **0 USD**: plan Workers Free (ver tabla siguiente); Workers Paid no es requisito | varias decenas de USD/mes con RDS; menos con DynamoDB pero más código |
+| Riesgo | D1 es SQLite (límites de tamaño, sin `jsonb`); 10 ms de CPU por petición obligan a PBKDF2 de 10 000 iteraciones + pepper (§3) | más maduro para Postgres y Argon2 (en Lambda) |
+
+**Plan gratis de Cloudflare: límites que aplican y cómo cabe el backend** (fuentes oficiales:
+<https://developers.cloudflare.com/workers/platform/limits/>, <https://developers.cloudflare.com/d1/platform/limits/>,
+<https://developers.cloudflare.com/d1/platform/pricing/>, <https://developers.cloudflare.com/durable-objects/platform/pricing/>,
+<https://developers.cloudflare.com/durable-objects/platform/limits/>; consultadas el 2026-10-30):
+
+| límite (Free) | valor | uso previsto y regla de diseño |
+|---|---|---|
+| CPU por petición HTTP del Worker | 10 ms | ruta más cara ≈ 7 ms (dos PBKDF2 de 10 000 iteraciones, §3); el resto, < 2 ms; esperas de D1, RPC al Hub y `cmd.result` son I/O y no cuentan |
+| CPU por petición del Durable Object | 30 s (igual que Paid) | el Hub filtra snapshots y reenvía frames; nunca deriva contraseñas |
+| peticiones del Worker | 100 000/día | app, web y SSE de un dueño y pocos watchers: órdenes de magnitud por debajo |
+| Durable Objects | solo con SQLite; 100 000 peticiones/día, 13 000 GB-s/día; mensajes WebSocket entrantes cuentan 20:1 con Hibernation | un solo Hub con Hibernation (`new_sqlite_classes`, §8.5) |
+| filas escritas en el SQLite del DO | 100 000/día | snapshots en memoria; al SQLite del Hub ≤ 1 por minuto y `(máquina, workspace)` (1440/día por par) |
+| D1 | 500 MB por base, 5 GB por cuenta, 5 M filas leídas y 100 000 escritas al día, 50 consultas por invocación | escrituras: sesiones (`last_seen_at` cada ≥ 5 min), intentos, auditoría, estructura; los `batch` (importaciones, sync) deben quedar en ≤ 50 sentencias o partirse; superar el diario hace fallar las consultas hasta las 00:00 UTC |
+
+Si algún día hiciera falta Paid (más CPU para subir iteraciones, más filas), no cambia el código: se sube `PBKDF2_ITERATIONS` y
+`needsRehash` migra en cada login.
 
 **Recomendación: Cloudflare.** Ya está desplegado y probado, el patrón Hub con Hibernation encaja exacto con «un dueño, pocas
 máquinas, pocos visores», y el coste y la operación son mínimos. La salida a AWS u otro proveedor queda abierta por las reglas
