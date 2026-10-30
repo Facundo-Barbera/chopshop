@@ -5,7 +5,7 @@ import os
 import sys
 import time
 
-from . import engine, events, graph, home, inbox, integrate, metrics, miniyaml, profile, state, t3
+from . import engine, events, graph, home, inbox, integrate, metrics, miniyaml, names, profile, state, t3
 
 HELP_EPILOG = """comandos: profile list|show|check | fanout | run | poll | watch | status | snapshot | metrics | wait | gather | answer [--queue] | stop | settle | integrate | subscribe | graph new|run|status | automation list|check|run|logs|add | agent run|status|token|check-config|print-unit | pair create|list|revoke|prune | mcp serve|token|pair"""
 
@@ -24,7 +24,31 @@ def _load_tasks(args):
     return items
 
 
+def _names_file(arg):
+    return "/" in arg or arg.endswith((".yaml", ".yml"))
+
+
+def cmd_names_check(path):
+    if not os.path.isfile(path):
+        print("error: no existe el archivo de nombres %s" % path, file=sys.stderr)
+        return 1
+    try:
+        data = miniyaml.load(path)
+    except miniyaml.YamlError as e:
+        print("error: %s: %s" % (path, e), file=sys.stderr)
+        return 1
+    errs = names.validate(data)
+    for e in errs:
+        print("error: %s: %s" % (path, e), file=sys.stderr)
+    if errs:
+        return 1
+    print("ok: %s (%s, %d nombres en el pool)" % (path, data.get("mode", "extend"), len(names.pool(data))))
+    return 0
+
+
 def cmd_profile(a):
+    if a.action == "check" and _names_file(a.project):
+        return cmd_names_check(a.project)
     if a.action == "list":
         for p in profile.list_projects():
             print(p)
