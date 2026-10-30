@@ -6,6 +6,7 @@ public enum BackendError: Error, Equatable {
     case http(Int)
     case network(String)
     case badResponse
+    case missingToken
 
     public var code: BackendErrorBody.Code? {
         switch self {
@@ -22,6 +23,7 @@ public enum BackendError: Error, Equatable {
         case .http(let status): return "El servidor respondió HTTP \(status)."
         case .network(let m): return "No pude hablar con el servidor (\(m))."
         case .badResponse: return "La respuesta del servidor no es válida."
+        case .missingToken: return "El servidor no devolvió el token de la sesión."
         }
     }
 }
@@ -275,7 +277,7 @@ public struct BackendClient {
     static func object(_ fields: [String: JSONValue?]) -> JSONValue { .object(fields.compactMapValues { $0 }) }
 
     private func store(_ r: BackendLoginResponse) throws {
-        guard let token = r.token, !token.isEmpty else { throw BackendError.badResponse }
+        guard let token = r.token, !token.isEmpty else { throw BackendError.missingToken }
         try session.save(token, apiURL: apiURL)
     }
 
