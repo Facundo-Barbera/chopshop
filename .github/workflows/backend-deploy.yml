@@ -63,15 +63,6 @@ jobs:
           pnpm --filter @chopshop/web-admin run test
           pnpm --filter @chopshop/web-admin run build
 
-      - name: Migraciones D1
-        uses: cloudflare/wrangler-action@953926a2e2182532811c01a25e53647d93bf07c0 # v4.1.3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          workingDirectory: apps/backend
-          packageManager: pnpm
-          command: d1 migrations apply chopshop --remote
-
       - name: Desplegar Worker
         uses: cloudflare/wrangler-action@953926a2e2182532811c01a25e53647d93bf07c0 # v4.1.3
         env:
