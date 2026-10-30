@@ -1,212 +1,97 @@
-# Relay de Chopshop (Cloudflare Worker)
+# Backend de Chopshop (`chopshop-api`, Cloudflare)
 
-El relay deja ver el estado de varias máquinas desde fuera de la tailnet (p. ej. la app de Mac en un portátil) sin abrir
-ningún agente a internet. Cada `chopshop-agent` **sale** hacia el relay por WebSocket y publica su snapshot y sus eventos; los
-visores leen por HTTP. El relay es de **solo lectura**: no reenvía órdenes a los agentes, no habla con T3 y no interpreta las
-partes opacas del snapshot. Lanzar, responder, asentar o encolar sigue siendo del MCP y de la API del agente en la tailnet.
+El backend con cuentas sustituye al relay de tokens `cr1_`. Es un Cloudflare Worker (`apps/backend`, nombre de despliegue
+`chopshop-api`) con una base D1 (`chopshop`) como fuente de verdad y un único Durable Object `Hub` para lo que está en vivo.
+Cuentas solo por invitación: un **dueño** (posee máquinas, workspaces y su ciudad; edita todo) y **watchers** (solo lectura de
+los workspaces que el dueño les comparte). Cada `chopshop-agent` ligado a la cuenta **sale** hacia el backend por WebSocket,
+publica sus snapshots y eventos y recibe la estructura de sus proyectos; la app Mac y la web entran con correo y contraseña.
 
-Este documento cubre la arquitectura, los roles, el pairing, los tokens, el deploy y los límites. El formato de cada mensaje
-(campos, lista blanca de lo que sale de la máquina, schemas) está en [`relay-protocol.md`](relay-protocol.md); si los dos no
-coinciden, mandan los schemas de `packages/api/relay/` y el código de `apps/relay/src/`.
+Este documento cubre la operación: dominios, secretos, despliegue, migraciones, bootstrap, enlace de máquinas, recuperación y
+verificación. La API está en [`backend-api.md`](backend-api.md) y el protocolo del agente en
+[`relay-protocol.md`](relay-protocol.md). Diseño completo: `docs/plans/auth-backend.md`. Si algo de aquí no coincide con los
+schemas de `packages/api/backend/` o con `apps/backend/src/`, mandan esos.
 
 ## Arquitectura
 
 ```mermaid
 flowchart LR
-  A1[chopshop-agent<br/>máquina A] -- "WSS saliente<br/>Bearer cr1_ (agent)" --> W
-  A2[chopshop-agent<br/>máquina B] -- "WSS saliente<br/>Bearer cr1_ (agent)" --> W
-  V[App de Mac / visor] -- "HTTPS GET /whoami, /state, /stream<br/>Bearer cr1_ (viewer)" --> W
-  O[Operador] -- "HTTPS POST /v1/pair/codes, DELETE /v1/tokens/…<br/>Bearer token de operador" --> W
+  M[App Mac / CLI] -- "HTTPS Bearer ss1_" --> W
+  B[Web admin] -- "HTTPS cookie __Host-chopshop_session" --> W
+  A[chopshop-agent] -- "WSS /v1/connect<br/>Bearer cm1_" --> W
+  O[Operador en contabo] -- "HTTPS /v1/operator/*<br/>Bearer RELAY_OPERATOR_TOKEN" --> W
   subgraph CF[Cloudflare]
-    W[Worker<br/>src/index.ts] --> H[(Durable Object Hub «global»<br/>SQLite + WebSocket Hibernation)]
+    W[Worker chopshop-api<br/>auth + autorización] --> D[(D1 chopshop<br/>usuarios, sesiones, máquinas,<br/>workspaces, proyectos, auditoría)]
+    W -- RPC --> H[(Durable Object Hub «owner»<br/>snapshots, WebSockets, SSE)]
+    H --> D
   end
 ```
 
 | pieza | archivo | qué hace |
 |---|---|---|
-| Worker | `apps/relay/src/index.ts` | Reenvía toda petición al único Durable Object (`HUB.idFromName("global")`). |
-| `Hub` (Durable Object) | `src/index.ts` | Resuelve el rol del llamador, autoriza la ruta y la despacha. Su `alarm()` purga snapshots caducados y cierra conexiones de agente sin `hello` o inactivas. |
-| rutas y roles | `src/routes.ts` | Tabla `ROUTES` (ruta, método, roles permitidos), `resolveCaller` y `authorize`. |
-| pairing | `src/pair.ts` | Crear, canjear y revocar códigos; revocar tokens; rate limit de canje. |
-| base de datos | `src/db.ts` | SQLite del Durable Object: `tokens`, `machines`, `snapshot`, `pair_codes`, `attempts` (migraciones versionadas en `schema_meta`). |
-| agentes | `src/agentws.ts` | WebSocket del agente (`/agent/ws` = `/v1/connect`) con Hibernation: `hello`/`welcome`, `snapshot`, `event`, `ping`/`pong`, `whoami`. |
-| visores | `src/viewer.ts` | `GET /state` (JSON) y `GET /stream` (SSE) por cuenta, con búfer en memoria para reanudar. |
+| Worker | `apps/backend/src/index.ts`, `router.ts` | Despacha por `Host` (web → assets, API → rutas), resuelve el principal, autoriza y llama a los handlers. |
+| HTTP | `src/http.ts` | Errores, CORS, CSRF, cookie, cabeceras de seguridad, límite de cuerpo (1 MiB). |
+| identidad | `src/auth.ts`, `src/crypto.ts`, `src/ratelimit.ts`, `src/routes/{auth,sessions,invitations,users,operator,recovery}.ts` | Sesiones, contraseñas con pepper, límites de intentos, invitaciones, operador y recuperación. |
+| máquinas | `src/machines.ts`, `src/routes/machines.ts` | Enlace por login, token para VPS, pausa, revocación, `verifyMachine`. |
+| estructura | `src/access.ts`, `src/structure.ts`, `src/routes/{workspaces,projects}.ts` | Workspaces (campus), compartición, proyectos, layouts, roles, `structure_rev` y documento `sync`. |
+| en vivo | `src/hub.ts`, `src/agentws.ts`, `src/viewer.ts`, `src/state.ts`, `src/routes/live.ts` | Hub único (`idFromName("owner")`) con WebSockets de agentes (Hibernation), snapshots por `(máquina, workspace)`, SSE filtrado por workspace y `GET /v1/state`. |
+| auditoría | `src/audit.ts` | `audit_log` en D1. |
+| migraciones | `apps/backend/migrations/0001_identity.sql`, `0002_machines.sql`, `0003_structure.sql` | Esquema de D1. |
+| web admin | `apps/web-admin` → `apps/web-admin/dist` | Aceptar invitación y login, servida con Workers Assets. |
 
 Lado del agente (Python, solo stdlib):
 
 | pieza | archivo | qué hace |
 |---|---|---|
-| CLI `chopshop relay pair\|status\|unpair` | `apps/agent/chopshop/relaycfg.py` | Guarda el token `cr1_` en `~/.config/chopshop/relay/token` (0600; respeta `XDG_CONFIG_HOME`) y nunca lo imprime (solo prefijo y últimos 4 caracteres). |
-| hilo `relay` del servicio | `apps/agent/chopshop/agent/relay.py` | Si hay `[relay] url` y un token válido, conecta, manda `hello`, el snapshot (al conectar, si cambia —como mucho cada 6 s— y al menos cada `ttl/2`) y los eventos del bus (hasta 40 por segundo). Reconecta con backoff exponencial con jitter (tope 60 s). |
-| serialización | `apps/agent/chopshop/relaysync.py` | Construye `hello`, `snapshot` y `event` aplicando la lista blanca de `relay-protocol.md`. |
-| cliente WebSocket | `apps/agent/chopshop/wsclient.py` | RFC 6455 mínimo; solo `ws://` y `wss://`. |
+| `chopshop relay link\|status\|unlink\|import --dry-run` | `apps/agent/chopshop/relaycfg.py` | Guarda la credencial en `~/.config/chopshop/relay/machine.json` (0600, directorio 0700; respeta `XDG_CONFIG_HOME`) y nunca la imprime entera (`cm1_…abcd`). |
+| `chopshop relay admin bootstrap\|recover` | `apps/agent/chopshop/relayadmin.py` | CLI del operador: llama `/v1/operator/*`, imprime el enlace una vez y nunca el secret. |
+| hilo `relay` | `apps/agent/chopshop/agent/relay.py`, `relaysync.py`, `cloudsync.py` | Conecta con la `cm1_`, manda snapshots por workspace y eventos, aplica `sync` (modo nube). |
+| endpoint local de enlace | `apps/agent/chopshop/agent/server.py` | `GET /local/relay/status`, `POST /local/relay/link|unlink` solo en loopback y con nonce: la app Mac entrega la credencial sin que nadie la vea. |
 
-Datos que guarda el relay: hashes SHA-256 de tokens y de códigos (con sal), el **último** snapshot de cada máquina durante su TTL,
-la lista de máquinas vistas (`machine_id`, versión del agente, proyectos y roles) y los intentos fallidos de canje por IP (1 min).
-Los eventos no se guardan: se reenvían a los visores conectados y se retienen solo en memoria para reanudar un `/stream`.
+## Dominios
 
-## Roles y rutas
-
-El rol sale de la cabecera `Authorization` (`routes.ts`, `resolveCaller`):
-
-| rol | credencial | para qué |
+| host | qué | cómo |
 |---|---|---|
-| `anonymous` | sin cabecera | solo canjear un código (`POST /v1/pair`) y `GET /health` |
-| `viewer` | `Bearer cr1_…` de scope `viewer` | leer el estado de su cuenta; solo `GET` (cualquier otro método → 403) |
-| `machine` | `Bearer cr1_…` de scope `agent` | abrir el WebSocket del agente atado a su `machine_id` |
-| `admin` | `Bearer <RELAY_OPERATOR_TOKEN>` | crear códigos de pairing y revocar tokens o códigos, en cualquier cuenta |
+| `api.chopshop.novarix.online` | la API (HTTP, SSE y WebSocket `/v1/connect`) | Custom Domain del Worker |
+| `chopshop.novarix.online` | la web admin estática | el mismo Worker con Workers Assets |
 
-Una cabecera mal formada o un token inválido o revocado → 401 antes de mirar la ruta.
+`apps/backend/wrangler.toml` declara los dos como `custom_domain = true` en `routes` y `workers_dev = false` (no hay URL
+`*.workers.dev`). Cloudflare crea los registros DNS y el certificado al desplegar; la zona `novarix.online` tiene que estar en la
+misma cuenta. Cualquier otro `Host` responde `404`. Las URLs base van en `[vars]`: `API_ORIGIN` y `WEB_ORIGIN`.
 
-| método y ruta | roles | respuesta |
+## Secretos y permisos
+
+| secreto | dónde vive | para qué |
 |---|---|---|
-| `GET /health` | todos (no mira la credencial) | `{ok: true, hub}` |
-| `GET /whoami` | `viewer`, `machine` | `{role, machine_id}` (`machine_id: null` para un visor) |
-| `GET /state` | `viewer` | `{v, type: "state", id, ts, head, machines[], snapshots[]}` de su cuenta |
-| `GET /stream` | `viewer` | SSE: `hello`, luego `snapshot`/`event` en vivo (reanuda con `Last-Event-ID` o `?after=`) |
-| `GET /v1/connect` (alias exacto de `GET /agent/ws`) | `machine` | upgrade a WebSocket (101) |
-| `POST /v1/pair` | `anonymous` | canjea un código → `{token_id, token, scope, machine_id, protocol}` |
-| `POST /v1/pair/codes` | `admin` | crea un código → `{id, code, scope, name, account, expires_at}` |
-| `DELETE /v1/tokens/<token_id>` | `admin` | 204; cierra al instante los WebSockets y los `/stream` de ese token |
-| `DELETE /v1/pair/codes/<id>` | `admin` | 204; invalida un código sin usar |
+| `CLOUDFLARE_API_TOKEN` | secret del repositorio | despliegue y migraciones desde Actions |
+| `CLOUDFLARE_ACCOUNT_ID` | secret del repositorio | cuenta de Cloudflare |
+| `RELAY_OPERATOR_TOKEN` | secret del repositorio → secret del Worker en cada deploy; copia del operador en un archivo 0600 | `POST /v1/operator/bootstrap` y `/recover` (mismo valor que el relay v1) |
+| `PASSWORD_PEPPER` | **solo** secret del Worker; nunca en el repo, en Actions, en D1 ni en `[vars]` | pepper HMAC de las contraseñas |
+| `PASSWORD_PEPPER_V<n>` | secret del Worker, solo durante una rotación | valor anterior del pepper |
 
-Un rol que no puede usar una ruta → 401 (anónimo) o 403; una ruta desconocida → 404; un método distinto en una ruta permitida → 405
-con `Allow`. La matriz completa, incluidos los casos 404/405, está en `relay-protocol.md` («Rutas por rol»).
+Permisos de `CLOUDFLARE_API_TOKEN` (un token con permisos acotados, nunca la Global API Key):
 
-**Cuentas.** Cada token pertenece a una cuenta (`ac-` + 8 hex). Un visor solo ve las máquinas de su cuenta, así que el token del
-agente y el del visor tienen que salir de códigos de la **misma** cuenta (ver «Pairing»).
-
-## Tokens
-
-| token | forma | dónde vive | caducidad |
-|---|---|---|---|
-| `cr1_` de scope `agent` | `cr1_` + 43 caracteres base64url (32 bytes aleatorios) | máquina: `~/.config/chopshop/relay/token` (0600) | no caduca; se revoca |
-| `cr1_` de scope `viewer` | igual | app de Mac: Llavero (en desarrollo, un archivo local) | no caduca; se revoca |
-| token de operador | cualquier cadena secreta | secret del Worker y secret del repositorio `RELAY_OPERATOR_TOKEN`; copia del operador en un archivo 0600 | hasta que se rote |
-
-- El relay guarda solo `sha256(token)` y devuelve el token **una sola vez**, en la respuesta del canje. `last_seen_at` se
-  actualiza como mucho una vez por minuto.
-- Un token `agent` queda atado al `machine_id` con el que se canjeó: un `hello` con otro `machine_id` → `forbidden` y cierre.
-  Volver a emparejar el mismo `machine_id` en la misma cuenta emite un token nuevo y **revoca el anterior**.
-- Los tokens `cr1_` (relay) y `cs1_` (dispositivo de la API del agente, `docs/agent-api.md`) son credenciales distintas: una no
-  sirve en el otro sitio.
-- El token de operador se compara por SHA-256 en tiempo constante. Si el Worker no tiene el secret, no existe el rol `admin`:
-  nadie puede crear códigos ni revocar.
-
-## Pairing
-
-Los comandos usan `RELAY` como la URL base del Worker (`https://chopshop-relay.<subdominio>.workers.dev`, por
-`workers_dev = true` en `apps/relay/wrangler.toml`) y la copia local del token de operador en
-`~/.config/chopshop/relay/operator` (0600). Ningún paso imprime un token `cr1_` ni el de operador.
-
-### 0. Elegir la cuenta
-
-Sin `?account=`, cada código abre una cuenta nueva. La respuesta trae su `account` desde el arreglo de BUG-1
-(`docs/plans/issue-2-checklist.md`), que llega con el primer deploy posterior a `relay-v0.1.0`; ese tag aún no lo devuelve. Lo
-más simple es elegir una vez un id y pasarlo siempre (un id nuevo crea la cuenta):
-
-```sh
-python3 -c 'import secrets; print("ac-" + secrets.token_hex(4))'   # p. ej. ac-1a2b3c4d; guárdalo junto al token de operador
-ACCOUNT=ac-1a2b3c4d
-```
-
-### 1. Crear un código (operador)
-
-```sh
-curl -fsS -X POST "$RELAY/v1/pair/codes?account=$ACCOUNT" \
-  -H "Authorization: Bearer $(cat ~/.config/chopshop/relay/operator)" \
-  -H 'Content-Type: application/json' \
-  -d '{"scope": "agent", "name": "host-b", "ttl_s": 600}'
-# → {"id": "rc-…", "code": "K7QM-93XD", "scope": "agent", "name": "host-b", "account": "ac-1a2b3c4d", "expires_at": "…"}
-```
-
-`scope` es `agent` (una máquina) o `viewer` (la app). `ttl_s` va de 1 a 3600 (600 por defecto). El código se muestra una sola
-vez; `DELETE /v1/pair/codes/<id>` lo invalida si no se llegó a usar.
-
-### 2a. Emparejar una máquina (agente, también headless)
-
-En la máquina, con el `machine_id` de su `[agent] machine_id` (vacío = nombre de host):
-
-```sh
-umask 077
-curl -fsS -X POST "$RELAY/v1/pair" -H 'Content-Type: application/json' \
-  -d '{"code": "K7QM-93XD", "machine_id": "host-b", "client_name": "host-b"}' -o relay-pair.json
-python3 -c 'import json; d = json.load(open("relay-pair.json")); print(d["token_id"], d["scope"], d["machine_id"])'
-python3 -c 'import json; print(json.load(open("relay-pair.json"))["token"])' | chopshop relay pair --stdin
-rm relay-pair.json
-```
-
-Apunta el `token_id` (`tk-…`): es lo que se usa para revocar. Luego, en `~/.config/chopshop/config.toml`:
-
-```toml
-[relay]
-url = "wss://chopshop-relay.<subdominio>.workers.dev/v1/connect"
-```
-
-(o `CHOPSHOP_RELAY__URL`) y reinicia el agente: `systemctl --user restart chopshop-agent` en Linux, o
-`launchctl kickstart -k gui/$(id -u)/<label del agente>` en macOS. Comprobación:
-
-```sh
-chopshop relay status                        # URL y token enmascarado; sale con 1 si falta algo
-journalctl --user -u chopshop-agent -n 50    # Linux: «relay conectado (sesión ss-…)»
-```
-
-`chopshop relay pair --token-file F` es la alternativa a `--stdin` (avisa si `F` es legible por otros). `chopshop relay unpair`
-borra el token local, pero **no** lo revoca en el relay.
-
-### 2b. Emparejar la app (visor)
-
-Crea un código `viewer` de la misma cuenta y canjéalo sin `machine_id`:
-
-```sh
-umask 077
-curl -fsS -X POST "$RELAY/v1/pair" -H 'Content-Type: application/json' \
-  -d '{"code": "<código viewer>", "client_name": "app-mac"}' -o relay-viewer.json
-```
-
-La app de Mac todavía no canjea códigos: en su pantalla de conexión al relay se pega la URL base (`https://…`) y el `token` de
-ese JSON, que la app guarda en el Llavero. Borra el archivo después. La app valida con `GET /whoami` y lee `GET /state`.
-
-### 3. Revocar
-
-```sh
-curl -fsS -X DELETE "$RELAY/v1/tokens/tk-0a1b2c3d" -H "Authorization: Bearer $(cat ~/.config/chopshop/relay/operator)"
-```
-
-Efecto inmediato: el WebSocket del agente recibe `error unauthorized` con `close: true` y se cierra con 4401; un `/stream` del
-visor recibe un `event: error` y se corta. No hay listado de tokens: guarda los `token_id` al emparejar.
-
-### Fallos del canje
-
-| caso | respuesta |
+| ámbito | permiso |
 |---|---|
-| código inválido | 401 `unauthorized` |
-| código usado, caducado o invalidado | 410 `gone` |
-| código `agent` sin `machine_id`, campos desconocidos, cuerpo no JSON | 400 `bad_request` |
-| 5 fallos en un minuto desde la misma IP | 429 `rate_limited` con `Retry-After` |
-| cada fallo (de cualquier IP) | suma 1 a todos los códigos vivos, de todas las cuentas; un código con 20 se invalida |
+| Cuenta | Workers Scripts: Edit · D1: Edit · Account Settings: Read |
+| Zona `novarix.online` | Zone: Read · DNS: Edit · Workers Routes: Edit |
 
-El código se normaliza (sin guiones ni espacios, mayúsculas, `O→0`, `I/L→1`) y se compara por hash con sal en tiempo constante.
+DNS: Edit hace falta porque los Custom Domains crean sus registros DNS y su certificado.
 
-## Deploy
+**Pepper.** El dueño lo fija **una vez**, a mano y antes del primer despliegue, desde su máquina con `wrangler` autenticado (el
+valor no pasa por la pantalla ni por el historial):
 
-El Worker se despliega **solo** desde GitHub Actions (`.github/workflows/relay-deploy.yml`); nunca con `wrangler deploy` ni
-`wrangler secret put` desde una máquina.
+```sh
+openssl rand -base64 32 | wrangler secret put PASSWORD_PEPPER --name chopshop-api
+```
 
-| disparador | cómo |
-|---|---|
-| tag `relay-v*` | `git tag relay-v0.2.0 && git push origin relay-v0.2.0` |
-| manual | `gh workflow run relay-deploy.yml --ref <rama o tag>` (`workflow_dispatch`) |
+Sin `PASSWORD_PEPPER` (≥ 32 caracteres) las rutas de contraseña responden `503`. La versión va en la var
+`PASSWORD_PEPPER_VERSION` (por defecto `1` si falta). **Si se pierde el pepper**, ninguna contraseña verifica: se fija uno
+nuevo y el dueño entra por la recuperación del operador; los watchers no tienen recuperación propia (ver
+«Recuperación del dueño»). **Rotación**: se copia el
+valor vigente a `PASSWORD_PEPPER_V<versión actual>`, se fija un `PASSWORD_PEPPER` nuevo y se sube `PASSWORD_PEPPER_VERSION`;
+cada login correcto rehace el hash y, cuando ningún `users.password_hash` lleve ya `-p<versión vieja>`, se borra el secret viejo.
 
-El job (Node 24, pnpm, `concurrency: relay-deploy` sin cancelar el que está en curso) hace:
-
-1. `pnpm install --frozen-lockfile --filter @chopshop/relay...`, `pnpm --filter @chopshop/relay run check` (`tsc --noEmit`) y `run test`.
-2. `cloudflare/wrangler-action` con `command: deploy` en `apps/relay`, con `apiToken` = secret `CLOUDFLARE_API_TOKEN`,
-   `accountId` = secret `CLOUDFLARE_ACCOUNT_ID` y `secrets: RELAY_OPERATOR_TOKEN`: el valor sale del secret del repositorio del
-   mismo nombre (expuesto como variable de entorno del paso) y se sube como secret del Worker en **cada** deploy, sin imprimirlo.
-
-Secrets del repositorio que necesita: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` y `RELAY_OPERATOR_TOKEN`. Crear o rotar el
-token de operador (el valor no pasa por la pantalla):
+**Operador.** Crear o rotar el secret de operador (el valor no pasa por la pantalla):
 
 ```sh
 umask 077; mkdir -p ~/.config/chopshop/relay
@@ -214,39 +99,175 @@ python3 -c 'import secrets; print(secrets.token_urlsafe(32))' > ~/.config/chopsh
 gh secret set RELAY_OPERATOR_TOKEN < ~/.config/chopshop/relay/operator
 ```
 
-Una rotación surte efecto en el siguiente deploy (tag o `workflow_dispatch`); los tokens `cr1_` ya emitidos siguen valiendo.
-Un deploy desconecta todos los WebSockets: los agentes reconectan solos con backoff y los visores reabren `/stream` (o siguen
-leyendo `/state`). La base de datos del Durable Object sobrevive al deploy; el búfer de eventos en memoria no (cambia la época
-del stream y el visor recibe `resume: "snapshot"`).
+La rotación surte efecto en el siguiente deploy. Tras el bootstrap el secret de operador solo sirve para `recover` (y para un
+`bootstrap` que responde 409).
 
-Validación local sin credenciales (no despliega nada; borra `node_modules` y `dist` al terminar):
+## Despliegue
+
+Nada se despliega sin aprobación explícita del dueño (fase 1 de `docs/plans/auth-backend.md` §8.1), y **nunca** desde una
+máquina de desarrollo: ni `wrangler deploy` ni `wrangler d1 migrations apply --remote` a mano (la única excepción es el
+`wrangler secret put PASSWORD_PEPPER` de arriba, que hace el dueño).
+
+Antes del primer despliegue, una vez:
+
+1. Crear la D1: `wrangler d1 create chopshop` (lo hace el dueño) y poner su id en `database_id` de `apps/backend/wrangler.toml`
+   (el workflow se niega a desplegar mientras quede el marcador `<id de la D1…>`).
+2. Fijar `PASSWORD_PEPPER` (arriba) y comprobar que existen los secrets del repositorio.
+
+Workflow `.github/workflows/backend-deploy.yml`, **solo manual** (`workflow_dispatch`, nunca por tag):
 
 ```sh
-pnpm install --filter @chopshop/relay...
-pnpm --filter @chopshop/relay run check
-pnpm --filter @chopshop/relay run deploy:dry     # wrangler deploy --dry-run --outdir dist
+gh workflow run backend-deploy.yml --ref <rama o commit> -f confirm=DEPLOY
 ```
 
-Salud del relay desplegado: `curl -fsS "$RELAY/health"`.
+El job (Node 24, pnpm, `concurrency: backend-deploy` sin cancelar el que está en curso):
+
+1. Exige `confirm = DEPLOY` y un `database_id` real.
+2. `pnpm install --frozen-lockfile --filter @chopshop/backend... --filter @chopshop/web-admin...`; `check` y `test` del backend y
+   de la web; `build` de la web (`apps/web-admin/dist`).
+3. `wrangler d1 migrations apply chopshop --remote` (migraciones de `apps/backend/migrations`).
+4. `wrangler deploy` con `RELAY_OPERATOR_TOKEN` subido como secret del Worker (sin imprimirlo).
+
+Plan de la cuenta: **Workers Free**. `wrangler.toml` no lleva `[limits] cpu_ms` (solo existe en Paid); PBKDF2 está calibrado a
+10 000 iteraciones para caber en 10 ms de CPU (ver [`backend-api.md`](backend-api.md#contraseñas-tokens-y-límites)).
+
+Cron: `wrangler.toml` declara `17 4 * * *` para purgar sesiones caducadas, invitaciones viejas, intentos de login sin
+actividad (`purgeAttempts`) y auditoría de más de 180 días; el Worker aún no exporta el handler `scheduled`, así que hoy esa
+purga no corre.
+
+Un deploy corta todos los WebSockets: los agentes reconectan solos con backoff y los visores reabren `/v1/stream` (cambia la
+época del stream y reciben `resume: "snapshot"`). D1 y el SQLite del Hub sobreviven al deploy.
+
+### Migraciones D1
+
+- Numeradas en `apps/backend/migrations/NNNN_nombre.sql` (formato de `wrangler d1 migrations`). Una migración aplicada en
+  producción **nunca** se edita: se añade otra.
+- Reglas de portabilidad a Postgres: ids UUID en `TEXT`, fechas ISO-8601 en `TEXT` generadas por la aplicación, sin booleanos
+  (fechas nullable o `TEXT` con `CHECK`), JSON en `TEXT`, sin `STRICT` ni funciones JSON de SQLite.
+- Las aplica solo el workflow (paso 3). En local, los tests las aplican sobre un doble de D1 en `node:sqlite`
+  (`pnpm --filter @chopshop/backend run test`).
+
+Validación local, sin credenciales ni red hacia Cloudflare:
+
+```sh
+pnpm install --frozen-lockfile
+pnpm --filter @chopshop/backend run check
+pnpm --filter @chopshop/backend run test
+python3 tools/contract_audit.py --backend
+```
+
+## Bootstrap del dueño (una sola vez)
+
+No hay registro abierto: la primera cuenta la crea el operador.
+
+1. En contabo, con el secret de operador en un archivo 0600:
+
+   ```sh
+   chopshop relay admin bootstrap --email <correo del dueño> --token-file ~/.config/chopshop/relay/operator
+   ```
+
+   (o `--stdin`; el secret nunca va en `argv`; `--api URL` cambia la base, por defecto `https://api.chopshop.novarix.online`).
+   Llama `POST /v1/operator/bootstrap`: revoca invitaciones `owner_bootstrap` pendientes, crea una nueva (caduca en 24 h) e
+   imprime **una vez** el enlace `https://chopshop.novarix.online/invite#t=ci1_…`. Salida: 0 ok, 1 error, 2 ya hay dueño (409).
+2. El dueño abre el enlace en el navegador (o lo pega en la app Mac, «Aceptar invitación») y fija su contraseña (12 a 256
+   caracteres). Se crean el usuario `owner`, el workspace `Personal` y una sesión, y se muestra el **código de recuperación**
+   (`XXXXX-XXXXX-XXXXX-XXXXX`) **una sola vez**: guardarlo fuera de línea.
+3. Desde ahí todo se gestiona en la app Mac (o la web): invitar watchers, compartir workspaces, ligar máquinas.
+
+Errores: secret incorrecto `401` (5 fallos en 10 min por IP → bloqueo de 60 min); secret no configurado en el Worker `503`;
+correo inválido `400`.
+
+## Ligar máquinas
+
+Nadie copia tokens a mano en la app de escritorio.
+
+**Con la app Mac** (la propia Mac o la MacBook Air): con la sesión del dueño, «Máquinas → Ligar esta Mac». La app lee el
+`machine_id` del agente local (`GET http://127.0.0.1:<puerto>/local/relay/status`), pide `POST /v1/machines/link` y entrega la
+credencial al agente por loopback (`POST /local/relay/link` con el nonce de `~/.config/chopshop/agent/link.nonce`). El agente
+la guarda 0600 y conecta sin reiniciar el servicio. Volver a ligar la misma máquina revoca la credencial anterior. Si la entrega
+falla, la app revoca la máquina recién creada.
+
+**VPS sin app** (p. ej. contabo): en la app, «Máquinas → Token para VPS» (`POST /v1/machines`) muestra **una vez** el JSON de
+enlace. En el VPS:
+
+```sh
+umask 077
+chopshop relay link --stdin    # pegar {"api_url", "machine_id", "local_machine_id", "credential"} y Ctrl-D
+chopshop relay status          # API, WebSocket, máquina y credencial enmascarada; aviso si los permisos no son 0600/0700
+```
+
+`machine_id` es el id (UUID) de la máquina en la nube y `local_machine_id` el `[agent] machine_id` del VPS (o su hostname). El
+primer `hello` fija `local_machine_id` en la nube; si otra máquina activa ya lo usa, la conexión se cierra con 4409 y la app
+muestra el conflicto. Reiniciar el agente: `systemctl --user restart chopshop-agent` (Linux) o
+`launchctl kickstart -k gui/$(id -u)/<label del agente>` (macOS).
+
+**Desconectar y revocar** (app → Máquinas): «Desconectar» (`pause`) corta el WebSocket (4403) y rechaza reconexiones hasta
+«Permitir» (`resume`); el agente reintenta cada 10 min. «Revocar» invalida la credencial para siempre (4401): el agente deja de
+reintentar y queda desligado. `chopshop relay unlink` borra `machine.json` en la máquina, pero **no** revoca en la nube.
+
+## Recuperación del dueño
+
+1. **Con el código de recuperación** (sin operador): en la app o la web, «Usar código de recuperación» →
+   `POST /v1/auth/recover {email, recovery_code, new_password}`. Fija la contraseña nueva, revoca **todas** las sesiones del
+   dueño y devuelve un código nuevo (el anterior deja de valer). Límites: 5 fallos por IP y hora; 20 por correo y hora.
+2. **Con el operador** (si también se perdió el código):
+
+   ```sh
+   chopshop relay admin recover --token-file ~/.config/chopshop/relay/operator
+   ```
+
+   Crea una invitación `owner_reset` para el correo del dueño (caduca en 1 h; revoca otras pendientes) e imprime el enlace una
+   vez. Al aceptarla: contraseña nueva, todas las sesiones revocadas y código de recuperación nuevo. Salida 2 si no hay dueño.
+3. Con sesión, el dueño puede regenerar el código en «Ajustes» (`POST /v1/auth/recovery-code`, pide la contraseña).
+
+Un watcher que olvida su contraseña no tiene recuperación: `POST /v1/invitations` rechaza un correo que ya tiene usuario (409),
+así que hoy el dueño solo puede desactivarlo; restablecer la contraseña de un watcher queda para después.
+
+## Verificación tras el despliegue
+
+La hace el dueño o el operador, no un hilo de implementación:
+
+```sh
+dig +short api.chopshop.novarix.online           # direcciones de Cloudflare
+dig +short chopshop.novarix.online
+curl -sS https://api.chopshop.novarix.online/health                 # {"ok":true,"version":"…"}
+curl -sSI https://api.chopshop.novarix.online/v1/auth/me            # 401 con Cache-Control: no-store, HSTS, nosniff,
+                                                                    # Referrer-Policy y X-Frame-Options
+curl -sSI https://chopshop.novarix.online/                          # 200 con Content-Security-Policy
+wrangler d1 migrations list chopshop --remote                       # sin migraciones pendientes
+```
+
+Y en la app: login del dueño, «Ligar esta Mac», la máquina aparece `online` y su campus en la ciudad.
 
 ## Límites
 
 | qué | valor | dónde |
 |---|---|---|
-| Durable Objects | uno solo (`global`) para todas las cuentas | `index.ts` |
-| código de pairing | 8 símbolos Crockford (40 bits); TTL 600 s por defecto, máx. 3600 s | `pair.ts` |
-| cuerpo de pairing | máx. 4096 bytes; `name`/`client_name` ≤ 128 caracteres; `machine_id` `[A-Za-z0-9_.:-]{1,128}` | `pair.ts` |
-| canje | 5 fallos por IP y minuto → 429; 20 fallos → códigos vivos invalidados; códigos cerrados se borran a los 7 días | `pair.ts` |
-| `hello` | debe llegar en ≤ 10 s tras el upgrade; ≤ 256 proyectos, ≤ 64 roles por proyecto | `agentws.ts` |
-| frame del WebSocket | máx. 1 MiB, solo texto | `agentws.ts` |
-| snapshot | 1 cada 5 s por conexión; TTL 30–900 s (120 por defecto); solo el último por máquina | `agentws.ts`, `db.ts` |
+| plan | Workers Free: 10 ms de CPU por petición HTTP, 100 000 peticiones/día; D1 5 M filas leídas y 100 000 escritas al día | `docs/plans/auth-backend.md` §12 |
+| Durable Objects | uno solo (`owner`) con Hibernation y SQLite | `hub.ts` |
+| cuerpo HTTP | 1 MiB | `http.ts` |
+| contraseña | 12–256 caracteres; PBKDF2 10 000 iteraciones con pepper | `crypto.ts` |
+| sesiones | `mac`/`cli` 30 días de inactividad, 90 máx.; `web` 12 h, 7 días | `auth.ts` |
+| invitaciones | watcher 1–720 h (168 por defecto); bootstrap 24 h; `owner_reset` 1 h | `routes/invitations.ts`, `routes/operator.ts` |
+| intentos | ver la tabla de [`backend-api.md`](backend-api.md#contraseñas-tokens-y-límites) | `ratelimit.ts` |
+| `hello` | ≤ 10 s tras el upgrade; ≤ 256 proyectos, ≤ 64 roles | `agentws.ts` |
+| frame WebSocket | 1 MiB, solo texto | `agentws.ts` |
+| snapshot | 1 cada 5 s por `(conexión, workspace)`; TTL 30–900 s (120); hoy cada uno se escribe en el SQLite del Hub (objetivo del plan: ≤ 1 por minuto y par) | `agentws.ts` |
 | eventos | 50 por segundo por conexión | `agentws.ts` |
-| inactividad del agente | `ping` cada 30 s; 90 s sin tráfico → cierre 4408 | `agentws.ts` |
-| conexiones por máquina | una: la nueva cierra la vieja con `conflict` | `agentws.ts` |
-| visores `/stream` | máx. 64 a la vez (429 con `Retry-After: 3`); latido cada 15 s; `retry: 3000`; un visor con 256 escrituras pendientes se corta | `viewer.ts` |
-| búfer de reanudación | 512 frames o 5 min, en memoria | `viewer.ts` |
-| partes del snapshot (agente) | cada parte ≤ 768 KiB; parte `events` ≤ 80; cola ≤ 100 tareas por empleado | `relaysync.py` |
+| inactividad del agente | `ping` cada 30 s; 90 s sin tráfico → 4408 | `agentws.ts` |
+| visores `/v1/stream` | máx. 64; latido 15 s; búfer de reanudación 512 frames o 5 min | `viewer.ts` |
+| máquinas revocadas | se listan 30 días | `machines.ts` |
 
-Lo que el relay **no** hace: no acepta escrituras de los visores, no manda órdenes a los agentes, no emite webhooks, no guarda
-historial de eventos y no sirve el MCP (sigue en `chopshop mcp serve`, ver README). `GET /state` no distingue una máquina
-desconectada de una con el snapshot caducado (BUG-10 de `docs/plans/contract-audit.md`).
+## Relay v1 (`chopshop-relay`, obsoleto)
+
+El relay de tokens `cr1_` (`apps/relay`, Worker `chopshop-relay` en `workers.dev`, protocolo en
+[`relay-protocol-v1.md`](relay-protocol-v1.md)) sigue desplegado y **sin cambios** durante las fases 0–2: el agente lo usa solo
+si no tiene `machine.json`. No hay migración de datos: sus tokens, códigos y cuentas `ac-…` no pasan a D1; las máquinas se
+vuelven a ligar por login.
+
+- Deploy: solo GitHub Actions (`.github/workflows/relay-deploy.yml`), con un tag `relay-v*` o `gh workflow run relay-deploy.yml`.
+- Pairing: el operador crea un código con `POST /v1/pair/codes` (token de operador) y se canjea con `POST /v1/pair`; el agente
+  guarda el `cr1_` con `chopshop relay pair --stdin` y lo borra con `chopshop relay unpair`; revocar es
+  `DELETE /v1/tokens/<token_id>`.
+- Fase 2: la app deja de ofrecer «pegar token `cr1_`». Fase 3 (con aprobación del dueño): se borran el Worker, `apps/relay`,
+  `relay-deploy.yml` y el camino `cr1_` del agente y de la app.
