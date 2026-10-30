@@ -96,11 +96,20 @@ public struct CityBuilding: Hashable, Sendable, Identifiable {
     public var d: Double
     /// De abajo arriba.
     public var floors: [CityFloor]
+    /// Aspecto (material, ventanas, azotea, alturas…): por defecto de la semilla `company`. Gancho de la personalización.
+    public var style: CityBuildingStyle
+
+    public init(company: String, index: Int, x0: Double, y0: Double, w: Double, d: Double, floors: [CityFloor],
+                style: CityBuildingStyle? = nil) {
+        self.company = company; self.index = index; self.x0 = x0; self.y0 = y0; self.w = w; self.d = d; self.floors = floors
+        self.style = style ?? CityBuildingStyle(seed: company)
+    }
+
     public var id: String { company }
     public var x1: Double { x0 + w }
     public var y1: Double { y0 + d }
-    /// Altura del techo (sin la azotea).
-    public var height: Double { Double(floors.count) * CityGeo.floorH }
+    /// Altura del techo (plinto y pisos, sin la azotea).
+    public var height: Double { floorZ(floors.count) }
     /// Profundidad para pintar de atrás hacia delante.
     public var depthKey: Double { x0 + w / 2 + y0 + d / 2 }
 }
@@ -118,7 +127,7 @@ public enum CityGeo {
     public static let slabH = 5.0
     public static let overhang = 0.14 * tile
     public static let wallT = 0.16 * tile
-    /// Azotea: losa + pretil + máquinas.
+    /// Azotea mínima: losa + pretil + máquinas (la de cada edificio, `CityBuildingStyle.roofH`).
     public static let roofH = 13.0
     /// Ventanas por piso: 6 en la cara izquierda (+y), 5 en la derecha (+x).
     public static let windowsLeft = 6
@@ -297,7 +306,7 @@ public struct CityModel: Equatable, Sendable {
         var b = IsoBounds.empty
         for (x, y) in [(0.0, 0.0), (groundX, 0.0), (0.0, groundY), (groundX, groundY)] { b.add(x, y, 0) }
         for bd in buildings {
-            let top = bd.height + CityGeo.roofH
+            let top = bd.height + bd.style.roofH
             for (x, y) in [(bd.x0, bd.y0), (bd.x1, bd.y0), (bd.x0, bd.y1), (bd.x1, bd.y1)] { b.add(x, y, top) }
         }
         return b
