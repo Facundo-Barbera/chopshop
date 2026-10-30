@@ -27,12 +27,69 @@ extension LiveState {
             projects[pi].attention.append(Attention(key: key, seq: 0, type: "relay", needs: needs, subjectKind: key.split(separator: ":").first.map(String.init),
                                                     subjectID: sid, summary: a["summary"]?.string))
         }
+        if let e = parts["employees"]?.object { readEmployees(e) }
+        readRelayOffice(parts["office"], threads: threads, company: parts["office"]?["company"]?.string)
         for i in projects.indices { projects[i].counts = Self.counts(projects[i]) }
         if let h = json["health"]?.object {
             machineHealth = h
             let run = (json["projects"]?.array ?? []).compactMap { $0["threads_running"]?.double }.reduce(0, +)
             series[machine] = Series(cpu: [h["cpu_pct"]?.double ?? 0], ram: [h["ram_pct"]?.double ?? 0], run: [run])
         }
+    }
+
+    private mutating func readRelayOffice(_ office: JSONValue?, threads: [JSONValue], company: String?) {
+        var byKey: [String: JSONValue] = [:]
+        for t in threads { if let k = t["key"]?.string { byKey[k] = t } }
+        var seats: [String: (desk: Employee, occupant: String?)] = [:]
+        for f in office?["floors"]?.array ?? [] {
+            for d in f["desks"]?.array ?? [] {
+                guard let id = d["id"]?.string, id.split(separator: "/").count == 4 else { continue }
+                seats[id] = (Employee(id: id, role: d["role"]?.string), d["occupant_key"]?.string)
+            }
+        }
+        for e in employees {
+            let occ = e.state == "working" ? e.threadID : nil
+            seats[e.id] = (e, occ ?? seats[e.id]?.occupant)
+        }
+        guard !seats.isEmpty else { return }
+        var seated = Set<String>()
+        for (project, list) in Dictionary(grouping: seats.values, by: { $0.desk.project }) {
+            let pi = projectIndex(project)
+            guard projects[pi].office == nil else { continue }
+            var floors: [JSONValue] = []
+            for (floor, ds) in Dictionary(grouping: list, by: { $0.desk.floor }).sorted(by: { $0.key < $1.key }) {
+                var rooms: [JSONValue] = []
+                for (role, rs) in Dictionary(grouping: ds, by: { $0.desk.role }).sorted(by: { $0.key < $1.key }) {
+                    var desks: [JSONValue] = []
+                    for s in rs.sorted(by: { $0.desk.slot < $1.desk.slot }) {
+                        var d: JSONValue.Object = ["id": .string(s.desk.id), "slot": .number(Double(s.desk.slot))]
+                        if let k = s.occupant {
+                            seated.insert(k)
+                            d["occupant"] = relayOccupant(k, thread: byKey[k], role: role, employee: employee(s.desk.id))
+                        }
+                        desks.append(.object(d))
+                    }
+                    let permanent = rs.contains { employee($0.desk.id) != nil }
+                    rooms.append(.object(["role": .string(role), "permanent": .bool(permanent), "desks": .array(desks)]))
+                }
+                floors.append(.object(["index": .number(Double(floor)), "rooms": .array(rooms)]))
+            }
+            projects[pi].office = Office(json: .object(["company": company.map(JSONValue.string) ?? .null, "floors": .array(floors)]))
+        }
+        for t in threads {
+            guard let k = t["key"]?.string, !seated.contains(k), let proj = t["project"]?.string,
+                  projects.first(where: { $0.name == proj })?.office != nil, !["done", "settled", "failed", "skipped"].contains(t["phase"]?.string ?? ""), !lobby.contains(where: { $0.threadID == k }) else { continue }
+            lobby.append(LobbyEntry(threadID: k, project: proj, company: company, title: t["title"]?.string, phase: t["phase"]?.string ?? "running",
+                                    attention: Self.nonEmpty(t["attention"]?.string), waitingRole: Self.nonEmpty(t["role"]?.string),
+                                    since: t["updated"]?.string, endedAt: nil, touchedAt: nil, halfLifeS: HalfLife.defaultSeconds))
+        }
+    }
+
+    private func relayOccupant(_ key: String, thread t: JSONValue?, role: String, employee e: Employee?) -> JSONValue {
+        let title: JSONValue = t?["title"].flatMap { $0.isNull ? nil : $0 } ?? e?.title.map(JSONValue.string) ?? .null
+        let since: JSONValue = e?.since.map(JSONValue.string) ?? t?["updated"] ?? .null
+        return .object(["thread_id": .string(key), "title": title, "role": .string(role), "phase": t?["phase"] ?? .string("running"),
+                        "attention": t?["attention"] ?? .null, "since": since])
     }
 
     static func relayParts(_ v: JSONValue?) -> JSONValue.Object {
