@@ -1,0 +1,16 @@
+{
+  "name": "@chopshop/backend",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Backend con cuentas de chopshop (Worker chopshop-api, D1 y Durable Object Hub).",
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "node --experimental-transform-types --experimental-sqlite --no-warnings --import ./test/register.mjs --test \"test/*.test.ts\""
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261030.1",
+    "typescript": "^7.0.2",
+    "wrangler": "^4.156.0"
+  }
+}
