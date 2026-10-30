@@ -2,10 +2,18 @@
   "name": "@chopshop/web-admin",
   "private": true,
   "version": "0.1.0",
+  "type": "module",
   "description": "Web admin de chopshop (estática, la sirve el Worker de apps/backend con Workers Assets).",
   "scripts": {
-    "build": "mkdir -p dist && cp src/index.html dist/",
-    "check": "test -f src/index.html",
-    "test": "node -e \"\""
+    "build": "mkdir -p dist && esbuild src/main.jsx --bundle --minify --format=iife --jsx=automatic --target=es2022 --outfile=dist/app.js && cp src/index.html src/app.css dist/",
+    "check": "node --check src/api.js && esbuild src/main.jsx --bundle --jsx=automatic --log-level=warning --outfile=/dev/null",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.0"
   }
 }
