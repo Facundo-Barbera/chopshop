@@ -1,16 +1,4 @@
-"""Servicio chopshop-agent: arranque, hilos de fondo y subcomandos `chopshop agent run|status|token|check-config|print-unit`.
-
-`AgentService` ensambla los módulos (colector, T3, eventos) y el servidor HTTP (`server.py`):
-  hilos: muestreo (+ compactación) · sondeo de T3 · motor (`engine.tick` con el bus inyectado, solo si hay lotes en
-  state.json) · importación periódica de events.jsonl (CLI externa) · automatizaciones (sobres del bus + horarios) ·
-  GitHub (si `[agent.github] enabled`) · roles permanentes (si `[agent.roles] enabled`: despertar por horario/eventos y
-  seguimiento del hilo en su escritorio) · rack de repos (`forge/rack.py`) · mantenimiento (retención de eventos, checkpoint WAL).
-  Un fallo en un hilo se registra (sin repetirlo cada ciclo) y el hilo sigue; `stop()` los para a todos de forma ordenada.
-`run` instala SIGTERM/SIGINT para la parada limpia. Nada aquí habla con systemd salvo `status` (solo lectura, inyectable) y
-`print-unit` solo IMPRIME la unidad: no escribe, no habilita y no arranca nada.
-Todo lo externo es inyectable (runners de tailscale/systemd/T3, reloj, poster de webhooks, módulos completos)."""
 import argparse
-import ipaddress
 import json
 import logging
 import os
@@ -22,31 +10,36 @@ import sys
 import threading
 import time
 
-from .. import engine as engine_mod, events as legacy_events, graph, home, settings, state
-from . import __version__, actions as actions_mod, automations as automations_mod, collector as collector_mod, config, db, envelope, \
-    events, github, halflife, listeners, notes, office as office_mod, pairing, roles as roles_mod, server, t3watch
-from .forge import github as forge_github, rack as forge_rack
+from .. import engine as engine_mod
+from .. import events as legacy_events
+from .. import graph, home, settings, state
+from . import __version__, config, db, envelope, events, github, halflife, listeners, notes, pairing, server, t3watch
+from . import actions as actions_mod
+from . import automations as automations_mod
+from . import collector as collector_mod
+from . import office as office_mod
+from . import roles as roles_mod
+from .forge import github as forge_github
+from .forge import rack as forge_rack
 
 log = logging.getLogger("chopshop.agent")
 
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))   # raíz del repo
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 AGENT_DIR = os.path.join(ROOT, "apps", "agent")
 UNIT_TEMPLATE = os.path.join(ROOT, "systemd", "chopshop-agent.service")
 UNIT_NAME = "chopshop-agent"
-COMPACT_EVERY = 300.0             # s entre compactaciones de métricas
-MAINT_INTERVAL = 3600.0           # s entre tareas de mantenimiento
-MAINT_FIRST = 60.0                # primera pasada de mantenimiento tras arrancar
-STOP_TIMEOUT = 10.0               # s totales para esperar a los hilos al parar
-AUTOMATIONS_RELOAD = 60.0         # s entre relecturas de los perfiles por el hilo de automatizaciones
+COMPACT_EVERY = 300.0
+MAINT_INTERVAL = 3600.0
+MAINT_FIRST = 60.0
+STOP_TIMEOUT = 10.0
+AUTOMATIONS_RELOAD = 60.0
 AUTOMATIONS_CURSOR = "automations_cursor"
-AUTOMATIONS_BATCH = 500           # sobres por pasada
+AUTOMATIONS_BATCH = 500
 
 
 class ServiceError(Exception):
-    """El servicio no puede arrancar (bind inválido, puerto ocupado...). El mensaje es para el operador."""
+    pass
 
-
-# ---------------------------------------------------------------- bind
 
 def _is_loopback(host):
     ip = server.parse_ip(host)
@@ -54,7 +47,6 @@ def _is_loopback(host):
 
 
 def resolve_bind(cfg, runner=None):
-    """IP de escucha efectiva. `auto` = primera IPv4 de `tailscale ip -4`. Nunca 0.0.0.0 ni `::`."""
     bind = str(cfg.get("bind") or "127.0.0.1").strip()
     if bind == "auto":
         rc, out, _ = (runner or server.default_runner)([cfg.get("tailscale_bin") or "tailscale", "ip", "-4"])
@@ -74,18 +66,13 @@ def resolve_bind(cfg, runner=None):
 
 
 def plan_listeners(host, port, local_listener=True):
-    """[(host, port)] a abrir: la IP configurada y, si no es loopback, también 127.0.0.1 (CLI local)."""
     out = [(host, port)]
     if local_listener and not _is_loopback(host):
         out.append(("127.0.0.1", port))
     return out
 
 
-# ---------------------------------------------------------------- token
-
 def ensure_token(path, rotate=False):
-    """Crea (0600, con `secrets.token_urlsafe`) el archivo del bearer si falta -> "created"; "exists" si ya está;
-    "rotated" si `rotate`. El token NUNCA se devuelve ni se imprime."""
     path = os.path.expanduser(path)
     os.makedirs(os.path.dirname(path) or ".", mode=0o700, exist_ok=True)
     existed = os.path.exists(path)
@@ -109,10 +96,7 @@ def ensure_token(path, rotate=False):
     return "rotated" if existed else "created"
 
 
-# ---------------------------------------------------------------- validación
-
 def _writable_target(path):
-    """El ancestro existente más cercano de `path` admite escritura (para crear el directorio de la DB)."""
     p = os.path.abspath(path)
     while p and not os.path.exists(p):
         parent = os.path.dirname(p)
@@ -123,7 +107,6 @@ def _writable_target(path):
 
 
 def check_config(cfg, runner=None, which=shutil.which):
-    """(errores, avisos) de la configuración del agente. Solo mira rutas y permisos: nunca lee token ni webhooks."""
     errs, warns = [], []
     mode = cfg.get("auth")
     if mode not in server.AUTH_MODES:
@@ -189,10 +172,7 @@ def check_config(cfg, runner=None, which=shutil.which):
     return errs, warns
 
 
-# ---------------------------------------------------------------- retención de eventos
-
 def prune_events(conn, days, now=None):
-    """Borra eventos (y sus entregas) más viejos que `days` días. Devuelve cuántos eventos se borraron."""
     cut = (time.time() if now is None else now) - float(days) * 86400
     with db.tx():
         n = conn.execute("DELETE FROM events WHERE ts<?", (cut,)).rowcount
@@ -200,26 +180,20 @@ def prune_events(conn, days, now=None):
     return max(0, n)
 
 
-# ---------------------------------------------------------------- puente del motor
-
 def engine_emitter(conn, cfg, poster=None, on_emit=None):
-    """`emit_fn` para el motor dentro del agente (misma firma y resultado que `chopshop.events.emit`): primero guarda el
-    sobre en el bus (con el mismo `ts` en segundos que la línea de events.jsonl, así `import_legacy` la reconoce y no la
-    duplica) y después hace lo de siempre (events.jsonl + suscripciones de state.json, p. ej. el `notify` de reacciones)."""
     def emit_fn(st, event, project, body, adhoc_files=None, log=True, only=None):
         ts = state.now()
         try:
             seq = events.emit(conn, cfg, event, project, body, poster=poster, ts=envelope.epoch(ts))
             if on_emit:
-                on_emit(seq)                     # despierta a /stream
-        except Exception:  # noqa: BLE001 - el bus no debe frenar al motor
+                on_emit(seq)
+        except Exception:
             logging.getLogger("chopshop.agent").exception("no pude registrar %s en el bus", event)
         return legacy_events.emit(st, event, project, body, adhoc_files, log=log, only=only, ts=ts)
     return emit_fn
 
 
 def engine_has_work(st=None):
-    """Hay algún lote que `engine.tick` todavía procesaría (mismo criterio con el que tick los salta)."""
     st = st if st is not None else state.read()
     for b in st.get("batches", {}).values():
         if not (all(t["done"] for t in b["tasks"]) and (b.get("done_notified") or (b.get("graph") and graph.finished(st, b)))):
@@ -227,11 +201,7 @@ def engine_has_work(st=None):
     return False
 
 
-# ---------------------------------------------------------------- servicio
-
 class AgentService:
-    """Ensambla módulos + servidor + hilos. `start()` → escucha y trabaja; `stop()` → parada ordenada (idempotente)."""
-
     def __init__(self, cfg, conn=None, collector=None, t3=None, runner=None, poster=None,
                  orchestrator_fn=None, clock=time.time, maint_interval=MAINT_INTERVAL, maint_first=MAINT_FIRST, compact_every=COMPACT_EVERY,
                  engine_tick=None, stream_opts=None, automations=None,
@@ -258,7 +228,7 @@ class AgentService:
             self.emit_envelope, clock=clock, store=automations_mod.MetaStore(self.conn), enabled=acfg.get("enabled", True))
         self._auto_cursor = None
         self._auto_loaded = None
-        self._wake_seats = {}                       # hilo despertado -> (escritorio, desde) pendiente de sentar
+        self._wake_seats = {}
         rcfg = cfg.get("roles") or {}
         self.roles = roles or roles_mod.Roles(
             self.conn, self._emit_role, assign_fn=self._seat_wake, clock=clock, enabled=bool(rcfg.get("enabled", False)),
@@ -268,7 +238,6 @@ class AgentService:
             self.github = github.GitHubPoller(self.conn, cfg, self.emit, runner=gh_runner, clock=clock,
                                               projects_fn=gh_projects_fn)
         self.fader = halflife.Fader(self.conn, self.app.projector.current, self._fade_emit, clock=clock)
-        # un solo sondeo de `actions/runs` para el rack y `actions`: lo que uno pidió hace poco lo reutiliza el otro
         intervals = [float((cfg.get(k) or {}).get("interval_s") or d) for k, d in (("github", 45), ("forge", 60))]
         self.gh_feed = forge_github.RunsFeed(clock=clock, max_age=0.8 * max(10.0, min(intervals)))
         self.forge = None
@@ -284,11 +253,9 @@ class AgentService:
         self.servers, self.threads, self._serving = [], [], []
         self._stopped = False
 
-    WAKE_SEAT_TTL = 900.0           # s que se reintenta sentar un hilo despertado que la oficina aún no conoce
+    WAKE_SEAT_TTL = 900.0
 
     def _seat_wake(self, project, desk, thread_id, role, inheritance=None, title=None, cause=None):
-        """`assign_fn` de los roles permanentes: el hilo despertado se sienta por la oficina (`desk.assigned reason: wake`),
-        que lleva la tabla de ocupación y la herencia. Si la oficina aún no vio su `task.state`, se reintenta en `office_once`."""
         self._wake_seats[thread_id] = (desk, self.clock())
         self._retry_wake_seats()
 
@@ -309,8 +276,6 @@ class AgentService:
         return r
 
     def _fade_emit(self, event, project, body):
-        """Salida por semivida: un escritorio lo libera `office.release` (actualiza su tabla y sube a quien espere el rol);
-        el vestíbulo (`desk: null`) va directo al bus."""
         office = getattr(self, "office", None)
         if event == "desk.released" and body.get("desk") and office is not None:
             occ = (office.desk(body["desk"]) or {}).get("occupant") or {}
@@ -319,32 +284,27 @@ class AgentService:
             return None
         return self.emit(event, project, body)
 
-    # -- API común de los módulos
     def emit(self, event, project, body=None):
-        body = halflife.stamp(self.conn, event, body)   # el `touched_at` de un toque viaja en cada `task.state` del hilo
+        body = halflife.stamp(self.conn, event, body)
         seq = events.emit(self.conn, self.cfg, event, project, body, poster=self.poster)
-        self.app.stream.bus.publish(seq)            # despierta a los clientes de /stream
+        self.app.stream.bus.publish(seq)
         return seq
 
     def emit_office(self, type, project, body, **kw):
-        """Sobre de la oficina (`desk.*`, `office.changed`) -> bus + `/stream`."""
         env = events.emit_envelope(self.conn, self.cfg, type, project, body, poster=self.poster, ts=self.clock(), **kw)
         if env:
             self.app.stream.bus.publish(env["seq"])
         return env
 
     def emit_envelope(self, env):
-        """Sobre parcial de una automatización -> bus (mismo `emit`, con los metadatos del sobre)."""
         return automations_mod.bus_emit(self.conn, self.cfg, env, poster=self.poster)
 
     def _emit_role(self, env):
-        """Sobre de los roles (`desk.*`) -> bus (valida el esquema del tipo) y despierta a /stream."""
         stored = self.emit_envelope(env)
         self.app.stream.bus.publish(stored.get("seq") if stored else None)
         return stored
 
     def emit_forge(self, type, project, body, severity=None):
-        """Tipo nuevo del agente (`forge.repo.state` del rack, `forge.run.state` de actions) -> bus validado + /stream."""
         env = events.emit_envelope(self.conn, self.cfg, type, project, body, severity=severity, poster=self.poster)
         if env:
             self.app.stream.bus.publish(env["seq"])
@@ -352,10 +312,8 @@ class AgentService:
 
     @property
     def address(self):
-        """(host, puerto) del listener principal (el puerto real si se pidió 0)."""
         return self.servers[0].server_address[:2] if self.servers else None
 
-    # -- arranque
     def start(self, background=True):
         host = resolve_bind(self.cfg, self.runner)
         port = int(self.cfg.get("port"))
@@ -403,7 +361,7 @@ class AgentService:
             self._spawn("http-%s" % s.server_address[0], s.serve_forever, 0.2)
         try:
             self.emit("agent_started", None, {"version": __version__})
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.exception("no pude registrar agent_started")
         log.info("chopshop-agent %s en %s escuchando en %s (auth=%s)", __version__, self.app.machine_id,
                  ", ".join("%s:%s" % s.server_address[:2] for s in self.servers), self.auth.mode)
@@ -419,11 +377,10 @@ class AgentService:
             return
         try:
             self.import_legacy_once()
-        except Exception:  # noqa: BLE001 - la migración es opcional
+        except Exception:
             log.exception("no pude importar events.jsonl")
 
     def import_legacy_once(self):
-        """Importa lo añadido a events.jsonl desde la última vez (idempotente por desplazamiento + deduplicación)."""
         res = events.import_legacy(self.conn, home.events_log(), self.cfg.get("machine_id"))
         if res["imported"]:
             log.info("importados %d eventos de events.jsonl (%d omitidos)", res["imported"], res["skipped"])
@@ -431,14 +388,11 @@ class AgentService:
         return res
 
     def engine_once(self):
-        """Una pasada del motor con el bus inyectado; nada si no hay lotes con trabajo en state.json."""
         if not os.path.exists(home.state_path()) or not engine_has_work():
             return None
         return self.engine_tick(None, None, lambda m: log.info("motor: %s", m), emit_fn=self.engine_emit)
 
-    # -- hilos
     def _listener(self, name, res, exc=None):
-        """`listener.state` del hilo tras un ciclo (nunca lanza: la sala de máquinas no frena a nadie)."""
         if self.listeners is None:
             return
         state, error, backoff = "ok", None, 0
@@ -450,7 +404,7 @@ class AgentService:
             state, error, backoff = "degraded", "GitHub degradado (cuota o gh)", self.github.until - self.clock()
         try:
             self.listeners.report(name, state, error, backoff)
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.debug("no pude publicar listener.state de %s", name, exc_info=True)
 
     def _loop(self, name, fn, interval):
@@ -459,7 +413,7 @@ class AgentService:
                 res = fn()
                 self.runtime.ok(name)
                 self._listener(name, res)
-            except Exception as e:  # noqa: BLE001 - un fallo no mata el hilo
+            except Exception as e:
                 if self.runtime.fail(name, e):
                     log.warning("hilo %s: %s: %s", name, type(e).__name__, e)
                 self._listener(name, None, e)
@@ -476,8 +430,6 @@ class AgentService:
         return res
 
     def automations_once(self):
-        """Una pasada: relee perfiles (cada AUTOMATIONS_RELOAD s), despacha los sobres nuevos del bus y revisa horarios.
-        El cursor vive en `meta`; la primera vez en una DB nueva empieza en la cabeza (no reprocesa el historial)."""
         now = self.clock()
         if self._auto_loaded is None or now - self._auto_loaded >= AUTOMATIONS_RELOAD:
             self.automations.reload()
@@ -501,7 +453,6 @@ class AgentService:
         return fired
 
     def roles_once(self):
-        """Una pasada de los roles permanentes (sobres nuevos del bus con cursor propio, horarios y despertares vivos)."""
         return self.roles.once(events.list_after, events.last_seq, self.clock())
 
     def _maintenance(self):
@@ -519,7 +470,6 @@ class AgentService:
             self.conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
         return n
 
-    # -- parada
     def request_stop(self):
         self.stop_event.set()
 
@@ -533,7 +483,7 @@ class AgentService:
                 if s in self._serving:
                     s.shutdown()
                 s.server_close()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
         self._serving = []
 
@@ -542,39 +492,35 @@ class AgentService:
             return
         self._stopped = True
         self.stop_event.set()
-        self.app.stream.close()                     # corta las conexiones SSE (sus hilos son daemon)
+        self.app.stream.close()
         self._close_servers()
         end = time.monotonic() + STOP_TIMEOUT
         for t in self.threads:
             t.join(max(0.1, end - time.monotonic()))
-        self.automations.wait_idle(max(0.1, end - time.monotonic()))   # los scripts en curso tienen su propio timeout
+        self.automations.wait_idle(max(0.1, end - time.monotonic()))
         alive = [t.name for t in self.threads if t.is_alive()]
         if alive:
             log.warning("hilos que no terminaron a tiempo: %s", ", ".join(alive))
         events.flush(5)
-        events.cancel_pending()                 # reintentos/debounce pendientes no sobreviven a la conexión
+        events.cancel_pending()
         if self.owns_conn and not alive:
             try:
                 self.conn.close()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
         log.info("chopshop-agent detenido")
 
-
-# ---------------------------------------------------------------- unidad systemd
 
 PLACEHOLDER = re.compile(r"@[A-Z_]+@")
 
 
 def _collapse(path, home_dir):
-    """Ruta -> forma para systemd: lo que cuelga de $HOME pasa a `%h`; el resto escapa `%`."""
     if home_dir and (path == home_dir or path.startswith(home_dir.rstrip("/") + "/")):
         return "%h" + path[len(home_dir.rstrip("/")):].replace("%", "%%")
     return path.replace("%", "%%")
 
 
 def _quote(arg):
-    """Argumento de ExecStart= entre comillas si hace falta ($ escapado; %h se conserva)."""
     arg = arg.replace("$", "$$")
     return '"%s"' % arg.replace("\\", "\\\\").replace('"', '\\"') if re.search(r'[\s"\'\\]', arg) else arg
 
@@ -589,7 +535,6 @@ def default_exec(environ=None):
 
 
 def render_unit(cfg, exec_path=None, extra_rw=(), template=None, environ=None):
-    """Texto de la unidad `chopshop-agent.service` con las rutas del entorno actual. No escribe nada."""
     env = os.environ if environ is None else environ
     home_dir = os.path.expanduser(env.get("HOME") or "~")
     with open(template or UNIT_TEMPLATE, encoding="utf-8") as f:
@@ -597,7 +542,7 @@ def render_unit(cfg, exec_path=None, extra_rw=(), template=None, environ=None):
     exe = os.path.expanduser(exec_path) if exec_path else default_exec(env)
     rw = [os.path.dirname(cfg.get("db_path") or ""), home.home()]
     rw += list((cfg.get("service") or {}).get("read_write_paths") or []) + list(extra_rw)
-    if not (cfg.get("t3") or {}).get("origin"):    # T3 local: su CLI (`t3 auth pairing create`) escribe en su carpeta de datos
+    if not (cfg.get("t3") or {}).get("origin"):
         rw.append(env.get("T3CODE_HOME") or os.path.join(home_dir, ".t3"))
     seen, rw_out = set(), []
     for p in rw:
@@ -628,8 +573,6 @@ def render_unit(cfg, exec_path=None, extra_rw=(), template=None, environ=None):
         raise ServiceError("la plantilla tiene marcadores sin resolver: %s" % ", ".join(sorted(set(left))))
     return rendered
 
-
-# ---------------------------------------------------------------- CLI
 
 def _dur(seconds):
     s = int(seconds or 0)
@@ -671,7 +614,6 @@ def cmd_run(a, out, err, runner):
     except (ServiceError, ValueError) as e:
         print("error: %s" % e, file=err)
         return 2
-    # los manejadores van ANTES de abrir el puerto: una señal temprana solo marca la parada y start() termina limpio
     old = {sig: signal.signal(sig, lambda *_: svc.request_stop()) for sig in (signal.SIGTERM, signal.SIGINT)}
     try:
         svc.start()
@@ -711,7 +653,7 @@ def cmd_status(a, out, err, runner):
         ag = snap["agent"]
         print("chopshop-agent %s en %s (api %s) — activo %s" % (health["version"], health["machine_id"], health["api_version"],
                                                                  _dur(health["uptime"])), file=out)
-        age = lambda v: "-" if v is None else "%.1fs" % v  # noqa: E731
+        age = lambda v: "-" if v is None else "%.1fs" % v
         print("  T3: %s · última muestra: %s · último sondeo: %s" % (
             {True: "ok", False: "caído", None: "sin datos"}[ag["t3_ok"]], age(ag["last_sample_age"]), age(ag["last_poll_age"])),
             file=out)

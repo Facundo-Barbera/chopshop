@@ -1,6 +1,5 @@
 import SwiftUI
 
-/// Telón de fondo de la oficina: grafito en oscuro, papel cálido en claro.
 @available(macOS 26.0, *)
 struct IsoBackdrop: View {
     @Environment(\.colorScheme) private var scheme
@@ -14,7 +13,6 @@ struct IsoBackdrop: View {
     }
 }
 
-/// Lo que define la escena de la oficina o del grafo: si cambia, se reconstruye.
 struct LiveSceneKey: Equatable {
     let graph: MockGraph
     let tasks: [String: MockTask]
@@ -23,9 +21,6 @@ struct LiveSceneKey: Equatable {
 @available(macOS 26.0, *)
 struct IsoAlert: Identifiable { let id: String; let label: String; let title: String; let visual: NodeVisual }
 
-/// La oficina isométrica: salas por rango, escritorios por tarea, cables con partículas, barra de vidrio con lo que te necesita,
-/// cámara que se acerca al escritorio elegido e inspector de vidrio.
-/// Origen de tiempo de la demo: la escena sale del reproductor en el instante `time`.
 @available(macOS 26.0, *)
 struct DemoFeed { let playback: DemoPlayback; let time: Double }
 
@@ -91,7 +86,6 @@ public struct IsoOfficeView: View {
                 withAnimation(.snappy(duration: 0.22)) { selected = (h == selected) ? nil : h }
             })
 
-            // barra flotante de vidrio arriba
             if let d = demo, sc.desks.isEmpty {
                 VStack(spacing: 6) {
                     Text("Sin plan todavía").font(.system(size: 15, weight: .medium))
@@ -127,7 +121,6 @@ public struct IsoOfficeView: View {
             }
         }
         .clipped()
-        // En vivo el grafo y las tareas cambian: se rehace la escena (la cámara y la selección viven aparte y se conservan).
         .onChange(of: LiveSceneKey(graph: graph, tasks: tasks)) { _, k in
             guard demo == nil else { return }
             scene = IsoScene(graph: k.graph, tasks: k.tasks)
@@ -169,7 +162,6 @@ public struct IsoOfficeView: View {
     }
 }
 
-/// Barra flotante de vidrio líquido con lo que te necesita; al pulsar uno, la cámara viaja a su escritorio.
 @available(macOS 26.0, *)
 struct IsoAttentionBar: View {
     let items: [IsoAlert]
@@ -201,7 +193,6 @@ struct IsoAttentionBar: View {
     }
 
     @ViewBuilder private var barBackground: some View {
-        // Sin el SDK de macOS 26 (Xcode < 26) no existe glassEffect: se queda el sustituto plano.
         #if compiler(>=6.2)
         if flat { flatBar } else { Color.clear.glassEffect(.regular, in: Capsule()) }
         #else
@@ -216,8 +207,6 @@ struct IsoAttentionBar: View {
             .shadow(color: .black.opacity(scheme == .dark ? 0.35 : 0.10), radius: 10, y: 4)
     }
 }
-
-// MARK: - Previews
 
 @available(macOS 26.0, *)
 private func isoPreviewData(_ project: String) -> (MockGraph, [String: MockTask], [String: String]) {

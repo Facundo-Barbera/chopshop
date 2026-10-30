@@ -1,8 +1,5 @@
 import Foundation
 
-/// Proyección `state` del agente (docs/agent-api.md «GET /state»), plegada con `apply`: la MISMA regla que
-/// `apps/agent/chopshop/agent/projection.py`. `GET /state` == `fold(sobres)` (hay tests con los fixtures dorados del agente).
-/// Cada sobre trae el estado completo de su sujeto, así que aplicar es un upsert idempotente: un sobre con `seq <= headSeq` se ignora.
 public struct LiveState: Equatable, Sendable {
     public struct Attention: Hashable, Sendable {
         public var key: String
@@ -24,7 +21,6 @@ public struct LiveState: Equatable, Sendable {
         public var tasks: [JSONValue.Object] = []
         public var graphs: [JSONValue.Object] = []
         public var attention: [Attention] = []
-        /// v3: oficina por escritorios (nil = el proyecto no declara `office:` o el agente es anterior a la v3).
         public var office: Office?
     }
 
@@ -36,15 +32,10 @@ public struct LiveState: Equatable, Sendable {
     public var ts: String?
     public var machineHealth: JSONValue.Object?
     public var projects: [Project] = []
-    /// Últimos 50 sobres, el más nuevo primero.
     public var recent: [Envelope] = []
-    /// v3: hilos activos sin rol (y los que esperan escritorio), de todos los proyectos. Orden `(company, project, since)`.
     public var lobby: [LobbyEntry] = []
-    /// v3: listeners, automatizaciones, suscripciones y rack (LiveStateOffice.swift).
     public var machineRoom = MachineRoomState()
 
-    // Lo siguiente NO viene en la proyección del agente (la proyección solo guarda el resumen de la atención): el cliente lo recuerda
-    // de los sobres que ve, para pintar las opciones de una pregunta, el historial de respuestas y las gráficas de la máquina.
     public struct Question: Hashable, Sendable {
         public var request: String
         public var summary: String
@@ -63,20 +54,14 @@ public struct LiveState: Equatable, Sendable {
         public var ram: [Double] = []
         public var run: [Double] = []
     }
-    /// Preguntas abiertas por `kind:id` del sujeto.
     public var questions: [String: Question] = [:]
-    /// Respuestas por id de tarea (las más nuevas al final, tope 5).
     public var answered: [String: [Answered]] = [:]
-    /// Últimas muestras de `machine.health` por máquina (tope 40).
     public var series: [String: Series] = [:]
 
     public init(machine: String? = nil) { self.machine = machine }
 
     public func project(_ name: String) -> Project? { projects.first { $0.name == name } }
 
-    // MARK: - Reductor
-
-    /// Función pura: estado nuevo con el sobre aplicado.
     public func applying(_ env: Envelope) -> LiveState {
         var s = self
         s.apply(env)
@@ -157,7 +142,6 @@ public struct LiveState: Equatable, Sendable {
                 if typ == "graph.done", new["status"] == nil { new["status"] = .string("done") }
                 Self.upsert(&projects[pi].graphs, key: "id", value: gid, new)
             } else if typ == "node.state", let gid = body["graph"]?.string, !gid.isEmpty {
-                // cuerpo plano: {graph, node: id, label, phase, deps, task}; también se acepta node como objeto
                 var node: JSONValue.Object
                 if let o = body["node"]?.object { node = o }
                 else {
@@ -186,7 +170,7 @@ public struct LiveState: Equatable, Sendable {
                         summary: Self.nonEmpty(body["summary"]?.string) ?? Self.nonEmpty(body["note"]?.string) ?? env.subject?.title))
                     projects[pi].attention.sort { $0.seq < $1.seq }
                 } else {
-                    questions.removeValue(forKey: key)      // el sujeto ya no espera: su pregunta (si la había) se cerró
+                    questions.removeValue(forKey: key)
                 }
             }
             projects[pi].counts = Self.counts(projects[pi])
@@ -198,13 +182,10 @@ public struct LiveState: Equatable, Sendable {
 
     static func nonEmpty(_ s: String?) -> String? { s.flatMap { $0.isEmpty ? nil : $0 } }
 
-    /// Opciones de una pregunta: cadenas, u objetos `{label, …}` (forma de T3).
     static func optionLabels(_ v: JSONValue?) -> [String] {
         (v?.array ?? []).compactMap { $0.string ?? $0["label"]?.string }
     }
 
-    /// running (running/preparing), queued, waiting (sin atención), done (done/settled), failed, stuck (último sobre warn/error y sin
-    /// terminar), needs_human (atención human/approval), waiting_bot (atención bot).
     static func counts(_ p: Project) -> [String: Int] {
         var c = Dictionary(uniqueKeysWithValues: ["running", "queued", "waiting", "stuck", "needs_human", "waiting_bot", "done", "failed"].map { ($0, 0) })
         for t in p.tasks {
@@ -221,9 +202,6 @@ public struct LiveState: Equatable, Sendable {
         return c
     }
 
-    // MARK: - Desde `GET /state` / evento SSE `state`
-
-    /// Lee la proyección completa que manda el agente (evento `state`). Tolerante: ignora lo que no conoce.
     public init?(json: JSONValue) {
         guard let o = json.object, o["projects"]?.array != nil else { return nil }
         self.init(machine: o["machine"]?.string)
@@ -249,7 +227,6 @@ public struct LiveState: Equatable, Sendable {
         recent = (o["recent"]?.array ?? []).compactMap(Envelope.init(json:))
         lobby = (o["lobby"]?.array ?? []).compactMap(LobbyEntry.init(json:))
         machineRoom = o["machine_room"].map(MachineRoomState.init(json:)) ?? MachineRoomState()
-        // Reconstruye lo que no trae la proyección con los sobres recientes (del más viejo al más nuevo).
         var replay = LiveState(machine: machine)
         for e in recent.reversed() where e.type == "question.opened" || e.type == "question.answered" || e.type == "machine.health" {
             var e2 = e; e2.seq = nil; replay.apply(e2)

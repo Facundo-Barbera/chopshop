@@ -1,8 +1,5 @@
 import SwiftUI
 
-/// Contenido del inspector del armazón: un panel fijo (lo que eran las pantallas Preguntas, Actividad, Lotes, Reacciones, Sala de
-/// máquinas y Máquinas) o el detalle de lo elegido en el mundo (un proyecto o un hilo). `flat`: sin ScrollView ni materiales
-/// (capturas: ImageRenderer no los pinta).
 @available(macOS 26.0, *)
 struct ShellInspectorView: View {
     @ObservedObject var shell: ShellController
@@ -15,7 +12,6 @@ struct ShellInspectorView: View {
         Group {
             switch shell.state.inspector {
             case .panel(.machineRoom)?:
-                // la sala es ancha: el inspector se abre a 640 con ella
                 ShellPanelFrame(title: ShellPanel.machineRoom.title, flat: flat, close: close) {
                     if machineRoom.isEmpty {
                         ShellEmpty("La sala de máquinas está vacía", "Aparece cuando el agente (api_version 3) publique listeners, automatizaciones o el rack.")
@@ -50,7 +46,6 @@ struct ShellInspectorView: View {
     }
 }
 
-/// Cabecera (título + cerrar) y cuerpo desplazable.
 @available(macOS 26.0, *)
 struct ShellPanelFrame<Content: View>: View {
     let title: String
@@ -104,8 +99,6 @@ private func sectionTitle(_ t: String) -> some View {
     Text(t).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
 }
 
-// MARK: - Atención (antes: Preguntas)
-
 @available(macOS 26.0, *)
 struct ShellAttentionPanel: View {
     @ObservedObject var shell: ShellController
@@ -137,8 +130,6 @@ struct ShellAttentionPanel: View {
     }
 }
 
-// MARK: - Actividad
-
 @available(macOS 26.0, *)
 struct ShellActivityPanel: View {
     let snapshot: MockSnapshot
@@ -162,8 +153,6 @@ struct ShellActivityPanel: View {
         }
     }
 }
-
-// MARK: - Lotes (y el progreso de los grafos)
 
 @available(macOS 26.0, *)
 struct ShellBatchesPanel: View {
@@ -217,8 +206,6 @@ struct ShellBatchCard: View {
     }
 }
 
-// MARK: - Reacciones
-
 @available(macOS 26.0, *)
 struct ShellReactionsPanel: View {
     @ObservedObject var shell: ShellController
@@ -261,8 +248,6 @@ struct ShellReactionsPanel: View {
     }
 }
 
-// MARK: - Máquinas
-
 @available(macOS 26.0, *)
 struct ShellMachinesPanel: View {
     let machines: [MockMachine]
@@ -300,8 +285,6 @@ struct ShellMachinesPanel: View {
         }
     }
 }
-
-// MARK: - Proyecto elegido (un piso)
 
 @available(macOS 26.0, *)
 struct ShellProjectPanel: View {
@@ -344,8 +327,6 @@ struct ShellProjectPanel: View {
     }
 }
 
-// MARK: - Hilo elegido (un escritorio)
-
 @available(macOS 26.0, *)
 struct ShellThreadPanel: View {
     @ObservedObject var shell: ShellController
@@ -382,7 +363,7 @@ struct ShellThreadPanel: View {
             }
             HStack(spacing: 8) {
                 if let u = t.link { Button("Abrir en T3") { shell.actions?.open(u) }.controlSize(.small) }
-                if (t.state == .done || t.state == .stuck), shell.actions?.settle != nil {
+                if t.state == .done || t.state == .stuck, shell.actions?.settle != nil {
                     Button("Cerrar hilo (settle)") {
                         shell.run(ShellCommand(id: "settle:\(t.id)", title: "", kind: .settle(threadID: t.id, project: project)))
                     }

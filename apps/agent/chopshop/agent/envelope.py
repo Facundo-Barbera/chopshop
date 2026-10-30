@@ -1,25 +1,12 @@
-"""Sobre único de eventos (v1): lo comparten SQLite, `GET /events`, el webhook, SSE y las automatizaciones.
-
-    {"v":1, "id":<ULID>, "seq":<int|None>, "ts":<ISO-8601 UTC>, "machine":..., "project":<str|None>, "type":"task.state",
-     "severity":"info|notice|warn|error", "needs":None|"human"|"bot"|"approval",
-     "subject":{"kind","id","title"?,"url"?}, "cause":{"id":<ULID|None>,"depth":0}, "body":{...}}
-
-- `new_id()`: ULID (48 bits de ms + 80 aleatorios, base32 de Crockford, 26 caracteres). Ordenable y monotónico dentro del
-  proceso (en el mismo ms incrementa la parte aleatoria). `Ulid(clock, rand)` permite reloj/aleatorio inyectados en tests.
-- `build(type, project, body, ...)`: sobre nuevo con `severity`/`needs` por defecto de `SEVERITY`/`NEEDS`.
-- `LEGACY_MAP` + `from_legacy(event, body)`: traduce los nombres viejos (`thread_done`, `pending_question`, ...) al tipo
-  nuevo con su sujeto y cuerpo (el cuerpo nuevo es un superconjunto del viejo y lleva `legacy` con el nombre viejo).
-  `companions(fields)`: eventos que acompañan al principal (`question.opened` → `task.state` con `attention`).
-- `validate(envelope)`: esquema mínimo del sobre y del cuerpo por tipo; lanza `EnvelopeError`. `errors(envelope)` -> lista.
-Puro: sin I/O ni dependencias (solo stdlib)."""
 import os
 import re
 import threading
 import time
 from datetime import datetime, timezone
+from typing import Optional
 
 V = 1
-MAX_DEPTH = 3                     # anti-bucles: un evento con cause.depth > 3 se descarta
+MAX_DEPTH = 3
 SEVERITIES = ("info", "notice", "warn", "error")
 NEEDS_VALUES = (None, "human", "bot", "approval")
 SUBJECT_KINDS = ("task", "batch", "node", "graph", "thread", "machine", "pr", "issue", "automation", "agent",
@@ -36,18 +23,16 @@ OFFICE_TYPES = ("desk.assigned", "desk.released", "desk.waiting", "desk.note", "
 GITHUB_TYPES = ("github.issue.opened", "github.issue.updated", "github.issue.closed", "github.pr.opened",
                 "github.pr.updated", "github.pr.merged", "github.pr.review", "github.ci.completed", "github.push")
 
-# Tipos de §2.2 -> severidad y "quién tiene que actuar" por defecto (el emisor puede afinarlos por evento).
 SEVERITY = {
     "task.state": "info", "question.opened": "notice", "question.answered": "info", "approval.requested": "notice",
     "batch.created": "info", "batch.done": "info", "graph.state": "info", "node.state": "info", "graph.done": "info",
     "reaction.applied": "info", "machine.health": "info", "automation.ran": "info", "agent.started": "info",
 }
 SEVERITY.update({t: "info" for t in GITHUB_TYPES + FORGE_TYPES + OFFICE_TYPES})
-NEEDS = {t: None for t in SEVERITY}
+NEEDS: dict[str, Optional[str]] = {t: None for t in SEVERITY}
 NEEDS.update({"question.opened": "human", "approval.requested": "approval"})
 TYPES = tuple(SEVERITY)
 
-# Nombre viejo -> tipo nuevo (§2.2). Los nombres desconocidos pasan como `legacy.<nombre>`.
 LEGACY_MAP = {
     "thread_started": "task.state", "thread_done": "task.state", "thread_failed": "task.state",
     "thread_settled": "task.state", "task_done": "task.state",
@@ -67,8 +52,6 @@ class EnvelopeError(ValueError):
     pass
 
 
-# ---------------------------------------------------------------- ULID
-
 def _b32(n, length):
     out = []
     for _ in range(length):
@@ -78,8 +61,6 @@ def _b32(n, length):
 
 
 class Ulid:
-    """Generador de ULID monotónico. `clock()` -> epoch en s; `rand(n)` -> n bytes aleatorios."""
-
     def __init__(self, clock=None, rand=None):
         self.clock, self.rand = clock or time.time, rand or os.urandom
         self._lock = threading.Lock()
@@ -88,7 +69,7 @@ class Ulid:
     def __call__(self, ts=None):
         ms = int((self.clock() if ts is None else ts) * 1000)
         with self._lock:
-            if ms <= self._ms:                       # mismo ms (o reloj hacia atrás): se incrementa y conserva el orden
+            if ms <= self._ms:
                 ms, r = self._ms, self._r + 1
                 if r >> 80:
                     ms, r = ms + 1, int.from_bytes(self.rand(10), "big")
@@ -102,29 +83,23 @@ _default = Ulid()
 
 
 def new_id(ts=None):
-    """ULID nuevo (con `ts` epoch opcional para la parte temporal)."""
     return _default(ts)
 
 
 def id_time(ulid):
-    """Epoch (s) codificado en un ULID."""
     n = 0
     for c in ulid[:10]:
         n = n * 32 + _CROCKFORD.index(c)
     return n / 1000.0
 
 
-# ---------------------------------------------------------------- tiempo
-
 def iso(ts=None):
-    """Epoch -> ISO-8601 UTC con milisegundos y `Z` (`2026-10-29T16:12:03.412Z`)."""
     ts = time.time() if ts is None else float(ts)
     d = datetime.fromtimestamp(ts, timezone.utc)
     return d.strftime("%Y-%m-%dT%H:%M:%S.") + "%03dZ" % (d.microsecond // 1000)
 
 
 def epoch(s):
-    """ISO-8601 (con `Z`, `+0000` o `+00:00`) -> epoch. None si no se entiende."""
     if isinstance(s, (int, float)) and not isinstance(s, bool):
         return float(s)
     s = str(s or "").strip()
@@ -140,8 +115,6 @@ def epoch(s):
     return (d if d.tzinfo else d.replace(tzinfo=timezone.utc)).timestamp()
 
 
-# ---------------------------------------------------------------- construcción
-
 DEFAULT = object()
 
 
@@ -155,17 +128,15 @@ def subject(kind, id, title=None, url=None):
 
 
 def cause_of(parent):
-    """`cause` para un evento provocado por `parent` (un sobre o {"id","depth"}); None -> raíz."""
     if not parent:
         return {"id": None, "depth": 0}
-    if "type" in parent:                             # un sobre: el hijo va un nivel más hondo
+    if "type" in parent:
         return {"id": parent.get("id"), "depth": int((parent.get("cause") or {}).get("depth") or 0) + 1}
     return {"id": parent.get("id"), "depth": int(parent.get("depth") or 0)}
 
 
 def build(type, project=None, body=None, severity=None, needs=DEFAULT, subj=None, cause=None, machine=None,
           ts=None, id=None, seq=None):
-    """Sobre completo. `cause` = sobre padre o {"id","depth"}; `ts` epoch (por defecto ahora)."""
     ts = time.time() if ts is None else float(ts)
     return {"v": V, "id": id or new_id(ts), "seq": seq, "ts": iso(ts), "machine": machine, "project": project,
             "type": type, "severity": severity or SEVERITY.get(type, "info"),
@@ -175,7 +146,6 @@ def build(type, project=None, body=None, severity=None, needs=DEFAULT, subj=None
 
 
 def default_subject(type, project, body, machine=None):
-    """Sujeto razonable a partir del cuerpo cuando el emisor no lo da."""
     if type.startswith("github."):
         kind = "pr" if ".pr." in type or type == "github.ci.completed" else ("issue" if ".issue." in type else "pr")
         num = body.get("number")
@@ -185,7 +155,7 @@ def default_subject(type, project, body, machine=None):
         return subject("automation", body.get("automation") or "?")
     if type in ("desk.assigned", "desk.note") or type == "desk.released" and body.get("desk"):
         return subject("desk", body.get("desk") or "?", body.get("role"))
-    if type in ("desk.waiting", "desk.released"):          # vestíbulo: el sujeto es el hilo
+    if type in ("desk.waiting", "desk.released"):
         return subject("thread", body.get("thread_id") or "?", body.get("title"))
     if type == "office.changed":
         return subject("office", body.get("project") or project or "?")
@@ -213,10 +183,7 @@ def default_subject(type, project, body, machine=None):
     return subject("agent", machine or project or "?")
 
 
-# ---------------------------------------------------------------- nombres viejos
-
 def phase_for(status, settled=False):
-    """Estado de hilo de T3 -> `phase` de `task.state`."""
     if settled:
         return "settled"
     if status in ("running", "starting"):
@@ -242,7 +209,6 @@ def needs_for_attention(attention):
 
 
 def _task_state(b, phase, attention=None, extra=None):
-    """Cuerpo de `task.state` (superconjunto del cuerpo viejo)."""
     out = dict(b)
     out.update(extra or {})
     out.setdefault("thread_id", b.get("thread"))
@@ -268,7 +234,6 @@ def _task_subject(b):
 
 
 def from_legacy(event, body=None, machine=None):
-    """Nombre viejo + cuerpo viejo -> {"type","severity","needs","subject","body"} (cuerpo con `legacy`)."""
     b = dict(body or {})
     b.pop("legacy", None)
     typ = LEGACY_MAP.get(event)
@@ -283,7 +248,7 @@ def from_legacy(event, body=None, machine=None):
             phase = phase_for(st)
         if phase is None:
             phase = phase_for(st)
-            if phase in ("done", "failed"):            # thread_started de un hilo que ya terminó al verlo
+            if phase in ("done", "failed"):
                 phase = "running"
         nb = _task_state(b, phase, extra={"thread_id": b.get("thread_id") or b.get("thread")})
         sev = "error" if phase == "failed" else "info"
@@ -336,8 +301,6 @@ def from_legacy(event, body=None, machine=None):
 
 
 def companions(fields):
-    """Eventos que acompañan al principal: una pregunta o un permiso dejan la tarea en `waiting` con `attention`.
-    Devuelve [{"type","severity","needs","subject","body"}] (pueden ir vacíos)."""
     typ, b = fields["type"], fields["body"]
     if typ not in ("question.opened", "approval.requested") or not fields["subject"]["kind"] == "task":
         return []
@@ -353,8 +316,6 @@ def companions(fields):
     return [{"type": "task.state", "severity": "notice", "needs": needs_for_attention(attention),
              "subject": dict(fields["subject"]), "body": tb}]
 
-
-# ---------------------------------------------------------------- validación
 
 def _str(v):
     return isinstance(v, str) and v != ""
@@ -390,7 +351,6 @@ def _in(*vals):
 
 _GITHUB = {"repo": _str, "action": _str, "url": _opt_str, "title": _opt_str, "number": _opt_int}
 
-# Campos obligatorios del cuerpo por tipo: {campo: validador}. Los campos extra se permiten.
 SCHEMAS = {
     "task.state": {"phase": _in(*PHASES), "attention": _in(*ATTENTION), "thread_id": _opt_str, "settled": _in(True, False)},
     "question.opened": {"thread_id": _opt_str, "request_id": _str, "summary": _opt_str, "options": _list,
@@ -425,7 +385,6 @@ SCHEMAS.update({
 
 
 def errors(env):
-    """Lista de problemas del sobre (vacía = válido)."""
     if not isinstance(env, dict):
         return ["el sobre no es un objeto"]
     errs = []
@@ -469,7 +428,6 @@ def errors(env):
 
 
 def validate(env):
-    """Devuelve el sobre si es válido; si no, lanza `EnvelopeError` con todos los problemas."""
     errs = errors(env)
     if errs:
         raise EnvelopeError("; ".join(errs))

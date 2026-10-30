@@ -1,5 +1,3 @@
-"""Pasos 2 y 3: fanout / tick (lanzar, seguir, detectar pending_question) / gather / answer / settle.
-Regla anti-Telar: no hay sesiones aquí; cada hilo es un hilo de T3 y Chopshop solo guarda su id."""
 import re
 import time
 
@@ -8,9 +6,7 @@ from . import answers, events, graph, home, inbox, profile, reactions, settings,
 TERMINAL = {"completed", "failed", "cancelled", "interrupted", "rolled_back"}
 
 
-# ---------- ruteo ----------
 def route(prof, n_tasks, cli_host=None, max_parallel=None):
-    """Devuelve (host, cap, notas). Un lote más grande que el tope del host va al host de desborde (perfil o general.overflow_host)."""
     hs = profile.hosts()
     notes = []
     if cli_host:
@@ -65,7 +61,6 @@ def skip_reason(prof, t):
 
 
 def compose_prompt(prof, host, hostcfg, task):
-    """Las reglas del perfil viajan como preámbulo del prompt (las 'instrucciones de bot')."""
     lines = ["[Chopshop] Proyecto %s. Reglas:" % prof["project"]]
     if prof.get("can_run"):
         lines.append("- Puedes ejecutar: %s." % ", ".join(map(str, prof["can_run"])))
@@ -86,13 +81,11 @@ def compose_prompt(prof, host, hostcfg, task):
     return "\n".join(lines) + "\n\nTarea:\n" + task["prompt"]
 
 
-# ---------- llamadas a T3 ----------
 def _call(st_hostcfgs, host, tool, args=None):
     return t3.call(st_hostcfgs[host], host, tool, args)
 
 
 def resolve_project(prof, host, hostcfg):
-    """projectId de T3 en ese host (None si el perfil usa scratch)."""
     if prof.get("scratch"):
         return None
     import os
@@ -131,13 +124,12 @@ def launch_args(prof, batch, task, hostcfg):
     else:
         args["scratch"] = True
     m = prof.get("model")
-    if m:  # opcional: con provider: any no se fija modelo y T3 usa el default del proyecto
+    if m:
         inst, _, model = str(m).partition("/")
         args["modelSelection"] = {"instanceId": inst, "model": model}
     return args
 
 
-# ---------- fanout ----------
 def create_batch(prof, items, host, cap, notes):
     tasks = normalize_tasks(items)
     with state.locked() as st:
@@ -145,12 +137,12 @@ def create_batch(prof, items, host, cap, notes):
         batch = {"id": bid, "project": prof["project"], "host": host, "max_parallel": cap,
                  "created": state.now(), "notes": notes, "projectId": None, "tasks": []}
         if prof.get("reactions"):
-            batch["rx"] = True   # las reacciones solo aplican a lotes creados con reglas activas (los viejos no se tocan)
+            batch["rx"] = True
         for i, t in enumerate(tasks, 1):
             rec = {"id": "t-%s-%d" % (bid[2:], i), "title": t["title"], "prompt": t["prompt"], "issue": t.get("issue"),
                    "status": "queued", "threadId": None, "link": None, "t3status": None, "done": False,
                    "notified": [], "settled": False}
-            for k in ("role", "desk", "wake"):   # rol permanente despertado por agent/roles.py (aditivo)
+            for k in ("role", "desk", "wake"):
                 if t.get(k):
                     rec[k] = t[k]
             why = skip_reason(prof, t)
@@ -174,7 +166,6 @@ def dry_run(prof, items, host, cap, notes):
     return out
 
 
-# ---------- tick ----------
 def _refresh(hc, host, task):
     th = t3.call(hc, host, "t3_thread_read", {"threadId": task["threadId"], "limit": 1, "maxCharsPerItem": 1})
     return th.get("thread", {})
@@ -186,15 +177,11 @@ def _questions(hc, host, task):
 
 
 def tick(batch_id=None, adhoc_files=None, log=print, emit_fn=None):
-    """Una pasada: refresca hilos, emite eventos, lanza tareas en cola mientras haya cupo.
-    `emit_fn` (misma firma que `events.emit`) sustituye la emisión del motor, reacciones y grafos durante la pasada
-    (el agente inyecta su bus); por defecto, `events.emit` (events.jsonl + suscripciones de state.json)."""
     with events.using(emit_fn):
         return _tick(batch_id, adhoc_files, log)
 
 
 def _question_level(t, rid):
-    """(nivel, notify) de la reacción que tomó la pregunta `rid`: bot que la espera, humano escalado o ninguno."""
     bw, esc = t.get("bot_wait") or {}, t.get("escalation") or {}
     if bw.get("request") == rid:
         return "bot", bw.get("notify")
@@ -251,11 +238,10 @@ def _tick(batch_id, adhoc_files, log):
                                     "reply": 'chopshop answer %s "..."' % t["id"], "title": t.get("title"),
                                     "link": t.get("link"), "node": t.get("node"), "level": level, "notify": notify}
                             ok_all, had, res = events.send(st, "pending_question", b["project"], body, adhoc_files)
-                            if ok_all or not had:   # si hay destinatarios y alguno falló, se reintenta en la próxima pasada
+                            if ok_all or not had:
                                 t["notified"].append(rid)
                             changed.append(("pending_question", t["id"], res))
                             log("evento pending_question %s (%s) -> %s" % (t["id"], rid[:12], res or "sin destinatarios"))
-                        # permisos (comandos/ediciones): MCP no los lista ni los puede aprobar → solo se avisa
                         napp = max(npend - len(qs_now), 0)
                         if napp and napp > t.get("approval_notified", 0):
                             body = {"batch": b["id"], "task": t["id"], "thread": t["threadId"], "host": b["host"], "count": napp,
@@ -274,7 +260,7 @@ def _tick(batch_id, adhoc_files, log):
                             try:
                                 answer_inline(hc, b, t, aa["choice"], aa["request"], by="auto", st=st)
                                 t["pending"] = None
-                            except Exception as e:  # noqa: BLE001
+                            except Exception as e:
                                 log("! respuesta auto %s: %s" % (t["id"], str(e)[:160]))
                     else:
                         t["pending"] = None
@@ -308,10 +294,9 @@ def _tick(batch_id, adhoc_files, log):
                     log("! %s: %s" % (t["id"], str(e)[:200]))
             if b.get("graph"):
                 try:
-                    graph.step(st, b, prof, log, adhoc_files)   # emite con el emit_fn de esta pasada (events.using)
-                except Exception as ex:  # noqa: BLE001 - un fallo del grafo no debe frenar el resto del tick
+                    graph.step(st, b, prof, log, adhoc_files)
+                except Exception as ex:
                     log("! grafo %s: %s" % (b["graph"], str(ex)[:200]))
-            # lanzar en cola
             queued = [t for t in b["tasks"] if t["status"] == "queued"]
             if queued:
                 try:
@@ -326,7 +311,7 @@ def _tick(batch_id, adhoc_files, log):
                 t["_composed"] = compose_prompt(prof, b["host"], hc, t)
                 try:
                     r = t3.call(hc, b["host"], "t3_thread_launch", launch_args(prof, b, t, hc))
-                except t3.T3Error as e:   # sin reintento automático: T3 no tiene clave de idempotencia
+                except t3.T3Error as e:
                     t.pop("_composed", None)
                     t.update(status="launch_failed", done=True, last_error=str(e)[:300])
                     log("! lanzamiento falló %s: %s" % (t["id"], str(e)[:200]))
@@ -355,7 +340,6 @@ def wait(batch_id, timeout=900, interval=10, adhoc_files=None, log=print):
         time.sleep(interval)
 
 
-# ---------- answer / gather / settle ----------
 def _find_task(st, task_id):
     for b in st["batches"].values():
         for t in b["tasks"]:
@@ -398,19 +382,17 @@ def _record_answer(t, qq, ans, by):
 
 
 def _emit_answered(st, b, t, rid, ans, by):
-    """`question.answered` (needs: null): cierra la atención que abrió la pregunta."""
     since = (t.get("bot_wait") or {}).get("since") if (t.get("bot_wait") or {}).get("request") == rid else None
     body = {"thread_id": t.get("threadId"), "request_id": rid, "choice": _flat(list(ans.values())[0]) if ans else None,
             "by": by or "human", "latency_s": round(time.time() - since) if since else None, "batch": b["id"],
             "task": t["id"], "title": t.get("title"), "link": t.get("link")}
     try:
         events.send(st, "question.answered", b["project"], body)
-    except Exception:  # noqa: BLE001 - la respuesta ya llegó a T3; el aviso no debe romperla
+    except Exception:
         pass
 
 
 def answer_inline(hc, b, t, choice, request=None, by=None, st=None):
-    """Responde sin tomar el lock (para usar dentro de tick, que ya lo tiene)."""
     ans, qq, rid = _send_answer(hc, b["host"], t, choice, request)
     _record_answer(t, qq, ans, by)
     _emit_answered(st if st is not None else state.read(), b, t, rid, ans, by)
@@ -422,7 +404,7 @@ def answer(task_id, choice, request=None, by=None):
     st = state.read()
     b, t = _find_task(st, task_id)
     ans, qq, rid = _send_answer(hs[b["host"]], b["host"], t, choice, request)
-    try:   # historial local para la UI: qué se preguntó y qué se respondió
+    try:
         with state.locked() as st2:
             b2, t2 = _find_task(st2, task_id)
             _record_answer(t2, qq, ans, by)
@@ -433,7 +415,6 @@ def answer(task_id, choice, request=None, by=None):
 
 
 def stop(batch_id=None, task_id=None, log=print):
-    """Interrumpe el turno en curso de los hilos (t3_thread_interrupt). No archiva ni borra nada."""
     hs = profile.hosts()
     n = 0
     with state.locked() as st:
@@ -454,7 +435,6 @@ def stop(batch_id=None, task_id=None, log=print):
 
 
 def snapshot(events_limit=80):
-    """Vista de solo lectura del estado local (sin llamar a T3) para la UI y los bots."""
     import json as _json
     st = state.read()
     out = {"generated": state.now(), "home": home.home(),
@@ -518,7 +498,6 @@ def gather(batch_id):
 
 
 def settle(batch_id, log=print):
-    """Marca los hilos como settled (nunca archiva; no hay código que archive)."""
     hs = profile.hosts()
     n = 0
     with state.locked() as st:

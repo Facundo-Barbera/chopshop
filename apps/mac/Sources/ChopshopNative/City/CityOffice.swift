@@ -1,21 +1,16 @@
 import Foundation
 
-/// Lo que la ciudad lee del `office` de un proyecto en `GET /state` v3 (docs/agent-api.md «api_version 3»): la empresa, los pisos
-/// del perfil y qué hilo ocupa un escritorio de cada uno. Puro y tolerante (ignora lo que no conoce).
 public struct CityOffice: Equatable, Sendable {
     public struct Floor: Equatable, Sendable {
         public var index: Int
         public var name: String?
-        /// `thread_id` de los ocupantes de sus escritorios (retirados incluidos: un ocupante sigue en su piso).
         public var threads: Set<String>
     }
 
-    /// Topes del plan (los mismos que valida `chopshop profile check`).
     public static let maxFloorsPerProject = 4
     public static let maxFloorsPerBuilding = 16
 
     public var company: String?
-    /// Por índice, como mucho `maxFloorsPerProject`.
     public var floors: [Floor]
 
     public init?(json office: JSONValue.Object?) {
@@ -34,7 +29,6 @@ public struct CityOffice: Equatable, Sendable {
         floors = Array(fs.sorted { $0.index < $1.index }.prefix(Self.maxFloorsPerProject))
     }
 
-    /// Desde el `office` ya decodificado de `LiveState` (LiveStateOffice.swift): es lo que guarda `LiveState.Project.office`.
     public init?(_ office: LiveState.Office?) {
         guard let o = office else { return nil }
         company = o.company
@@ -44,6 +38,5 @@ public struct CityOffice: Equatable, Sendable {
         }.prefix(Self.maxFloorsPerProject))
     }
 
-    /// Índice del piso cuyo escritorio ocupa el hilo (nil = no ocupa ninguno: vestíbulo).
     public func floor(ofThread t: String) -> Int? { floors.first { $0.threads.contains(t) }?.index }
 }

@@ -1,13 +1,4 @@
 #!/usr/bin/env bash
-# Ensambla Chopshop.app listo para firmar. Reutiliza apps/mac/build.sh (UI + Swift + agente incrustado + icono) y le
-# aplica, vía PlistBuddy, lo que depende del release: bundle id, versiones, sistema mínimo y claves de Sparkle.
-# Así el Info.plist de desarrollo y el de release no divergen (cualquier clave nueva de build.sh se conserva).
-#
-# Entrada (env): SHORT_VERSION, BUILD_NUMBER (obligatorias); BUNDLE_ID (com.example.chopshop),
-#   MIN_MACOS_VERSION (13.0), UPDATES_BASE_URL (el feed es <URL>/appcast.xml), SPARKLE_ED_PUBLIC_KEY, SPARKLE_AUTO_UPDATE (false),
-#   SPARKLE_CHECK_INTERVAL (86400), APP_OUT (apps/mac/build/release/Chopshop.app),
-#   RELEASE_MODE=release|dryrun (en release faltar el feed o la clave pública es un error),
-#   BUILD_SCRIPT (solo para pruebas: sustituye a apps/mac/build.sh).
 set -euo pipefail
 # shellcheck source=lib.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
@@ -31,14 +22,13 @@ if [ "$MODE" = release ]; then
 fi
 if [ -n "$PUBKEY" ] && [ "$(b64_len "$PUBKEY")" != 32 ]; then die "SPARKLE_ED_PUBLIC_KEY no es base64 de 32 bytes"; fi
 
-# 1) UI (pnpm) + Swift + motor + Info.plist base: lo hace build.sh con la ruta de salida parametrizada
 log "build.sh -> $OUT"
 rm -rf "$OUT"
 CHOPSHOP_APP="$OUT" bash "${BUILD_SCRIPT:-$MAC_DIR/build.sh}"
 [ -f "$OUT/Contents/Info.plist" ] || die "build.sh no generó $OUT"
 PLIST="$OUT/Contents/Info.plist"
 
-plist_put() { # clave tipo valor
+plist_put() {
   local key="$1" type="$2" value="$3"
   case "$value" in *\"* | *$'\n'*) die "valor inválido para $key" ;; esac
   if [ "$type" != string ] && ! [[ "$value" =~ ^(true|false|[0-9]+)$ ]]; then die "valor inválido para $key"; fi
@@ -52,13 +42,11 @@ plist_put() { # clave tipo valor
 plist_del() { "$PLISTBUDDY" -c "Delete :$1" "$PLIST" >/dev/null 2>&1 || true; }
 plist_get() { "$PLISTBUDDY" -c "Print :$1" "$PLIST" 2>/dev/null || true; }
 
-# 2) Identidad y versiones
 plist_put CFBundleIdentifier string "$BUNDLE_ID"
 plist_put CFBundleShortVersionString string "$SHORT_VERSION"
 plist_put CFBundleVersion string "$BUILD_NUMBER"
 plist_put LSMinimumSystemVersion string "$MIN_MACOS_VERSION"
 
-# 2b) LaunchAgent del agente incrustado (si build.sh lo puso): Label y app asociada siguen al bundle id de release
 AGENT_PLIST="$OUT/Contents/Library/LaunchAgents/chopshop-agent.plist"
 if [ -f "$AGENT_PLIST" ]; then
   APP_PLIST="$PLIST"
@@ -71,14 +59,12 @@ if [ -f "$AGENT_PLIST" ]; then
   PLIST="$APP_PLIST"
 fi
 
-# 3) Sparkle: solo si hay feed y clave pública; si no (dev/dry-run sin vars) el updater queda desactivado
 if [ -n "$FEED" ] && [ -n "$PUBKEY" ]; then
   plist_put SUFeedURL string "$FEED"
   plist_put SUPublicEDKey string "$PUBKEY"
   plist_put SUEnableAutomaticChecks bool true
   plist_put SUAutomaticallyUpdate bool "$AUTO_UPDATE"
   plist_put SUScheduledCheckInterval integer "$CHECK_INTERVAL"
-  # Feed firmado (generate_appcast lo firma si ve esta clave) y firma verificada antes de extraer
   plist_put SURequireSignedFeed bool true
   plist_put SUVerifyUpdateBeforeExtraction bool true
 else
@@ -86,10 +72,8 @@ else
   for k in SUFeedURL SUPublicEDKey SUEnableAutomaticChecks SUAutomaticallyUpdate SUScheduledCheckInterval SURequireSignedFeed SUVerifyUpdateBeforeExtraction; do plist_del "$k"; done
 fi
 
-# 4) Sparkle.framework dentro del bundle (y rpath)
 bash "$RELEASE_SCRIPTS/embed-sparkle.sh" "$OUT"
 
-# 5) Comprobaciones: el plist quedó como se pidió y el binario puede correr en el sistema mínimo declarado
 [ "$(plist_get CFBundleIdentifier)" = "$BUNDLE_ID" ] || die "CFBundleIdentifier no quedó aplicado"
 [ "$(plist_get CFBundleShortVersionString)" = "$SHORT_VERSION" ] || die "CFBundleShortVersionString no quedó aplicado"
 [ "$(plist_get CFBundleVersion)" = "$BUILD_NUMBER" ] || die "CFBundleVersion no quedó aplicado"

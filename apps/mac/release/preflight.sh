@@ -1,12 +1,4 @@
 #!/usr/bin/env bash
-# Valida que existan TODOS los secrets/vars requeridos y lista los que faltan (solo nombres, nunca valores).
-#   preflight.sh <release|rollback>
-#   PREFLIGHT_MODE=release (por defecto) | dryrun
-# Se ejecuta en el primer job del workflow, antes de tocar keychain, red o credenciales. Los secrets llegan
-# como indicador, no como valor: el workflow pasa `'set'` si el secret existe y vacío si no (`secrets.X != ''`),
-# de modo que este job nunca ve su contenido.
-# En dryrun (sin firma Developer ID, sin notarización ni release) NO se exigen MACOS_CERT_P12_BASE64, MACOS_CERT_PASSWORD
-# ni SIGNING_IDENTITY; todo lo demás sí (la notarización, Sparkle y R2 también se prueban allí o se necesitarán después).
 set -euo pipefail
 # shellcheck source=lib.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
@@ -14,7 +6,6 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 SCOPE="${1:-}"
 MODE="${PREFLIGHT_MODE:-release}"
 
-# NOMBRE|tipo|para qué sirve (la lista completa y cómo obtenerlos está en docs/release.md)
 SPEC_VARS=(
   "APPLE_TEAM_ID|var|Team ID de Apple Developer (10 caracteres)"
   "BUNDLE_ID|var|bundle id de la app (p. ej. com.example.chopshop)"
@@ -40,7 +31,6 @@ SPEC_PUBLISH=(
 
 case "$SCOPE" in
   release) SPEC=("${SPEC_VARS[@]}" "${SPEC_SIGN[@]}" "${SPEC_PUBLISH[@]}") ;;
-  # El rollback solo publica un feed: no firma ni notariza
   rollback) SPEC=(
     "SPARKLE_ED_PUBLIC_KEY|var|clave pública EdDSA de Sparkle (generate_keys)"
     "R2_ACCOUNT_ID|var|Account ID de Cloudflare (endpoint S3 de R2)"
@@ -64,7 +54,6 @@ for spec in "${SPEC[@]}"; do
   fi
 done
 
-# Formato de las variables públicas que estén definidas (nunca de los secretos)
 bad_format=()
 if [ -n "${UPDATES_BASE_URL:-}" ] && ! [[ "$UPDATES_BASE_URL" =~ ^https://[^[:space:]?#]+$ ]]; then
   bad_format+=("UPDATES_BASE_URL debe ser una URL https:// sin query ni fragmento")

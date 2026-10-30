@@ -1,16 +1,11 @@
 import SwiftUI
 import simd
 
-// 3D "de verdad", pero proyectado a mano: cada rango (capa de dependencia) es un plano a distinta profundidad,
-// los nodos son tarjetas sobre ese plano. Se proyecta con perspectiva suave y cada tarjeta se dibuja con la
-// transformación afín que casa con su cuadrilátero proyectado (así el texto y el vidrio se inclinan de verdad).
-
 @available(macOS 26.0, *)
 struct SceneCard: Identifiable {
     let node: MockGraphNode
     let visual: NodeVisual
     let layer: Int
-    /// centro de la tarjeta en el mundo (x derecha, y arriba, z hacia el fondo)
     let c: SIMD3<Double>
     var id: String { node.id }
 }
@@ -52,7 +47,6 @@ struct GraphScene {
     func planeX(_ l: Int) -> Double { (Double(l) - Double(layers - 1) / 2) * Self.rankDX }
     func planeZ(_ l: Int) -> Double { (Double(l) - Double(layers - 1) / 2) * Self.rankDZ }
 
-    /// Ancestros y descendientes transitivos (el "camino" de un nodo).
     func neighborhood(of id: String) -> Set<String> {
         var out: Set<String> = [id]
         func up(_ x: String) { for p in preds[x] ?? [] where out.insert(p).inserted { up(p) } }
@@ -81,7 +75,6 @@ struct Camera {
         return P(pt: CGPoint(x: x1 * k * scale + offset.x, y: -y2 * k * scale + offset.y), k: k, z: z2)
     }
 
-    /// Transformación afín del rectángulo local (0,0,w,h; y hacia abajo) al cuadrilátero proyectado.
     static func affine(tl: CGPoint, tr: CGPoint, bl: CGPoint, w: Double, h: Double) -> CGAffineTransform {
         CGAffineTransform(a: (tr.x - tl.x) / w, b: (tr.y - tl.y) / w, c: (bl.x - tl.x) / h, d: (bl.y - tl.y) / h, tx: tl.x, ty: tl.y)
     }

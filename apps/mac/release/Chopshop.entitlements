@@ -1,8 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- Entitlements mínimos: la app no usa sandbox, JIT ni memoria ejecutable (WKWebView corre en procesos de Apple).
-     Con hardened runtime basta un diccionario vacío. No añadas disable-library-validation: Sparkle se
-     vuelve a firmar con la misma identidad Developer ID, así que la validación de librerías pasa. -->
 <plist version="1.0">
 <dict/>
 </plist>

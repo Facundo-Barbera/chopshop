@@ -2,8 +2,7 @@
 
 Un solo formato para todo lo que emite `chopshop-agent`: la tabla `events` (SQLite), `GET /events`, `/snapshot.events`, el
 webhook de los bots y, después, SSE (`/stream`) y las automatizaciones. Código: `apps/agent/chopshop/agent/envelope.py`.
-Ejemplos dorados (uno por tipo): `apps/agent/tests/fixtures/events/<tipo>.json`; secuencia realista de 3 proyectos para la
-app y los tests: `apps/agent/tests/fixtures/events/ui-fixture.jsonl`.
+Secuencia realista de 3 proyectos para la app: `apps/mac/Sources/ChopshopNative/Resources/ui-fixture.jsonl`.
 
 ## Sobre
 

@@ -1,6 +1,3 @@
-"""Configuración del agente: sección [agent] de ~/.config/chopshop/config.toml (ver config.example.toml) + entorno
-(`CHOPSHOP_AGENT__PORT=3791`, ...). Valores por defecto genéricos en `settings.DEFAULTS["agent"]`.
-Las URLs de webhook NUNCA van aquí: solo rutas a archivos que contienen la URL."""
 import os
 import socket
 

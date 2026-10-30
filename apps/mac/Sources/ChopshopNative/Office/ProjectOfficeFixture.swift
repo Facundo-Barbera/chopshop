@@ -1,10 +1,5 @@
 import Foundation
 
-/// El caso «chopshop · 46 hilos, 1 corriendo» (tests y `ChopshopSnap <salida> floor`): 1 hilo corriendo y 45 terminados, uno cada
-/// 7 min hacia atrás desde `now` (1 de cada 9 fallido), roles mac/agent/ui/docs o ninguno. Con `office: true`, el perfil declara un
-/// piso «Producto» (triage permanente, mac 4, agent 4, ui 3, docs 2) y los escritorios los ocupan los hilos más recientes de cada rol;
-/// los sin rol pasan por el vestíbulo; la sala de máquinas tiene dos repos y tres listeners. Misma escena que `Tests/ChopshopNativeTests/tools/make_office_layout_fixture.py` (que la
-/// escribe como `.jsonl` para el modo demo de la app). Datos inventados.
 public enum ProjectOfficeFixture {
     public static let project = "chopshop"
     public static let now = Date(timeIntervalSince1970: 1_793_300_000)
@@ -41,7 +36,6 @@ public enum ProjectOfficeFixture {
                       ["project": .string(project), "by": "profile", "company": "Personal", "half_life_s": 1800,
                        "floors": [["index": 0, "name": "Producto", "rooms": .array(rs)]]], "info"))
         }
-        // escritorio de cada hilo con rol: los más recientes de su rol, hasta llenar los escritorios
         var desk: [String: String] = [:]
         if office {
             for (r, n, _) in rooms {
@@ -63,7 +57,6 @@ public enum ProjectOfficeFixture {
             }
             if let end = t.end { e.append(task(end, t.failed ? "failed" : "done")) }
         }
-        // sala de máquinas: dos repos en el rack (uno con CI en curso) y los listeners del agente
         let t0 = now.timeIntervalSince1970
         for (repo, label, light) in [("<org>/chopshop", "chopshop", "amber"), ("<org>/chopshop-docs", "docs", "green")] {
             e.append((t0 - 120, "forge.repo.state", .init(kind: "repo", id: "github:\(repo)"),

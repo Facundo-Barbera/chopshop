@@ -1,29 +1,15 @@
-"""Notas de bots en escritorios para preparar el día (docs/plans/office-redesign.md §5, `POST /desks/<id>/notes`).
-
-Un bot (Grok) deja una nota en la bandeja de un escritorio; queda pendiente hasta que la consume el hilo que despierta en ese
-escritorio (rol permanente, `wake`) o el hilo activo en su próximo turno, o hasta que caduca (`ttl_s`, 24 h por defecto).
-Cada nota nueva emite `desk.note` con `pending` (notas sin consumir tras esta) para que la proyección pinte `notes_pending`.
-
-- `add(conn, desk, frm, text, ttl_s, now) -> {id, desk, from, text, created, expires}`; `body(note, pending)` = cuerpo de
-  `desk.note`.
-- `pending(conn, desk, now)` / `count(conn, desk, now)`: notas vivas (sin consumir y sin caducar), las más viejas primero.
-- `consume(conn, desk, now, by)`: marca las vivas como consumidas por `by` (id del hilo) y las devuelve, para el prompt.
-- `prompt_block(notes)`: texto para el prompt de arranque o un `t3_thread_send` (mensaje interno a T3, nunca externo).
-- `prune(conn, now, keep_s)`: borra consumidas/caducadas con más de `keep_s` (mantenimiento).
-- `declared_desk(desk)`: el escritorio según el perfil local (None si no existe o no es válido).
-Tabla propia `desk_notes`, creada de forma idempotente (no toca `user_version`)."""
 import time
 import uuid
 
 from . import db, envelope, layout
 
-MAX_TEXT = 2048                    # bytes UTF-8 (el sobre lo trunca a 2 KB)
+MAX_TEXT = 2048
 MAX_FROM = 64
-DEFAULT_TTL = 86400                # s
+DEFAULT_TTL = 86400
 MIN_TTL = 60
 MAX_TTL = 7 * 86400
-MAX_PENDING = 50                   # notas vivas por escritorio (la más vieja se descarta al pasarse)
-KEEP_S = 7 * 86400                 # consumidas/caducadas que se conservan antes de borrarlas
+MAX_PENDING = 50
+KEEP_S = 7 * 86400
 
 SCHEMA = ('CREATE TABLE IF NOT EXISTS desk_notes (id TEXT PRIMARY KEY, desk_id TEXT NOT NULL, "from" TEXT NOT NULL,'
           " text TEXT NOT NULL, created REAL NOT NULL, expires REAL NOT NULL, consumed REAL, consumed_by TEXT)",
@@ -31,23 +17,21 @@ SCHEMA = ('CREATE TABLE IF NOT EXISTS desk_notes (id TEXT PRIMARY KEY, desk_id T
 
 
 class NoteError(ValueError):
-    """Nota inválida; el mensaje llega al cliente."""
+    pass
 
 
 def ensure(conn):
-    with db.tx():                  # idempotente y barato; sin executescript (no hace COMMIT implícito)
+    with db.tx():
         for sql in SCHEMA:
             conn.execute(sql)
 
 
 def truncate(text, limit=MAX_TEXT):
-    """Corta a `limit` bytes UTF-8 sin partir caracteres."""
     raw = text.encode("utf-8")
     return text if len(raw) <= limit else raw[:limit].decode("utf-8", "ignore")
 
 
 def clean(frm, text, ttl_s=None):
-    """Valida los campos de `POST /desks/<id>/notes` -> (from, text, ttl_s) o NoteError."""
     if not isinstance(frm, str) or not frm.strip() or len(frm) > MAX_FROM or any(ord(c) < 32 for c in frm):
         raise NoteError("from debe ser un nombre (máx. %d caracteres, sin controles)" % MAX_FROM)
     if not isinstance(text, str) or not text.strip():
@@ -79,7 +63,7 @@ def add(conn, desk, frm, text, ttl_s=None, now=None):
                      (note["id"], desk, frm, note["text"], now, note["expires"]))
         extra = conn.execute("SELECT id FROM desk_notes WHERE desk_id=? AND consumed IS NULL AND expires>? "
                              "ORDER BY created DESC, rowid DESC LIMIT -1 OFFSET ?", (desk, now, MAX_PENDING)).fetchall()
-        for r in extra:                                  # bandeja llena: las más viejas caducan ya
+        for r in extra:
             conn.execute("UPDATE desk_notes SET expires=? WHERE id=?", (now, r["id"]))
     return note
 
@@ -100,7 +84,6 @@ def count(conn, desk, now):
 
 
 def consume(conn, desk, now, by=None):
-    """Marca como consumidas las notas vivas del escritorio y las devuelve (las más viejas primero)."""
     ensure(conn)
     with db.tx():
         rows = conn.execute("SELECT * FROM desk_notes WHERE desk_id=? AND consumed IS NULL AND expires>? "
@@ -118,13 +101,11 @@ def prune(conn, now, keep_s=KEEP_S):
 
 
 def body(note, pending_n):
-    """Cuerpo de `desk.note`."""
     return {"desk": note["desk"], "from": note["from"], "text": truncate(note["text"]), "pending": pending_n,
             "expires": envelope.iso(note["expires"])}
 
 
 def prompt_block(notes):
-    """Notas pendientes como bloque de texto para el prompt del hilo ("" si no hay)."""
     if not notes:
         return ""
     lines = ["Notas pendientes en tu escritorio (de los bots, para preparar el día):"]
@@ -134,11 +115,10 @@ def prompt_block(notes):
 
 
 def declared_desk(desk):
-    """Escritorio declarado en el perfil local de su proyecto: {id, project, floor, role, slot, permanent} o None."""
     p = layout.parse_desk_id(desk)
     if not p:
         return None
-    from .. import profile  # noqa: PLC0415
+    from .. import profile
     try:
         prof = profile.load(p[0])
     except profile.ProfileError:

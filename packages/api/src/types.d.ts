@@ -1,4 +1,3 @@
-// Tipos de la API de chopshop-agent (api_version 1). Fuente de verdad: docs/agent-api.md
 export interface MachineStats { cpus: number; load: number[]; cpu_pct: number; ram_total_mb: number; ram_avail_mb: number; ram_pct: number;
   swap_used_mb: number; disk_used_gb: number; disk_total_gb: number; disk_pct: number; os: string; uptime: number }
 export interface Group { name: string; cpu_pct: number; rss_mb: number; procs: number }
@@ -15,9 +14,7 @@ export interface Snapshot {
   agent: { version: string; uptime: number; t3_ok: boolean; last_sample_age: number; last_poll_age: number };
 }
 
-// --- vista para la UI (src/view.js) ---
 export type AgentStatus = "ok" | "unreachable" | "forbidden" | "unauthorized" | "incompatible" | "error";
-/** Resultado crudo de consultar a un agente; lo entrega la app nativa a la UI. */
 export interface AgentResult { name: string; status?: AgentStatus; error?: string; snapshot?: Snapshot | null }
 export interface AgentRow { name: string; label: string; status: AgentStatus; error: string; message: string; stale: boolean; age: number; info: Snapshot["agent"] | null; warning: string }
 export interface MachineView {
@@ -27,3 +24,6 @@ export interface MachineView {
   apps: AppGroup[]; projects: ProjectGroup[];
 }
 export interface View { hasData: boolean; state: Record<string, unknown>; machines: MachineView[]; agents: AgentRow[] }
+export interface Store { history: unknown; update(results: AgentResult[]): View }
+export function parseTs(ts: unknown): Date | null;
+export function createStore(opts?: { historyLen?: number; now?: () => number }): Store;

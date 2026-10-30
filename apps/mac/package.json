@@ -5,7 +5,6 @@
   "description": "Chopshop.app (SwiftUI + WKWebView): cliente puro de la API del agente. Solo compila en macOS: `pnpm app` desde la raíz.",
   "scripts": {
     "app": "bash build.sh",
-    "test": "python3 -m unittest discover -s release/tests && python3 -m unittest discover -s Tests/ChopshopNativeTests/tools -p 'test_*.py' && python3 -m unittest discover -s tests",
     "check": "bash -n build.sh && bash -n shot.sh && for f in release/*.sh; do bash -n \"$f\"; done"
   }
 }

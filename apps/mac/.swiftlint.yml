@@ -1,0 +1,31 @@
+included:
+  - Sources
+  - native/Sources/ChopshopPlayground
+  - native/Sources/ChopshopSnap
+excluded:
+  - Package.swift
+  - native/Package.swift
+custom_rules:
+  no_comments:
+    name: "Sin comentarios"
+    regex: "(//|/\\*)"
+    match_kinds:
+      - comment
+      - doccomment
+    message: "Comentarios prohibidos: el código debe explicarse solo."
+    severity: error
+disabled_rules:
+  - identifier_name
+  - line_length
+  - statement_position
+  - trailing_comma
+  - large_tuple
+  - cyclomatic_complexity
+  - function_parameter_count
+  - function_body_length
+  - type_body_length
+  - file_length
+  - type_name
+  - switch_case_alignment
+  - implicit_optional_initialization
+  - optional_data_string_conversion

@@ -1,8 +1,3 @@
-"""Paso 3: eventos. Se registran en ~/.chopshop/events.jsonl y se mandan por POST a webhooks.
-La URL del webhook se lee SIEMPRE de un archivo local (--webhook-file); nunca se imprime ni se registra.
-
-El motor (engine/reactions/graph) emite con `send(...)`, que usa la función inyectada con `using(emit_fn)` (misma firma que
-`emit`) o, por defecto, `emit`. Dentro del agente se inyecta el puente al bus (`agent/service.py::engine_emitter`)."""
 import contextlib
 import contextvars
 import json
@@ -22,7 +17,6 @@ def _read_url(path):
 
 
 def post(webhook_file, payload, timeout=10):
-    """Devuelve (ok, motivo). El motivo nunca incluye la URL."""
     try:
         url = _read_url(webhook_file)
     except (OSError, ValueError) as e:
@@ -35,13 +29,11 @@ def post(webhook_file, payload, timeout=10):
             return (200 <= r.status < 300), "HTTP %d" % r.status
     except urllib.error.HTTPError as e:
         return False, "HTTP %d" % e.code
-    except Exception as e:  # noqa: BLE001 - el mensaje de urllib puede traer la URL: solo el tipo
+    except Exception as e:
         return False, type(e).__name__
 
 
 def recipients(st, event, project, adhoc_files, only=None):
-    """(nombre, archivo) de cada suscripción que aplica + los --webhook-file ad hoc.
-    `only` (lista de nombres) restringe a esas suscripciones, sin filtrar por evento (lo usan las reacciones)."""
     out = []
     if only is not None:
         return [(n, st["subscriptions"][n]["webhook_file"]) for n in only if n in st.get("subscriptions", {})]
@@ -54,7 +46,6 @@ def recipients(st, event, project, adhoc_files, only=None):
 
 
 def emit(st, event, project, body, adhoc_files=None, log=True, only=None, ts=None):
-    """Registra y entrega. Devuelve (entregado_a_todos, hubo_destinatarios, resultados). `ts` = ISO (por defecto ahora)."""
     payload = {"event": event, "project": project, "ts": ts or state.now()}
     payload.update(body)
     rcpts = recipients(st, event, project, adhoc_files, only)
@@ -78,7 +69,6 @@ _current = contextvars.ContextVar("chopshop_emit_fn", default=None)
 
 @contextlib.contextmanager
 def using(emit_fn):
-    """Durante el bloque, `send` usa `emit_fn(st, event, project, body, adhoc_files=None, log=True, only=None)`."""
     tok = _current.set(emit_fn) if emit_fn is not None else None
     try:
         yield
@@ -88,5 +78,4 @@ def using(emit_fn):
 
 
 def send(st, event, project, body, adhoc_files=None, log=True, only=None):
-    """Emite con la función inyectada (`using`) o con `emit`. Mismo resultado que `emit`."""
     return (_current.get() or emit)(st, event, project, body, adhoc_files, log=log, only=only)

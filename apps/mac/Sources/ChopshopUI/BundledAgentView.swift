@@ -1,6 +1,5 @@
 import SwiftUI
 
-/// Bloque de Ajustes «Usar esta Mac como máquina» (agente incrustado; ver BundledAgent.swift).
 struct BundledAgentSection: View {
     @EnvironmentObject var model: AppModel
     @ObservedObject var bundled: BundledAgent

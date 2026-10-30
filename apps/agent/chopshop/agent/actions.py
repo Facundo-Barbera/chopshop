@@ -1,27 +1,3 @@
-"""Runs de GitHub Actions con disparador y origen (docs/plans/office-redesign.md §4): hilo `actions` del agente.
-
-Por cada repo de `[agent.github] repos` y de `rack.repos` de los perfiles (proveedor `github`):
-- `GET /repos/{o}/{r}/actions/runs` por el `RunsFeed` compartido con el rack (`forge/github.py`: ETag, un solo sondeo por
-  repo); la versión (ETag) ya procesada vive en `meta` `actions_seen:github:<repo>`.
-- Cada run se normaliza (`map_run`) y se le atribuye un **origen** (`attribute`), por prioridad:
-  1. `thread`: la rama del run es la de un hilo de T3 (`t3_threads.branch`, nunca `main`/`master`/la rama por defecto),
-     o, en `push`/`pull_request*`, el sha es el HEAD del worktree del hilo;
-  2. `automation`: un `forge.dispatch` reciente (`nonce` en el título del run, o mismo workflow + ref y creado dentro de
-     `DISPATCH_WINDOW` después del dispatch, sin otro run que ya lo haya reclamado);
-  3. `bot`: el actor (o quien relanzó el run) está en `rack.actors` con `kind: bot`, o es una cuenta `…[bot]` (no en
-     `schedule`: ahí GitHub pone de actor a quien editó el cron por última vez);
-  4. `schedule`: disparador `schedule`;
-  5. `human` (hay actor; etiqueta de `rack.actors` si lo declara) o `unknown`.
-  Un origen `thread`/`automation` ya guardado no se degrada (el HEAD del worktree avanza después del push).
-- Se emite `forge.run.state` (severidad `warn` si el run terminó mal) cuando un run es nuevo o cambia su estado,
-  conclusión u origen; solo para runs en curso y los `KEEP_DONE` completados más recientes de cada repo. Si el feed
-  no cambió (304 o respuesta reutilizada) se reatribuyen los runs en curso guardados (un hilo puede aparecer después de
-  su push).
-- Estado en la tabla `forge_runs` (se crea aquí, aditiva; se podan los runs fuera de los `KEEP_ROWS` más recientes).
-
-Mismas reglas que `github.py`: `gh` ya autenticado (el token nunca se toca), backoff y `machine.health` degradado
-heredados de `GitHubPoller`, cuerpos sin credenciales. Inyectable: `runner`, `clock`, `emit(type, project, body,
-severity)`, `profiles_fn()` -> {proyecto: perfil}, `head_fn(worktree)` -> sha o None, `feed` (`RunsFeed`)."""
 import calendar
 import logging
 import os
@@ -34,11 +10,11 @@ from .forge import github as forge_gh
 log = logging.getLogger("chopshop.agent.actions")
 
 PROVIDER = "github"
-KEEP_DONE = 5                     # completados que se publican por repo (los de la proyección)
-KEEP_ROWS = 100                   # filas de `forge_runs` por repo
-DISPATCH_WINDOW = 600.0           # s entre un `forge.dispatch` y el run que lanza
-DISPATCH_LOOKBACK = 86400.0       # s de `forge.dispatch` que se miran
-THREAD_LOOKBACK = 3 * 86400.0     # s: hilos asentados vistos hace más que esto no reclaman runs
+KEEP_DONE = 5
+KEEP_ROWS = 100
+DISPATCH_WINDOW = 600.0
+DISPATCH_LOOKBACK = 86400.0
+THREAD_LOOKBACK = 3 * 86400.0
 DEFAULT_BRANCHES = ("main", "master")
 SHA_EVENTS = ("push", "pull_request", "pull_request_target", "merge_group")
 
@@ -55,8 +31,6 @@ def ensure_schema(conn):
         conn.executescript(SCHEMA)
 
 
-# ---------------------------------------------------------------- utilidades puras
-
 def _iso_epoch(s):
     if not isinstance(s, str) or not s:
         return None
@@ -67,7 +41,6 @@ def _iso_epoch(s):
 
 
 def map_run(run, repo, project=None):
-    """Run de `/actions/runs` -> cuerpo de `forge.run.state` sin `origin` (o None si no es un run)."""
     if not isinstance(run, dict) or run.get("id") is None:
         return None
     path = run.get("path") or ""
@@ -96,7 +69,6 @@ def _thread_label(t):
 
 
 def _match_thread(run, threads, default_branch, project):
-    """Hilo dueño del run (o None). Rama primero (fuera de las ramas por defecto); sha solo en eventos de código."""
     branch, sha = run.get("head_branch"), run.get("head_sha")
     defaults = set(DEFAULT_BRANCHES) | ({default_branch} if default_branch else set())
     hits = []
@@ -119,7 +91,6 @@ def _workflow_matches(run, wf):
 
 
 def _match_dispatch(run, dispatches, claimed):
-    """`forge.dispatch` que lanzó el run (o None). `claimed` = nonces/ids ya reclamados por otros runs."""
     if run.get("event") != "workflow_dispatch":
         return None
     title = run.get("title") or ""
@@ -140,7 +111,6 @@ def _match_dispatch(run, dispatches, claimed):
 
 
 def attribute(run, threads=(), dispatches=(), actors=None, default_branch=None, claimed=(), project=None):
-    """Origen `{kind, id, label}` de un run normalizado (`map_run`) según la prioridad del plan."""
     t = _match_thread(run, list(threads), default_branch, project)
     if t:
         return origin("thread", t["thread_id"], _thread_label(t))
@@ -150,7 +120,7 @@ def attribute(run, threads=(), dispatches=(), actors=None, default_branch=None, 
         return origin("automation", d.get("nonce") or d.get("id"), "%s · %s" % (name, d.get("workflow")))
     actors = actors or {}
     who = [a for a in (run.get("triggering_actor"), run.get("actor")) if a]
-    for a in who if run.get("event") != "schedule" else ():     # en un cron el actor es quien editó el workflow
+    for a in who if run.get("event") != "schedule" else ():
         decl = actors.get(a) or {}
         if (decl and decl.get("kind", "bot") == "bot") or a.endswith("[bot]"):
             return origin("bot", a, decl.get("label") or a)
@@ -163,14 +133,12 @@ def attribute(run, threads=(), dispatches=(), actors=None, default_branch=None, 
 
 
 def published(runs):
-    """Ids de los runs que se publican: todos los no completados + los KEEP_DONE completados más recientes."""
     done = sorted((r for r in runs if r.get("status") == "completed"),
                   key=lambda r: (r.get("updated_at") or "", r["run_id"]), reverse=True)
     return {r["run_id"] for r in runs if r.get("status") != "completed"} | {r["run_id"] for r in done[:KEEP_DONE]}
 
 
 def repos_for(cfg, profiles):
-    """[(repo, proyecto, ruta_api)] de `[agent.github] repos` + `rack.repos` (github). El nombre emitido es el del perfil."""
     out, seen = [], {}
     for name, prof in sorted((profiles or {}).items()):
         for e in layout.rack_repos(prof or {}):
@@ -188,21 +156,16 @@ def repos_for(cfg, profiles):
 
 
 def load_profiles():
-    """{proyecto: perfil} de ~/.chopshop/profiles/*.yaml. Un perfil roto se ignora."""
     out = {}
     for name in github.profile_mod.list_projects():
         try:
             out[name] = github.profile_mod.load(name)
-        except Exception:  # noqa: BLE001 - un perfil roto no tumba el hilo
+        except Exception:
             continue
     return out
 
 
-# ---------------------------------------------------------------- poller
-
 class ActionsPoller(github.GitHubPoller):
-    """`poll_once()` = una pasada por todos los repos (nunca lanza por errores de GitHub); `next_delay()` = espera."""
-
     def __init__(self, conn, cfg, emit, runner=None, clock=time.time, profiles_fn=load_profiles, head_fn=None, feed=None):
         super().__init__(conn, cfg, emit, runner=runner, clock=clock, projects_fn=None)
         self.profiles_fn = profiles_fn
@@ -213,7 +176,6 @@ class ActionsPoller(github.GitHubPoller):
     def _emit(self, event, project, body, severity=None):
         self.emit(event, project, github._clean(body), severity)
 
-    # -- salud: mismo backoff que `github.py`, pero el `machine.health` de GitHub lo publica solo el hilo `github`
     def _degrade(self, e, now):
         self.failures += 1
         wait = min(github.MAX_BACKOFF, self.interval * (2 ** min(self.failures - 1, 6)))
@@ -236,19 +198,18 @@ class ActionsPoller(github.GitHubPoller):
         sha = (out or "").strip()
         return sha if rc == 0 and re.match(r"^[0-9a-f]{40}$", sha) else None
 
-    # -- contexto local de la atribución
     def _threads(self, now):
         try:
             rows = db.rows(self.conn.execute(
                 "SELECT * FROM t3_threads WHERE (branch IS NOT NULL OR worktree IS NOT NULL) AND (settled=0 OR last_seen>=?)",
                 (now - THREAD_LOOKBACK,)))
-        except Exception:  # noqa: BLE001
+        except Exception:
             return []
         desks = {}
-        try:                              # escritorios de la oficina (fase 1), si existen
+        try:
             for r in self.conn.execute("SELECT desk_id, thread_id FROM desk_occupancy WHERE until IS NULL"):
                 desks[r["thread_id"]] = r["desk_id"]
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
         for t in rows:
             t["desk"] = desks.get(t["thread_id"])
@@ -262,7 +223,7 @@ class ActionsPoller(github.GitHubPoller):
             if t.get("worktree") and not t.get("settled") and t["head_sha"] is None:
                 try:
                     t["head_sha"] = self.head_fn(t["worktree"]) or ""
-                except Exception:  # noqa: BLE001
+                except Exception:
                     t["head_sha"] = ""
         return threads
 
@@ -271,7 +232,7 @@ class ActionsPoller(github.GitHubPoller):
         try:
             cur = self.conn.execute("SELECT id, ts, body, subject FROM events WHERE type='forge.dispatch' AND ts>=? ORDER BY seq",
                                     (now - DISPATCH_LOOKBACK,))
-        except Exception:  # noqa: BLE001
+        except Exception:
             return out
         for r in cur:
             b = db.jload(r["body"], {}) or {}
@@ -306,7 +267,6 @@ class ActionsPoller(github.GitHubPoller):
                 " WHERE provider=? AND repo=? ORDER BY CAST(run_id AS INTEGER) DESC LIMIT ?)",
                 (PROVIDER, repo, PROVIDER, repo, KEEP_ROWS))
 
-    # -- una pasada
     def poll_once(self):
         now = self.clock()
         if now < self.until:
@@ -314,7 +274,7 @@ class ActionsPoller(github.GitHubPoller):
         self.poll_interval = 0.0
         try:
             profiles = self.profiles_fn() if self.profiles_fn else {}
-        except Exception:  # noqa: BLE001
+        except Exception:
             profiles = {}
         actors = {}
         for prof in profiles.values():

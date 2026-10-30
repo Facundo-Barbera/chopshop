@@ -1,11 +1,7 @@
 import Foundation
 
-/// Estado v3 fijo (tests y, en sus hilos, Previews y capturas de la ciudad, la oficina y la sala de máquinas): `awesome-gb` con dos pisos (Producto con triage permanente,
-/// backend y frontend; Docs), ocupantes en todos los estados, vestíbulo con un hilo sin rol y otro esperando escritorio, y una sala de
-/// máquinas en Producto (declarada en `machine_rooms`) con listeners, una automatización y el rack (main + Engine CX). `chopshop` sigue sin bloque `office:` (piso clásico).
-/// Determinista: `now` es 2026-10-29T16:30:00Z.
 public enum OfficeFixture {
-    public static let now = 1_793_291_400.0          // 2026-10-29T16:30:00Z
+    public static let now = 1_793_291_400.0
     public static let project = "awesome-gb"
 
     private static func env(_ seq: Int, _ ts: String, _ type: String, project: String? = OfficeFixture.project, subject: Envelope.Subject,
@@ -42,7 +38,6 @@ public enum OfficeFixture {
             "machine_rooms": [["name": "Sala de máquinas", "floor": 0, "repos": ["*"], "listeners": ["*"], "automations": ["*"],
                                "subscriptions": ["*"]]],
         ]))
-        // backend: uno corriendo, uno que te pregunta, uno terminado hace 30 min (a media semivida), uno libre
         e.append(task(2, "2026-10-29T15:40:00.000Z", thread: "mcp:b7", title: "[be] login con passkeys", phase: "running", role: "backend"))
         e.append(env(3, "2026-10-29T15:40:01.000Z", "desk.assigned", subject: .init(kind: "desk", id: "awesome-gb/0/backend/0"), [
             "desk": "awesome-gb/0/backend/0", "thread_id": "mcp:b7", "role": "backend", "reason": "inherited",
@@ -58,27 +53,21 @@ public enum OfficeFixture {
             "desk": "awesome-gb/0/backend/2", "thread_id": "mcp:b9", "role": "backend", "reason": "start"]))
         e.append(task(9, "2026-10-29T16:00:00.000Z", thread: "mcp:b9", title: "[be] migración de pagos", phase: "done", role: "backend",
                       ended: "2026-10-29T16:00:00.000Z"))
-        // frontend: uno trabado
         e.append(task(10, "2026-10-29T15:50:00.000Z", thread: "mcp:f2", title: "[fe] modo oscuro del panel", phase: "running", role: "frontend"))
         e.append(env(11, "2026-10-29T15:50:01.000Z", "desk.assigned", subject: .init(kind: "desk", id: "awesome-gb/0/frontend/0"), [
             "desk": "awesome-gb/0/frontend/0", "thread_id": "mcp:f2", "role": "frontend", "reason": "start"]))
         e.append(task(12, "2026-10-29T16:25:00.000Z", thread: "mcp:f2", title: "[fe] modo oscuro del panel", phase: "failed", role: "frontend",
                       ended: "2026-10-29T16:25:00.000Z", severity: "error"))
-        // docs (piso 2): uno corriendo
         e.append(task(13, "2026-10-29T16:05:00.000Z", thread: "mcp:d1", title: "Guía de despliegue de Engine CX", phase: "running", role: "docs"))
         e.append(env(14, "2026-10-29T16:05:01.000Z", "desk.assigned", subject: .init(kind: "desk", id: "awesome-gb/1/docs/0"), [
             "desk": "awesome-gb/1/docs/0", "thread_id": "mcp:d1", "role": "docs", "reason": "start"]))
-        // triage dormido con notas de los bots
         e.append(env(15, "2026-10-29T16:10:00.000Z", "desk.note", subject: .init(kind: "desk", id: "awesome-gb/0/triage/0"), [
             "desk": "awesome-gb/0/triage/0", "from": "Grok · Facundo", "text": "Mañana prioriza los issues de pagos.", "pending": 2]))
-        // vestíbulo: uno sin rol y uno esperando escritorio de frontend
         e.append(task(16, "2026-10-29T16:12:00.000Z", thread: "mcp:c3", title: "Revisar dependencias", phase: "running"))
         e.append(task(17, "2026-10-29T16:15:00.000Z", thread: "mcp:c9", title: "[fe] tabla de pedidos", phase: "running", role: "frontend"))
         e.append(env(18, "2026-10-29T16:15:01.000Z", "desk.waiting", subject: .init(kind: "thread", id: "mcp:c9"), [
             "thread_id": "mcp:c9", "role": "frontend", "title": "[fe] tabla de pedidos", "phase": "running"]))
-        // proyecto clásico (sin office): sigue con su piso de siempre
         e.append(task(19, "2026-10-29T16:16:00.000Z", project: "chopshop", thread: "mcp:k1", title: "Rediseño de la oficina", phase: "running"))
-        // sala de máquinas
         e.append(env(20, "2026-10-29T16:20:00.000Z", "listener.state", project: nil, subject: .init(kind: "listener", id: "t3watch"), [
             "name": "t3watch", "state": "ok", "last_ok": "2026-10-29T16:20:00.000Z", "last_cycle": "2026-10-29T16:20:00.000Z", "backoff_s": 0, "error": nil]))
         e.append(env(21, "2026-10-29T16:20:00.000Z", "listener.state", project: nil, subject: .init(kind: "listener", id: "forge"), severity: "warn", [

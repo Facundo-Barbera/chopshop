@@ -1,6 +1,5 @@
 import SwiftUI
 
-/// Ventana completa: barra lateral nativa (proyectos + máquinas) y vista de proyecto. Todo con Fixtures.
 @available(macOS 26.0, *)
 public struct PlaygroundRoot: View {
     @State private var selection: String? = "nuskills"

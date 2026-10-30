@@ -1,50 +1,29 @@
-"""Vigilante de T3: lee proyectos e hilos por el MCP de T3, mantiene `t3_threads` y emite eventos por transición.
-
-- `T3(cfg, client=None, clock=None)`: adaptador fino sobre el cliente MCP nativo compartido (`chopshop/t3mcp.py`).
-  `.call(tool, args)` delega en `client` (inyectado, o un `t3mcp.Client` construido desde `cfg["t3"]`: `origin`,
-  `access`, `credential_file`, `t3_bin`); todo fallo llega como `T3Error` (= `t3mcp.T3Error`). Guarda además el estado
-  de alcanzabilidad/backoff que usa `poll` (`.reachable`, `.failures`, `.backoff`, `.retry_at`, `.last_error`).
-  No hay transporte propio: autenticación, sesión MCP y la guardia contra archivar viven en `t3mcp.Client`.
-- `poll(conn, cfg, t3, emit_fn, level_fn=None)`: una pasada. `emit_fn(event, project, body)` (el agente lo envuelve sobre
-  `events.emit`, que traduce cada nombre al sobre: `task.state`, `question.opened` + `task.state` con `attention`,
-  `approval.requested`, `machine.health`). `level_fn(project, texto) -> (nivel, notify)` decide si una pregunta la atiende
-  un bot o una persona (por defecto: la regla `reactions` `on: pending_question` del perfil del proyecto, si existe).
-  Eventos: `thread_started`, `thread_done`, `thread_failed`, `thread_settled`, `pending_question`, `pending_approval`,
-  `t3_unreachable` (una sola vez al caer) y `t3_recovered`. Los cuerpos de hilo llevan además `role` (el guardado, o el de
-  las reglas `match` del perfil; `agent/office.py` lo usa para el escritorio) y `ended_at` (ISO). La primera pasada (sin línea base) siembra la tabla en silencio
-  salvo las preguntas pendientes, que sí se avisan (son accionables).
-- `settle(t3, thread_id)`: `t3_thread_organize {action: "settle"}`. Nunca archiva.
-- `answer(t3, thread_id, choice, request=None)`: resuelve la opción con `chopshop/answers.py` (igual que el motor).
-Se prueba inyectando un cliente falso con `.call(tool, args) -> obj` (o que lance `T3Error`)."""
 import time
 from datetime import datetime, timezone
 
 from .. import answers, profile, reactions, t3mcp
 from . import db, envelope, layout
 
-# Estados de hilo de T3 (los terminales coinciden con engine.TERMINAL). `idle` (hilos de proveedor/subagentes sin
-# ejecuciones) no es activo ni terminal: se registra pero no genera transiciones de inicio/fin.
 ACTIVE = {"running", "starting", "waiting", "queued", "pending"}
 DONE = {"completed"}
 FAILED = {"failed", "cancelled", "interrupted", "rolled_back"}
 
-TIMEOUT = 60              # segundos por llamada a T3
-BACKOFF_BASE = 10         # primer reintento tras caer T3
+TIMEOUT = 60
+BACKOFF_BASE = 10
 BACKOFF_MAX = 300
-PAGE = 25                 # páginas chicas: respuestas acotadas y cortes tempranos al paginar
+PAGE = 25
 MAX_PAGES = 20
-MAX_READS = 40            # tope de t3_thread_read por pasada
-NEW_SLACK = 30            # un hilo "nuevo" se considera reciente si se creó tras la pasada anterior (menos esta holgura)
+MAX_READS = 40
+NEW_SLACK = 30
 
 T3Error = t3mcp.T3Error
 
 
 class AnswerError(T3Error):
-    """Petición inválida al responder (sin preguntas, ambigua u opción no válida): no es un fallo de T3."""
+    pass
 
 
 def make_client(conf, timeout=TIMEOUT):
-    """`t3mcp.Client` desde la sección `agent.t3` (vacíos = valores por defecto del cliente)."""
     conf = conf or {}
     return t3mcp.Client(origin=conf.get("origin") or None, access=conf.get("access") or "approval-required",
                         credential_file=conf.get("credential_file") or None, t3_bin=conf.get("t3_bin") or "t3",
@@ -57,9 +36,9 @@ class T3:
         self.conf = cfg.get("t3") or {}
         self.client = client if client is not None else make_client(self.conf, timeout)
         self.clock = clock or time.time
-        self.reachable = None     # None = aún no se sabe; True/False tras la primera pasada
-        self.failures = 0         # fallos consecutivos de poll
-        self.retry_at = 0.0       # no volver a llamar antes de este instante (clock)
+        self.reachable = None
+        self.failures = 0
+        self.retry_at = 0.0
         self.last_error = None
 
     def call(self, tool, args=None):
@@ -67,11 +46,10 @@ class T3:
             return self.client.call(tool, args or {})
         except T3Error:
             raise
-        except Exception as e:  # noqa: BLE001 - un cliente que falla de forma inesperada cuenta como T3 caído
+        except Exception as e:
             raise T3Error("%s: %s" % (tool, str(e)[:600]))
 
     def projects(self):
-        """Proyectos de T3 no borrados: [{id, title, workspaceRoot, ...}]."""
         out, cursor = [], None
         for _ in range(10):
             data = self.call("t3_project_list", dict({"limit": 100}, **({"cursor": cursor} if cursor is not None else {})))
@@ -82,7 +60,6 @@ class T3:
         return out
 
     def threads(self, project_id, stop=None, limit=PAGE, max_pages=MAX_PAGES):
-        """Hilos de un proyecto, más nuevos primero, paginando. `stop(page)` -> True corta (la página ya es conocida)."""
         out, cursor = [], None
         for _ in range(max_pages):
             data = self.call("t3_thread_list", dict({"projectId": project_id, "limit": limit},
@@ -97,10 +74,8 @@ class T3:
     def read(self, thread_id, limit=1, chars=1):
         return self.call("t3_thread_read", {"threadId": thread_id, "limit": limit, "maxCharsPerItem": chars})
 
-    # ---- estado de alcanzabilidad ----
     @property
     def backoff(self):
-        """Segundos de espera actuales (0 si T3 responde)."""
         return 0 if not self.failures else min(BACKOFF_MAX, BACKOFF_BASE * 2 ** (self.failures - 1))
 
     def mark_ok(self):
@@ -111,7 +86,6 @@ class T3:
         self.retry_at = now + self.backoff
 
 
-# ---------- utilidades ----------
 def _epoch(s, default=None):
     try:
         return datetime.strptime(str(s)[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc).timestamp()
@@ -144,7 +118,6 @@ def _known_rows(conn):
 
 
 def _stable(row, t):
-    """La fila guardada ya refleja este hilo (mismo estado, settled y última actualización)."""
     if not row:
         return False
     extra = db.jload(row.get("extra"), {}) or {}
@@ -153,7 +126,6 @@ def _stable(row, t):
 
 
 def _new_requests(t3, thread_id, known):
-    """Preguntas pendientes: [{request_id, questions}] reutilizando las ya leídas (`known` por request_id)."""
     ids = t3.call("t3_pending_request", {"action": "list", "threadId": thread_id}).get("requestIds", [])
     out = []
     for rid in ids:
@@ -171,11 +143,9 @@ def _last_assistant_text(read, limit=600):
 
 
 def reaction_level(project, text):
-    """(nivel, notify) de la regla `reactions` `on: pending_question` del perfil que aplica a la pregunta; (None, None)
-    sin perfil o sin regla (entonces la pregunta la atiende una persona)."""
     try:
         rule = reactions.find(profile.load(project), "pending_question", text)
-    except Exception:  # noqa: BLE001 - perfil ausente o inválido: sin reacción
+    except Exception:
         return None, None
     return (rule["level"], rule.get("notify")) if rule else (None, None)
 
@@ -185,14 +155,12 @@ def _level(p, project, questions):
                      for q in questions or [] if isinstance(q, dict)])
     try:
         level, notify = p.level_fn(project, text)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None, None
     return level, notify
 
 
-# ---------- poll ----------
 class _Pass:
-    """Contexto de una pasada de poll."""
     def __init__(self, conn, t3, emit_fn, now, baseline, last_poll, max_reads, level_fn=None):
         self.conn, self.t3, self.emit_fn, self.now = conn, t3, emit_fn, now
         self.level_fn = level_fn or reaction_level
@@ -201,11 +169,10 @@ class _Pass:
         self.profiles = {}
 
     def role(self, project, title, branch):
-        """Rol de la oficina por las reglas `match` del perfil (perfil leído una vez por pasada)."""
         if project not in self.profiles:
             try:
                 self.profiles[project] = profile.load(project)
-            except Exception:  # noqa: BLE001 - sin perfil (o inválido): sin rol
+            except Exception:
                 self.profiles[project] = None
         prof = self.profiles[project]
         return layout.role_for(prof, title, branch) if prof else None
@@ -223,7 +190,6 @@ class _Pass:
 
 
 def _process(p, t, project, project_id, prev):
-    """Procesa un hilo (dict de t3_thread_list o de t3_thread_read.thread): upsert + eventos por transición."""
     tid, status, settled = t["threadId"], t.get("status"), bool(t.get("settled"))
     active, was_active = status in ACTIVE, bool(prev) and prev["status"] in ACTIVE
     created = _epoch(t.get("createdAt"), p.now)
@@ -235,7 +201,6 @@ def _process(p, t, project, project_id, prev):
     worktree, branch = (prev or {}).get("worktree"), (prev or {}).get("branch")
     pending, approvals = old_pending, old_extra.get("approvals", 0)
     result = None
-    # lecturas acotadas: activos, con pendientes, o cuya transición terminal interesa
     if active or old_pending or old_extra.get("approvals") or terminal_change:
         full = status in DONE and terminal_change
         th = p.read(tid, 30, 600) if full else p.read(tid)
@@ -253,12 +218,12 @@ def _process(p, t, project, project_id, prev):
     row_title = t.get("title") or (prev or {}).get("title")
     role = (prev or {}).get("role") or p.role(project, row_title, branch)
     ended_at = None
-    if status in DONE | FAILED:     # cuándo terminó (el primer avistamiento usa la última actualización de T3)
+    if status in DONE | FAILED:
         ended_at = (prev or {}).get("ended_at") if prev and prev["status"] in DONE | FAILED else None
         ended_at = ended_at or (p.now if terminal_change else _epoch(t.get("updatedAt"), p.now))
     body = {"thread_id": tid, "title": row_title, "status": status, "link": t.get("link"), "worktree": worktree,
             "branch": branch, "pull_requests": _prs(t), "role": role, "ended_at": _iso(ended_at)}
-    quiet = p.baseline   # primera pasada: sembrar sin avisar (salvo preguntas)
+    quiet = p.baseline
     if not quiet:
         if active and not was_active:
             p.emit("thread_started", project, dict(body))
@@ -291,8 +256,6 @@ def _process(p, t, project, project_id, prev):
 
 
 def poll(conn, cfg, t3, emit_fn, max_reads=MAX_READS, level_fn=None):
-    """Una pasada de vigilancia -> {"threads": n, "changes": [...], "errors": [...], "reachable": bool, "backoff": s}.
-    Respeta el backoff de `t3`: si T3 está caído y aún no toca reintentar, no llama (devuelve `skipped`)."""
     now = t3.clock()
     res = {"threads": 0, "changes": [], "errors": [], "reachable": bool(t3.reachable), "backoff": t3.backoff}
     if now < t3.retry_at:
@@ -317,11 +280,10 @@ def poll(conn, cfg, t3, emit_fn, max_reads=MAX_READS, level_fn=None):
                 p.seen.add(t["threadId"])
                 try:
                     _process(p, t, title, pr["id"], prev_rows.get(t["threadId"]))
-                except Exception as e:  # noqa: BLE001 - un hilo con problemas (o un emit fallido) no frena el resto
+                except Exception as e:
                     p.errors.append("%s: %s" % (t["threadId"], str(e)[:200]))
         if projects and not listed:
             raise T3Error("no pude listar hilos de ningún proyecto: %s" % "; ".join(p.errors)[:300])
-        # activos conocidos que no salieron en el listado (p. ej. paginados fuera): se leen directo
         for tid, row in prev_rows.items():
             if tid not in p.seen and row["status"] in ACTIVE and p.reads_left > 0:
                 try:
@@ -329,7 +291,7 @@ def poll(conn, cfg, t3, emit_fn, max_reads=MAX_READS, level_fn=None):
                     if th:
                         _process(p, th["thread"], row["project"], row["t3_project_id"], row)
                         p.seen.add(tid)
-                except Exception as e:  # noqa: BLE001
+                except Exception as e:
                     p.errors.append("%s: %s" % (tid, str(e)[:200]))
         ok = not failed
     except T3Error as e:
@@ -344,7 +306,7 @@ def poll(conn, cfg, t3, emit_fn, max_reads=MAX_READS, level_fn=None):
 
 def _unreachable(conn, t3, emit_fn, now, err, res, p):
     t3.mark_fail(err, now)
-    if _meta(conn, "t3_unreachable") is None:   # una sola emisión mientras dure la caída (sobrevive a reinicios del agente)
+    if _meta(conn, "t3_unreachable") is None:
         _set_meta(conn, "t3_unreachable", now)
         body = {"error": t3.last_error, "retry_in": t3.backoff}
         seq = emit_fn("t3_unreachable", None, body)
@@ -363,17 +325,13 @@ def _recovered(conn, t3, emit_fn, now, p):
                           **({"seq": seq} if isinstance(seq, int) else {})})
 
 
-# ---------- acciones ----------
 def settle(t3, thread_id):
-    """Marca el hilo como settled en T3. Nunca archiva."""
     if not isinstance(thread_id, str) or not thread_id.strip():
         raise T3Error("thread_id requerido")
     return t3.call("t3_thread_organize", {"threadId": thread_id, "action": "settle"})
 
 
 def answer(t3, thread_id, choice, request=None):
-    """Responde la pregunta pendiente de un hilo. `request` = id (o prefijo) si hay varias. Con una petición de varias
-    preguntas, `choice` debe ser un dict {id_pregunta: elección}. Devuelve {"request_id", "answers", "question"}."""
     ids = t3.call("t3_pending_request", {"action": "list", "threadId": thread_id}).get("requestIds", [])
     if not ids:
         raise AnswerError("%s no tiene preguntas pendientes" % thread_id)

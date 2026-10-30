@@ -1,4 +1,3 @@
-"""Estado propio mínimo: lotes, tareas y suscripciones en un JSON local (~/.chopshop/state.json, 0600)."""
 import contextlib
 import fcntl
 import json
@@ -14,7 +13,6 @@ def _empty():
 
 @contextlib.contextmanager
 def locked():
-    """Carga el estado con lock exclusivo; guarda al salir sin error."""
     home.ensure_home()
     lock = open(os.path.join(home.home(), "state.lock"), "a")
     fcntl.flock(lock, fcntl.LOCK_EX)

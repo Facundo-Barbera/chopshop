@@ -1,19 +1,13 @@
 #!/usr/bin/env bash
-# Utilidades comunes de los scripts de release (se cargan con `source`; no se ejecuta solo).
-# Compatible con bash 3.2 (el de macOS): sin arrays asociativos, mapfile ni ${var,,}.
-# Regla de oro: ningún valor secreto se imprime. Lo derivado y sensible se registra con ::add-mask::.
-
 log()  { printf '==> %s\n' "$*"; }
 warn() { printf '::warning::%s\n' "$*" >&2; }
 die()  { printf '::error::%s\n' "$*" >&2; exit 1; }
 
-# Directorio de los scripts de release y de apps/mac
 RELEASE_SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MAC_DIR="$(cd "$RELEASE_SCRIPTS/.." && pwd)"
 REPO_ROOT="$(cd "$MAC_DIR/../.." && pwd)"
 export RELEASE_SCRIPTS MAC_DIR REPO_ROOT
 
-# Registra cada línea de un valor para que Actions lo oculte en los logs; no imprime nada más.
 mask_value() {
   local line
   while IFS= read -r line || [ -n "$line" ]; do
@@ -22,7 +16,6 @@ mask_value() {
   return 0
 }
 
-# Falla listando las variables vacías o ausentes (solo nombres, nunca valores).
 require_env() {
   local n
   local -a missing=()
@@ -32,25 +25,21 @@ require_env() {
   if [ "${#missing[@]}" -gt 0 ]; then die "faltan variables de entorno: ${missing[*]}"; fi
 }
 
-# Salidas de un paso (solo datos NO secretos).
 set_output() {
   if [ -n "${GITHUB_OUTPUT:-}" ]; then printf '%s=%s\n' "$1" "$2" >> "$GITHUB_OUTPUT"; fi
   printf '%s=%s\n' "$1" "$2"
 }
 
-# Variable de entorno para los pasos siguientes del job (solo datos NO secretos).
 set_env() {
   if [ -n "${GITHUB_ENV:-}" ]; then printf '%s=%s\n' "$1" "$2" >> "$GITHUB_ENV"; fi
   export "$1=$2"
 }
 
-# Añade una sección al resumen del job si existe.
 summary() {
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then printf '%s\n' "$*" >> "$GITHUB_STEP_SUMMARY"; fi
   return 0
 }
 
-# version_ge A B -> 0 si A >= B (versiones numéricas con puntos, p. ej. 26.0 >= 13.0)
 version_ge() {
   local IFS=.
   local -a a b
@@ -66,10 +55,8 @@ version_ge() {
   return 0
 }
 
-# Normaliza una URL base quitando barras finales
 strip_slash() { local u="$1"; while [ "${u%/}" != "$u" ]; do u="${u%/}"; done; printf '%s' "$u"; }
 
-# Escribe <archivo>.sha256 (formato `shasum -c`, con el nombre base) e imprime el hash.
 write_sha256() {
   local sum
   sum="$(shasum -a 256 "$1" | awk '{print $1}')"
@@ -77,10 +64,8 @@ write_sha256() {
   printf '%s\n' "$sum"
 }
 
-# Número de bytes decodificados de un base64 (para validar claves)
 b64_len() { printf '%s' "$1" | base64 --decode 2>/dev/null | wc -c | tr -d ' '; }
 
-# ¿Es un binario Mach-O (o fat)? Se mira la cabecera, sin depender de `file`.
 is_macho() {
   local magic
   magic="$(od -An -tx1 -N4 "$1" 2>/dev/null | tr -d ' \n')"
@@ -90,12 +75,6 @@ is_macho() {
   return 1
 }
 
-# stapler_retry <staple|validate> <ruta>: ejecuta `xcrun stapler <acción> <ruta>` con reintentos y backoff exponencial.
-# staple/validate consultan CloudKit (ticket-delivery) y fallan a veces por la red de Apple (NSURLErrorDomain -1005,
-# «Error 68») aunque la notarización esté aceptada. Se reintenta ante cualquier salida no cero de stapler; al agotar los
-# intentos falla con el último código. NO sustituye ninguna verificación: el éxito exige que stapler termine en 0.
-# Env: STAPLER_ATTEMPTS (8), STAPLER_RETRY_DELAY (5 s, se duplica en cada intento), STAPLER_RETRY_MAX_DELAY (60 s);
-# con STAPLER_RETRY_DELAY=0 no hay espera (pruebas). Con los valores por defecto espera 5,10,20,40,60,60,60 s.
 stapler_retry() {
   local action="${1:-}" target="${2:-}"
   local max="${STAPLER_ATTEMPTS:-8}" delay="${STAPLER_RETRY_DELAY:-5}" cap="${STAPLER_RETRY_MAX_DELAY:-60}"

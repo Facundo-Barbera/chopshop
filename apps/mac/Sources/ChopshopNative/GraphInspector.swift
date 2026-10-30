@@ -1,6 +1,5 @@
 import SwiftUI
 
-/// Panel flotante de detalle del nodo seleccionado. Vidrio líquido real (macOS 26); en capturas, un sustituto plano.
 @available(macOS 26.0, *)
 struct GraphInspector: View {
     let card: SceneCard
@@ -61,7 +60,6 @@ struct GraphInspector: View {
 
     @ViewBuilder private var panelBackground: some View {
         let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
-        // Sin el SDK de macOS 26 (Xcode < 26) no existe glassEffect: se queda el sustituto plano.
         #if compiler(>=6.2)
         if flat { flatPanel(shape) } else { Color.clear.glassEffect(.regular, in: shape) }
         #else

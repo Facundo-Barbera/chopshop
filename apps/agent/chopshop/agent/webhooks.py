@@ -1,18 +1,3 @@
-"""Webhooks v2 (suscripciones con filtros) sobre el sobre de eventos (§2 y §4 del diseño de flujo de eventos).
-
-- El sobre y `LEGACY_MAP` son de `envelope.py` (contrato); aquí solo se leen `type/severity/needs/subject/body.legacy`.
-- `effective(row)` normaliza una fila de `subscriptions` (v4) a un filtro; las filas viejas (`project` + `events`)
-  siguen funcionando: los nombres viejos casan con `body.legacy` o, si el sobre no trae nombre viejo, con su tipo
-  nuevo vía `LEGACY_MAP`.
-- `matches(sub, env)` es puro: proyecto (globs, `*`), `types` (globs), `exclude_types`, `min_severity`, `needs`.
-- `Dispatcher` añade lo que tiene estado: `only_changes` (por suscripción y sujeto), `debounce_s` (ventana fija por
-  sujeto, se entrega el último), reintentos 2/10/60 s programados (no ocupan hilo), un carril (hilo) por destino para
-  que uno lento o caído no retrase a otro, `body.context`, la firma HMAC y las cabeceras de `headers_file`. Reloj
-  inyectable; `pump()` ejecuta lo que ya venció (los tests avanzan un reloj falso y llaman a `pump`).
-- Cada intento queda en `deliveries` y en el log (`chopshop.agent.webhooks`: suscripción, seq, tipo, intento,
-  resultado, latencia y si se reintenta).
-- Nunca se guardan, registran ni devuelven la URL, el secreto ni los valores de `headers_file`: se leen del archivo
-  en cada intento y `deliveries`/log solo llevan `HTTP <código>` o el nombre del tipo de excepción."""
 import fnmatch
 import hashlib
 import heapq
@@ -30,15 +15,15 @@ from . import db, envelope
 
 SEVERITIES = ("info", "notice", "warn", "error")
 NEEDS = ("human", "bot", "approval")
-NEEDS_NONE = "none"                    # en `needs` de una suscripción: también eventos con needs = null (cierres)
-RETRY_DELAYS = (2, 10, 60)             # segundos antes del reintento 1, 2 y 3
-CONTEXT_RECENT = 5                     # sobres previos del mismo sujeto en body.context.recent
-CONTEXT_SCAN = 500                     # filas recientes del proyecto que se miran para armar el contexto
+NEEDS_NONE = "none"
+RETRY_DELAYS = (2, 10, 60)
+CONTEXT_RECENT = 5
+CONTEXT_SCAN = 500
 MAX_DEBOUNCE = 3600
 MAX_ITEMS = 32
 _PATTERN = re.compile(r"^[A-Za-z0-9_.*?\[\]!-]{1,128}$")
 _URL = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
-_HEADER_NAME = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$")        # token de RFC 9110
+_HEADER_NAME = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$")
 RESERVED_HEADERS = ("content-type", "content-length", "host", "user-agent", "transfer-encoding", "connection")
 MAX_HEADERS = 32
 log = logging.getLogger("chopshop.agent.webhooks")
@@ -48,16 +33,11 @@ class WebhookError(Exception):
     pass
 
 
-# ---------------------------------------------------------------- sobre
-
 def legacy_map():
-    """{nombre viejo: tipo nuevo} (contrato de `envelope.py`)."""
     return envelope.LEGACY_MAP
 
 
 def legacy_name(env):
-    """Nombre viejo del evento. Si el sobre ya trae `event` (payload de `events`), manda ese: los acompañantes
-    (`task.state` de una pregunta) llevan `body.legacy` del principal pero `event` = su tipo, y no son el evento viejo."""
     if "event" in env:
         ev = env.get("event")
         return ev if isinstance(ev, str) and ev != env.get("type") else None
@@ -73,8 +53,6 @@ def subject_key(env):
 
 
 def payload(env, context=None):
-    """Lo que viaja en el POST: el sobre + `event` (nombre viejo) y `machine_id` durante un ciclo de versión
-    (`events.payload` ya los pone; aquí solo se completan si faltan) y, con `context`, `body.context`."""
     out = dict(env)
     out.setdefault("event", legacy_name(env) or env.get("type"))
     out.setdefault("machine_id", env.get("machine"))
@@ -82,8 +60,6 @@ def payload(env, context=None):
         out["body"] = dict(env.get("body") or {}, context=context)
     return out
 
-
-# ---------------------------------------------------------------- validación y filtros
 
 def _strlist(v, key, pattern=None):
     if v is None:
@@ -109,7 +85,6 @@ def _path(v, key):
 
 
 def validate(opts):
-    """Valida y normaliza las opciones v2 (claves de `FIELDS`). Los mensajes nunca incluyen valores de rutas."""
     o = dict(opts or {})
     out = {
         "projects": _strlist(o.get("projects"), "projects"),
@@ -145,7 +120,6 @@ JSON_FIELDS = ("projects", "types", "exclude_types", "needs")
 
 
 def effective(row):
-    """Filtro normalizado de una fila de `subscriptions` (con o sin columnas v4)."""
     r = dict(row)
     def jl(k):
         v = db.jload(r.get(k)) if isinstance(r.get(k), str) else r.get(k)
@@ -163,7 +137,6 @@ def effective(row):
 
 
 def public(sub):
-    """Lo que se puede mostrar de una suscripción: filtros, sin rutas ni URL (`headers` = tiene `headers_file`)."""
     return {"projects": sub["projects"], "types": sub["types"], "exclude_types": sub["exclude_types"],
             "min_severity": sub["min_severity"], "needs": sub["needs"], "only_changes": sub["only_changes"],
             "context": sub["context"], "debounce_s": sub["debounce_s"], "signed": bool(sub["secret_file"]),
@@ -175,7 +148,6 @@ def _glob(value, pat):
 
 
 def matches(sub, env):
-    """¿El sobre pasa los filtros sin estado de la suscripción?"""
     proj = env.get("project")
     if not any(p == "*" or _glob(proj, p) for p in sub["projects"]):
         return False
@@ -199,11 +171,8 @@ def matches(sub, env):
     return True
 
 
-# ---------------------------------------------------------------- contexto
-
 def build_context(conn, env):
-    """{recent: ≤5 sobres previos del mismo sujeto (del más viejo al más nuevo), project_summary: {counts}}."""
-    from .events import COLUMNS, to_envelope           # events importa este módulo
+    from .events import COLUMNS, to_envelope
     key, seq = subject_key(env), env.get("seq") or 0
     with db.tx():
         rs = conn.execute("SELECT %s FROM events WHERE seq<=? AND project IS ? ORDER BY seq DESC LIMIT ?" % COLUMNS,
@@ -233,10 +202,7 @@ def build_context(conn, env):
     return {"recent": recent[::-1], "project_summary": {"project": env.get("project"), "counts": counts}}
 
 
-# ---------------------------------------------------------------- entrega
-
 def read_url(path):
-    """Primera línea del archivo, sin espacios. Solo http(s)."""
     with open(os.path.expanduser(path), encoding="utf-8") as f:
         url = f.readline().strip()
     if not url.startswith(("http://", "https://")):
@@ -245,7 +211,6 @@ def read_url(path):
 
 
 def read_secret(path):
-    """Contenido (sin espacios) del archivo de secreto. Exige permisos 0600 (nada para grupo/otros)."""
     p = os.path.expanduser(path)
     if os.stat(p).st_mode & 0o077:
         raise PermissionError("permisos abiertos")
@@ -257,9 +222,6 @@ def read_secret(path):
 
 
 def read_headers(path):
-    """{Nombre: valor} de un archivo 0600 con líneas `Nombre: valor` (vacías y `#...` se ignoran). Los errores nunca
-    incluyen valores ni el contenido de la línea, solo su número. No se pueden pisar las cabeceras de transporte
-    (`RESERVED_HEADERS`) ni las `X-Chopshop-*`."""
     p = os.path.expanduser(path)
     if os.stat(p).st_mode & 0o077:
         raise PermissionError("permisos abiertos")
@@ -290,7 +252,6 @@ def sign(secret, data):
 
 
 def exc_detail(e):
-    """Describe una excepción SIN su mensaje (puede contener la URL). Solo tipos (y el del motivo en URLError)."""
     import urllib.error
     name = type(e).__name__
     reason = getattr(e, "reason", None)
@@ -300,7 +261,6 @@ def exc_detail(e):
 
 
 def _accepts_headers(poster):
-    """¿El poster acepta `headers=`? Los posters viejos (url, data, timeout) siguen valiendo (sin cabeceras)."""
     try:
         ps = inspect.signature(poster).parameters.values()
     except (TypeError, ValueError):
@@ -309,27 +269,25 @@ def _accepts_headers(poster):
 
 
 def attempt(webhook_file, secret_file, data, headers, poster, timeout, headers_file=None):
-    """(ok, detail, reintentable). Nunca lanza; el detail no incluye la URL, el secreto, las cabeceras de
-    `headers_file` ni mensajes de excepción."""
     try:
         url = read_url(webhook_file)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return False, "archivo de webhook ilegible (%s)" % type(e).__name__, False
     extra = {}
     if headers_file:
         try:
             extra = read_headers(headers_file)
-        except Exception as e:  # noqa: BLE001 - sin las cabeceras que pide el receptor no se manda nada
+        except Exception as e:
             return False, "archivo de cabeceras ilegible (%s)" % type(e).__name__, False
     headers = dict(extra, **headers)
     if secret_file:
         try:
             headers["X-Chopshop-Signature"] = sign(read_secret(secret_file), data)
-        except Exception as e:  # noqa: BLE001 - sin firma no se manda nada
+        except Exception as e:
             return False, "archivo de secreto ilegible (%s)" % type(e).__name__, False
     try:
         status = poster(url, data, timeout, headers=headers) if _accepts_headers(poster) else poster(url, data, timeout)
-    except Exception as e:  # noqa: BLE001 - solo el tipo, nunca str(e)
+    except Exception as e:
         return False, exc_detail(e), True
     if isinstance(status, bool) or not isinstance(status, int):
         return bool(status), "ok" if status else "fallo", not status
@@ -342,14 +300,11 @@ def record(conn, seq, name, ok, detail, attempts=1, next_retry=None, clock=time.
         with db.tx():
             conn.execute("INSERT OR REPLACE INTO deliveries(event_seq,name,ok,detail,ts,attempts,next_retry) "
                          "VALUES(?,?,?,?,?,?,?)", (seq, name, 1 if ok else 0, detail, clock(), attempts, next_retry))
-    except Exception:  # noqa: BLE001 - conexión cerrada al apagar, etc.
+    except Exception:
         pass
 
 
 class Lanes:
-    """Un carril (hilo daemon, creado bajo demanda) por destino: en orden dentro del destino, en paralelo entre
-    destinos. `flush` espera a que se vacíen todos."""
-
     def __init__(self):
         self._cv = threading.Condition()
         self._lanes = {}
@@ -375,8 +330,8 @@ class Lanes:
                 fn = lane.popleft()
             try:
                 fn()
-            except Exception as e:  # noqa: BLE001 - un fallo de entrega no debe matar al hilo
-                log.error("webhook: fallo inesperado en la entrega (%s)", type(e).__name__)   # sin str(e): puede traer la URL
+            except Exception as e:
+                log.error("webhook: fallo inesperado en la entrega (%s)", type(e).__name__)
             finally:
                 with self._cv:
                     self._pending -= 1
@@ -394,9 +349,6 @@ class Lanes:
 
 
 class Scheduler:
-    """Tareas diferidas (reintentos, fin de debounce) con reloj inyectable. Un hilo daemon las ejecuta al vencer;
-    `pump()` ejecuta ya las vencidas (tests con reloj falso). Las tareas deben ser rápidas (encolan en un carril)."""
-
     def __init__(self, clock=time.time):
         self.clock = clock
         self._cv = threading.Condition()
@@ -423,7 +375,7 @@ class Scheduler:
                 fn = heapq.heappop(self._heap)[2]
                 try:
                     fn()
-                except Exception as e:  # noqa: BLE001
+                except Exception as e:
                     log.error("webhook: fallo inesperado en una tarea diferida (%s)", type(e).__name__)
 
     def cancel(self):
@@ -443,20 +395,16 @@ class Scheduler:
 
 
 class Dispatcher:
-    """Aplica filtros y estado (only_changes, debounce) y entrega con reintentos. Uno por proceso (`events`)."""
-
     def __init__(self, clock=time.time, retry_delays=RETRY_DELAYS):
         self.clock = clock
         self.retry_delays = tuple(retry_delays)
         self.lanes = Lanes()
         self.scheduler = Scheduler(clock)
         self._lock = threading.Lock()
-        self._last = {}          # (nombre, sujeto) -> (phase, attention) del último task.state considerado
-        self._held = {}          # (nombre, sujeto) -> último sobre retenido por debounce
+        self._last = {}
+        self._held = {}
 
     def dispatch(self, conn, subs, fixed, env, poster, timeout):
-        """`subs`: suscripciones efectivas; `fixed`: {nombre: archivo} sin filtro (config), salvo si una suscripción
-        con el mismo nombre casa (la pisa). Devuelve los nombres a los que se entrega o retiene."""
         chosen = [s for s in subs if matches(s, env)]
         names = {s["name"] for s in chosen}
         chosen += [effective({"name": n, "webhook_file": f}) for n, f in fixed.items() if n not in names]
@@ -522,7 +470,6 @@ class Dispatcher:
         return self.lanes.flush(timeout)
 
     def cancel(self):
-        """Descarta reintentos y retenidos pendientes (apagado, tests)."""
         self.scheduler.cancel()
         with self._lock:
             self._held.clear()

@@ -1,10 +1,4 @@
 #!/usr/bin/env bash
-# Publica un release ya firmado y notarizado en R2 con el orden seguro. Orquesta:
-#   pull del feed y zips previos -> comprobaciones (monotonía, no pisar) -> notas -> generate_appcast (+deltas)
-#   -> validación -> subir zips/deltas/notas -> appcast AL FINAL -> verificación por HTTP.
-#   publish.sh <Chopshop-VERSION.zip>
-# Env: TAG, VERSION (corta), BUILD_NUMBER, CHANNEL (vacío = estable), más las de appcast.sh y r2.sh.
-#      NOTES_MD_OUT (opcional): ruta donde dejar las notas en markdown (para la GitHub Release).
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
@@ -13,7 +7,6 @@ source "$HERE/lib.sh"
 ZIP="${1:-}"
 [ -f "$ZIP" ] || die "uso: publish.sh <Chopshop-VERSION.zip>"
 require_env VERSION BUILD_NUMBER
-# En dry-run no hay tag (se lanza desde una rama) y todo va bajo test/<run_id> (R2_PREFIX, R2_TEST_ONLY=1)
 if [ "${DRY_RUN:-false}" = true ]; then
   [ "${R2_TEST_ONLY:-0}" = 1 ] || die "dry-run exige R2_TEST_ONLY=1 y R2_PREFIX=test/<id>"
   TAG=""

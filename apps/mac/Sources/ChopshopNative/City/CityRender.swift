@@ -1,12 +1,5 @@
 import SwiftUI
 
-// Dibujo de la ciudad en un Canvas, con la misma proyección que la oficina (IsoFrame ≡ IsoCam).
-// Orden (de atrás hacia delante): suelo y calles → tráfico → edificios por profundidad (plinto, pisos de abajo arriba, azotea) →
-// brillo ámbar/rojo → etiquetas. El piso elegido para el zoom se pinta hueco: muros del fondo, la oficina (FloorRenderer, el mismo
-// dibujo que FloorOfficeView; IsoRenderer si el proyecto no trae `office`) y muros delanteros que bajan; los pisos de encima
-// suben y salen de cuadro.
-
-/// Color en 0…1 con mezcla lineal (para teñir de ámbar/rojo y encender ventanas sin saltos).
 @available(macOS 26.0, *)
 struct CityRGB {
     var r: Double, g: Double, b: Double
@@ -20,7 +13,6 @@ struct CityRGB {
     var color: Color { Color(red: r, green: g, blue: b) }
 }
 
-/// Paleta de la ciudad (grafito en oscuro, como la referencia; papel cálido en claro, como la oficina).
 @available(macOS 26.0, *)
 struct CityPalette {
     let dark: Bool
@@ -64,7 +56,6 @@ struct CityPalette {
     }
     var vent: CityRGB { p(CityRGB(38, 38, 40), CityRGB(170, 165, 156)) }
 
-    /// Matiz de cada material sobre el muro (nil = el hormigón de la paleta) y cuánto se mezcla: siempre apagado, nunca de atención.
     func material(_ m: CityBuildingStyle.Material) -> (tone: CityRGB, k: Double)? {
         switch m {
         case .concrete: return nil
@@ -81,7 +72,6 @@ struct CityPalette {
     var sill: CityRGB { p(CityRGB(74, 74, 78), CityRGB(242, 239, 232)) }
     var mast: CityRGB { p(CityRGB(110, 110, 114), CityRGB(150, 146, 138)) }
 
-    // atención (igual en claro y oscuro)
     static let amber = CityRGB(255, 159, 10)
     static let red = CityRGB(255, 69, 58)
     static let amberLit = (CityRGB(255, 176, 36), CityRGB(236, 142, 14))
@@ -90,8 +80,6 @@ struct CityPalette {
     static let redSlab = (CityRGB(255, 110, 100), CityRGB(240, 66, 56), CityRGB(176, 46, 40))
 }
 
-/// Zoom en curso hacia un piso: la transición y lo que hay dentro (el piso v3 de FloorOfficeView, o la escena de IsoOfficeView si
-/// el proyecto no trae `office`).
 @available(macOS 26.0, *)
 struct CityZoom {
     enum Content {
@@ -99,7 +87,6 @@ struct CityZoom {
         case graph(IsoScene)
     }
     let project: String
-    /// `CityFloor.id` del piso elegido (un proyecto v3 puede tener varios).
     let floorID: String
     let p: Double
     let transition: CityTransition
@@ -113,7 +100,6 @@ struct CityRenderer {
     let cam: IsoFrame
     let dark: Bool
     let t: Double
-    /// t de la cronología para la subida de edificios (nil = todo en pie).
     let growth: Double?
     let hovered: String?
     let zoom: CityZoom?
@@ -138,9 +124,6 @@ struct CityRenderer {
     }
     private var ambient: Double { growth.map { CityTimeline.ambient($0) } ?? 1 }
 
-    // MARK: primitivas
-
-    /// Prisma (x0…x1, y0…y1, z0…z1): caras +y (izquierda), +x (derecha) y techo.
     private func box(_ g: inout GraphicsContext, _ x0: Double, _ y0: Double, _ x1: Double, _ y1: Double, _ z0: Double, _ z1: Double,
                      top: CityRGB, left: CityRGB, right: CityRGB, edge: CityRGB? = nil, topFace: Bool = true) {
         guard z1 - z0 > 0.01 else { return }
@@ -152,8 +135,6 @@ struct CityRenderer {
             g.stroke(l, with: .color(e.color.opacity(dark ? 0.9 : 0.8)), style: StrokeStyle(lineWidth: 1.1, lineCap: .round, lineJoin: .round))
         }
     }
-
-    // MARK: escena
 
     func draw(_ ctx: inout GraphicsContext) {
         let others = CityTransition.others(p)
@@ -185,8 +166,6 @@ struct CityRenderer {
         drawLabels(&ctx)
     }
 
-    // Suelo y calles ----------------------------------------------------------
-
     private func drawGround(_ ctx: inout GraphicsContext, alpha: Double) {
         var g = ctx; g.opacity = alpha
         let X = model.groundX, Y = model.groundY, depth = 12.0
@@ -194,7 +173,6 @@ struct CityRenderer {
         g.fill(poly([P(X, Y, 0), P(X, 0, 0), P(X, 0, -depth), P(X, Y, -depth)]), with: .color(pal.groundR.color))
         let top = poly([P(0, 0, 0), P(X, 0, 0), P(X, Y, 0), P(0, Y, 0)])
         g.fill(top, with: .color(pal.groundTop.color))
-        // calles entre columnas y filas de edificios
         let half = 0.5 * CityGeo.tile
         for x in streetsX() { g.fill(poly([P(x - half, 0, 0), P(x + half, 0, 0), P(x + half, Y, 0), P(x - half, Y, 0)]), with: .color(pal.lane.color)) }
         for y in streetsY() { g.fill(poly([P(0, y - half, 0), P(X, y - half, 0), P(X, y + half, 0), P(0, y + half, 0)]), with: .color(pal.lane.color)) }
@@ -211,7 +189,6 @@ struct CityRenderer {
         g.stroke(dashes, with: .color(pal.dash.color), lineWidth: 0.8)
         g.stroke(top, with: .color(pal.groundEdge.color), lineWidth: 0.8)
 
-        // sombras de contacto de los edificios
         for b in model.buildings {
             let a = cityClamp(rise(b, 0) / 0.6)
             guard a > 0 else { continue }
@@ -221,7 +198,6 @@ struct CityRenderer {
                     with: .color(pal.contact.color))
         }
 
-        // tráfico: puntos que recorren las calles (deterministas en t)
         let ta = ambient
         guard ta > 0.01 else { return }
         var gt = g; gt.opacity = alpha * ta
@@ -253,10 +229,6 @@ struct CityRenderer {
         return (0..<(ys.count - 1)).map { (ys[$0] + CityGeo.footprintD + ys[$0 + 1]) / 2 }
     }
 
-    // Edificios ---------------------------------------------------------------
-    // Cada edificio: plinto con escalones → planta baja (vestíbulo de vidrio, puerta y marquesina) → pisos con su ritmo de huecos
-    // (CityBuildingStyle: banda corrida con cornisas, huecos sueltos, pareados o verticales) → azotea con pretil y su remate.
-
     private typealias Faces = (CityRGB, CityRGB, CityRGB)
 
     private func box(_ g: inout GraphicsContext, _ x0: Double, _ y0: Double, _ x1: Double, _ y1: Double, _ z0: Double, _ z1: Double,
@@ -273,7 +245,6 @@ struct CityRenderer {
 
     private func slabColors(_ amber: Double, _ red: Double) -> Faces { tinted((pal.slabT, pal.slabL, pal.slabR), amber, red) }
 
-    /// Muro con el matiz del material.
     private func body(_ m: CityBuildingStyle.Material) -> Faces {
         let base: Faces = (pal.bodyT, pal.bodyL, pal.bodyR)
         guard let mt = pal.material(m) else { return base }
@@ -281,8 +252,6 @@ struct CityRenderer {
         return (base.0.mix(mt.tone, mt.k), base.1.mix(mt.tone.scaled(lf), mt.k), base.2.mix(mt.tone.scaled(rf), mt.k))
     }
 
-    /// Losa de cada piso: con banda corrida vuela (cornisa); con huecos es una imposta casi enrasada, del tono del muro, para que la
-    /// fachada se lea entera y no como pisos apilados. Lleva el tinte ámbar/rojo del piso.
     private func band(_ st: CityBuildingStyle, _ amber: Double, _ red: Double) -> Faces {
         if st.windows == .ribbon { return slabColors(amber, red) }
         let b = body(st.material)
@@ -291,7 +260,6 @@ struct CityRenderer {
     private func slabOverhang(_ st: CityBuildingStyle) -> Double { st.windows == .ribbon ? CityGeo.overhang : 0.25 * CityGeo.overhang }
     private func bandEdge(_ st: CityBuildingStyle) -> CityRGB { st.windows == .ribbon ? pal.slabEdge : pal.bodyEdge }
 
-    /// Hueco `i` de `n` en una cara (parámetro u a lo largo de la cara).
     private static func bay(_ i: Int, _ n: Int) -> (Double, Double) {
         (0.04 + 0.92 * Double(i) / Double(n), 0.04 + 0.92 * Double(i + 1) / Double(n))
     }
@@ -322,7 +290,6 @@ struct CityRenderer {
             let z0 = b.floorZ(f.level) + zOff
             let z1 = z0 + fh * r
             let isTarget = f.level == targetLevel
-            // losa
             var gs = g
             if isTarget { gs.opacity = g.opacity * CityTransition.slab(p) }
             box(&gs, R.x0 - so, R.y0 - so, R.x1 + so, R.y1 + so, z0, min(z1, z0 + CityGeo.slabH), band(st, tn.amber, tn.red), edge: bandEdge(st))
@@ -336,11 +303,9 @@ struct CityRenderer {
                     drawFacade(&g, b, f, R, zb: zb, z1: z1, windows: windows, amber: tn.amber, red: tn.red, alpha: fade)
                 }
             }
-            // terraza: el piso de encima se retira; pretil bajo en el borde delantero
             if r >= 1, b.floors.indices.contains(f.level + 1), b.setback(f.level + 1) > b.setback(f.level), !isTarget {
                 drawRail(&g, R, z: z1)
             }
-            // brillo ámbar/rojo (pulso lento)
             let att = max(tn.amber, tn.red)
             if att > 0.01 {
                 let sil = poly([P(R.x0 - so, R.y0 - so, z1), P(R.x1 + so, R.y0 - so, z1), P(R.x1 + so, R.y0 - so, z0), P(R.x1 + so, R.y1 + so, z0),
@@ -351,18 +316,15 @@ struct CityRenderer {
             }
             topZ = z1
         }
-        // azotea sobre el último piso (con el tinte del último piso); si el zoom levanta los de arriba, se va con ellos
         guard let last = b.floors.last, rise(b, last.level) >= 1 else { return }
         var g = ctx
         if targetLevel != nil { g.opacity = CityTransition.upperAlpha(p) }
         guard g.opacity > 0.001 else { return }
         let tn = lights.tint(last.id, t: t)
-        // topZ ya incluye la subida si el último piso está encima del elegido; si el elegido es el último, la azotea sube sola
         let roofZ = topZ + (last.level == targetLevel ? lift : 0)
         drawRoof(&g, b, b.rect(last.level), z: roofZ, alpha: roofAlpha(b), amber: tn.amber, red: tn.red)
     }
 
-    /// Plinto: zócalo de piedra algo más ancho que la planta baja, con un escalón delante de la puerta.
     private func drawPlinth(_ g: inout GraphicsContext, _ b: CityBuilding) {
         let st = b.style, R = b.rect(0), po = 0.22 * CityGeo.tile, h = st.plinthH
         box(&g, R.x0 - po, R.y0 - po, R.x1 + po, R.y1 + po, 0, h, pal.plinth, edge: pal.bodyEdge)
@@ -370,8 +332,6 @@ struct CityRenderer {
         box(&g, R.x0 + a0 * R.w - 2, R.y1 + po, R.x0 + a1 * R.w + 2, R.y1 + po + 0.22 * CityGeo.tile, 0, h * 0.5, pal.plinth)
     }
 
-    /// Muros y huecos de un piso entero (no el elegido para el zoom). La planta baja es el vestíbulo: vidrio casi corrido, puerta y
-    /// marquesina en la cara izquierda.
     private func drawFacade(_ g: inout GraphicsContext, _ b: CityBuilding, _ f: CityFloor, _ R: CityRect, zb: Double, z1: Double,
                             windows: [Double], amber: Double, red: Double, alpha: Double) {
         let st = b.style, wall = body(st.material)
@@ -390,7 +350,6 @@ struct CityRenderer {
         if ground { drawCanopy(&g, R, st, zb: zb, hh: hh, alpha: alpha) }
     }
 
-    /// Marquesina sobre la puerta: losa fina que vuela hacia la calle.
     private func drawCanopy(_ g: inout GraphicsContext, _ R: CityRect, _ st: CityBuildingStyle, zb: Double, hh: Double, alpha: Double) {
         let (a0, a1) = Self.bay(st.doorBay, CityGeo.windowsLeft)
         let z = zb + Openings.doorTop * hh + 3
@@ -399,7 +358,6 @@ struct CityRenderer {
             (pal.slabT, pal.slabL, pal.slabR), edge: pal.slabEdge)
     }
 
-    /// Pretil bajo en el borde delantero de una terraza.
     private func drawRail(_ g: inout GraphicsContext, _ R: CityRect, z: Double) {
         let w = 0.12 * CityGeo.tile, h = 3.0
         box(&g, R.x1 - w, R.y0, R.x1, R.y1, z, z + h, pal.parapet)
@@ -422,7 +380,6 @@ struct CityRenderer {
         box(&g, R.x0, R.y1 - w, R.x1, R.y1, zt, zt + hh, pal.parapet)
     }
 
-    /// Remate de la azotea (detrás del pretil delantero). Alto máximo: `CityBuildingStyle.roofH`.
     private func drawRoofKit(_ g: inout GraphicsContext, _ kind: CityBuildingStyle.Roof, _ R: CityRect, z zt: Double) {
         let tile = CityGeo.tile
         func unit(_ ux: Double, _ uy: Double, _ w: Double, _ d: Double, _ h: Double, vents: Bool) {
@@ -440,7 +397,6 @@ struct CityRenderer {
             unit(R.x0 + 0.9 * tile, R.y0 + 0.8 * tile, 0.9 * tile, 0.6 * tile, 7, vents: true)
             unit(R.x1 - 1.7 * tile, R.y1 - 1.2 * tile, 0.6 * tile, 0.6 * tile, 5, vents: false)
         case .tank:
-            // depósito de agua sobre patas, con aros y tapa en punta
             let tx = R.x0 + 0.8 * tile, ty = R.y0 + 0.7 * tile, s = 0.62 * tile, legH = 8.0, th = 11.0, lw = 0.07 * tile
             for (lx, ly) in [(tx, ty), (tx + s - lw, ty), (tx, ty + s - lw), (tx + s - lw, ty + s - lw)] {
                 box(&g, lx, ly, lx + lw, ly + lw, zt, zt + legH, pal.unit)
@@ -460,7 +416,6 @@ struct CityRenderer {
             g.fill(poly([P(tx + s, ty + s, z1), P(tx + s, ty, z1), apex]), with: .color(pal.unit.1.color))
             unit(R.x1 - 1.6 * tile, R.y1 - 1.1 * tile, 0.8 * tile, 0.5 * tile, 6, vents: true)
         case .penthouse:
-            // cuerpo retirado al fondo, con su banda de vidrio apagada y su losa
             let px = R.x0 + 0.5 * tile, py = R.y0 + 0.5 * tile, pw = R.w * 0.42, pd = R.d * 0.5, ph = 15.0
             box(&g, px, py, px + pw, py + pd, zt, zt + ph, pal.unit, edge: pal.bodyEdge)
             g.fill(poly([P(px + 0.1 * pw, py + pd, zt + 0.78 * ph), P(px + 0.9 * pw, py + pd, zt + 0.78 * ph),
@@ -471,7 +426,6 @@ struct CityRenderer {
             unit(R.x1 - 1.5 * tile, R.y1 - 1.1 * tile, 0.6 * tile, 0.6 * tile, 5, vents: false)
         case .mast:
             unit(R.x0 + 0.9 * tile, R.y0 + 0.8 * tile, 0.9 * tile, 0.6 * tile, 7, vents: true)
-            // mástil fino con dos travesaños (neutro: sin baliza de color)
             let mx = R.x1 - 1.3 * tile, my = R.y0 + 1.0 * tile, bw = 0.2 * tile
             box(&g, mx - bw / 2, my - bw / 2, mx + bw / 2, my + bw / 2, zt, zt + 3, pal.unit)
             var m = Path()
@@ -483,18 +437,13 @@ struct CityRenderer {
 
     enum Face { case left, right, backX, backY }
 
-    /// Huecos de una cara: alto (fracción del piso, sobre la losa) y ancho (fracción del hueco).
     struct Openings {
         var za: Double, zt: Double, width: Double
-        /// dos hojas por hueco
         var split = false
-        /// marco corrido de punta a punta (banda) en vez de un marco por hueco
         var band = false
         var sill = false
-        /// Dintel de la puerta (fracción del piso).
         static let doorTop = 0.62
 
-        /// nil = planta baja (vestíbulo).
         init(_ w: CityBuildingStyle.Windows?) {
             switch w {
             case nil: za = 0.05; zt = 0.78; width = 0.9; band = true
@@ -506,8 +455,6 @@ struct CityRenderer {
         }
     }
 
-    /// Huecos de una cara. `levels[i]` = nivel de la ventana i (cara izquierda 0…5, derecha 6…10); `blinds[i]`, su persiana (solo se
-    /// ve apagada); `door` = hueco de la cara izquierda con la puerta.
     private func drawWindows(_ g: inout GraphicsContext, _ R: CityRect, face: Face, _ op: Openings, zb: Double, hh: Double,
                              levels: [Double], blinds: [Double] = [], door: Int? = nil, amber: Double, red: Double, alpha: Double) {
         let wt = CityGeo.wallT
@@ -541,7 +488,6 @@ struct CityRenderer {
             let ua = a0 + m, ub = a1 - m
             let lv = off >= 0 && off + i < levels.count ? levels[off + i] : 0
             if door == i {
-                // puerta de vidrio oscuro en dos hojas (el vestíbulo se intuye detrás si hay hilos) y montante encima
                 let dt = zb + Openings.doorTop * hh
                 gg.fill(poly([pt(ua - fu, dt + 1.2), pt(ub + fu, dt + 1.2), pt(ub + fu, zb), pt(ua - fu, zb)]), with: .color(frame))
                 gg.fill(poly([pt(ua, dt), pt(ub, dt), pt(ub, zb), pt(ua, zb)]), with: .color(pal.door.mix(lc2, 0.35 * lv).color))
@@ -571,7 +517,6 @@ struct CityRenderer {
                 gg.fill(poly([pt(pa, zt), pt(pb, zt), pt(pb, zm), pt(pa, zm)]), with: .color(c1.color))
                 gg.fill(poly([pt(pa, zm), pt(pb, zm), pt(pb, za), pt(pa, za)]), with: .color(c2.color))
                 guard lv < 0.5 else { continue }
-                // reflejo en el cristal apagado y, en algunas, la persiana a media altura
                 let s1 = pa + (pb - pa) * 0.18, s2 = pa + (pb - pa) * 0.42, k = (pb - pa) * 0.12
                 var gr = gg; gr.opacity = gg.opacity * (1 - lv * 2)
                 gr.fill(poly([pt(s2, zt), pt(s2 + k, zt), pt(s1 + k, za), pt(s1, za)]), with: .color((lit ? pal.streakL : pal.streakR).color))
@@ -582,7 +527,6 @@ struct CityRenderer {
             }
             if lv > 0.05 && dark { halo.append(poly([pt(ua, zt), pt(ub, zt), pt(ub, za), pt(ua, za)])) }
         }
-        // halo tenue de las ventanas encendidas
         if !halo.isEmpty {
             let col = lc1.color
             gg.drawLayer { l in
@@ -593,7 +537,6 @@ struct CityRenderer {
         }
     }
 
-    /// Piso elegido durante el zoom: muros del fondo, la oficina dentro, muros delanteros que bajan.
     private func drawHollow(_ g: inout GraphicsContext, _ b: CityBuilding, _ f: CityFloor, _ R: CityRect, zb: Double, hh: Double,
                             windows: [Double], amber: Double, red: Double, zoom z: CityZoom) {
         let wt = CityGeo.wallT, st = b.style, wall = body(st.material), ground = f.level == 0
@@ -605,7 +548,6 @@ struct CityRenderer {
             drawWindows(&g, R, face: .backX, op, zb: zb, hh: hb, levels: [], amber: 0, red: 0, alpha: 1)
             drawWindows(&g, R, face: .backY, op, zb: zb, hh: hb, levels: [], amber: 0, red: 0, alpha: 1)
         }
-        // la oficina, con el MISMO dibujo que la vista que se monta al final (FloorOfficeView o IsoOfficeView)
         let rr = CityTransition.roomRise(p), dp = CityTransition.deskPop(p)
         if rr > 0.001 {
             let oc = z.transition.officeCamera(p)
@@ -613,12 +555,10 @@ struct CityRenderer {
             var go = g
             switch z.content {
             case .floor(let plan, let lay, let now):
-                // los escritorios son fijos: el piso entero aparece con el zoom
                 go.opacity = g.opacity * rr
                 FloorRenderer(plan: plan, layout: lay, cam: cam, box: FloorCameraBox(), dark: dark, t: t, now: now,
                               selected: nil, hovered: nil).draw(&go)
             case .graph(var sc):
-                // las salas se extruyen y los escritorios brotan con el zoom
                 for i in sc.rooms.indices { sc.rooms[i].rise = rr; sc.rooms[i].wallRise = rr }
                 for i in sc.desks.indices { sc.desks[i].pop = dp; sc.desks[i].floorZ = Iso.slabH * rr }
                 for i in sc.wires.indices { sc.wires[i].draw = dp }
@@ -633,9 +573,6 @@ struct CityRenderer {
         }
     }
 
-    // Etiquetas -----------------------------------------------------------------
-
-    /// Lado de las píldoras de proyecto: a la izquierda los edificios del borde izquierdo de la pantalla.
     func labelsOnLeft(_ b: CityBuilding) -> Bool {
         let us = model.buildings.map { ($0.x0 + $0.x1) / 2 - ($0.y0 + $0.y1) / 2 }
         guard let lo = us.min(), let hi = us.max(), hi - lo > 1 else { return false }

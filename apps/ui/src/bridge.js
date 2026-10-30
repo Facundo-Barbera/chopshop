@@ -1,6 +1,3 @@
-// Puente JSON {type, payload} entre React (WKWebView) y el shell SwiftUI.
-// JS -> Swift: window.webkit.messageHandlers.chopshop.postMessage({type, payload, id?})
-// Swift -> JS: window.chopshop.receive({type, payload, id?})
 let seq = 0;
 const waiting = new Map();
 const listeners = new Set();

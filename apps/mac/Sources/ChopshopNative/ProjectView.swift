@@ -1,7 +1,5 @@
 import SwiftUI
 
-/// Vista de proyecto: una frase de estado, la oficina viva como protagonista, "te necesita" y una lista compacta.
-/// Se ve como app nativa de macOS: grises del sistema, tipografía SF, color solo para atención.
 @available(macOS 26.0, *)
 public struct ProjectView: View {
     public let project: String
@@ -30,7 +28,6 @@ public struct ProjectView: View {
     }
 }
 
-/// Contenido sin ScrollView ni toolbar (lo reutilizan las capturas).
 @available(macOS 26.0, *)
 public struct ProjectContent: View {
     let project: String
@@ -72,7 +69,6 @@ public struct ProjectContent: View {
         }
     }
 
-    // Una frase: se lee en un vistazo. El color solo en lo que pide algo de ti.
     private var statusLine: some View {
         var t = Text("")
         var first = true
@@ -160,8 +156,6 @@ public struct ProjectContent: View {
         }
     }
 }
-
-// MARK: - Previews (cada proyecto, claro y oscuro). Fotograma fijo = sin animación; el de "vivo" anima.
 
 #if NATIVE_PREVIEWS
 #Preview("nuskills · oscuro", traits: .fixedLayout(width: 1000, height: 900)) {

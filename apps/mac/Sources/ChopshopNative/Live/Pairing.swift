@@ -1,6 +1,5 @@
 import Foundation
 
-/// Resultado de canjear un código: `POST /pair` -> `{device_id, credential, api_version}`.
 public struct PairingResult: Equatable, Sendable {
     public var deviceID: String
     public var credential: String
@@ -8,23 +7,16 @@ public struct PairingResult: Equatable, Sendable {
 }
 
 public enum PairingError: Error, Equatable {
-    /// El texto no es un código (8 símbolos base32 de Crockford).
     case badCode
-    /// 401: código inválido.
     case invalidCode
-    /// 410: ya usado, caducado o invalidado.
     case expired
-    /// 429: demasiados intentos.
     case rateLimited
-    /// 403: identidad Tailscale no permitida.
     case forbidden
-    /// 404/405, o 503 sin emparejamiento: el agente es anterior a api_version 2.
     case unsupported
     case http(Int, String?)
     case network(String)
     case badResponse
 
-    /// Texto para la UI (sin URLs ni secretos).
     public var message: String {
         switch self {
         case .badCode: return "El código tiene 8 letras y números, como K7QM-93XD."
@@ -40,8 +32,6 @@ public enum PairingError: Error, Equatable {
     }
 }
 
-/// Emparejamiento por dispositivo (docs/agent-api.md «Emparejamiento por dispositivo»). Sin credencial, sin `Origin`,
-/// `Content-Type: application/json` y `Content-Length` (el agente rechaza chunked).
 public struct PairingClient: Sendable {
     public static let alphabet = Set("0123456789ABCDEFGHJKMNPQRSTVWXYZ")
     private let session: URLSession
@@ -56,8 +46,6 @@ public struct PairingClient: Sendable {
         }
     }
 
-    /// Texto tecleado -> `XXXX-XXXX` canónico, o nil. Igual que `pairing.normalize` del agente: sin guiones ni espacios,
-    /// sin distinguir mayúsculas, O -> 0 e I/L -> 1.
     public static func normalize(code: String) -> String? {
         var s = ""
         for ch in code.uppercased() where !(ch == "-" || ch.isWhitespace) {
@@ -104,7 +92,6 @@ public struct PairingClient: Sendable {
         }
     }
 
-    /// `GET /health` (sin credencial): `machine_id` del agente, para nombrar la cuenta del Keychain.
     public func machineID(baseURL: URL) async throws -> String? {
         var req = URLRequest(url: Self.url(baseURL, "health"))
         req.setValue("application/json", forHTTPHeaderField: "Accept")

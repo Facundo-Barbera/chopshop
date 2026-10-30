@@ -1,17 +1,4 @@
 #!/usr/bin/env python3
-"""Agente FICTICIO para probar la app de Mac con varias máquinas, sin T3 ni datos reales.
-
-Sirve uno de los agentes de tools/screenshots/fixture.json (host-a, host-b…) en loopback, con la forma de
-docs/agent-api.md: `GET /health`, `GET /snapshot` (con `ts`, CPU y RAM que se mueven en cada petición) y
-`POST /pair` (cualquier código no vacío da una credencial `cs1_…` aleatoria que solo vive en memoria; nunca se
-imprime). El resto de rutas da 404 (la app sigue funcionando: `/stream` falla y la oficina nativa lo muestra).
-
-    python3 tools/mock_agent/mock_agent.py --agent host-a --port 3791
-    python3 tools/mock_agent/mock_agent.py --agent host-b --port 3792 --require-pairing
-
-Sin `--require-pairing` no pide credencial (para verificar sin emparejar); con él, `/snapshot` da 401 hasta
-canjear un código, como un agente real con api_version 2. Solo stdlib.
-"""
 import argparse
 import json
 import math
@@ -28,7 +15,6 @@ MAX_BODY = 64 * 1024
 
 
 def load_snapshot(agent, path=FIXTURE):
-    """Snapshot del agente `agent` en el fixture (ValueError si no existe o no tiene snapshot)."""
     with open(path, encoding="utf-8") as f:
         fx = json.load(f)
     for a in fx.get("agents", []):
@@ -39,8 +25,6 @@ def load_snapshot(agent, path=FIXTURE):
 
 
 class MockAgent:
-    """Estado del agente ficticio. Las credenciales emitidas se guardan solo como conjunto en memoria."""
-
     def __init__(self, snapshot, require_pairing=False, clock=time.time):
         self.base = snapshot
         self.machine_id = snapshot.get("machine_id") or "mock"
@@ -76,7 +60,6 @@ class MockAgent:
                 "uptime": round(now - self.started, 1), "whoami": {"mock": True}}
 
     def snapshot(self):
-        """El snapshot del fixture con hora actual y CPU/RAM oscilando (para que las minigráficas se muevan)."""
         with self._lock:
             self._tick += 1
             t = self._tick
@@ -100,7 +83,6 @@ def make_handler(agent):
         server_version = "chopshop-mock-agent"
 
         def log_message(self, fmt, *args):
-            # Método, ruta y código; nunca cabeceras (Authorization) ni cuerpos (credenciales).
             sys.stderr.write("%s %s\n" % (agent.machine_id, fmt % args))
 
         def _send(self, status, obj):
@@ -151,12 +133,11 @@ def make_handler(agent):
 
 
 def serve(agent, host="127.0.0.1", port=0):
-    """Arranca el servidor (port 0 = libre) y lo devuelve; `server.server_address[1]` es el puerto."""
     return ThreadingHTTPServer((host, port), make_handler(agent))
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(description="Agente ficticio para probar la app de Mac con varias máquinas.")
     ap.add_argument("--agent", default="host-a", help="nombre del agente en el fixture (host-a, host-b…)")
     ap.add_argument("--port", type=int, default=3791)
     ap.add_argument("--host", default="127.0.0.1", help="solo loopback por defecto")

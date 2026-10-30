@@ -1,8 +1,6 @@
 import SwiftUI
 import AppKit
 
-/// Capturas PNG para autoevaluar el diseño sin abrir Xcode (las usa el target `ChopshopSnap`).
-/// ImageRenderer no dibuja la toolbar ni materiales, así que se emula la barra de título.
 @available(macOS 26.0, *)
 @MainActor
 public enum Snapshots {
@@ -44,7 +42,6 @@ public enum Snapshots {
         print("ok \(path)")
     }
 
-    /// Solo la oficina (para ver el resaltado de hover, que ImageRenderer no puede provocar solo; en el mundo no hay tooltips).
     public static func renderOffice(project: String, dark: Bool, hovered: String?, selected: String? = nil, width: CGFloat = 1000, height: CGFloat = 640, to path: String) {
         NSApp?.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
         let snap = Fixtures.snapshot
@@ -59,7 +56,6 @@ public enum Snapshots {
         try? png.write(to: URL(fileURLWithPath: path)); print("ok \(path)")
     }
 
-    /// Un fotograma de la demo en el instante `t` (tiempo congelado: puro, igual que en vivo). `jpeg` para las secuencias largas.
     public static func renderDemo(t: Double, dark: Bool = true, width: CGFloat = 1100, height: CGFloat = 700, scale: CGFloat = 2, jpeg: Bool = false, to path: String) {
         NSApp?.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
         let v = DemoOfficeCard(playback: DemoPlayback.shared, time: t, frozen: true)

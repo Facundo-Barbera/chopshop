@@ -1,26 +1,5 @@
 name: Release Mac
 
-# Publica Chopshop.app firmada (Developer ID), notarizada y con auto-actualización (Sparkle) en Cloudflare R2.
-# Guía completa, lista de secrets/variables y rollback: docs/release.md
-#
-#   git tag v1.2.3 && git push origin v1.2.3        # release real (v1.2.3-beta.1 -> canal beta)
-#   Actions -> Release Mac -> Run workflow           # dry-run por defecto: build + firma ad-hoc, sin credenciales
-#
-# Seguridad:
-#  - Solo se dispara por tag o a mano; NO hay pull_request ni pull_request_target (los forks no ven secretos).
-#  - Una release real exige un tag vX.Y.Z alcanzable desde la rama de releases (RELEASE_BRANCH, por defecto main).
-#  - Secrets y variables a nivel de REPOSITORIO (así el job `preflight` ve cuáles faltan y falla el primero, antes de
-#    tocar keychain o red). Los secrets solo se pasan como valor a los pasos que los usan; `preflight` recibe
-#    únicamente un indicador "existe/no existe". El job `publish` usa el environment `release` (aprobación manual
-#    opcional; no necesita secrets propios).
-#  - Toda release REAL sale firmada con Developer ID y notarizada: no hay canal sin firmar y el workflow aborta si falta.
-#  - DRY-RUN (workflow_dispatch con dry_run=true, el valor por defecto): omite firma Developer ID, notarización y
-#    stapling (y no exige MACOS_CERT_P12_BASE64, MACOS_CERT_PASSWORD ni SIGNING_IDENTITY). Compila, ensambla (firma
-#    ad-hoc), zip, DMG sin firmar, firma EdDSA de Sparkle, generate_appcast y sube SOLO a R2 bajo test/<run_id>/ (el
-#    DMG solo como artefacto del run). No toca el appcast ni los zips de producción, no crea GitHub Release ni tags.
-#  - El DMG (instalación manual) se firma, notariza y grapa en cada release real y va a la GitHub Release junto al zip;
-#    Sparkle sigue usando solo el zip y el appcast no lo referencia.
-#  - Acciones fijadas por SHA de commit (comentario = versión).
 on:
   push:
     tags: ["v*"]
@@ -46,19 +25,18 @@ concurrency:
   group: release-mac-${{ github.ref }}
   cancel-in-progress: false
 
-# Valores por defecto del pipeline (sin secretos). Se editan aquí, no son variables de GitHub.
 env:
   MIN_MACOS_VERSION: ${{ inputs.min_macos_version || '13.0' }}
-  RELEASE_BRANCH: main # rama a la que debe pertenecer el tag
-  UNIVERSAL: "1" # arm64 + x86_64 (0 = solo arm64)
-  SPARKLE_AUTO_UPDATE: "false" # SUAutomaticallyUpdate
-  SPARKLE_CHECK_INTERVAL: "86400" # SUScheduledCheckInterval (segundos, >= 3600)
+  RELEASE_BRANCH: main
+  UNIVERSAL: "1"
+  SPARKLE_AUTO_UPDATE: "false"
+  SPARKLE_CHECK_INTERVAL: "86400"
   MAX_DELTAS: "3"
-  MAX_VERSIONS: "5" # versiones que conserva el feed (los zips nunca se borran)
+  MAX_VERSIONS: "5"
   DELTA_COMPRESSION: lzma
-  PHASED_ROLLOUT_INTERVAL: "" # segundos entre tandas del rollout gradual (solo canal estable); vacío = sin rollout
+  PHASED_ROLLOUT_INTERVAL: ""
   FULL_RELEASE_NOTES_URL: ""
-  XCODE_VERSION: "27.1" # /Applications/Xcode_27.1.app en la imagen xcode-27 (SDK macOS 27: ChopshopNative usa APIs 26+; igual que el Mac de desarrollo)
+  XCODE_VERSION: "27.1"
 
 jobs:
   preflight:
@@ -72,7 +50,7 @@ jobs:
       build_number: ${{ steps.version.outputs.build_number }}
       channel: ${{ steps.version.outputs.channel }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -88,8 +66,6 @@ jobs:
           echo "dry_run=$dry" >> "$GITHUB_OUTPUT"
           echo "Modo: dry_run=$dry"
 
-      # PRIMERA comprobación: lista TODOS los secrets/vars que falten (solo nombres). Los secrets se pasan como
-      # indicador (`set` o vacío): este job nunca recibe su valor.
       - name: Secrets y variables requeridos
         env:
           PREFLIGHT_MODE: ${{ steps.mode.outputs.dry_run == 'true' && 'dryrun' || 'release' }}
@@ -111,7 +87,6 @@ jobs:
           UPDATES_BASE_URL: ${{ vars.UPDATES_BASE_URL }}
         run: bash apps/mac/release/preflight.sh release
 
-      # Ancestría y no igualdad: se puede etiquetar un commit antiguo de la rama, pero no una rama sin revisar.
       - name: El tag debe estar en la rama de releases
         if: steps.mode.outputs.dry_run != 'true'
         run: |
@@ -137,14 +112,13 @@ jobs:
   build:
     name: Build, firma y notarización
     needs: preflight
-    # runner fijado (no *-latest): las builds de release deben ser reproducibles entre ejecuciones
-    runs-on: xcode-27 # imagen GA con Xcode 27.x (solo arm64; el build universal sigue cruzando a x86_64)
+    runs-on: xcode-27
     timeout-minutes: 75
     env:
       DRY_RUN: ${{ needs.preflight.outputs.dry_run }}
       VERSION: ${{ needs.preflight.outputs.version }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
 
@@ -159,11 +133,11 @@ jobs:
           xcodebuild -version
           swift --version
 
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
         with:
           run_install: false
 
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: "24"
           cache: pnpm
@@ -192,7 +166,6 @@ jobs:
           BUILD_NUMBER: ${{ needs.preflight.outputs.build_number }}
           RELEASE_MODE: ${{ env.DRY_RUN == 'true' && 'dryrun' || 'release' }}
           BUNDLE_ID: ${{ vars.BUNDLE_ID || 'com.example.chopshop' }}
-          # En dry-run la app apunta al feed de PRUEBA (test/<run_id>), no al de producción
           UPDATES_BASE_URL: ${{ vars.UPDATES_BASE_URL }}${{ env.DRY_RUN == 'true' && format('/test/{0}', github.run_id) || '' }}
           SPARKLE_ED_PUBLIC_KEY: ${{ vars.SPARKLE_ED_PUBLIC_KEY }}
           APP_OUT: ${{ runner.temp }}/out/Chopshop.app
@@ -200,14 +173,12 @@ jobs:
 
       - name: Firmar (hardened runtime, de dentro hacia fuera)
         env:
-          # En dry-run no hay certificado: firma ad-hoc ("-"). En release, SIGN_IDENTITY (hash) lo exportó keychain.sh.
           SIGN_IDENTITY: ${{ env.DRY_RUN == 'true' && '-' || env.SIGN_IDENTITY }}
-          RELEASE_MODE: ${{ env.DRY_RUN == 'true' && 'dryrun' || 'release' }} # en release, sign-app.sh rechaza la firma ad-hoc
+          RELEASE_MODE: ${{ env.DRY_RUN == 'true' && 'dryrun' || 'release' }}
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
         run: bash apps/mac/release/sign-app.sh "$RUNNER_TEMP/out/Chopshop.app"
 
       - name: Comprobar el agente incrustado (firmado, hardened runtime)
-        # «Usar esta Mac como máquina»: el lanzador y el Python incrustado deben arrancar ya firmados; un release sin agente no sale
         run: |
           set -euo pipefail
           app="$RUNNER_TEMP/out/Chopshop.app"
@@ -225,14 +196,12 @@ jobs:
           ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
         run: bash apps/mac/release/notarize.sh "$RUNNER_TEMP/out/Chopshop.app" "$RUNNER_TEMP/notarize-submit.zip"
 
-      # El zip FINAL se crea DESPUÉS de grapar el ticket
       - name: Zip final y checksum
         id: pack
         env:
           REQUIRE_STAPLE: ${{ env.DRY_RUN == 'true' && '0' || '1' }}
         run: bash apps/mac/release/package.sh "$RUNNER_TEMP/out/Chopshop.app" "$RUNNER_TEMP/dist/Chopshop-${VERSION}.zip"
 
-      # DMG con la app YA firmada y grapada. En dry-run queda sin firmar (y no se sube a producción).
       - name: Crear el DMG
         env:
           REQUIRE_STAPLE: ${{ env.DRY_RUN == 'true' && '0' || '1' }}
@@ -253,7 +222,7 @@ jobs:
         run: bash apps/mac/release/notarize.sh "$RUNNER_TEMP/dist/Chopshop-${VERSION}.dmg"
 
       - name: Subir el zip y el DMG como artefacto del run
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: chopshop-mac-${{ needs.preflight.outputs.version }}
           path: |
@@ -265,7 +234,6 @@ jobs:
           compression-level: 0
           retention-days: ${{ env.DRY_RUN == 'true' && 3 || 30 }}
 
-      # Siempre, falle o no el job: borra keychain y credenciales temporales
       - name: Limpiar keychain y credenciales
         if: always()
         run: bash apps/mac/release/keychain.sh cleanup
@@ -275,11 +243,9 @@ jobs:
     needs: [preflight, build]
     runs-on: macos-15
     timeout-minutes: 45
-    # Aprobación manual opcional (Settings -> Environments -> release -> Required reviewers). Sin secrets propios.
     environment: release
     permissions:
-      contents: write # crear la GitHub Release (solo en release real)
-    # Un solo publicador a la vez (compartido con rollback-mac): dos releases no pisan el appcast
+      contents: write
     concurrency:
       group: mac-updates-feed
       cancel-in-progress: false
@@ -289,28 +255,25 @@ jobs:
       VERSION: ${{ needs.preflight.outputs.version }}
       BUILD_NUMBER: ${{ needs.preflight.outputs.build_number }}
       CHANNEL: ${{ needs.preflight.outputs.channel }}
-      # Dry-run: todo bajo test/<run_id> y con la salvaguarda R2_TEST_ONLY (r2.sh se niega a escribir fuera de test/)
       R2_PREFIX: ${{ needs.preflight.outputs.dry_run == 'true' && format('test/{0}', github.run_id) || '' }}
       R2_TEST_ONLY: ${{ needs.preflight.outputs.dry_run == 'true' && '1' || '0' }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
-          fetch-tags: true # notas: el mensaje del tag anotado y el tag anterior
+          fetch-tags: true
           persist-credentials: false
 
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: chopshop-mac-${{ needs.preflight.outputs.version }}
           path: ${{ runner.temp }}/dl
 
-      # Release real: sin firma Developer ID + notarización el workflow ABORTA aquí; nunca se publica algo sin firmar.
       - name: Comprobar el zip descargado (checksum y firma)
         env:
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
-          # stapler_retry: staple/validate con reintentos (CloudKit falla a veces por red)
           source "$GITHUB_WORKSPACE/apps/mac/release/lib.sh"
           cd "$RUNNER_TEMP/dl"
           shasum -a 256 -c "Chopshop-${VERSION}.zip.sha256"
@@ -325,7 +288,6 @@ jobs:
             fi
             stapler_retry validate "$check/Chopshop.app"
             spctl --assess --type execute -vv "$check/Chopshop.app" 2>&1 | sed 's/^origin=.*/origin=<oculto>/'
-            # el DMG que se adjunta a la GitHub Release: firmado, aceptado por Gatekeeper y con el ticket grapado
             codesign --verify --strict --verbose=2 "Chopshop-${VERSION}.dmg"
             spctl -a -t open --context context:primary-signature -vv "Chopshop-${VERSION}.dmg" 2>&1 | sed 's/^origin=.*/origin=<oculto>/'
             stapler_retry validate "Chopshop-${VERSION}.dmg"
@@ -396,7 +358,6 @@ jobs:
               --notes-file "$RUNNER_TEMP/release-notes.md" ${flags[@]+"${flags[@]}"}
           fi
 
-      # Siempre: la clave de Sparkle solo existe como archivo temporal 0600 dentro de appcast.sh; si algo la dejó, se borra
       - name: Borrar claves temporales
         if: always()
         run: rm -f "$RUNNER_TEMP"/chopshop-sparkle-key-* "$RUNNER_TEMP"/chopshop-notary-*

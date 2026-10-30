@@ -1,35 +1,18 @@
-"""Roles permanentes por oficina (docs/plans/office-redesign.md §5, fase 6): modelo, escritorio y despertar.
-
-- Un departamento `permanent: true` cuyo rol declara `office.roles.<rol>.wake` se **despierta** con los disparadores de
-  `automations.py`: `schedule` (`cron`/`every`, hora local de la box), `type: <evento>` con `where` sobre los sobres del bus
-  (p. ej. `github.issue.opened` del polling de GitHub), `manual` y `desk.note` (una nota de bot en ese escritorio: lo despierta
-  si está libre; si está ocupado la nota se queda en la bandeja de `notes.py`). Las notas vivas del escritorio entran en el
-  prompt del despertar y se consumen al lanzarlo.
-- Al despertar se elige el primer escritorio permanente libre del rol (piso más bajo primero) y se crea un **lote de una
-  tarea** en el motor (`engine.create_batch`, con `role`/`desk`/`wake` en la tarea) con el prompt del rol (`prompt_file`,
-  relativo a `~/.chopshop/automations/<proyecto>/`) + el disparador + la herencia del ocupante anterior. El hilo de
-  `engine.tick` lo lanza en T3; cuando aparece su `threadId`, `assign_fn` lo sienta en el escritorio (por defecto emite
-  `desk.assigned reason: wake`); cuando la tarea termina, el despertar se cierra.
-- **Una sola instancia viva por escritorio**: si todos los escritorios del rol tienen un despertar vivo, el disparo queda como
-  **despertar pendiente** del escritorio (varios se fusionan en uno, en `meta` `role:pending:<escritorio>`) y se lanza al
-  terminar el hilo vivo.
-- Tope `max_wakes_per_hour` por escritorio; anti-bucles: `cause.depth >= 3` no despierta.
-- Tabla propia `desk_wakes`, creada con `ensure_schema` (idempotente, sin tocar `user_version`).
-Todo lo externo es inyectable (perfiles, lanzamiento, lectura de la tarea, asiento, reloj)."""
 import fnmatch
 import json
 import logging
 import os
 import time
 
-from . import automations, db, envelope, layout, notes as notes_mod
+from . import automations, db, envelope, layout
+from . import notes as notes_mod
 
 log = logging.getLogger("chopshop.agent.roles")
 
-PROMPT_MAX = 32 * 1024            # bytes leídos del prompt_file
+PROMPT_MAX = 32 * 1024
 SUMMARY_MAX = 1500
 MAX_WAKES_PER_HOUR = 6
-PENDING_SEEN = 10                 # disparos pendientes que se citan en el prompt (el resto solo cuenta)
+PENDING_SEEN = 10
 CURSOR = "roles_cursor"
 BATCH = 500
 RELOAD = 60.0
@@ -56,8 +39,6 @@ def ensure_schema(conn):
                 conn.execute(sql)
 
 
-# ---------------------------------------------------------------- despertares (tabla)
-
 def wakes(conn, desk=None, states=None, limit=50):
     sql, args = "SELECT * FROM desk_wakes", []
     cond = []
@@ -80,10 +61,7 @@ def _set_wake(conn, wid, **cols):
         conn.execute("UPDATE desk_wakes SET %s WHERE id=?" % ", ".join("%s=?" % k for k in cols), list(cols.values()) + [wid])
 
 
-# ---------------------------------------------------------------- perfil -> escritorios que despiertan
-
 def permanent_roles(prof):
-    """[{project, role, desks:[id], triggers, prompt_file, prof}] de los roles con `wake` y departamento permanente."""
     out = []
     for role, spec in layout.roles(prof).items():
         trs = layout.wake_triggers(prof, role)
@@ -96,7 +74,6 @@ def permanent_roles(prof):
 
 
 def read_prompt(project, rel, root=None):
-    """Texto del `prompt_file` (dentro de la carpeta del proyecto; nunca fuera) o None si no hay o no se puede leer."""
     if not rel:
         return None
     base = os.path.realpath(automations.project_dir(project, root))
@@ -113,7 +90,6 @@ def read_prompt(project, rel, root=None):
 
 
 def describe(env):
-    """Una línea legible del sobre que despierta (tipo, sujeto, título, url)."""
     if not env:
         return None
     s = env.get("subject") or {}
@@ -129,7 +105,6 @@ def describe(env):
 
 
 def compose(role, desk, trigger, prompt_text, inheritance, trigger_env=None, pending=None, notes_text=None):
-    """Prompt del despertar: rol + disparador + herencia + restricciones (el motor antepone las reglas del perfil)."""
     out = ["[Chopshop] Rol permanente `%s` en el escritorio %s. Te despertó: %s." % (role, desk, describe(trigger_env) or trigger)]
     out.append("")
     out.append(prompt_text.strip() if prompt_text and prompt_text.strip()
@@ -157,22 +132,19 @@ def compose(role, desk, trigger, prompt_text, inheritance, trigger_env=None, pen
 
 
 def default_launch(prof, item):
-    """Lote de una tarea en el motor (state.json); `engine.tick` (hilo `engine` del agente) lo lanza en T3."""
-    from .. import engine  # noqa: PLC0415
+    from .. import engine
     host, _cap, route_notes = engine.route(prof, 1)
     bid = engine.create_batch(prof, [item], host, 1, route_notes)
     return bid, "t-%s-1" % bid[2:]
 
 
 def default_task(batch_id, task_id):
-    from .. import state  # noqa: PLC0415
+    from .. import state
     b = state.read().get("batches", {}).get(batch_id)
     return next((t for t in (b or {}).get("tasks", []) if t.get("id") == task_id), None) if b else None
 
 
 class MetaStore:
-    """Cursores de `schedule` y despertares pendientes de los roles en `meta` (clave `role:<...>`)."""
-
     def __init__(self, conn):
         self.conn = conn
 
@@ -187,7 +159,7 @@ class MetaStore:
 
 
 def _load_profiles():
-    from .. import profile  # noqa: PLC0415
+    from .. import profile
     out = []
     for p in profile.list_projects():
         try:
@@ -200,14 +172,7 @@ def _load_profiles():
     return out
 
 
-# ---------------------------------------------------------------- motor
-
 class Roles:
-    """Despierta roles permanentes. `emit_fn(sobre_parcial) -> sobre guardado` publica en el bus (como las automatizaciones).
-
-    `launch_fn(perfil, tarea) -> (batch_id, task_id)`; `task_fn(batch_id, task_id) -> tarea de state.json | None`;
-    `assign_fn(**kw)` sienta el hilo en el escritorio (por defecto, sobre `desk.assigned reason: wake`; la oficina de escritorios puede sustituirlo)."""
-
     def __init__(self, conn, emit_fn, profiles_fn=None, launch_fn=None, task_fn=None, assign_fn=None,
                  clock=time.time, store=None, root=None, enabled=True, max_wakes_per_hour=MAX_WAKES_PER_HOUR):
         self.conn, self.emit_fn, self.clock, self.root = conn, emit_fn, clock, root
@@ -222,13 +187,12 @@ class Roles:
         self._cursor = None
         ensure_schema(conn)
 
-    # -- perfiles
     def reload(self):
         out = []
         for prof in self.profiles_fn():
             try:
                 out += permanent_roles(prof)
-            except Exception as e:  # noqa: BLE001 - un perfil roto no para a los demás
+            except Exception as e:
                 log.warning("roles de %s: %s", prof.get("project"), e)
         self.roles = out
         self._loaded = self.clock()
@@ -237,11 +201,10 @@ class Roles:
     def find(self, project, role):
         return next((r for r in self.roles if r["project"] == project and r["role"] == role), None)
 
-    # -- emisión
     def _emit(self, type, project, body, cause=None):
         try:
             return self.emit_fn({"type": type, "project": project, "body": body, "cause": cause})
-        except Exception:  # noqa: BLE001 - el bus no debe frenar el despertar
+        except Exception:
             log.exception("no pude emitir %s", type)
             return None
 
@@ -252,14 +215,12 @@ class Roles:
             body["title"] = title
         return self._emit("desk.assigned", project, body, cause)
 
-    # -- disparadores
     def matches(self, env):
-        """[(rol, disparador)] que este sobre despierta (con anti-bucles; `desk.*`/`office.*` nunca despiertan)."""
         env = automations.normalize(env)
         if not env or env["cause"]["depth"] >= automations.MAX_DEPTH:
             return []
         ty = env.get("type") or ""
-        if ty == layout.WAKE_EVENT:                       # nota de bot: despierta ese escritorio si su rol la declara
+        if ty == layout.WAKE_EVENT:
             desk = (env.get("body") or {}).get("desk")
             return [(r, t, desk) for r in self.roles if env.get("project") == r["project"] and desk in r["desks"]
                     for t in r["triggers"] if t.get("type") == layout.WAKE_EVENT][:1]
@@ -278,7 +239,6 @@ class Roles:
         return out
 
     def on_event(self, env):
-        """Un sobre del bus -> despertares. Devuelve [(proyecto, rol, resultado)]."""
         if not self.enabled:
             return []
         env = automations.normalize(env)
@@ -287,7 +247,6 @@ class Roles:
         return [(r["project"], r["role"], self.wake(r, env.get("type"), env, desk=d)) for r, _, d in self.matches(env)]
 
     def tick(self, now=None):
-        """Horarios (`schedule`) de los roles. Primera vez = siembra sin disparar; tras una caída larga dispara una sola vez."""
         now = self.clock() if now is None else now
         fired = []
         if not self.enabled:
@@ -321,7 +280,6 @@ class Roles:
             raise RolesError("%s no tiene un rol permanente %s con wake" % (project, role))
         return self.wake(r, "manual", None, by=by)
 
-    # -- despertar
     def _rate_ok(self, desk, now):
         with db.tx():
             n = self.conn.execute("SELECT COUNT(*) FROM desk_wakes WHERE desk_id=? AND created > ? AND state != 'failed'",
@@ -329,14 +287,13 @@ class Roles:
         return n < self.max_wakes_per_hour
 
     def wake(self, r, trigger, env=None, desk=None, by=None):
-        """Despierta el rol: "launched" | "pending" | "rate_limited" | "failed" | "disabled"."""
         if not self.enabled:
             return "disabled"
         now = self.clock()
         live = {w["desk_id"] for w in wakes(self.conn, None, LIVE, 500)}
         free = [d for d in r["desks"] if d not in live] if desk is None else ([desk] if desk not in live else [])
         if not free:
-            if trigger == layout.WAKE_EVENT:              # la nota ya espera en la bandeja; la lee el próximo despertar
+            if trigger == layout.WAKE_EVENT:
                 return "noted"
             self._add_pending(desk or r["desks"][0], "%s: %s" % (trigger, describe(env) or by or trigger))
             return "pending"
@@ -354,7 +311,7 @@ class Roles:
                 "wake": wid}
         try:
             bid, tid = self.launch_fn(r["prof"], item)
-        except Exception as e:  # noqa: BLE001 - perfil sin host, state.json bloqueado...
+        except Exception as e:
             if pending:
                 self.store["pending:" + target] = json.dumps(pending)
             log.warning("no pude despertar %s/%s en %s: %s", r["project"], r["role"], target, e)
@@ -372,7 +329,6 @@ class Roles:
         log.info("rol %s/%s despertado en %s (%s) -> lote %s", r["project"], r["role"], target, trigger, bid)
         return "launched"
 
-    # -- despertares pendientes (disparos mientras el escritorio está ocupado; se fusionan en uno)
     def _add_pending(self, desk, desc):
         p = self._pending(desk) or {"count": 0, "seen": []}
         p["count"] += 1
@@ -393,14 +349,13 @@ class Roles:
         return p
 
     def inheritance(self, desk):
-        """Lo que hereda el próximo ocupante: el último despertar terminado del escritorio (hilo, resumen, rama, PRs)."""
         prev = next((w for w in wakes(self.conn, desk, ("ended",), 5) if w["thread_id"]), None)
         if not prev:
             return None
         task = None
         try:
             task = self.task_fn(prev["batch_id"], prev["task_id"]) if prev["batch_id"] else None
-        except Exception:  # noqa: BLE001
+        except Exception:
             task = None
         with db.tx():
             th = self.conn.execute("SELECT title, status, worktree, branch, extra FROM t3_threads WHERE thread_id=?",
@@ -414,16 +369,13 @@ class Roles:
                 "phase": "failed" if (task or {}).get("t3status") in ("failed", "cancelled", "interrupted") else "done",
                 "ended_at": envelope.iso(prev["ended"]) if prev["ended"] else None}
 
-    # -- seguimiento de los despertares vivos
     def sync(self, now=None):
-        """Avanza los despertares vivos: hilo lanzado -> `assign_fn`; tarea terminada -> fin (y el despertar pendiente del
-        escritorio, si lo hay). Devuelve [(desk, evento)]."""
         now = self.clock() if now is None else now
         out = []
         for w in reversed(wakes(self.conn, None, LIVE, 500)):
             try:
                 task = self.task_fn(w["batch_id"], w["task_id"])
-            except Exception as e:  # noqa: BLE001 - state.json ilegible: se reintenta
+            except Exception as e:
                 log.warning("no pude leer la tarea %s/%s: %s", w["batch_id"], w["task_id"], e)
                 continue
             if task is None:
@@ -454,10 +406,7 @@ class Roles:
         if r and self.enabled and self._pending(w["desk_id"]):
             out.append((w["desk_id"], "rewake:" + self.wake(r, "pending", None, desk=w["desk_id"])))
 
-    # -- pasada del servicio
     def once(self, list_after, last_seq, now=None):
-        """Relee perfiles (cada RELOAD s), despacha los sobres nuevos del bus (cursor en `meta`), revisa horarios y sigue
-        los despertares vivos. `list_after(conn, seq, n)` / `last_seq(conn)` = las de `events`."""
         now = self.clock() if now is None else now
         if self._loaded is None or now - self._loaded >= RELOAD:
             self.reload()
@@ -478,4 +427,3 @@ class Roles:
         fired += self.tick(now)
         self.sync(now)
         return fired
-

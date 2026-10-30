@@ -1,15 +1,7 @@
 import Foundation
 
-/// Proyección viva (`LiveState`) -> modelos que pinta la oficina (`MockSnapshot`). Puro, sin SwiftUI (DESIGN.md §3.4).
-///
-/// - Tarea: `task.state` + la cola de atención del proyecto (`needs`) + la pregunta abierta que recuerda `LiveState`.
-/// - Lote: `batches` del proyecto; las tareas sin lote (o de un lote que no llegó) van a un lote sintético "(sueltas)".
-/// - Grafo: `graphs`; el `task` de un nodo es un id de lote (`t-0007-1`), así que se resuelve a la tarea viva por
-///   `(batch, node)` de `task.state`. Un proyecto sin grafo recibe uno sintético (un nodo por tarea): la oficina nunca queda vacía.
 public enum SnapshotMapper {
-    /// Id (y nombre) del lote sintético de las tareas sin lote.
     public static let looseBatch = "(sueltas)"
-    /// Prefijo del id del grafo sintético.
     public static let autoGraphPrefix = "auto:"
 
     public static func snapshot(_ s: LiveState, now: Date = Date()) -> MockSnapshot {
@@ -29,7 +21,6 @@ public enum SnapshotMapper {
                                     notes: b["notes"]?.strings ?? [], graph: nil,
                                     tasks: tasks.filter { batchOf($0.id) == id }))
             }
-            // Tareas de un lote que aún no llegó (o que se perdió): su propio lote, con lo que se sabe.
             let known = Set(pb.map(\.id))
             var orphanIDs: [String] = []
             for t in tasks { if let b = batchOf(t.id), !known.contains(b), !orphanIDs.contains(b) { orphanIDs.append(b) } }
@@ -42,7 +33,6 @@ public enum SnapshotMapper {
             }
 
             var pg = p.graphs.compactMap { graph($0, project: p.name, tasks: tasks, raw: raw, batches: pb) }
-            // El primero es el que pinta la vista de proyecto: el que corre, y si no, el más reciente.
             pg = pg.enumerated().sorted { a, b in
                 let ra = a.element.status == "running" ? 0 : 1, rb = b.element.status == "running" ? 0 : 1
                 return ra != rb ? ra < rb : a.offset > b.offset
@@ -56,9 +46,6 @@ public enum SnapshotMapper {
                             events: events(s, now: now), machines: machines(s, host: host))
     }
 
-    // MARK: - Tareas
-
-    /// phase + atención -> TaskKind.
     public static func kind(phase: String?, needs: String?, hasQuestion: Bool) -> TaskKind {
         switch needs {
         case "human": return hasQuestion ? .ask : .human
@@ -72,11 +59,10 @@ public enum SnapshotMapper {
         case "done", "settled": return .done
         case "failed": return .failed
         case "skipped": return .skipped
-        default: return .queued          // queued, waiting sin atención, o desconocido
+        default: return .queued
         }
     }
 
-    /// `task.state.attention` (ask, human, approval, bot) -> `needs` del sobre, por si la cola no lo trae.
     static func needs(fromAttention a: String?) -> String? {
         switch a {
         case "ask", "human": return "human"
@@ -103,7 +89,7 @@ public enum SnapshotMapper {
         switch m.kind {
         case .approval: m.approvals = 1
         case .bot: m.botWait = q?.level == "bot" ? "bot" : (m.level == .bot ? "bot" : nil)
-        case .human: m.escalationReason = att?.summary        // sin pregunta conocida: lo que dijo el sobre que abrió la atención
+        case .human: m.escalationReason = att?.summary
         case .skipped: m.skipReason = m.lastError ?? nonEmpty(t["reason"]?.string)
         case .failed: if m.lastError == nil { m.lastError = att?.summary }
         default: break
@@ -114,15 +100,13 @@ public enum SnapshotMapper {
         return m
     }
 
-    // MARK: - Grafos
-
     static func nodeStatus(_ phase: String?) -> NodeStatus {
         switch phase {
         case "done", "settled": return .done
         case "running", "preparing": return .running
         case "failed": return .failed
         case "skipped": return .skipped
-        default: return .pending         // queued, waiting
+        default: return .pending
         }
     }
 
@@ -130,14 +114,12 @@ public enum SnapshotMapper {
         guard let gid = g["id"]?.string else { return nil }
         let nodesRaw = (g["nodes"]?.array ?? []).compactMap(\.object)
         let nodeIDs = Set(nodesRaw.compactMap { $0["id"]?.string })
-        // Lote del grafo: el que dice graph.done; si no, el de las tareas vivas que apuntan a sus nodos.
         let batch = nonEmpty(g["batch"]?.string) ?? raw.values.first { t in
             t["node"]?.string.map { nodeIDs.contains($0) } ?? false
         }.flatMap { nonEmpty($0["batch"]?.string) }
         let byID = Dictionary(tasks.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         func live(_ node: String) -> MockTask? {
             let hit = raw.filter { $0.value["node"]?.string == node && (batch == nil || $0.value["batch"]?.string == batch) }
-            // si hay varias (reintento), la más nueva
             return hit.max { ($0.value["seq"]?.int ?? 0) < ($1.value["seq"]?.int ?? 0) }.flatMap { byID[$0.key] }
         }
         var seen = Set<String>()
@@ -160,7 +142,6 @@ public enum SnapshotMapper {
                          throttleMode: "completo", nodes: nodes)
     }
 
-    /// Etiqueta corta de un escritorio: lo que va antes de " · " en el título, o sus primeros 12 caracteres.
     static func shortLabel(_ title: String) -> String {
         if let r = title.range(of: " · ") { return String(title[..<r.lowerBound]) }
         return title.count > 12 ? String(title.prefix(12)) : title
@@ -188,8 +169,6 @@ public enum SnapshotMapper {
         }
     }
 
-    // MARK: - Eventos y máquinas
-
     static func events(_ s: LiveState, now: Date) -> [MockEvent] {
         s.recent.enumerated().map { i, e in
             MockEvent(id: e.seq ?? -(i + 1), minutesAgo: minutes(e.ts, now: now), event: e.type, batch: nonEmpty(e.body["batch"]?.string),
@@ -198,7 +177,6 @@ public enum SnapshotMapper {
         }
     }
 
-    /// Máquina del agente: la del `hello`/`state`; si no, la del último `machine.health`.
     static func defaultHost(_ s: LiveState) -> String {
         nonEmpty(s.machine) ?? s.series.keys.sorted().first ?? "agente"
     }
@@ -216,8 +194,6 @@ public enum SnapshotMapper {
                                cpu: sr.cpu, ram: sr.ram, run: sr.run)
         }
     }
-
-    // MARK: - Utilidades
 
     static func nonEmpty(_ s: String?) -> String? { s.flatMap { $0.isEmpty ? nil : $0 } }
 

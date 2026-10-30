@@ -1,10 +1,4 @@
 #!/usr/bin/env bash
-# Keychain TEMPORAL para firmar en el runner.
-#   keychain.sh setup     importa el .p12 en un keychain nuevo y exporta SIGN_KEYCHAIN y SIGN_IDENTITY (a GITHUB_ENV)
-#   keychain.sh cleanup   restaura la lista de keychains y borra keychain y archivos temporales (idempotente, nunca falla)
-# Entrada (setup): MACOS_CERT_P12_BASE64, MACOS_CERT_PASSWORD, KEYCHAIN_PASSWORD (secrets) y
-# SIGNING_IDENTITY (var: nombre «Developer ID Application: Nombre (TEAMID)» o hash SHA-1) y APPLE_TEAM_ID (var).
-# Nunca imprime valores: los derivados sensibles (nombre del certificado, Team ID) se enmascaran.
 set -euo pipefail
 # shellcheck source=lib.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
@@ -18,10 +12,8 @@ setup() {
   require_env MACOS_CERT_P12_BASE64 MACOS_CERT_PASSWORD KEYCHAIN_PASSWORD SIGNING_IDENTITY APPLE_TEAM_ID
   local kc_pass="$KEYCHAIN_PASSWORD"
   mask_value "$kc_pass"
-  # Pase lo que pase, el .p12 en claro no se queda en disco
   trap 'rm -f "$P12"' EXIT
 
-  # Guarda la lista actual de keychains para restaurarla al final
   security list-keychains -d user | tr -d '"' | sed 's/^[[:space:]]*//' > "$SEARCH_LIST"
 
   printf '%s' "$MACOS_CERT_P12_BASE64" | base64 --decode > "$P12"
@@ -34,15 +26,12 @@ setup() {
   security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$kc_pass" "$KEYCHAIN" >/dev/null
   rm -f "$P12"
 
-  # El keychain temporal va primero y se conservan los demás (notarytool/stapler necesitan los del sistema)
   local -a existing=()
   while IFS= read -r kc; do
     if [ -n "$kc" ]; then existing+=("$kc"); fi
   done < "$SEARCH_LIST"
   security list-keychains -d user -s "$KEYCHAIN" ${existing[@]+"${existing[@]}"}
 
-  # Identidad: se elige la que pide SIGNING_IDENTITY (nombre o hash) y debe ser del equipo APPLE_TEAM_ID.
-  # Se exporta el hash SHA-1 (sin nombre ni comillas); el nombre y el Team ID se enmascaran por si los imprime otra herramienta.
   local ids count identity line cn
   mask_value "$SIGNING_IDENTITY"
   mask_value "${SIGNING_IDENTITY#*: }"
@@ -76,7 +65,6 @@ cleanup() {
   fi
   security delete-keychain "$KEYCHAIN" >/dev/null 2>&1
   rm -f "$P12" "$SEARCH_LIST" "$KEYCHAIN" 2>/dev/null
-  # Archivos de notarización que pudieran haber quedado (ver notarize.sh)
   rm -f "$TMP"/chopshop-notary-*.p8 2>/dev/null
   log "keychain temporal y archivos de credenciales eliminados"
   return 0

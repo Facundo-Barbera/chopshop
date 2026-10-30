@@ -1,8 +1,5 @@
 import SwiftUI
 
-/// Un piso suelto (o el vestíbulo) como mundo de una sola región: lo usan las previews y las capturas. La app monta
-/// `OfficeWorldView` con todos los pisos del proyecto. Visualizador puro: el detalle de un hilo, o de un armario o la consola de
-/// una sala de máquinas del piso (`rack:<k>:<unidad>`, `machine:<k>`), va en el panel lateral.
 @available(macOS 26.0, *)
 public struct FloorOfficeView: View {
     let plan: FloorPlan
@@ -10,8 +7,6 @@ public struct FloorOfficeView: View {
     var selected: String?
     var onSelect: ((String?) -> Void)?
 
-    /// `selected`: hilo elegido, o armario/consola de una sala de máquinas (se resalta su hueco). `flatChrome` se acepta por
-    /// compatibilidad (no hay cromo encima).
     public init(plan: FloorPlan, frozenNow: Date? = nil, selected: String? = nil, flatChrome: Bool = false, onSelect: ((String?) -> Void)? = nil) {
         self.plan = plan; self.frozenNow = frozenNow; self.selected = selected; self.onSelect = onSelect
     }
@@ -20,8 +15,6 @@ public struct FloorOfficeView: View {
         OfficeWorldView(floors: [plan], frozenNow: frozenNow, selected: selected, onSelect: onSelect)
     }
 
-    /// Etiqueta larga del hueco (panel lateral): `rol · n` en un piso, el rol que espera (o «sin rol») en el vestíbulo; en una sala
-    /// de máquinas, el repo del armario o el nombre de la sala (consola).
     static func label(_ plan: FloorPlan, _ id: String) -> String {
         if let m = FloorLayout.machinePart(id), m.unit == nil { return plan.machineRoom(of: id)?.name ?? "Sala de máquinas" }
         if let u = unit(plan, id) { return u.title }
@@ -33,13 +26,11 @@ public struct FloorOfficeView: View {
         return "\(r.role) · \(d.slot + 1)"
     }
 
-    /// Repo del armario `rack:<k>:<unidad>` (nil si `id` no es un armario).
     static func unit(_ plan: FloorPlan, _ id: String) -> RackUnit? {
         guard let u = FloorLayout.machinePart(id)?.unit else { return nil }
         return plan.machineRoom(of: id)?.unit(u)
     }
 
-    /// Lo que dice la etiqueta del hueco en el piso: el nombre corto del hilo; un escritorio sin hilo, su `rol · n`.
     static func tag(_ plan: FloorPlan, _ id: String, now: Date) -> String {
         if let o = plan.occupant(of: id, now: now) {
             let name = ProjectOffice.shortName(o.title ?? o.threadID)
@@ -48,10 +39,7 @@ public struct FloorOfficeView: View {
         return label(plan, id)
     }
 
-    /// Etiquetas de escritorios (`<prefijo>d:<id>`), departamentos (`<prefijo>r:<i>`; la sala de máquinas k es `r:<-1-k>`) y
-    /// armarios (`<prefijo>m:<id>`) que resuelve FloorRenderer.
     @ViewBuilder static func labels(_ plan: FloorPlan, layout lay: FloorLayout, now: Date, dark: Bool, prefix: String = "") -> some View {
-        // ids con prefijo: en el mundo hay varios pisos en el mismo lienzo y los símbolos de un Canvas no pueden repetirse
         ForEach(lay.spots.filter { !$0.isMachine }.map { (prefix + $0.id, $0) }, id: \.0) { _, sp in
             let lk = plan.look(sp.id, now: now)
             let tint = lk?.visual?.tint
@@ -93,7 +81,6 @@ public struct FloorOfficeView: View {
         }
     }
 
-    /// Rótulo de la sala de máquinas k: su nombre del perfil en mayúsculas.
     static func machineTitle(_ plan: FloorPlan, _ k: Int) -> String {
         guard plan.machineRooms.indices.contains(k), let n = plan.machineRooms[k].name, !n.isEmpty else { return "SALA DE MÁQUINAS" }
         return n.uppercased()
@@ -106,18 +93,14 @@ public struct FloorOfficeView: View {
     }
 }
 
-/// Detalle de un hueco de una sala de máquinas en el panel lateral: el rack del proyecto (el repo elegido con sus runs,
-/// disparador y origen), sus scripts, sus webhooks y los listeners del agente.
 @available(macOS 26.0, *)
 struct MachineRoomDetail: View {
     let room: MachineRoom
     let title: String
-    /// Armario elegido (`RackUnit.id`); nil = la consola.
     let unit: String?
     let frozenNow: Date?
     var width: CGFloat = Self.defaultWidth
 
-    /// Ancho del contenido por defecto (el panel lateral, sin su margen).
     static let defaultWidth: CGFloat = 328
 
     var body: some View {
@@ -131,11 +114,8 @@ struct MachineRoomDetail: View {
     }
 }
 
-// MARK: - Fixture de previews (forma de GET /state v3, docs/agent-api.md)
-
 @available(macOS 26.0, *)
 enum FloorFixture {
-    /// Instante de referencia: los tiempos del fixture son relativos a él.
     static let now = Date(timeIntervalSince1970: 1_793_300_000)
     static func iso(_ minutesAgo: Double) -> JSONValue {
         let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -184,13 +164,11 @@ enum FloorFixture {
         ["run_id": .string(id), "workflow": .string(wf), "status": .string(status), "conclusion": conclusion, "event": .string(event),
          "head_branch": .string(ref), "head_sha": "3f2a9c1e", "updated_at": iso(ago), "origin": origin]
     }
-    /// Dos salas declaradas en Producto: la principal (repo principal, todos los listeners, scripts y webhooks) y la de docs.
     static let machineRoomConfigs: [JSONValue] = [
         ["name": "Sala de máquinas", "floor": 0, "repos": ["<org>/<repo-principal>"], "listeners": ["*"], "automations": ["*"],
          "subscriptions": ["*"]],
         ["name": "Sala de docs", "floor": 0, "repos": ["<org>/<engine-cx>"], "listeners": ["forge"], "automations": ["docs-*"]],
     ]
-    /// Sala de máquinas de toda la máquina: cada sala del piso la recorta a lo suyo de Awesome GB (lo de `otro` no sale).
     static let listeners: [JSONValue] = [
         ["name": "forge", "state": "degraded", "backoff_s": 120, "error": "rate limit", "ts": iso(1)],
         ["name": "t3watch", "state": "ok", "ts": iso(0.5)],

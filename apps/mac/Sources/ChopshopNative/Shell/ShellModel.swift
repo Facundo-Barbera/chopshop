@@ -1,19 +1,9 @@
 import Foundation
 import CoreGraphics
 
-// Armazón de la oficina (docs/plans/office-first-ui.md): lo que va ENCIMA del mundo. Puro (sin SwiftUI, macOS 13): HUD, paneles,
-// paleta de órdenes con búsqueda difusa, atajos, ciclo de atención y minimapa. La vista (`OfficeShell.swift`, macOS 26) solo pinta
-// esto y traduce las órdenes a acciones de la app.
-
-// MARK: - Objetivos y paneles
-
-/// Lo que se puede elegir en el mundo o pedirle que enfoque.
 public enum ShellTarget: Hashable, Sendable {
-    /// Toda la ciudad (salir del piso).
     case city
-    /// El piso (o pisos) de un proyecto.
     case project(String)
-    /// Un hilo (el escritorio que ocupa); `project` para que el mundo sepa a qué piso ir.
     case thread(id: String, project: String)
 
     public var project: String? {
@@ -28,17 +18,14 @@ public enum ShellTarget: Hashable, Sendable {
     }
 }
 
-/// Petición del armazón al mundo: ir a `target`. `token` sube en cada petición (pedir dos veces lo mismo vuelve a hacer zoom).
 public struct ShellFocus: Equatable, Sendable {
     public var target: ShellTarget
     public var token: Int
     public init(target: ShellTarget, token: Int) { self.target = target; self.token = token }
 }
 
-/// Lo que el armazón le da al mundo: adónde ir, si el Esc es suyo y cómo avisar de lo que el usuario elige.
 public struct ShellWorldContext {
     public var focus: ShellFocus?
-    /// No hay paleta ni panel abiertos: el Esc es del mundo (salir del piso).
     public var ownsEscape: Bool
     public var select: (ShellTarget) -> Void
     public init(focus: ShellFocus?, ownsEscape: Bool, select: @escaping (ShellTarget) -> Void) {
@@ -46,7 +33,6 @@ public struct ShellWorldContext {
     }
 }
 
-/// Paneles fijos del inspector: lo que eran pantallas aparte (Preguntas, Actividad, Lotes, Reacciones, Sala de máquinas, Máquinas).
 public enum ShellPanel: String, CaseIterable, Identifiable, Sendable {
     case attention, activity, batches, reactions, machineRoom, machines
     public var id: String { rawValue }
@@ -72,50 +58,39 @@ public enum ShellPanel: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-/// Lo que muestra el inspector: un panel fijo o el detalle de lo elegido en el mundo.
 public enum ShellInspector: Hashable, Sendable {
     case panel(ShellPanel)
     case target(ShellTarget)
 }
 
-// MARK: - Estado del armazón
-
-/// Estado de los controles encima del mundo. Todas las transiciones son funciones puras (las prueba `ShellModelTests`).
 public struct ShellState: Equatable, Sendable {
     public var inspector: ShellInspector?
-    /// Último contenido del inspector (⌘\ lo vuelve a abrir tal cual).
     public var lastInspector: ShellInspector = .panel(.attention)
     public var paletteOpen = false
     public var query = ""
     public var minimap = true
     public var focus: ShellFocus?
-    /// Hilo elegido (⌘O lo abre en T3).
     public var selectedThread: String?
-    /// Posición en la lista de atención para ⌘J / ⇧⌘J (-1 = todavía ninguna).
     public var attentionCursor = -1
 
     public init() {}
 
-    /// El usuario pulsó algo en el mundo: se abre su detalle (sin mover la cámara: ya está ahí).
     public mutating func select(_ target: ShellTarget) {
         if target == .city { selectedThread = nil; return }
         selectedThread = target.threadID
         show(.target(target))
     }
 
-    /// La paleta, el minimapa o ⌘J piden ir a algo: el mundo hace zoom y el inspector muestra su detalle.
     public mutating func go(_ target: ShellTarget) {
         focus = ShellFocus(target: target, token: (focus?.token ?? 0) + 1)
         if target == .city { selectedThread = nil; return }
         select(target)
     }
 
-    /// ⌘1…⌘6: abre ese panel; si ya está abierto, lo cierra.
     public mutating func toggle(_ panel: ShellPanel) {
         if inspector == .panel(panel) { inspector = nil } else { show(.panel(panel)) }
     }
 
-    /// ⌘\: muestra u oculta el inspector (al volver, con lo último que tenía).
     public mutating func toggleInspector() {
         if inspector == nil { inspector = lastInspector } else { inspector = nil }
     }
@@ -123,7 +98,6 @@ public struct ShellState: Equatable, Sendable {
     public mutating func openPalette() { paletteOpen = true; query = "" }
     public mutating func closePalette() { paletteOpen = false; query = "" }
 
-    /// Esc: cierra la paleta; si no, el inspector. `false` = no había nada que cerrar (el Esc es del mundo: salir del piso).
     @discardableResult
     public mutating func escape() -> Bool {
         if paletteOpen { closePalette(); return true }
@@ -131,12 +105,9 @@ public struct ShellState: Equatable, Sendable {
         return false
     }
 
-    /// ⌘J / ⇧⌘J: siguiente (o anterior) hilo que te necesita, en el orden de `ShellAttention.items`. Va al hilo y abre su detalle.
-    /// Devuelve el elegido (nil si no hay nada pendiente).
     @discardableResult
     public mutating func cycleAttention(_ items: [ShellAttentionItem], forward: Bool = true) -> ShellAttentionItem? {
         guard !items.isEmpty else { attentionCursor = -1; return nil }
-        // si la lista cambió y el hilo elegido sigue en ella, se sigue desde él
         if let sel = selectedThread, let i = items.firstIndex(where: { $0.threadID == sel }) { attentionCursor = i }
         let n = items.count
         if attentionCursor < 0 || attentionCursor >= n {
@@ -155,10 +126,7 @@ public struct ShellState: Equatable, Sendable {
     }
 }
 
-// MARK: - Búsqueda en el snapshot
-
 public extension MockSnapshot {
-    /// La tarea y su lote por id de tarea o por hilo de T3 (el mundo elige escritorios por hilo; el snapshot va por tarea).
     func shellTask(_ id: String) -> (batch: MockBatch, task: MockTask)? {
         for b in batches {
             if let t = b.tasks.first(where: { $0.id == id || $0.threadID == id }) { return (b, t) }
@@ -167,16 +135,12 @@ public extension MockSnapshot {
     }
 }
 
-// MARK: - HUD
-
-/// Los tres contadores de la barra: te necesita (ámbar/rojo), corriendo y máquinas.
 public struct ShellHUD: Equatable, Sendable {
     public var needsYou: Int
     public var stuck: Int
     public var running: Int
     public var machinesOK: Int
     public var machinesTotal: Int
-    /// Máquinas con la CPU al 100 % o más (el HUD las marca).
     public var machinesHot: Int
 
     public init(needsYou: Int = 0, stuck: Int = 0, running: Int = 0, machinesOK: Int = 0, machinesTotal: Int = 0, machinesHot: Int = 0) {
@@ -204,11 +168,8 @@ public struct ShellHUD: Equatable, Sendable {
     }
     public var runningLabel: String { "\(running) corriendo" }
     public var machinesLabel: String { machinesTotal == 0 ? "sin máquinas" : "\(machinesOK)/\(machinesTotal) máquinas" }
-    /// El contador de máquinas pide atención (alguna caída o saturada).
     public var machinesAlert: Bool { machinesOK < machinesTotal || machinesHot > 0 }
 }
-
-// MARK: - Atención
 
 public struct ShellAttentionItem: Hashable, Sendable, Identifiable {
     public var threadID: String
@@ -219,7 +180,6 @@ public struct ShellAttentionItem: Hashable, Sendable, Identifiable {
 }
 
 public enum ShellAttention {
-    /// Lo que te necesita, primero las decisiones y luego lo trabado; dentro, por proyecto y en el orden de los lotes.
     public static func items(_ s: MockSnapshot) -> [ShellAttentionItem] {
         var out: [ShellAttentionItem] = []
         var seen = Set<String>()
@@ -229,24 +189,18 @@ public enum ShellAttention {
                 out.append(ShellAttentionItem(threadID: t.id, project: p, title: t.title, state: t.state))
             }
         }
-        // orden estable: needsYou < stuck, y el resto como venía
         return out.enumerated().sorted { ($0.element.state, $0.offset) < ($1.element.state, $1.offset) }.map(\.element)
     }
 }
 
-// MARK: - Paleta de órdenes
-
 public struct ShellCommand: Identifiable, Hashable, Sendable {
     public enum Kind: Hashable, Sendable {
-        /// `POST /answer` con esa opción.
         case answer(threadID: String, project: String, option: String)
-        /// `POST /settle` (cierra el hilo en T3, nunca archiva).
         case settle(threadID: String, project: String)
         case openT3(URL)
         case go(ShellTarget)
         case panel(ShellPanel)
         case nextAttention
-        /// Sin ruta en el agente (todavía): copia el comando de la CLI al portapapeles.
         case cliOnly(String)
     }
 
@@ -254,16 +208,13 @@ public struct ShellCommand: Identifiable, Hashable, Sendable {
     public var title: String
     public var subtitle: String?
     public var kind: Kind
-    /// Palabras extra para la búsqueda (verbo, proyecto, id del hilo).
     public var keywords: [String]
-    /// Se pinta con el color de atención (solo responder y lo trabado).
     public var attention: Bool
 
     public init(id: String, title: String, subtitle: String? = nil, kind: Kind, keywords: [String] = [], attention: Bool = false) {
         self.id = id; self.title = title; self.subtitle = subtitle; self.kind = kind; self.keywords = keywords; self.attention = attention
     }
 
-    /// Grupo en la paleta sin búsqueda.
     public var group: String {
         switch kind {
         case .answer, .nextAttention: return "Te necesita"
@@ -276,7 +227,6 @@ public struct ShellCommand: Identifiable, Hashable, Sendable {
 }
 
 public enum ShellCommands {
-    /// Todas las órdenes posibles con este snapshot. `selected` (el hilo elegido) va primero en settle / abrir en T3.
     public static func all(_ s: MockSnapshot, selected: String? = nil) -> [ShellCommand] {
         var out: [ShellCommand] = []
         let attention = ShellAttention.items(s)
@@ -325,7 +275,6 @@ public enum ShellCommands {
             out.append(ShellCommand(id: "cli-fanout:\(p)", title: "Lanzar hilos en \(p) (fanout)", subtitle: "solo CLI: copia el comando",
                                     kind: .cliOnly("chopshop fanout \(p) --task \"…\""), keywords: ["lanzar", "launch", "fanout", "nuevo", p]))
         }
-        // el lote «(sueltas)» y los grafos sintéticos los inventa el cliente: la CLI no los conoce
         for b in s.batches where b.id != SnapshotMapper.looseBatch
             && b.tasks.contains(where: { $0.state == .running || $0.state == .queued || $0.state == .waitingBot }) {
             out.append(ShellCommand(id: "cli-stop:\(b.id)", title: "Parar el lote \(b.id)", subtitle: "\(b.project) · solo CLI: copia el comando",
@@ -338,8 +287,6 @@ public enum ShellCommands {
         return out
     }
 
-    /// Búsqueda difusa: cada carácter de la consulta en orden (subsecuencia), sin mayúsculas ni tildes. Puntúa más los aciertos
-    /// al principio de palabra y seguidos; con empate, el orden de `all` (atención primero). Consulta vacía = todo, tal cual.
     public static func search(_ query: String, in commands: [ShellCommand], limit: Int = 40) -> [ShellCommand] {
         let q = fold(query).filter { !$0.isWhitespace }
         guard !q.isEmpty else { return Array(commands.prefix(limit)) }
@@ -351,8 +298,6 @@ public enum ShellCommands {
         return scored.sorted { ($0.0, -$0.1) > ($1.0, -$1.1) }.prefix(limit).map(\.2)
     }
 
-    /// Puntuación de `q` (ya plegada, sin espacios) como subsecuencia de `hay`, o nil si no lo es. Prueba cada aparición del
-    /// primer carácter como inicio (con avance voraz desde ahí) y se queda con la mejor: «lo» en «panel lotes» puntúa por «lotes».
     static func score(_ q: String, in hay: String) -> Int? {
         let h = Array(hay), n = Array(q)
         guard let first = n.first else { return 0 }
@@ -364,15 +309,15 @@ public enum ShellCommands {
                 if h[k] == n[i] {
                     let prev: Character = k == 0 ? " " : h[k - 1]
                     var s = 1
-                    if !prev.isLetter && !prev.isNumber { s += 6 }      // principio de palabra
-                    if run > 0 { s += 3 * run }                          // seguidos
+                    if !prev.isLetter && !prev.isNumber { s += 6 }
+                    if run > 0 { s += 3 * run }
                     total += s; run += 1; i += 1
                 } else {
                     run = 0
                 }
                 k += 1
             }
-            if i == n.count { best = max(best ?? total, total) } else { break }   // si desde aquí no cabe, desde más allá tampoco
+            if i == n.count { best = max(best ?? total, total) } else { break }
         }
         return best
     }
@@ -387,7 +332,6 @@ public enum ShellCommands {
     }
 }
 
-/// La misma frase corta que el subtítulo de la vista de proyecto, sin SwiftUI.
 public enum ProjectSummaryText {
     public static func line(_ s: ProjectSummary) -> String {
         var parts: [String] = []
@@ -397,8 +341,6 @@ public enum ProjectSummaryText {
         return parts.isEmpty ? "en calma" : parts.joined(separator: " · ")
     }
 }
-
-// MARK: - Atajos
 
 public enum ShellAction: String, CaseIterable, Sendable {
     case palette, nextAttention, prevAttention
@@ -418,7 +360,6 @@ public enum ShellAction: String, CaseIterable, Sendable {
     }
 }
 
-/// Un atajo: tecla (un carácter, o "esc") con ⌘ (y ⇧ si `shift`). Esc va sin modificadores.
 public struct ShellShortcut: Hashable, Sendable {
     public var action: ShellAction
     public var key: String
@@ -431,15 +372,12 @@ public struct ShellShortcut: Hashable, Sendable {
 
     public var command: Bool { key != "esc" }
 
-    /// Como se escribe en el menú y en docs/plans/office-first-ui.md: «⇧⌘J», «⌘K», «Esc».
     public var display: String {
         if key == "esc" { return "Esc" }
         return (shift ? "⇧" : "") + "⌘" + key.uppercased()
     }
 }
 
-/// Fuente única de los atajos del armazón: el menú «Oficina» se genera de aquí y `apps/mac/tests/test_office_first_ui.py`
-/// comprueba que la tabla «Atajos» del plan coincide. Una entrada por línea (el test las lee con una expresión regular).
 public enum ShellKeymap {
     public static let all: [ShellShortcut] = [
         ShellShortcut(.palette, "k", "Paleta de órdenes"),
@@ -461,10 +399,6 @@ public enum ShellKeymap {
     public static func shortcut(for a: ShellAction) -> ShellShortcut? { all.first { $0.action == a } }
 }
 
-// MARK: - Minimapa
-
-/// Planta de la ciudad vista desde arriba, escalada a un rectángulo: un bloque por edificio y una franja por piso (las que piden algo
-/// llevan el color de atención). Clic en un bloque → ir a ese proyecto (el piso de arriba con atención, si no el primero).
 public struct ShellMinimap: Equatable, Sendable {
     public struct Block: Equatable, Sendable, Identifiable {
         public var company: String
@@ -480,7 +414,6 @@ public struct ShellMinimap: Equatable, Sendable {
 
     public var blocks: [Block]
 
-    /// `size`: tamaño del minimapa en puntos; `inset`: margen interior.
     public static func layout(_ m: CityModel, size: CGSize, inset: Double = 6) -> ShellMinimap {
         guard !m.buildings.isEmpty, size.width > 2 * inset, size.height > 2 * inset else { return ShellMinimap(blocks: []) }
         let minX = m.buildings.map(\.x0).min()!, minY = m.buildings.map(\.y0).min()!
@@ -496,7 +429,6 @@ public struct ShellMinimap: Equatable, Sendable {
         return ShellMinimap(blocks: blocks)
     }
 
-    /// Proyecto al pulsar en `p` (nil fuera de los bloques o en un edificio sin proyectos).
     public func project(at p: CGPoint) -> String? {
         guard let b = blocks.first(where: { $0.rect.insetBy(dx: -2, dy: -2).contains(p) }) else { return nil }
         let real = b.floors.filter { !$0.isLobby }

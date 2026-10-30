@@ -1,11 +1,3 @@
-"""Integración: cuando un hilo de T3 termina, lleva su rama a la base (main) y lo settlea.
-Pasos (todo con `git` en el worktree que creó T3 para el hilo; Chopshop no crea worktrees):
-  1. worktree limpio y en la rama del hilo;
-  2. `git fetch origin` + `git rebase origin/<base>` (conflicto → `rebase --abort`, estado `conflict`);
-  3. tests del perfil (`integration.test_cmd`); sin tests no se integra nunca (`no_tests`);
-  4. `git push origin HEAD:<base>` sin reescribir historia; si lo rechazan, hasta 2 reintentos de fetch+rebase+tests;
-  5. solo tras un push correcto: `t3_thread_organize settle` (nunca archiva), `integrated: true` y evento `task_integrated`.
-`runner(argv, cwd) -> (rc, salida)` es inyectable para probar sin repo real."""
 import os
 import subprocess
 
@@ -21,9 +13,6 @@ class IntegrateError(profile.ProfileError):
     pass
 
 
-# ---------- guardia del push ----------
-# Prohibido reescribir la base: se rechaza cualquier push con --force, -f (también agrupado, p. ej. -uf),
-# --force-with-lease / --force-if-includes o un refspec con '+' (p. ej. +HEAD:main).
 def check_push(argv):
     if "push" not in argv:
         return
@@ -33,7 +22,6 @@ def check_push(argv):
 
 
 def subprocess_runner(timeout=DEFAULT_TIMEOUT):
-    """Runner real: ejecuta argv sin shell, salida combinada; timeout → rc 124."""
     env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
 
     def run(argv, cwd):
@@ -54,10 +42,8 @@ def _tail(s, n=1500):
     return s if len(s) <= n else "…" + s[-n:]
 
 
-# ---------- pasos git ----------
 def integrate_worktree(worktree, branch, base, test_cmd, test_cwd=None, runner=None, dry_run=False,
                        retries=PUSH_RETRIES, log=print):
-    """Ejecuta los pasos 1-4 en `worktree`. Devuelve {"status", "steps", ...}; nunca lanza por fallos de git/tests."""
     runner = runner or subprocess_runner()
     steps = []
     res = {"status": None, "worktree": worktree, "branch": branch, "base": base, "steps": steps}
@@ -125,14 +111,12 @@ def integrate_worktree(worktree, branch, base, test_cmd, test_cwd=None, runner=N
         log("integrate: push rechazado (la base avanzó); reintento %d/%d" % (attempt, retries))
 
 
-# ---------- orquestación con T3 y el estado ----------
 def _thread_info(hc, host, thread_id):
     th = t3.call(hc, host, "t3_thread_read", {"threadId": thread_id, "limit": 1, "maxCharsPerItem": 1})
     return (th or {}).get("thread") or {}
 
 
 def _targets(target, thread, host, project):
-    """Lista de (batch|None, task|None, host, project, threadId)."""
     st = state.read()
     if thread:
         if not host or not project:
@@ -210,7 +194,7 @@ def integrate_one(b, t, host, project, thread_id, dry_run=False, runner=None, ad
     try:
         t3.call(hc, host, "t3_thread_organize", {"threadId": thread_id, "action": "settle"})
         res["settled"] = True
-    except t3.T3Error as e:  # el push ya está hecho: se marca integrada igual y se avisa
+    except t3.T3Error as e:
         res["settled"] = False
         res["settle_error"] = str(e)[:300]
         log("! settle %s: %s" % (label, str(e)[:200]))
@@ -219,7 +203,6 @@ def integrate_one(b, t, host, project, thread_id, dry_run=False, runner=None, ad
 
 
 def run(target=None, thread=None, host=None, project=None, dry_run=False, runner=None, adhoc_files=None, log=print):
-    """Integra una tarea, todas las de un lote (en orden) o un hilo suelto. Devuelve la lista de resultados."""
     out = []
     for b, t, h, p, tid in _targets(target, thread, host, project):
         out.append(integrate_one(b, t, h, p, tid, dry_run, runner, adhoc_files, log))

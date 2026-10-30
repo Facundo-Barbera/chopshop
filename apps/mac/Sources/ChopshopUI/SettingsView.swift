@@ -1,23 +1,17 @@
 import SwiftUI
 
-/// Hoja de ajustes: las máquinas (agentes) a las que se conecta la app, cada una con nombre, URL, interruptor de activada, estado de
-/// conexión y emparejamiento (credencial en el Keychain, nunca en el config). Se guardan como `[app.agents.<nombre>]` con
-/// `ConfigWriter` (preserva el resto del archivo, permisos 600) y la app reconecta sin reiniciar. Versión mínima: la interfaz
-/// multi-dispositivo buena llega en la siguiente versión.
 struct SettingsView: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
 
-    /// Lo que hay en el archivo (sin las variables de entorno): es lo que se edita y se guarda.
     @State private var machines: [AgentSpec] = []
-    @State private var editing: Int?            // índice en `machines`; `machines.count` = máquina nueva
+    @State private var editing: Int?
     @State private var draftName = ""
     @State private var draftURL = ""
     @State private var formError: String?
     @State private var message: String?
     @State private var removing: AgentSpec?
 
-    /// Variables de entorno que pisan al archivo (para avisar de que guardar puede no cambiar nada).
     private var envOverrides: Bool {
         ProcessInfo.processInfo.environment.keys.contains { $0.hasPrefix("CHOPSHOP_APP__") }
     }
@@ -82,8 +76,6 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Fila
-
     private func row(_ m: AgentSpec, at i: Int) -> some View {
         let status = model.connectionStatus(m)
         return VStack(alignment: .leading, spacing: 6) {
@@ -120,8 +112,6 @@ struct SettingsView: View {
         case .failed: return .red
         }
     }
-
-    // MARK: - Formulario (añadir / editar)
 
     private var form: some View {
         let old = editing.flatMap { $0 < machines.count ? machines[$0] : nil }
@@ -189,9 +179,6 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Archivo
-
-    /// Rellena la lista con lo que hay en el archivo (la migración del formato viejo ya se hizo al arrancar).
     private func load() {
         var text = ""
         if let data = FileManager.default.contents(atPath: AppConfig.configPath()) {

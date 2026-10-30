@@ -1,9 +1,6 @@
 import SwiftUI
 import AppKit
 
-/// Capturas del armazón (`ChopshopSnap <salida> shell`): la ciudad de `CityOfficeFixture` a ventana completa con el HUD en una barra
-/// de título emulada (ImageRenderer no dibuja la toolbar ni el inspector del sistema), el minimapa, el panel Atención, el detalle
-/// de un hilo y la paleta abierta: `shell-*.png`.
 @available(macOS 26.0, *)
 @MainActor
 public extension Snapshots {
@@ -35,8 +32,6 @@ public extension Snapshots {
     }
 }
 
-/// Ventana del armazón dibujada a mano para las capturas: barra de título con el HUD, el mundo congelado, minimapa, paleta e
-/// inspector como columna fija.
 @available(macOS 26.0, *)
 struct ShellSnapshotFrame: View {
     let state: LiveState

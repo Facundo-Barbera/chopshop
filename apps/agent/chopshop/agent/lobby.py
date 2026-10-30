@@ -1,13 +1,3 @@
-"""Vestíbulo (planta baja de cada edificio): regla `apply` de `GET /state.lobby` (docs/agent-api.md, «`api_version 3`»).
-
-Entran los hilos **activos sin rol** y los que **esperan escritorio** (con `waiting_role`); nunca los que ocupan un escritorio.
-- `task.state` → si el hilo no ocupa escritorio de su proyecto: con `role` nulo y fase activa entra o se refresca; si ya
-  estaba se refresca también en fase terminal (ahí se desvanece con la semivida); terminal y fuera del vestíbulo no entra.
-- `desk.waiting` → upsert con `waiting_role = role` (resto de campos desde la última `task.state` del hilo).
-- `desk.assigned` (sube a su escritorio) y `desk.released` con `desk: null` (salió del vestíbulo) → el hilo sale.
-`company` y `half_life_s` salen del `office` del proyecto (o `null` y 1800). Orden: `(company, project, since)`.
-Pura sobre `state` (la llama `projection._apply` en sitio); la misma regla aplica `LiveState.swift`."""
-
 ACTIVE = ("queued", "preparing", "running", "waiting")
 HALF_LIFE_S = 1800
 _FROM_TASK = ("title", "phase", "attention", "ended_at", "touched_at")
@@ -44,7 +34,6 @@ def _upsert(state, p, thread_id, src, ts, waiting_role):
 
 
 def apply(state, p, env):
-    """Aplica `env` al vestíbulo de `state` (en sitio); `p` es el proyecto del sobre ya actualizado con él."""
     state.setdefault("lobby", [])
     typ, body = env.get("type") or "", env.get("body") or {}
     tid = body.get("thread_id")

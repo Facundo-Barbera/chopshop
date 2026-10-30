@@ -1,8 +1,5 @@
 import Foundation
 
-// Resumen para la barra lateral nativa a partir de los snapshots crudos de los agentes. Solo Foundation:
-// la vista web combina los mismos datos por su cuenta (packages/api/src/view.js).
-
 struct ProjectInfo: Identifiable, Equatable {
     let name: String
     let running: Int
@@ -11,10 +8,9 @@ struct ProjectInfo: Identifiable, Equatable {
     var id: String { name }
 }
 
-/// Serie de métricas de una máquina (historial en memoria; una muestra por sondeo).
 struct Machine: Identifiable, Equatable {
-    let name: String           // machine_id del agente (o el nombre configurado si nunca respondió)
-    var agent = ""             // nombre del agente en la configuración
+    let name: String
+    var agent = ""
     var ok = false
     var reason: String?
     var os = ""
@@ -22,16 +18,15 @@ struct Machine: Identifiable, Equatable {
     var load: [Double] = []
     var ramTotalMB = 0, ramAvailMB = 0
     var disk = "", diskPct = 0
-    var cpu: [Double] = []     // % de CPU usada
-    var ram: [Double] = []     // % de RAM usada
+    var cpu: [Double] = []
+    var ram: [Double] = []
     var load1: [Double] = []
-    var run: [Double] = []     // hilos corriendo
+    var run: [Double] = []
     var cpuNow: Int { Int((cpu.last ?? 0).rounded()) }
     var ramNow: Int { Int((ram.last ?? 0).rounded()) }
     var id: String { name }
 }
 
-/// Estado de la conexión con los agentes (píldora de la barra lateral).
 enum LinkState: Equatable {
     case connecting
     case unconfigured
@@ -49,7 +44,6 @@ enum LinkState: Equatable {
         }
     }
 
-    /// `configured`: agentes definidos en la configuración; `results`: última ronda de sondeo (vacía antes de la primera).
     static func from(_ results: [AgentResult], configured: Int) -> LinkState {
         if configured == 0 { return .unconfigured }
         if results.isEmpty { return .connecting }
@@ -62,8 +56,8 @@ enum LinkState: Equatable {
 struct Summary: Equatable {
     var projects: [ProjectInfo] = []
     var machines: [Machine] = []
-    var questions = 0       // preguntas pendientes en todos los agentes
-    var reactions = 0       // escalaciones a humano abiertas (orquestador)
+    var questions = 0
+    var reactions = 0
 }
 
 enum Summarizer {
@@ -82,14 +76,11 @@ enum Summarizer {
         return x
     }
 
-    /// `labels`: nombre de agente -> último machine_id conocido (para que una máquina caída conserve su nombre).
-    /// `previous`: máquinas de la ronda anterior (de ahí sale el historial).
     static func summarize(_ results: [AgentResult], labels: [String: String], previous: [Machine]) -> Summary {
         var out = Summary()
         var projects: [String: (run: Int, q: Int, total: Int)] = [:]
         for r in results {
             var name = r.machineId ?? labels[r.name] ?? r.name
-            // Dos agentes con el mismo machine_id (p. ej. dos en el mismo host): cada uno su fila
             if out.machines.contains(where: { $0.name == name }) { name += " · " + r.name }
             var m = previous.first(where: { $0.name == name }) ?? Machine(name: name)
             m.agent = r.name
@@ -148,7 +139,6 @@ enum Summarizer {
     }
 }
 
-/// Estado de conexión de una máquina configurada (fila de los ajustes).
 enum MachineConnection: Equatable {
     case disabled
     case connecting

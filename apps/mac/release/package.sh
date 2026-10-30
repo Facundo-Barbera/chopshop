@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Crea el zip FINAL (después de grapar), lo vuelve a abrir para comprobarlo y escribe su SHA-256.
-#   package.sh <Chopshop.app> <zip_salida>     [REQUIRE_STAPLE=1 para exigir el ticket grapado]
-# `ditto -c -k --sequesterRsrc --keepParent` es el formato que espera Sparkle (conserva symlinks y xattrs).
 set -euo pipefail
 # shellcheck source=lib.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"

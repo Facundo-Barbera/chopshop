@@ -1,22 +1,8 @@
-"""Emparejamiento único por dispositivo (docs/agent-api.md, «Emparejamiento»).
-
-- `chopshop pair create` (CLI LOCAL, escribe directo en la DB del agente) genera un código de un solo uso (`K7QM-93XD`, 8 símbolos
-  base32 de Crockford = 40 bits) con caducidad (10 min por defecto, máx. 1 h). Solo se guarda `sha256(sal + código)` en `pair_codes`.
-  No hay ruta HTTP para crear códigos.
-- `POST /pair {"code","device_name","device_id"}` canjea el código (`Pairing.redeem`) y devuelve una credencial `cs1_<43 car.>`
-  (32 bytes aleatorios en base64url). En `devices` solo queda `sha256(credencial)`; la credencial se muestra una sola vez.
-- Intentos fallidos: 5 por minuto por IP (429) y 20 por código vivo (cada fallo cuenta contra todos los códigos vivos; al llegar a 20
-  el código queda invalidado). Comparaciones con `hmac.compare_digest`.
-- `check(credencial)` -> id del dispositivo si existe y no está revocado (consulta la DB en cada llamada: revocar desde la CLI tiene
-  efecto inmediato aunque el agente sea otro proceso). `last_seen_at`/`last_ip` se escriben como mucho una vez por minuto.
-Nunca se registran ni se devuelven códigos, credenciales ni hashes (salvo la credencial recién emitida, al que canjea).
-Las tablas se crean con `CREATE TABLE IF NOT EXISTS` (sin tocar `user_version`, que llevan las migraciones del bus de eventos)."""
 import argparse
 import base64
 import hashlib
 import hmac
 import json
-import os
 import re
 import secrets
 import sys
@@ -26,16 +12,16 @@ import uuid
 
 from . import db
 
-ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"     # base32 de Crockford (sin I, L, O, U)
-CODE_LEN = 8                                     # 8 x 5 bits = 40 bits
+ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+CODE_LEN = 8
 CRED_PREFIX = "cs1_"
-DEFAULT_TTL = 600.0                              # s
+DEFAULT_TTL = 600.0
 MAX_TTL = 3600.0
-IP_FAILS = 5                                     # fallos por IP ...
-IP_WINDOW = 60.0                                 # ... en esta ventana (s)
-CODE_FAILS = 20                                  # fallos que invalidan un código vivo
-SEEN_EVERY = 60.0                                # s mínimos entre escrituras de last_seen_at por dispositivo
-KEEP_USED = 7 * 86400.0                          # `prune` borra códigos usados/caducados más viejos que esto
+IP_FAILS = 5
+IP_WINDOW = 60.0
+CODE_FAILS = 20
+SEEN_EVERY = 60.0
+KEEP_USED = 7 * 86400.0
 _ID = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
 _CRED = re.compile(r"^cs1_[A-Za-z0-9_-]{43}$")
 
@@ -50,8 +36,6 @@ CREATE TABLE IF NOT EXISTS devices (
 
 
 class PairError(Exception):
-    """Fallo de emparejamiento con su código HTTP (401 inválido, 410 caducado/usado, 429 demasiados intentos, 400 petición)."""
-
     def __init__(self, status, message):
         super().__init__(message)
         self.status, self.message = status, message
@@ -63,7 +47,6 @@ def ensure_schema(conn):
 
 
 def normalize(code):
-    """Texto tecleado -> 8 símbolos canónicos o None (sin guiones/espacios; O->0, I/L->1; sin distinguir mayúsculas)."""
     if not isinstance(code, str):
         return None
     s = re.sub(r"[\s-]", "", code).upper().translate(str.maketrans("OIL", "011"))
@@ -79,7 +62,6 @@ def _cred_hash(cred):
 
 
 def parse_ttl(text):
-    """'10m' | '90s' | '1h' | '600' -> segundos (1 s .. MAX_TTL) o ValueError."""
     m = re.match(r"^\s*(\d+(?:\.\d+)?)\s*([smh]?)\s*$", str(text))
     if not m:
         raise ValueError("ttl inválido: usa 90s, 10m o 1h")
@@ -93,13 +75,11 @@ class Pairing:
     def __init__(self, conn, clock=time.time):
         self.conn, self.clock = conn, clock
         self._lock = threading.Lock()
-        self._fails = {}                         # ip -> [ts de fallos recientes]
-        self._seen = {}                          # device_id -> último ts escrito
+        self._fails = {}
+        self._seen = {}
         ensure_schema(conn)
 
-    # -- códigos (solo CLI local)
     def create_code(self, name=None, ttl=DEFAULT_TTL):
-        """-> {"id","code","name","expires_at"}. El código en claro solo existe en este valor de retorno."""
         ttl = float(ttl)
         if not 1 <= ttl <= MAX_TTL:
             raise PairError(400, "ttl fuera de rango (1 s a 1 h)")
@@ -114,7 +94,6 @@ class Pairing:
                               (cid, _code_hash(salt, code), salt, name, now, now + ttl))
         return {"id": cid, "code": code[:4] + "-" + code[4:], "name": name, "expires_at": now + ttl}
 
-    # -- canje (POST /pair)
     def _ip_blocked(self, ip, now):
         with self._lock:
             recent = [t for t in self._fails.get(ip, []) if now - t < IP_WINDOW]
@@ -122,21 +101,20 @@ class Pairing:
                 self._fails[ip] = recent
             else:
                 self._fails.pop(ip, None)
-            if len(self._fails) > 4096:          # tope de memoria: se olvidan las IPs sin fallos recientes
+            if len(self._fails) > 4096:
                 self._fails = {k: v for k, v in self._fails.items() if v and now - v[-1] < IP_WINDOW}
             return len(recent) >= IP_FAILS
 
     def _fail(self, ip, now):
         with self._lock:
             self._fails.setdefault(ip, []).append(now)
-        with db.tx():                            # cada fallo cuenta contra todos los códigos vivos
+        with db.tx():
             self.conn.execute("UPDATE pair_codes SET failures=failures+1 WHERE used_at IS NULL AND invalidated_at IS NULL"
                               " AND expires_at>?", (now,))
             self.conn.execute("UPDATE pair_codes SET invalidated_at=? WHERE used_at IS NULL AND invalidated_at IS NULL"
                               " AND failures>=?", (now, CODE_FAILS))
 
     def redeem(self, code, device_name=None, device_id=None, ip=""):
-        """-> {"device_id","credential"} o PairError. Consume el código al primer canje exitoso."""
         now = self.clock()
         if self._ip_blocked(ip, now):
             raise PairError(429, "demasiados intentos: espera un minuto")
@@ -149,7 +127,7 @@ class Pairing:
         with db.tx():
             rows = db.rows(self.conn.execute("SELECT id,code_hash,salt,name,expires_at,used_at,invalidated_at FROM pair_codes"))
             hit = None
-            for r in rows:                       # sin cortocircuito: el tiempo no depende de cuál coincide
+            for r in rows:
                 ok = hmac.compare_digest(_code_hash(r["salt"], canon or "-"), r["code_hash"])
                 if ok and canon:
                     hit = r
@@ -157,7 +135,6 @@ class Pairing:
                 dev = device_id or str(uuid.uuid4())
                 cred = CRED_PREFIX + base64.urlsafe_b64encode(secrets.token_bytes(32)).decode("ascii").rstrip("=")
                 name = device_name or hit["name"]
-                # el mismo device_id puede re-emparejarse: credencial nueva, la anterior deja de valer
                 self.conn.execute("INSERT INTO devices(id,name,cred_hash,created_at,last_seen_at,last_ip,revoked_at)"
                                   " VALUES(?,?,?,?,?,?,NULL) ON CONFLICT(id) DO UPDATE SET name=excluded.name,"
                                   " cred_hash=excluded.cred_hash, created_at=excluded.created_at, last_seen_at=excluded.last_seen_at,"
@@ -170,9 +147,7 @@ class Pairing:
             raise PairError(410, "el código ya se usó, caducó o fue invalidado: crea otro con `chopshop pair create`")
         raise PairError(401, "código de emparejamiento inválido")
 
-    # -- uso
     def check(self, cred, ip=None):
-        """id del dispositivo dueño de la credencial (no revocada) o None."""
         if not isinstance(cred, str) or not _CRED.match(cred):
             return None
         with db.tx():
@@ -187,13 +162,10 @@ class Pairing:
         return r["id"]
 
     def active(self, device_id):
-        """True si el dispositivo existe y no está revocado (el SSE lo comprueba en cada vuelta)."""
         with db.tx():
             return self.conn.execute("SELECT 1 FROM devices WHERE id=? AND revoked_at IS NULL", (device_id,)).fetchone() is not None
 
-    # -- gestión (CLI local)
     def list(self):
-        """{"devices":[...], "codes":[...vivos]}: ids, nombres, fechas e IP. Nunca hashes, sales ni credenciales."""
         now = self.clock()
         with db.tx():
             devs = db.rows(self.conn.execute("SELECT id,name,created_at,last_seen_at,last_ip,revoked_at FROM devices ORDER BY created_at"))
@@ -203,7 +175,6 @@ class Pairing:
         return {"devices": devs, "codes": codes}
 
     def revoke(self, ident):
-        """Revoca un dispositivo o invalida un código vivo por id. -> "device" | "code" | None."""
         now = self.clock()
         with db.tx():
             if self.conn.execute("UPDATE devices SET revoked_at=? WHERE id=? AND revoked_at IS NULL", (now, ident)).rowcount:
@@ -214,7 +185,6 @@ class Pairing:
         return None
 
     def prune(self):
-        """Borra códigos usados/caducados/invalidados (más de 7 días) y dispositivos revocados. -> {"codes","devices"}."""
         cut = self.clock() - KEEP_USED
         with db.tx():
             c = self.conn.execute("DELETE FROM pair_codes WHERE (used_at IS NOT NULL OR invalidated_at IS NOT NULL OR expires_at<=?)"
@@ -222,8 +192,6 @@ class Pairing:
             d = self.conn.execute("DELETE FROM devices WHERE revoked_at IS NOT NULL").rowcount
         return {"codes": max(0, c), "devices": max(0, d)}
 
-
-# ---------------------------------------------------------------- CLI `chopshop pair`
 
 def _when(ts):
     return "-" if not ts else time.strftime("%Y-%m-%d %H:%M", time.localtime(ts))

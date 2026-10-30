@@ -1,12 +1,9 @@
 import SwiftUI
 
-// MARK: - Estado visual de un nodo
-
 @available(macOS 26.0, *)
 enum NodeVisual: Equatable {
     case done, running, pending, needsYou, stuck, waitingBot, skipped, expanding
 
-    /// Profundidad aparente: lo que importa se acerca, lo terminado se aleja.
     var depth: CGFloat {
         switch self {
         case .needsYou, .stuck, .running: return 1
@@ -27,8 +24,6 @@ struct PlacedNode: Identifiable {
     var pos: CGPoint
     var id: String { node.id }
 }
-
-// MARK: - Layout por dependencia (columnas = capas; el eje y se ajusta por baricentro)
 
 @available(macOS 26.0, *)
 enum GraphLayout {
@@ -54,7 +49,6 @@ enum GraphLayout {
         }
     }
 
-    /// Predecesores que dibujan una arista: dependencias si las hay; si no, el padre.
     static func preds(of n: MockGraphNode, ids: Set<String>) -> [String] {
         let d = n.deps.filter(ids.contains)
         if !d.isEmpty { return d }
@@ -108,7 +102,6 @@ enum GraphLayout {
         return placed
     }
 }
-
 
 @available(macOS 26.0, *)
 extension NodeVisual {

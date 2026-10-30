@@ -1,10 +1,5 @@
 import SwiftUI
 
-/// Lo que pueden hacer los botones de atención (filas "te necesita" e inspector). Sin acciones en el entorno (Playground,
-/// Previews, capturas) los botones se ven como en la maqueta y no hacen nada.
-/// - `answer`: responde la pregunta de la tarea con esa opción (la app: `POST /answer`). Devuelve el error para mostrar, o nil.
-/// - `open`: abre un enlace (el hilo en T3). Permitir/Denegar y Reintentar no tienen API: en vivo se cambian por "Abrir en T3".
-/// - `settle`: cierra el hilo en T3 (`POST /settle`, nunca archiva). nil = la app no lo ofrece (los botones no aparecen).
 public struct AttentionActions: @unchecked Sendable {
     public var answer: @MainActor (_ task: MockTask, _ option: String) async -> String?
     public var open: @MainActor (_ url: URL) -> Void
@@ -28,7 +23,6 @@ extension EnvironmentValues {
     }
 }
 
-/// Botones de una tarea que te necesita o está trabada, con estado "enviando…" y error en línea.
 @available(macOS 26.0, *)
 struct AttentionButtons: View {
     let task: MockTask

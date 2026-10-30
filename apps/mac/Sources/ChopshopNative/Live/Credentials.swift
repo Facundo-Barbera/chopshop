@@ -1,14 +1,10 @@
 import Foundation
 import Security
 
-/// Dónde guarda la app la credencial de dispositivo (`cs1_…`) de cada agente (docs/agent-api.md «Emparejamiento»).
-/// La credencial nunca va a `config.toml` ni a `UserDefaults`, ni se imprime.
-/// Cuenta = `<machine>@<host:port>` del agente (un emparejamiento por agente).
 public protocol CredentialStore: AnyObject, Sendable {
     func credential(account: String) -> String?
     func save(_ credential: String, account: String) throws
     func delete(account: String) throws
-    /// Todas las cuentas guardadas (sin leer los secretos).
     func accounts() -> [String]
 }
 
@@ -16,9 +12,7 @@ public enum CredentialError: Error, Equatable {
     case keychain(OSStatus)
 }
 
-/// Nombre de la cuenta en el almacén: `<machine>@<host:port>`.
 public enum CredentialAccount {
-    /// `host:port` del agente (el puerto por defecto del esquema si la URL no lo trae).
     public static func endpoint(_ baseURL: URL) -> String {
         let host = (baseURL.host ?? "").lowercased()
         let port = baseURL.port ?? (baseURL.scheme?.lowercased() == "https" ? 443 : 80)
@@ -29,7 +23,6 @@ public enum CredentialAccount {
 }
 
 extension CredentialStore {
-    /// Cuenta y credencial guardadas para ese agente (sea cual sea la máquina con la que se emparejó).
     public func find(baseURL: URL) -> (account: String, credential: String)? {
         let suffix = "@" + CredentialAccount.endpoint(baseURL)
         for a in accounts().sorted() where a.hasSuffix(suffix) {
@@ -38,14 +31,12 @@ extension CredentialStore {
         return nil
     }
 
-    /// Borra todas las credenciales de ese agente (desemparejar, o 401 = revocada).
     public func forget(baseURL: URL) {
         let suffix = "@" + CredentialAccount.endpoint(baseURL)
         for a in accounts() where a.hasSuffix(suffix) { try? delete(account: a) }
     }
 }
 
-/// En memoria (tests, Previews).
 public final class InMemoryCredentialStore: CredentialStore, @unchecked Sendable {
     private let lock = NSLock()
     private var items: [String: String]
@@ -58,9 +49,6 @@ public final class InMemoryCredentialStore: CredentialStore, @unchecked Sendable
     public func accounts() -> [String] { lock.lock(); defer { lock.unlock() }; return Array(items.keys) }
 }
 
-/// Keychain del usuario: contraseña genérica, servicio `com.chopshop.agent`, accesible tras el primer desbloqueo y solo en este
-/// dispositivo (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`), sin sincronizar con iCloud.
-/// Guarda en memoria lo ya leído (la app pregunta en cada petición; así el Keychain se consulta una vez por cuenta).
 public final class KeychainCredentialStore: CredentialStore, @unchecked Sendable {
     public static let service = "com.chopshop.agent"
     public let service: String

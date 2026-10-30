@@ -1,9 +1,5 @@
 import SwiftUI
 
-/// Armazón de la oficina (docs/plans/office-first-ui.md): el mundo a ventana completa y, encima, el HUD (en la barra de la ventana),
-/// la paleta de órdenes (⌘K), el minimapa y el inspector con los paneles. El mundo llega como vista: recibe un `ShellWorldContext`
-/// (petición de foco, si el Esc es suyo) y avisa de lo que el usuario elige (`ShellTarget`). Sin credencial muestra `unpaired`.
-/// Sin tooltips sobre el mundo: lo que haya que leer está en el inspector o en la paleta.
 @available(macOS 26.0, *)
 public struct OfficeShell<World: View, Unpaired: View>: View {
     @ObservedObject var store: LiveStore
@@ -68,17 +64,12 @@ public struct OfficeShell<World: View, Unpaired: View>: View {
             ShellInspectorView(shell: shell, snapshot: store.snapshot, machineRoom: MachineRoom(store.state.machineRoom))
                 .inspectorColumnWidth(min: 300, ideal: shell.state.inspector == .panel(.machineRoom) ? 640 : 380, max: 920)
         }
-        // Esc: la paleta, luego el panel; si no hay nada abierto el Esc sigue hacia el mundo (salir del piso)
         .onKeyPress(.escape) { shell.state.escape() ? .handled : .ignored }
         .animation(.snappy(duration: 0.18), value: shell.state.paletteOpen)
         .animation(.easeOut(duration: 0.2), value: shell.notice)
     }
 }
 
-// MARK: - Mundo: la ciudad en vivo
-
-/// La ciudad del `LiveStore` como mundo del armazón (fase 1; en la fase 2 la sustituye `OfficeWorldView`). Sin cabecera de ventana
-/// propia: el HUD es del armazón.
 @available(macOS 26.0, *)
 public struct ShellCityWorld: View {
     @ObservedObject var store: LiveStore
@@ -102,7 +93,6 @@ public struct ShellCityWorld: View {
                 CityView(model: model, lights: lights, snapshot: store.snapshot, state: store.state,
                          onSelectFloor: { context.select(.project($0)) },
                          onInspect: { tid in
-                             // el piso da el hilo de T3; el armazón trabaja con la tarea del snapshot
                              if let f = store.snapshot.shellTask(tid) { context.select(.thread(id: f.task.id, project: f.batch.project)) }
                              else if let pr = context.focus?.target.project { context.select(.thread(id: tid, project: pr)) }
                          },
@@ -122,10 +112,6 @@ public struct ShellCityWorld: View {
     }
 }
 
-// MARK: - HUD
-
-/// Tres contadores en la barra de la ventana. Neutros salvo la atención (ámbar si algo te necesita, rojo si solo hay trabadas) y
-/// las máquinas caídas o saturadas. Cada uno abre su panel.
 @available(macOS 26.0, *)
 struct ShellHUDView: View {
     let hud: ShellHUD
@@ -159,9 +145,6 @@ struct ShellHUDView: View {
     }
 }
 
-// MARK: - Paleta
-
-/// Paleta de órdenes (⌘K): búsqueda difusa sobre `ShellCommands.all`; ↑/↓ mueven, ⏎ ejecuta, Esc cierra. Vidrio (como Spotlight).
 @available(macOS 26.0, *)
 struct ShellPalette: View {
     @ObservedObject var shell: ShellController
@@ -270,10 +253,6 @@ struct ShellPalette: View {
     }
 }
 
-// MARK: - Minimapa
-
-/// Planta de la ciudad desde arriba: un bloque por edificio, una franja por piso (color solo si el piso pide algo). Clic → ir a
-/// ese proyecto. Vidrio: es una pieza flotante sobre el mundo.
 @available(macOS 26.0, *)
 struct ShellMinimapView: View {
     let model: CityModel
@@ -292,7 +271,6 @@ struct ShellMinimapView: View {
                 let n = max(1, b.floors.count)
                 let h = r.height / CGFloat(n)
                 for (i, f) in b.floors.enumerated() {
-                    // de abajo arriba, como los pisos del edificio
                     let fr = CGRect(x: r.minX, y: r.maxY - CGFloat(i + 1) * h, width: r.width, height: h).insetBy(dx: 1.5, dy: 0.75)
                     switch f.status {
                     case .needsYou: ctx.fill(Path(roundedRect: fr, cornerRadius: 1), with: .color(Attention.needsYou))
@@ -321,8 +299,6 @@ struct ShellMinimapView: View {
         #endif
     }
 }
-
-// MARK: - Aviso
 
 @available(macOS 26.0, *)
 struct ShellNoticeView: View {

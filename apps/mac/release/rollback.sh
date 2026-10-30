@@ -1,12 +1,4 @@
 #!/usr/bin/env bash
-# Retira UNA versión del feed de Sparkle sin tocar las demás.
-#   rollback.sh <versión>            versión corta, p. ej. 1.2.3 (sin la v)
-# Env: ROLLBACK_DRY_RUN=true|false (por defecto true: calcula y valida, no publica),
-#      KEEP_FILES=true|false (false: mueve el zip y sus deltas a retired/; nunca se borran),
-#      además las de appcast.sh y r2.sh.
-# Orden seguro: 1) regenera el feed sin esa versión (la firma el mismo generate_appcast), 2) publica el
-# appcast, 3) recién entonces mueve los archivos. Los usuarios que YA instalaron la versión mala no
-# retroceden (Sparkle solo va hacia adelante): publica un release corregido con build mayor.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
@@ -34,7 +26,6 @@ while IFS= read -r f; do
   if [ -f "$work/$f" ]; then mv "$work/$f" "$work.retired/$f"; fi
 done <<< "$files"
 
-# Regenera sin esa versión; ABSENT_VERSION hace que la validación falle si sigue en el feed
 ABSENT_VERSION="$VERSION" bash "$HERE/appcast.sh" "$work"
 
 if [ "$DRY" = true ]; then

@@ -1,12 +1,5 @@
-"""Resolución de respuestas a preguntas pendientes de T3 (puro, sin I/O). Lo comparten el motor y el agente.
-
-Una pregunta de T3 es `{id, question, options: [{label, value?}], multiSelect?, allowCustomAnswer?}`.
-`resolve(q, choice)` traduce lo que escribe una persona (nº de opción 1..n, etiqueta, valor o texto libre;
-con multiSelect, varias separadas por comas) al valor que espera `t3_pending_request respond`."""
-
-
 class InvalidChoice(ValueError):
-    """La elección no vale para la pregunta (opción inexistente sin respuesta libre, o respuestas que no cuadran)."""
+    pass
 
 
 def _value(o):
@@ -14,7 +7,6 @@ def _value(o):
 
 
 def resolve(q, choice):
-    """Valor para T3 de una pregunta: str, o lista si `multiSelect`. Lanza `InvalidChoice`."""
     opts = q.get("options", [])
     picks = [c.strip() for c in choice.split(",")] if q.get("multiSelect") else [choice]
     res = []
@@ -33,8 +25,6 @@ def resolve(q, choice):
 
 
 def resolve_all(questions, choice):
-    """Respuestas `{id_pregunta: valor}` de una petición. Con una sola pregunta `choice` es la elección; con varias,
-    un dict `{id_pregunta: elección}` que cubra todas. Lanza `InvalidChoice`."""
     if not questions:
         raise InvalidChoice("la petición no trae preguntas")
     if isinstance(choice, dict):

@@ -1,17 +1,10 @@
 import SwiftUI
 
-// Rack de servidores visto de frente, en un Canvas. Un módulo (2U) por repositorio, agrupados por proyecto con una placa entre
-// grupos. Cada módulo: luz grande de estado (ámbar parpadea), una fila de leds por run (activos primero, luego los 5 últimos
-// completados), etiqueta y rejilla de ventilación. La geometría (`RackLayout`) es pura para el clic y los tests.
-
-/// Geometría del rack: dónde cae cada módulo y cada placa de proyecto, en puntos, dentro de un ancho dado.
 public struct RackLayout: Equatable, Sendable {
     public struct Slot: Equatable, Sendable {
         public var unitID: String
         public var rect: CGRect
-        /// Centro de la luz de estado.
         public var lamp: CGPoint
-        /// Centros de los leds de runs (en el orden de `RackLayout.runOrder`).
         public var leds: [CGPoint]
     }
     public struct Plate: Equatable, Sendable {
@@ -31,7 +24,6 @@ public struct RackLayout: Equatable, Sendable {
     public var slots: [Slot]
     public var plates: [Plate]
 
-    /// Leds de un módulo: activos primero (en orden de llegada), después los completados del más nuevo al más viejo.
     public static func runOrder(_ u: RackUnit) -> [ForgeRun] {
         Array((u.activeRuns + u.completedRuns.reversed()).prefix(maxLeds))
     }
@@ -62,11 +54,9 @@ public struct RackLayout: Equatable, Sendable {
         self.size = CGSize(width: w, height: max(120, y + 10))
     }
 
-    /// Módulo bajo el punto (nil = fuera de los módulos).
     public func unit(at p: CGPoint) -> String? { slots.first { $0.rect.contains(p) }?.unitID }
 }
 
-/// Colores del rack: chapa grafito (oscuro) o gris claro (claro); las luces son iguales en ambos.
 @available(macOS 26.0, *)
 struct RackPalette {
     let dark: Bool
@@ -103,14 +93,12 @@ struct RackRenderer {
     let room: MachineRoom
     let layout: RackLayout
     let dark: Bool
-    /// Reloj (s) para el parpadeo del ámbar; nil = congelado encendido (capturas).
     let t: Double?
     let selected: String?
     let hovered: String?
 
     private var pal: RackPalette { RackPalette(dark: dark) }
 
-    /// Intensidad del ámbar: pulso suave de ~1,2 s entre 0,25 y 1.
     static func blink(_ t: Double?) -> Double {
         guard let t else { return 1 }
         return 0.25 + 0.75 * (0.5 + 0.5 * cos(t * 2 * .pi / 1.2))
@@ -142,18 +130,14 @@ struct RackRenderer {
 
     private func drawUnit(_ g: inout GraphicsContext, _ u: RackUnit, _ s: RackLayout.Slot) {
         let r = s.rect
-        // chapa con bisel
         g.fill(Path(roundedRect: r.offsetBy(dx: 0, dy: 1.5), cornerRadius: 4), with: .color(pal.faceShadow.color))
         g.fill(Path(roundedRect: r, cornerRadius: 4), with: .color(pal.face.color))
         g.stroke(Path(roundedRect: r.insetBy(dx: 0.5, dy: 0.5), cornerRadius: 4), with: .color(pal.faceEdge.color.opacity(0.6)), lineWidth: 1)
-        // tornillos
         for x in [r.minX + 6, r.maxX - 6] {
             for y in [r.minY + 6, r.maxY - 6] {
                 g.fill(Path(ellipseIn: CGRect(x: x - 1.5, y: y - 1.5, width: 3, height: 3)), with: .color(pal.railHole.color))
             }
         }
-        // etiqueta: título a la izquierda y "proveedor · tipo · rama" a la derecha, junto a la rejilla; la rejilla cede sitio y,
-        // si aun así no cabe (rack estrecho), el subtítulo se omite (el detalle del módulo ya lo muestra)
         let title = g.resolve(Text(u.title).font(.system(size: 12, weight: .semibold)).foregroundStyle(pal.text.color))
         var sub = [u.provider, u.kind].compactMap { $0 }.joined(separator: " · ")
         if let b = u.defaultBranch { sub += " · " + b }
@@ -162,13 +146,11 @@ struct RackRenderer {
         let room = r.maxX - 22 - (titleEnd + 12 + subt.measure(in: r.size).width)
         let ventW = max(0, min(110, r.width * 0.28, room))
         let showSub = room >= 0
-        // rejilla a la derecha
         var vx = r.maxX - 14 - ventW
         while vx < r.maxX - 14 {
             g.fill(Path(roundedRect: CGRect(x: vx, y: r.minY + 9, width: 2.5, height: r.height - 18), cornerRadius: 1), with: .color(pal.vent.color))
             vx += 6
         }
-        // luz de estado
         let lc = RackPalette.light(u.light)
         let k = u.light.blinks ? Self.blink(t) : 1
         let lr = RackLayout.lampRadius
@@ -183,7 +165,6 @@ struct RackRenderer {
                with: .color(.white.opacity(0.35 * k)))
         g.draw(title, at: CGPoint(x: r.minX + 44, y: r.minY + 13), anchor: .leading)
         if showSub { g.draw(subt, at: CGPoint(x: r.maxX - 22 - ventW, y: r.minY + 13), anchor: .trailing) }
-        // leds de runs
         let runs = RackLayout.runOrder(u)
         for (i, c) in s.leds.enumerated() where i < runs.count {
             let run = runs[i]
@@ -197,7 +178,6 @@ struct RackRenderer {
             let none = Text("sin runs").font(.system(size: 9.5)).foregroundStyle(pal.subtext.color.opacity(0.8))
             g.draw(none, at: CGPoint(x: r.minX + 44, y: r.maxY - 11), anchor: .leading)
         }
-        // selección / hover
         if u.id == selected || u.id == hovered {
             g.stroke(Path(roundedRect: r.insetBy(dx: -2, dy: -2), cornerRadius: 6),
                      with: .color(pal.selection.color.opacity(u.id == selected ? 0.9 : 0.4)), lineWidth: u.id == selected ? 1.6 : 1)
@@ -205,7 +185,6 @@ struct RackRenderer {
     }
 }
 
-/// El rack como vista (ancho fijo): Canvas animado solo si algo parpadea; clic elige módulo.
 @available(macOS 26.0, *)
 struct RackView: View {
     let room: MachineRoom

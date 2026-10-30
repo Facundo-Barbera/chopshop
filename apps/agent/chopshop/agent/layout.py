@@ -1,15 +1,3 @@
-"""Estructura de la oficina y del rack desde el perfil local (bloques `office:` y `rack:`, docs/plans/office-redesign.md).
-
-- `validate(prof) -> [problema]`: lo llama `profile.validate` (y `chopshop profile check`); aplica los topes
-  (`MAX_FLOORS_PER_PROJECT`, `MAX_ROOMS_PER_FLOOR`, `MAX_DESKS_PER_ROOM`, `MAX_DESKS_PER_FLOOR`).
-- `validate_building(profiles) -> [problema]`: tope de pisos de proyecto por edificio (empresa) entre todos los perfiles.
-- `desks(prof) -> [desk]`: escritorios declarados, con id estable `<proyecto>/<piso>/<rol>/<n>` (piso y n desde 0).
-- `structure(prof)`: forma de `office` para el sobre `office.changed` y para `GET /state` (sin ocupantes).
-- `roles(prof)`, `wake_triggers(prof, role)`, `match_rules(prof)`, `half_life_s(prof)`, `rack_repos(prof)`, `rack_actors(prof)`.
-- `machine_rooms(prof)`: salas de máquinas del bloque opcional `machine_rooms:` (0..N por proyecto; cada una en un piso de
-  `office.floors`, con los repos del rack, listeners, automatizaciones y webhooks que aloja, por nombre o glob). Van en
-  `structure()` como `machine_rooms` (y de ahí al sobre `office.changed` y a `projects[].office`).
-Puro: sin I/O (el perfil ya viene cargado por `chopshop.profile.load`)."""
 import re
 
 from . import automations
@@ -18,8 +6,8 @@ MAX_FLOORS_PER_PROJECT = 4
 MAX_ROOMS_PER_FLOOR = 6
 MAX_DESKS_PER_ROOM = 6
 MAX_DESKS_PER_FLOOR = 24
-MAX_BUILDING_FLOORS = 16          # pisos de proyecto por edificio (más la planta baja = vestíbulo)
-DEFAULT_HALF_LIFE = 30 * 60       # s
+MAX_BUILDING_FLOORS = 16
+DEFAULT_HALF_LIFE = 30 * 60
 MIN_HALF_LIFE = 60
 MAX_HALF_LIFE = 7 * 86400
 
@@ -30,13 +18,13 @@ ROLE_KEYS = ("prompt_file", "wake", "match")
 MATCH_KEYS = ("title", "branch", "label")
 RACK_KEYS = ("repos", "actors")
 REPO_KEYS = ("provider", "repo", "kind", "label")
-PROVIDERS = ("github",)           # se suman con su adaptador en agent/forge/
+PROVIDERS = ("github",)
 REPO_KINDS = ("main", "docs", "service", "lib", "other")
 ACTOR_KEYS = ("kind", "label")
 ACTOR_KINDS = ("bot", "human")
 MACHINE_ROOM_KEYS = ("name", "floor", "repos", "listeners", "automations", "subscriptions")
 MACHINE_ROOM_LISTS = MACHINE_ROOM_KEYS[2:]
-WAKE_EVENT = "desk.note"          # disparador extra de `wake`: una nota nueva en el escritorio
+WAKE_EVENT = "desk.note"
 
 _ROLE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 _REPO = re.compile(r"^[^/\s]+/[^/\s]+$")
@@ -51,14 +39,10 @@ def _mapping(v):
 
 
 def parse_duration(v):
-    """`30m` / `2h` / `90s` / `1d` / segundos -> segundos (None si no vale)."""
     return automations.parse_every(v)
 
 
-# ---------------------------------------------------------------- validación
-
 def validate(prof):
-    """Problemas de los bloques `office:` y `rack:` (lista vacía si están bien o no existen)."""
     return _office_errs(prof) + _rack_errs(prof) + _machine_errs(prof)
 
 
@@ -258,7 +242,6 @@ def _machine_errs(prof):
 
 
 def validate_building(profiles):
-    """Tope de pisos de proyecto por edificio: `profiles` = perfiles cargados; agrupa por `company(prof)`."""
     per = {}
     for p in profiles:
         n = len(floors(p))
@@ -273,15 +256,12 @@ def validate_building(profiles):
     return errs
 
 
-# ---------------------------------------------------------------- lectura (perfil ya validado)
-
 def _office(prof):
     o = prof.get("office")
     return o if _mapping(o) else {}
 
 
 def company(prof):
-    """Empresa del edificio: `office.company`, o el `company` suelto del perfil, o None (la app usa su tabla de respaldo)."""
     c = _office(prof).get("company") or prof.get("company")
     return c if isinstance(c, str) and c.strip() else None
 
@@ -300,7 +280,6 @@ def desk_id(project, floor, role, slot):
 
 
 def parse_desk_id(did):
-    """`<proyecto>/<piso>/<rol>/<n>` -> (proyecto, piso, rol, n) o None."""
     parts = str(did or "").split("/")
     if len(parts) != 4 or not parts[1].isdigit() or not parts[3].isdigit() or not parts[0] or not parts[2]:
         return None
@@ -308,7 +287,6 @@ def parse_desk_id(did):
 
 
 def desks(prof):
-    """Escritorios declarados, en orden de asignación (piso más bajo, orden de departamentos, n creciente)."""
     project, out = prof.get("project"), []
     for fi, f in enumerate(floors(prof)):
         for r in f.get("rooms") or []:
@@ -322,8 +300,6 @@ def desks(prof):
 
 
 def structure(prof, retired=()):
-    """`office` del sobre `office.changed` / `GET /state` sin ocupantes. `retired` = ids de escritorios que ya no declara el
-    perfil (se conservan, `retired: true`, en su piso/departamento si aún existe; si no, en un departamento al final del piso)."""
     retired = sorted(set(retired), key=lambda d: (parse_desk_id(d) or ("", 0, "", 0))[1:])
     fl = []
     for fi, f in enumerate(floors(prof)):
@@ -354,7 +330,6 @@ def structure(prof, retired=()):
 
 
 def machine_rooms(prof):
-    """[{name, floor, repos, listeners, automations, subscriptions}] del perfil (solo las válidas; vacío si no declara)."""
     m, n, out = prof.get("machine_rooms"), len(floors(prof)), []
     for r in m if isinstance(m, list) else []:
         f = r.get("floor", 0) if _mapping(r) else None
@@ -378,7 +353,6 @@ def _normalize_wake(wake):
 
 
 def wake_triggers(prof, role):
-    """Disparadores de `wake` del rol, normalizados como los de `automations` (`schedule` con `_every`/`_cron`)."""
     spec = roles(prof).get(role)
     wake = spec.get("wake") if _mapping(spec) else None
     out = []
@@ -394,7 +368,6 @@ def wake_triggers(prof, role):
 
 
 def match_rules(prof):
-    """[(rol, {title|branch|label: regex compilada})] en el orden del perfil."""
     out = []
     for name, spec in roles(prof).items():
         m = spec.get("match") if _mapping(spec) else None
@@ -407,7 +380,6 @@ def match_rules(prof):
 
 
 def role_for(prof, title=None, branch=None, labels=()):
-    """Rol por reglas `match` (cualquier campo que coincida). None si ninguna."""
     for name, rules in match_rules(prof):
         for k, rx in rules.items():
             vals = list(labels or ()) if k == "label" else [title if k == "title" else branch]
@@ -417,7 +389,6 @@ def role_for(prof, title=None, branch=None, labels=()):
 
 
 def rack_repos(prof):
-    """[{provider, repo, project, kind, label}] del perfil (solo las entradas válidas)."""
     r = prof.get("rack")
     out = []
     for e in (r.get("repos") if _mapping(r) and isinstance(r.get("repos"), list) else []):
@@ -428,7 +399,6 @@ def rack_repos(prof):
 
 
 def rack_actors(prof):
-    """{login: {kind, label}} del perfil."""
     r = prof.get("rack")
     a = r.get("actors") if _mapping(r) else None
     return {str(k): {"kind": v.get("kind", "bot"), "label": v.get("label") or str(k)}

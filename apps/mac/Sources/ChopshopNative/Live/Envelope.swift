@@ -1,6 +1,5 @@
 import Foundation
 
-/// Sobre v1 del bus de eventos (docs/event-envelope.md): `{v, id, seq, ts, machine, project, type, severity, needs, subject, cause, body}`.
 public struct Envelope: Hashable, Sendable {
     public struct Subject: Hashable, Sendable {
         public var kind: String
@@ -20,10 +19,8 @@ public struct Envelope: Hashable, Sendable {
     public var project: String?
     public var type: String
     public var severity: String?
-    /// nil | human | bot | approval
     public var needs: String?
     public var subject: Subject?
-    /// `{id, depth}` del evento que lo provocó (se conserva tal cual).
     public var cause: JSONValue?
     public var body: JSONValue.Object
 
@@ -34,7 +31,6 @@ public struct Envelope: Hashable, Sendable {
         self.type = type; self.severity = severity; self.needs = needs; self.subject = subject; self.cause = cause; self.body = body
     }
 
-    /// Lectura tolerante: ignora campos que no conoce y exige solo `type` (un sobre sin `type` no se puede aplicar).
     public init?(json: JSONValue) {
         guard let o = json.object, let type = o["type"]?.string else { return nil }
         func s(_ k: String) -> String? { o[k]?.string }
@@ -52,13 +48,11 @@ public struct Envelope: Hashable, Sendable {
         self.init(json: j)
     }
 
-    /// Clave del sujeto (`kind:id`), con la que la cola de atención sigue lo abierto/cerrado.
     public var subjectKey: String? {
         guard let s = subject, let id = s.id else { return nil }
         return "\(s.kind):\(id)"
     }
 
-    /// El sobre como JSON, con todos los campos del contrato (los que faltan van como `null`).
     public var json: JSONValue {
         func opt(_ s: String?) -> JSONValue { s.map { .string($0) } ?? .null }
         var o: JSONValue.Object = ["v": .number(Double(v)), "type": .string(type), "body": .object(body),

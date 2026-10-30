@@ -116,15 +116,13 @@ clásica (barra lateral + UI web) queda para macOS < 26, agentes sin `/stream` y
 del stream de eventos del agente principal (el primero configurado):
 
 - `LiveStore` abre `GET /stream` (SSE) con la credencial, pliega cada sobre con la misma regla que `projection.py`
-  (`LiveState.apply`; hay test de equivalencia con la proyección dorada) y reconecta con `Last-Event-ID` y backoff 3→30 s.
+  (`LiveState.apply`, misma regla que `projection.py`) y reconecta con `Last-Event-ID` y backoff 3→30 s.
   El indicador de la barra dice **en vivo**, **reconectando** o **sin emparejar**.
 - Los botones de una pregunta responden por `POST /answer`; permitir/denegar y reintentar no tienen API: el botón abre el hilo en T3.
 - La vista web (`WKWebView`) solo se carga en la vista clásica: en macOS < 26 todo sigue con `GET /snapshot`.
   Si el stream no responde y no hay datos (agente antiguo), se ve la vista web.
-- Modo demo sin agente: `Chopshop.app/Contents/MacOS/Chopshop --demo-fixture apps/agent/tests/fixtures/events/ui-fixture.jsonl`
+- Modo demo sin agente: `Chopshop.app/Contents/MacOS/Chopshop --demo-fixture apps/mac/Sources/ChopshopNative/Resources/ui-fixture.jsonl`
   (o `CHOPSHOP_DEMO_FIXTURE=…`): reproduce la secuencia acelerada. `--demo-speed 0` (o `CHOPSHOP_DEMO_SPEED`) la entrega de golpe.
-  Escena de muchos hilos (46, 1 corriendo; tiempos relativos a ahora):
-  `python3 apps/mac/Tests/ChopshopNativeTests/tools/make_office_layout_fixture.py /tmp/office-46.jsonl [--no-office]`.
 - **Proyecto** a pantalla completa (`ProjectWorkspace`; selector Oficina / Grafo en la barra de la ventana). La **oficina** es un
   solo mundo (`OfficeWorldView` sobre `WorldLayout`): vestíbulo, todos los pisos de escritorios por rol (los del perfil `office`;
   sin perfil, departamentos sintéticos por `role` de hasta 6 escritorios, ≤ 24 por piso) y la sala de máquinas (rack y listeners
@@ -174,5 +172,4 @@ Si macOS la marca como «dañada» (por haberla copiado desde otra máquina o de
 ## Desarrollo
 
 - `swift build` en `apps/mac` compila sin empaquetar; `swift run` busca la UI en `CHOPSHOP_WEB_DIR` o en `Resources/web` del directorio actual.
-- `swift test` (requiere Xcode) ejecuta las pruebas de la lógica pura: lectura del config, cliente con transporte falso, resumen y combinación de agentes (`ChopshopUITests`), y el contrato del bus (sobres dorados, `LiveState.fold` == proyección dorada de `projection.py`), parser SSE, stream con transporte falso, reconexión, emparejamiento y mapeo a la oficina (`ChopshopNativeTests`). La proyección dorada se regenera con `python3 apps/mac/Tests/ChopshopNativeTests/tools/make_golden.py <apps/agent con projection.py>`. La combinación de snapshots que pinta la UI se prueba en JS: `pnpm test` (`packages/api/test`).
 - Capturas con datos de ejemplo, sin servidores: [`screenshots.md`](screenshots.md).

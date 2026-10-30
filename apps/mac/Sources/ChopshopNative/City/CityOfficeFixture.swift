@@ -1,7 +1,5 @@
 import Foundation
 
-/// Escena v3 de la ciudad: Awesome GB con `office` de dos pisos (Producto y Docs, cada uno con una sala de máquinas declarada en
-/// `machine_rooms`) y un hilo en el vestíbulo; chopshop sin `office` ni salas (un piso, empresa por `CompanyDirectory`). La usan `CityOfficeTests` y `ChopshopSnap <salida> city-office`.
 enum CityOfficeFixture {
     static func desk(_ id: String, _ thread: String?) -> String {
         let occ = thread.map { #"{"thread_id": "\#($0)", "phase": "running"}"# } ?? "null"
