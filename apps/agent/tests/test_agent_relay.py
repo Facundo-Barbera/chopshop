@@ -1,3 +1,4 @@
+import io
 import json
 import os
 import socket
@@ -111,7 +112,7 @@ class Base(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         env = mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": os.path.join(self.tmp.name, "cfg"),
-                                       "CHOPSHOP_HOME": os.path.join(self.tmp.name, "home")})
+                                         "CHOPSHOP_HOME": os.path.join(self.tmp.name, "home")})
         env.start()
         self.addCleanup(env.stop)
         self.conn = db.connect(os.path.join(self.tmp.name, "agent", "agent.db"))
@@ -279,6 +280,162 @@ class TestConfigured(Base):
     def test_machine_json_wins_and_derives_wss(self):
         self.write_machine(CRED_A)
         self.assertEqual(relay.configured(), ("wss://api.example.test/v1/connect", CRED_A))
+
+
+PROFILE = """project: alpha
+t3_project: alpha
+repo: git@example.test:acme/alpha.git
+office:
+  company: Acme
+  floors:
+    - name: Producto
+      rooms:
+        - role: triage
+          desks: 1
+  roles:
+    triage:
+      prompt_file: prompts/triage.md
+      match:
+        title: bug
+"""
+
+
+def result(re, status="stored"):
+    return {"v": 2, "type": "import.result", "id": "r", "ts": "2026-10-30T14:02:11.250Z", "re": re,
+            "import_id": "imp-1", "status": status}
+
+
+class OfferBase(Base):
+    def setUp(self):
+        super().setUp()
+        self.home = os.environ["CHOPSHOP_HOME"]
+        self.cfg = os.path.join(os.environ["XDG_CONFIG_HOME"], "chopshop")
+        os.makedirs(os.path.join(self.home, "profiles"))
+        os.makedirs(self.cfg, exist_ok=True)
+        for name in ("alpha", "gamma"):
+            self.profile(name, PROFILE.replace("alpha", name), "Clasifica los issues de %s." % name)
+        with open(os.path.join(self.cfg, "projects.toml"), "w") as f:
+            f.write('[projects."gamma"]\ncompany = "Acme"\nenabled = true\n\n'
+                    '[projects."delta"]\ncompany = "Beta"\nt3_project = "delta"\nenabled = false\n')
+
+    def profile(self, name, text, prompt):
+        with open(os.path.join(self.home, "profiles", name + ".yaml"), "w") as f:
+            f.write(text)
+        d = os.path.join(self.home, "automations", name, "prompts")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "triage.md"), "w") as f:
+            f.write(prompt)
+
+    def run_session(self, inbound):
+        stop = Stop()
+        link = self.link(stop, [lambda s: Client(self.clock, s, inbound)])
+        link.run()
+        return self.clients[-1]
+
+
+class TestLocalProjects(OfferBase):
+    def test_excludes_synced_and_includes_registry_only(self):
+        projects = relaysync.local_projects({"alpha"})
+        self.assertEqual([p["project"] for p in projects], ["delta", "gamma"])
+        delta, gamma = projects
+        self.assertEqual(delta, {"project": "delta", "registry": {"company": "Beta", "t3_project": "delta", "repo": None,
+                                                                  "host": "local", "enabled": False}})
+        self.assertEqual(gamma["registry"]["company"], "Acme")
+        self.assertEqual(gamma["office"]["roles"]["triage"], {"prompt": "Clasifica los issues de gamma.",
+                                                              "match": {"title": "bug"}})
+
+    def test_no_local_paths_outside_profile_fields(self):
+        raw = json.dumps(relaysync.local_projects())
+        self.assertNotIn(self.tmp.name, raw)
+        self.assertNotIn("prompt_file", raw)
+        self.assertNotIn("_path", raw)
+        self.assertNotIn("_unknown", raw)
+        self.assertNotIn("prompts/triage.md", raw)
+
+    def test_prompt_outside_project_dir_is_empty(self):
+        self.profile("alpha", PROFILE.replace("prompts/triage.md", "../gamma/prompts/triage.md"), "x")
+        alpha = [p for p in relaysync.local_projects() if p["project"] == "alpha"][0]
+        self.assertEqual(alpha["office"]["roles"]["triage"]["prompt"], "")
+
+    def test_offer_is_capped_at_768_kib(self):
+        big = [{"project": "p%03d" % i, "settings": {"blob": "x" * 200000}} for i in range(6)]
+        msg, skipped = relaysync.import_offer(big)
+        size = len(json.dumps(msg, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+        self.assertLessEqual(size, relaysync.MAX_OFFER_BYTES)
+        self.assertEqual([p["project"] for p in msg["projects"]], ["p000", "p001", "p002"])
+        self.assertEqual(skipped, ["p003", "p004", "p005"])
+        self.assertEqual(relaysync.import_offer([{"project": "huge", "x": "y" * relaysync.MAX_OFFER_BYTES}]),
+                         (None, ["huge"]))
+
+
+class TestOfferOverRelay(OfferBase):
+    def test_offers_projects_not_in_sync(self):
+        c = self.run_session([welcome(), sync()])
+        offers = c.of("import.offer")
+        self.assertEqual(len(offers), 1)
+        self.assertEqual(offers[0]["v"], 2)
+        self.assertEqual([p["project"] for p in offers[0]["projects"]], ["delta", "gamma"])
+
+    def test_no_offer_without_sync(self):
+        c = self.run_session([welcome()])
+        self.assertEqual(c.of("import.offer"), [])
+
+    def test_does_not_resend_when_hash_unchanged(self):
+        first = self.run_session([welcome(), sync(), None, lambda c: result(c.of("import.offer")[0]["id"])])
+        offer = first.of("import.offer")[0]
+        self.assertEqual(relaysync.read_import_hash(), relaysync.offer_hash(offer["projects"]))
+        self.assertEqual(oct(os.stat(relaysync.import_hash_path()).st_mode & 0o777), "0o600")
+        self.assertEqual(self.run_session([welcome(), sync()]).of("import.offer"), [])
+        self.assertEqual(self.run_session([welcome(), sync(), sync()]).of("import.offer"), [])
+
+    def test_resends_when_hash_changes(self):
+        self.run_session([welcome(), sync(), None, lambda c: result(c.of("import.offer")[0]["id"], "duplicate")])
+        self.profile("gamma", PROFILE.replace("alpha", "gamma"), "Prompt nuevo.")
+        offers = self.run_session([welcome(), sync()]).of("import.offer")
+        self.assertEqual(len(offers), 1)
+        gamma = [p for p in offers[0]["projects"] if p["project"] == "gamma"][0]
+        self.assertEqual(gamma["office"]["roles"]["triage"]["prompt"], "Prompt nuevo.")
+
+    def test_unacknowledged_offer_is_not_recorded(self):
+        self.run_session([welcome(), sync()])
+        self.assertIsNone(relaysync.read_import_hash())
+        self.assertEqual(len(self.run_session([welcome(), sync()]).of("import.offer")), 1)
+
+    def test_v1_never_offers(self):
+        stop = Stop()
+        link = self.link(stop, [lambda s: Client(self.clock, s, [welcome(1), sync()])], token="cr1_" + "c" * 43)
+        link.run()
+        self.assertEqual(self.clients[0].of("import.offer"), [])
+
+
+class TestDryRun(OfferBase):
+    def cli(self):
+        out, err = io.StringIO(), io.StringIO()
+        code = relaycfg.main(["import", "--dry-run"], out, err)
+        return code, out.getvalue(), err.getvalue()
+
+    def test_dry_run_lists_without_sending_or_recording(self):
+        os.makedirs(relaysync.cloud_dir())
+        with open(os.path.join(relaysync.cloud_dir(), "state.json"), "w") as f:
+            json.dump({"rev": 1, "projects": [{"name": "alpha"}]}, f)
+        code, out, err = self.cli()
+        self.assertEqual(code, 0)
+        self.assertIn("ya en la nube (no se ofrecen): alpha", out)
+        self.assertIn("delta: campus Beta, 0 roles, registro", out)
+        self.assertIn("gamma: campus Acme, 1 roles, registro", out)
+        self.assertIn("se enviaría al conectar", out)
+        self.assertNotIn("Clasifica", out)
+        self.assertIsNone(relaysync.read_import_hash())
+
+    def test_dry_run_reports_unchanged(self):
+        msg, _ = relaysync.import_offer(relaysync.local_projects())
+        relaysync.write_import_hash(relaysync.offer_hash(msg["projects"]))
+        self.assertIn("sin cambios desde la última oferta", self.cli()[1])
+
+    def test_requires_dry_run(self):
+        err = io.StringIO()
+        self.assertEqual(relaycfg.main(["import"], io.StringIO(), err), 1)
+        self.assertIn("--dry-run", err.getvalue())
 
 
 if __name__ == "__main__":
