@@ -113,6 +113,7 @@ public struct CityView: View {
     @State private var zoomOrigin: String?
     @State private var officeAll = false
     @State private var fitToken = 0
+    @State private var officeRegion: String?
     @Environment(\.colorScheme) private var scheme
 
     /// Duración del zoom completo en la app (la cronología grabada usa 5.6 s).
@@ -149,6 +150,11 @@ public struct CityView: View {
 
     /// Piso v3 enfocado, del `office` tipado de la proyección (nil si el proyecto no lo trae).
     private var targetPlan: FloorPlan? { target.flatMap { plan($0, floor: targetFloor) } }
+
+    private var shownPlan: FloorPlan? {
+        guard let pr = target, let rid = officeRegion, officeMounted else { return targetPlan }
+        return floors(pr).first { Self.regionID($0) == rid } ?? targetPlan
+    }
 
     /// Pisos de la oficina del proyecto (`ProjectOffice`: los del perfil o, sin `office`, los sintéticos por rol, y el vestíbulo).
     private func floors(_ project: String) -> [FloorPlan] {
@@ -223,6 +229,7 @@ public struct CityView: View {
         if !(same && cur > 0) { zoomOrigin = campusFocus }
         campus = model.campus(of: project) ?? campus
         officeAll = false
+        officeRegion = nil
         focus = project; focusFloor = floor; zoomFrom = cur; zoomTo = 1; zoomAt = t; mounted = false
         box.zoomGen += 1
         let gen = box.zoomGen
@@ -239,6 +246,7 @@ public struct CityView: View {
         if cur >= 0.98 { zoomOrigin = campusFocus } else { campus = zoomOrigin }
         mounted = false
         officeAll = false
+        officeRegion = nil
         zoomFrom = cur; zoomTo = 0; zoomAt = t
         box.zoomGen += 1
         let gen = box.zoomGen
@@ -260,10 +268,7 @@ public struct CityView: View {
 
     private func stepOut() {
         guard frozenZoom == nil else { return }
-        if officeIsWorld && !officeAll {
-            officeAll = true
-            fitToken += 1
-        } else if zoomed || mounted {
+        if zoomed || mounted {
             zoomOut()
         } else if campusFocus != nil {
             campus = nil
@@ -350,10 +355,11 @@ public struct CityView: View {
                 if office, let pr = target, state != nil, let plan = targetPlan {
                     // el mundo entero del proyecto, encuadrado al principio igual que el final del zoom (el piso pulsado)
                     let all = floors(pr)
-                    OfficeWorldView(floors: all, frozenNow: officeNow, focusRegion: officeAll ? nil : Self.regionID(plan),
+                    OfficeWorldView(floors: all, frozenNow: officeNow, focusRegion: officeAll ? nil : (officeRegion ?? Self.regionID(plan)),
                                     frame: FloorFrame.building(all), fitRequest: fitToken,
                                     onSelect: { tid in if let tid, FloorLayout.machinePart(tid) == nil { onInspect?(tid) } },
-                                    onExit: { zoomOut() })
+                                    onExit: { zoomOut() }, layered: true,
+                                    onActiveRegion: { officeRegion = $0; officeAll = false })
                 } else if office, let pr = target, let g = graph(pr) {
                     IsoOfficeView(graph: g, tasks: tasks(pr), hostOf: hosts(pr), frozenTime: frozenTime, flatChrome: flatChrome)
                 } else {
@@ -376,7 +382,7 @@ public struct CityView: View {
     /// Título y recuento del piso enfocado: nombre del piso y escritorios ocupados en v3; objetivo e hilos del grafo si no.
     private func officeHeader(now: Date) -> (title: String, count: String)? {
         guard let pr = target else { return nil }
-        if let plan = targetPlan {
+        if let plan = shownPlan {
             let desks = plan.desks.filter { !$0.retired }
             let busy = desks.filter { plan.occupant(of: $0.id, now: now) != nil }.count
             return (plan.name.map { "\(pr) · \($0)" } ?? pr, "\(busy) de \(desks.count) escritorios")
@@ -396,7 +402,7 @@ public struct CityView: View {
         if inside, let pr = target {
             let atFloor = !(officeIsWorld && officeAll)
             out.append(CityCrumb(id: "project", title: pr, action: act(officeIsWorld && atFloor) { goBuilding() }))
-            if atFloor, let plan = targetPlan {
+            if atFloor, let plan = shownPlan {
                 out.append(CityCrumb(id: "floor", title: plan.shortTitle, action: nil))
             }
         }

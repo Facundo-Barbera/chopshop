@@ -131,6 +131,10 @@ public enum FloorPlanGenerator {
         }
     }
 
+    public static func coreWidth(W: Double, D: Double) -> Double {
+        min(coreW, max(72, (sqrt(W * D) * 0.11).rounded()))
+    }
+
     public static func machineWidth(_ cabinets: Int) -> Double {
         let row = Double(max(1, cabinets)) * (cabW + cabGap) - cabGap
         return max(3 * cellW, row + 40) + 2 * pad
@@ -200,11 +204,14 @@ public enum FloorPlanGenerator {
         let split = rng.pick([0.44, 0.5, 0.56])
         var backD = ((D - C) * split).rounded()
         backD = min(max(backD, min(minBand, (D - C) / 2)), D - C - min(minBand, (D - C) / 2))
-        let coreX = (W * (0.5 + (rng.unit() - 0.5) * 0.3) - coreW / 2).rounded()
-        let core = Rect(x0: max(0, coreX), y0: 0, w: coreW, d: backD)
+        let cw = coreWidth(W: W, D: D)
+        let cd = min(backD, max((cw * 0.8).rounded(), min((cw * 1.3).rounded(), (backD * 0.6).rounded())))
+        let coreX = (W * (0.5 + (rng.unit() - 0.5) * 0.3) - cw / 2).rounded()
+        let core = Rect(x0: min(max(0, coreX), W - cw), y0: 0, w: cw, d: cd)
         let corr = Rect(x0: 0, y0: backD, w: W, d: C)
         var rooms = [Room(kind: .core, rect: core, door: Opening(side: .south, from: core.midX - 22, to: core.midX + 22)),
                      Room(kind: .corridor, rect: corr)]
+        if backD - cd > 1 { rooms.append(Room(kind: .corridor, rect: Rect(x0: core.x0, y0: cd, w: cw, d: backD - cd))) }
         var back = Band(y0: 0, y1: backD, doorSide: .south, free: [(0, core.x0), (core.x1, W)].filter { $0.1 - $0.0 > 1 })
         var front = Band(y0: backD + C, y1: D, doorSide: .north, free: [(0, W)])
 
