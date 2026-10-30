@@ -77,10 +77,42 @@ public struct OfficeWorldView: View {
         guard let cur = activeID(w), let i = order.firstIndex(where: { $0.id == cur }) else { return }
         let j = min(max(0, i + d), order.count - 1)
         guard j != i else { return }
-        let r = order[j]
+        go(order[j])
+    }
+
+    private func go(_ r: WorldLayout.Region) {
         active = r.id
         box.focusRegion(r)
         onActiveRegion?(r.id)
+    }
+
+    private func floorPicker(_ w: WorldLayout) -> some View {
+        let order = w.regions.sorted { $0.oz < $1.oz }
+        let cur = activeID(w)
+        let i = order.firstIndex { $0.id == cur } ?? 0
+        return VStack(spacing: 2) {
+            FloorStepButton(symbol: "chevron.up", enabled: i < order.count - 1) { step(1) }
+            let lift = order.first?.kind == .lobby ? 0 : 1
+            ForEach(Array(order.enumerated()).reversed(), id: \.element.id) { k, r in
+                let on = r.id == cur
+                Button { go(r) } label: {
+                    Text(r.kind == .lobby ? "PB" : "\(k + lift)")
+                        .font(.system(size: 11, weight: on ? .semibold : .regular, design: .rounded))
+                        .monospacedDigit()
+                        .frame(width: 30, height: 24)
+                        .background(on ? Color.accentColor.opacity(0.9) : Color.clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .foregroundStyle(on ? Color.white : Color.primary.opacity(0.7))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(r.title.capitalized)
+            }
+            FloorStepButton(symbol: "chevron.down", enabled: i > 0) { step(-1) }
+        }
+        .padding(4)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5))
+        .padding(14)
     }
 
     public var body: some View {
@@ -132,6 +164,7 @@ public struct OfficeWorldView: View {
             if box.showingAll { onExit?() } else { box.fitAll() }
         }
         .onChange(of: fitRequest) { _, _ in box.fitAll() }
+        .overlay(alignment: .trailing) { if layered, w.regions.count > 1 { floorPicker(w) } }
         .clipped()
         .hotReload()
     }
@@ -162,6 +195,25 @@ public struct OfficeWorldView: View {
         } symbols: {
             WorldLabels(world: w, now: now, dark: dark)
         }
+    }
+}
+
+@available(macOS 26.0, *)
+private struct FloorStepButton: View {
+    let symbol: String
+    let enabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 11, weight: .semibold))
+                .frame(width: 30, height: 22)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Color.primary.opacity(enabled ? 0.75 : 0.25))
+        .disabled(!enabled)
     }
 }
 
@@ -251,61 +303,63 @@ struct WorldRenderer {
         let f = FloorRenderer(plan: ar.plan, layout: ar.layout, cam: regionCam(ar), box: fbox, dark: dark, t: t, now: now,
                               selected: selected, hovered: hovered, prefix: "\(ar.id)|")
         let lk = f.looks()
-        ctx.drawLayer { l in
-            l.addFilter(.blur(radius: 9 * cam.s))
-            for (i, r) in regions.enumerated() {
-                let a = i == ai ? 1 : far
-                guard a > 0.01 else { continue }
-                l.opacity = a
-                l.fill(plateShadow(r), with: .color(.black.opacity(dark ? 0.5 : 0.16)))
-            }
-            l.opacity = near
-            if near > 0.01 { f.slabShadows(&l) }
-        }
-        for (i, r) in regions.enumerated() {
-            if i > 0 { link(&ctx, regions[i - 1], r) }
-            if far > 0.01 { slab(&ctx, r, active: i == ai, alpha: far) }
-            if i == ai {
-                guard near > 0.01 else { continue }
-                var g = ctx; g.opacity = near
-                plate(&g, r)
-                f.drawRooms(&g, looks: lk)
-                g.drawLayer { l in
-                    l.addFilter(.blur(radius: 2.4 * cam.s))
-                    f.contactShadows(&l, looks: lk)
-                }
-                f.drawContents(&g, looks: lk)
-            } else if near > 0.01 {
-                outline(&ctx, r, above: i > ai, alpha: near)
+        base(&ctx, regions, below: ai)
+        if near > 0.01 {
+            ctx.drawLayer { l in
+                l.addFilter(.blur(radius: 2.4 * cam.s))
+                l.opacity = near
+                f.slabShadows(&l)
             }
         }
-        if near > 0.01 { var g = ctx; g.opacity = near; f.drawLabels(&g, looks: lk) }
-        for (i, r) in regions.enumerated() {
-            guard let s = ctx.resolveSymbol(id: "\(r.id)|title") else { continue }
-            var g = ctx; g.opacity = i == ai ? 1 : 0.55
-            let p = P(r.x0, r.y0 + r.d, r.oz)
-            g.draw(s, at: CGPoint(x: p.x - 12, y: p.y), anchor: .trailing)
+        if far > 0.01 { slab(&ctx, ar, active: true, alpha: far) }
+        if near > 0.01 {
+            var g = ctx; g.opacity = near
+            plate(&g, ar)
+            f.drawRooms(&g, looks: lk)
+            g.drawLayer { l in
+                l.addFilter(.blur(radius: 2.4 * cam.s))
+                f.contactShadows(&l, looks: lk)
+            }
+            f.drawContents(&g, looks: lk)
+            f.drawLabels(&g, looks: lk)
+        }
+        if let s = ctx.resolveSymbol(id: "\(ar.id)|title") {
+            let p = P(ar.x0, ar.y0 + ar.d, ar.oz)
+            ctx.draw(s, at: CGPoint(x: p.x - 12, y: p.y), anchor: .trailing)
         }
         box.hits = far > 0.6 ? [] : fbox.hits
     }
 
-    private func outline(_ ctx: inout GraphicsContext, _ r: WorldLayout.Region, above: Bool, alpha: Double) {
-        let lay = r.layout, s = lay.shell, z = r.oz + Iso.slabH
-        let ink: Color = dark ? .white : Color(red: 0.2, green: 0.18, blue: 0.15)
-        let base = above ? 0.6 : 1.0
-        ctx.fill(rect(s.x0, s.y0, s.x1, s.y1, z), with: .color(ink.opacity((dark ? 0.035 : 0.04) * base * alpha)))
-        ctx.stroke(rect(s.x0, s.y0, s.x1, s.y1, z), with: .color(ink.opacity((dark ? 0.34 : 0.38) * base * alpha)), lineWidth: 1.1)
-        var rooms = Path()
-        for b in lay.rooms + lay.extras where b.index != FloorLayout.corridorIndex && b.index != FloorLayout.coreIndex {
-            rooms.addPath(rect(b.x0, b.y0, b.x1, b.y1, z))
-        }
-        for m in lay.machines { rooms.addPath(rect(m.x0, m.y0, m.x0 + m.w, m.y0 + m.d, z)) }
-        ctx.stroke(rooms, with: .color(ink.opacity((dark ? 0.16 : 0.18) * base * alpha)),
-                   style: StrokeStyle(lineWidth: 0.8, dash: above ? [4, 4] : []))
-        if let c = lay.core {
-            let tone: Color = dark ? Color(red: 0.55, green: 0.62, blue: 0.72) : Color(red: 0.52, green: 0.58, blue: 0.66)
-            ctx.fill(rect(c.x0, c.y0, c.x1, c.y1, z), with: .color(tone.opacity((dark ? 0.18 : 0.20) * base * alpha)))
-            ctx.stroke(rect(c.x0, c.y0, c.x1, c.y1, z), with: .color(tone.opacity(0.5 * base * alpha)), lineWidth: 0.9)
+    static let storey = 34.0
+
+    private func base(_ ctx: inout GraphicsContext, _ regions: [WorldLayout.Region], below ai: Int) {
+        guard ai > 0 else { return }
+        let r = regions[ai], top = r.oz - 1, h = Self.storey
+        let x0 = r.x0, y0 = r.y0, x1 = r.x0 + r.w, y1 = r.y0 + r.d
+        let wallL: Color = dark ? Color(white: 0.085) : Color(red: 0.86, green: 0.84, blue: 0.80)
+        let wallR: Color = dark ? Color(white: 0.06) : Color(red: 0.80, green: 0.78, blue: 0.74)
+        let glass: Color = dark ? Color(red: 0.16, green: 0.19, blue: 0.24) : Color(red: 0.62, green: 0.68, blue: 0.74)
+        let edge: Color = .primary.opacity(dark ? 0.10 : 0.12)
+        for i in 0..<ai {
+            let z0 = top - Double(ai - i) * h, z1 = z0 + h
+            ctx.fill(poly([P(x0, y1, z1), P(x1, y1, z1), P(x1, y1, z0), P(x0, y1, z0)]), with: .color(wallL))
+            ctx.fill(poly([P(x1, y0, z1), P(x1, y1, z1), P(x1, y1, z0), P(x1, y0, z0)]), with: .color(wallR))
+            let lobby = regions[i].kind == .lobby
+            let g0 = z0 + h * (lobby ? 0.12 : 0.3), g1 = z0 + h * 0.78
+            let ix = r.w * 0.04, iy = r.d * 0.04
+            ctx.fill(poly([P(x0 + ix, y1, g1), P(x1 - ix, y1, g1), P(x1 - ix, y1, g0), P(x0 + ix, y1, g0)]), with: .color(glass.opacity(lobby ? 0.9 : 0.7)))
+            ctx.fill(poly([P(x1, y0 + iy, g1), P(x1, y1 - iy, g1), P(x1, y1 - iy, g0), P(x1, y0 + iy, g0)]), with: .color(glass.opacity(lobby ? 0.75 : 0.55)))
+            if lobby {
+                let dx = (x0 + x1) / 2, dw = r.w * 0.07
+                ctx.fill(poly([P(dx - dw, y1, z0 + h * 0.7), P(dx + dw, y1, z0 + h * 0.7), P(dx + dw, y1, z0), P(dx - dw, y1, z0)]),
+                         with: .color(dark ? Color(white: 0.03) : Color(white: 0.25)))
+                ctx.fill(poly([P(dx - dw * 1.6, y1, z0 + h * 0.78), P(dx + dw * 1.6, y1, z0 + h * 0.78),
+                               P(dx + dw * 1.6, y1 + r.d * 0.08, z0 + h * 0.74), P(dx - dw * 1.6, y1 + r.d * 0.08, z0 + h * 0.74)]),
+                         with: .color(Color.accentColor.opacity(0.8)))
+            }
+            var band = Path()
+            band.move(to: P(x0, y1, z1)); band.addLine(to: P(x1, y1, z1)); band.addLine(to: P(x1, y0, z1))
+            ctx.stroke(band, with: .color(edge), lineWidth: 0.8)
         }
     }
 
