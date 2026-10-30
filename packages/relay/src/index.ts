@@ -24,7 +24,7 @@ export class Hub extends DurableObject<Env> {
     this.agents = new AgentSockets(ctx, this.db, (account, type, raw) => {
       this.viewers.publish(account, type, raw);
     });
-    this.viewers = new ViewerHub(this.db);
+    this.viewers = new ViewerHub(this.db, (account) => this.agents.online(account));
   }
 
   async publishSnapshot(account: string, machineId: string, seq: number, ttlS: number | null, frame: string): Promise<StoredSnapshot> {
