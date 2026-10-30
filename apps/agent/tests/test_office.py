@@ -24,7 +24,8 @@ def profile(backend=2, frontend=1, extra_floor=False):
     if extra_floor:
         floors.append({"name": "Docs", "rooms": [{"role": "docs", "desks": 1}]})
     return {"project": "awesome-gb", "office": {"company": "Awesome GB", "half_life": "10m", "floors": floors,
-                                                 "roles": {"backend": {"match": {"title": r"^\[be\]"}}}}}
+                                                 "roles": {"backend": {"match": {"title": r"^\[be\]"}}}},
+            "capacity": {"flex_per_floor": 0, "max_extra_floors": 0, "outsourcing": False}}
 
 
 class Base(unittest.TestCase):

@@ -92,7 +92,7 @@ class TestOfficeApi(ApiBase):
         self.assertEqual(body["office"], example()["office"])
         self.assertEqual(body["rev"], S.rev(self.text()))
         self.assertEqual(body["limits"]["floors_per_project"], 4)
-        self.assertEqual(len([d for f in body["structure"]["floors"] for r in f["rooms"] for d in r["desks"]]), 10)
+        self.assertEqual(len([d for f in body["structure"]["floors"] for r in f["rooms"] for d in r["desks"]]), 18)
         self.assertEqual(self.get("/office/no-existe")[0], 404)
         self.assertEqual(self.get("/office/..%2Fx")[0], 400)
 
