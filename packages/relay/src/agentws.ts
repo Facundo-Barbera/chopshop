@@ -14,6 +14,12 @@ const MSG_ID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
 const VERSION_RE = /^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]{1,32})?$/;
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+const SNAPSHOT_KEYS: ReadonlySet<string> = new Set([
+  "v", "type", "id", "ts", "machine_id", "seq", "ttl_s", "agent_version", "health", "counts", "projects", "parts",
+]);
+const EVENT_KEYS: ReadonlySet<string> = new Set([
+  "v", "type", "id", "ts", "machine_id", "event_id", "seq", "event_ts", "project", "event_type", "severity", "needs", "subject", "body",
+]);
 
 export type ErrorCode =
   | "bad_request"
@@ -322,9 +328,13 @@ export class AgentSockets {
     return true;
   }
 
-  private ready(ws: WebSocket, att: AgentAttachment, frame: Frame): boolean {
+  private ready(ws: WebSocket, att: AgentAttachment, frame: Frame, keys: ReadonlySet<string>): boolean {
     if (att.sessionId === null) {
       send(ws, errorFrame("bad_request", "hello required first", { re: frame.id }));
+      return false;
+    }
+    if (!Object.keys(frame).every((k) => keys.has(k))) {
+      send(ws, errorFrame("bad_request", "field outside the whitelist", { re: frame.id }));
       return false;
     }
     if (frame.machine_id !== att.machineId) {
@@ -339,7 +349,7 @@ export class AgentSockets {
   }
 
   private async snapshot(ws: WebSocket, att: AgentAttachment, frame: Frame, raw: string, now: number): Promise<void> {
-    if (!this.ready(ws, att, frame)) return;
+    if (!this.ready(ws, att, frame, SNAPSHOT_KEYS)) return;
     const wait = att.lastSnapshotAt + SNAPSHOT_MIN_INTERVAL_MS - now;
     if (wait > 0) {
       send(ws, errorFrame("rate_limited", "too many snapshots", { re: frame.id, retryAfterS: Math.ceil(wait / 1000) }));
@@ -355,7 +365,7 @@ export class AgentSockets {
   }
 
   private event(ws: WebSocket, att: AgentAttachment, frame: Frame, raw: string, now: number): void {
-    if (!this.ready(ws, att, frame)) return;
+    if (!this.ready(ws, att, frame, EVENT_KEYS)) return;
     if (now - att.eventWindowStart >= EVENT_WINDOW_MS) {
       att.eventWindowStart = now;
       att.eventCount = 0;
