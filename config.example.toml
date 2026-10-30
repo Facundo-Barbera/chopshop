@@ -107,8 +107,12 @@ interval = 2                              # s entre pasadas (sobres nuevos del b
 enabled = true                            # false = el hilo `office` no asigna escritorios
 interval = 2                              # s entre pasadas (task.state nuevos del bus)
 
+# Despachador de las colas de empleados (docs/employees.md): saca tareas de la cola de cada escritorio permanente y las
+# lanza en T3. Como los roles, LANZA hilos: apagado por defecto.
 [agent.dispatcher]
-max_threads = 2
+enabled = false                           # true = hilo `dispatcher` del agente (anuncia, cierra y despacha la cola)
+max_threads = 2                           # hilos de empleado vivos a la vez (todas las colas)
+interval = 5                              # s entre pasadas
 
 # Roles permanentes de la oficina (office.roles.<rol>.wake del perfil; ver docs/agent-api.md «Roles permanentes»).
 # Despertar un rol LANZA un hilo de T3 (lote de una tarea por el motor): por eso está apagado por defecto.

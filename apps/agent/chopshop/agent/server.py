@@ -326,12 +326,14 @@ class AgentApp:
         ("GET", "/t3/projects"): "t3_projects", ("GET", "/thread"): "thread_read", ("POST", "/threads"): "thread_launch",
         ("POST", "/threads/send"): "thread_send", ("POST", "/threads/interrupt"): "thread_interrupt",
         ("GET", "/projects"): "projects", ("POST", "/projects"): "project_register",
+        ("POST", "/queue/cancel"): "queue_cancel",
     }
 
     def __init__(self, cfg, conn, collector, t3, auth, runtime=None, emit_fn=None, orchestrator_fn=None,
                  clock=time.time, pairing=None, stream_opts=None, office=None):
         self.cfg, self.conn = cfg, conn
         self.office = office              # agent/office.py (None = sin oficina: las rutas /desks dan 503)
+        self.queue = None                 # chopshop/queue.py (la pone el servicio; None = /queue/cancel da 503)
         self.collector, self.t3, self.auth = collector, t3, auth
         self.runtime = runtime or Runtime(clock)
         self.clock = clock
@@ -644,6 +646,21 @@ class AgentApp:
             raise ApiError(e.status, e.message)
         log.info("hilo %s asignado a %s por %s", thread, desk_id, ident.login or ident.via)
         return {"ok": True, "desk": desk_id, "thread_id": thread}
+
+    # -- colas de empleados
+    def r_queue_cancel(self, ident, q, body):
+        """Cancela una tarea en la cola de un empleado -> `task.cancelled` + `queue.changed`."""
+        if self.queue is None:
+            raise ApiError(503, "cola no disponible en este agente")
+        emp, task = _text(body, "employee", True, 128), _ident(body, "task", True)
+        by, note = _text(body, "by", maxlen=64) or "human", _text(body, "note", maxlen=500)
+        cur = self.queue.get(task)
+        if cur is None or cur["employee"] != emp or cur["state"] != "queued":
+            raise ApiError(404, "no hay tarea %s en la cola de %s" % (task, emp))
+        if self.queue.cancel(task, by, note=note) is None:
+            raise ApiError(404, "la tarea %s ya no está en cola" % task)
+        log.info("tarea %s de %s cancelada por %s", task, emp, ident.login or ident.via)
+        return {"ok": True, "task": task, "employee": emp, "state": "cancelled", "queue_len": self.queue.length(emp)}
 
     # -- semivida
     def r_touch(self, ident, q, body):
