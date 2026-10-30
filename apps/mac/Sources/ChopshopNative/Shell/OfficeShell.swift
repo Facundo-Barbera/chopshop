@@ -33,10 +33,16 @@ public struct OfficeShell<World: View, Unpaired: View>: View {
             ToolbarItem(placement: .principal) {
                 ShellHUDView(hud: ShellHUD.from(store.snapshot), open: { shell.state.toggle($0) })
             }
-            ToolbarItemGroup(placement: .primaryAction) {
+            ToolbarItem(placement: .primaryAction) {
                 Button { shell.state.go(.city) } label: { Label("Ciudad", systemImage: "building.2") }
-                Button { shell.perform(.palette) } label: { Label("Órdenes", systemImage: "command") }
+                    .help("Volver a la ciudad")
+            }
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button { shell.perform(.palette) } label: { Label("Órdenes", systemImage: "magnifyingglass") }
+                    .help("Paleta de órdenes (\(shortcut(.palette)))")
                 Button { shell.perform(.toggleInspector) } label: { Label("Panel", systemImage: "sidebar.trailing") }
+                    .help("Mostrar u ocultar el panel (\(shortcut(.toggleInspector)))")
             }
         }
         .onAppear { shell.snapshot = store.snapshot }
@@ -47,28 +53,32 @@ public struct OfficeShell<World: View, Unpaired: View>: View {
         .hotReload()
     }
 
+    private func shortcut(_ a: ShellAction) -> String {
+        ShellKeymap.all.first { $0.action == a }?.display ?? ""
+    }
+
     private var inspectorShown: Binding<Bool> {
         Binding(get: { shell.state.inspector != nil }, set: { if !$0 { shell.state.inspector = nil } })
     }
 
     private var stage: some View {
         let city = CityModel.build(store.state, perProject: true)
-        return ZStack(alignment: .bottomLeading) {
+        return ZStack(alignment: .bottomTrailing) {
             world(ShellWorldContext(focus: shell.state.focus, ownsEscape: !shell.state.paletteOpen && shell.state.inspector == nil,
                                     back: shell.state.backToken, select: { shell.state.select($0) }))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             if shell.state.minimap, !city.buildings.isEmpty {
                 ShellMinimapView(model: city, focused: shell.state.focus?.target.project) { shell.state.go(.project($0)) }
-                    .padding(14)
+                    .padding(16)
             }
         }
         .overlay(alignment: .bottom) {
-            if let n = shell.notice { ShellNoticeView(notice: n).padding(.bottom, 18).transition(.opacity) }
+            if let n = shell.notice { ShellNoticeView(notice: n).padding(.bottom, 20).transition(.opacity.combined(with: .move(edge: .bottom))) }
         }
         .overlay(alignment: .top) {
             if shell.state.paletteOpen {
                 ShellPalette(shell: shell, commands: ShellCommands.all(store.snapshot, selected: shell.state.selectedThread))
-                    .padding(.top, 40)
+                    .padding(.top, 56)
                     .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
             }
         }
@@ -152,31 +162,72 @@ struct ShellHUDView: View {
     let open: (ShellPanel) -> Void
 
     var body: some View {
-        HStack(spacing: 16) {
-            counter(hud.attention > 0 ? "exclamationmark.bubble.fill" : "checkmark.circle", hud.attentionLabel, tint: attentionTint) { open(.attention) }
-            counter("play.circle", hud.runningLabel, tint: nil) { open(.batches) }
-            counter("server.rack", hud.machinesLabel, tint: hud.machinesAlert ? Attention.needsYou : nil) { open(.machines) }
+        HStack(spacing: 2) {
+            if hud.attention > 0 {
+                ShellHUDChip(symbol: "exclamationmark.circle.fill", value: "\(hud.attention)",
+                             label: hud.attention == 1 ? "te necesita" : "te necesitan", tint: attentionTint) { open(.attention) }
+            } else {
+                ShellHUDChip(symbol: "checkmark.circle", value: nil, label: "Nada pendiente", tint: nil) { open(.attention) }
+            }
+            separator
+            ShellHUDChip(symbol: "circle.dotted", value: "\(hud.running)", label: "corriendo", tint: nil,
+                         dim: hud.running == 0) { open(.batches) }
+            separator
+            ShellHUDChip(symbol: "server.rack", value: hud.machinesTotal == 0 ? nil : "\(hud.machinesOK)/\(hud.machinesTotal)",
+                         label: hud.machinesTotal == 0 ? "sin máquinas" : "máquinas",
+                         tint: hud.machinesAlert ? Attention.needsYou : nil, dim: hud.machinesTotal == 0) { open(.machines) }
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 4)
         .hotReload()
+    }
+
+    private var separator: some View {
+        Rectangle().fill(Chrome.hairline).frame(width: 1, height: 14)
     }
 
     private var attentionTint: Color? {
         if hud.needsYou > 0 { return Attention.needsYou }
         return hud.stuck > 0 ? Attention.stuck : nil
     }
+}
 
-    private func counter(_ symbol: String, _ text: String, tint: Color?, action: @escaping () -> Void) -> some View {
+@available(macOS 26.0, *)
+struct ShellHUDChip: View {
+    let symbol: String
+    let value: String?
+    let label: String
+    let tint: Color?
+    var dim = false
+    let action: () -> Void
+    @State private var hover = false
+
+    var body: some View {
         Button(action: action) {
-            HStack(spacing: 5) {
-                Image(systemName: symbol).symbolRenderingMode(.hierarchical)
-                Text(text).font(.callout.monospacedDigit().weight(tint == nil ? .regular : .semibold))
+            HStack(spacing: 6) {
+                Image(systemName: symbol)
+                    .font(.system(size: 12, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(tint ?? Color.secondary)
+                HStack(spacing: 4) {
+                    if let value {
+                        Text(value).font(.system(size: 12.5, weight: .semibold).monospacedDigit())
+                            .foregroundStyle(tint ?? Color.primary)
+                    }
+                    Text(label).font(.system(size: 12.5))
+                        .foregroundStyle(tint.map { AnyShapeStyle($0.opacity(0.9)) } ?? AnyShapeStyle(.secondary))
+                }
             }
-            .foregroundStyle(tint ?? Color.secondary)
-            .contentShape(Rectangle())
+            .opacity(dim ? 0.55 : 1)
+            .padding(.horizontal, 10).padding(.vertical, 5)
+            .background {
+                Capsule().fill(tint.map { $0.opacity(0.14) } ?? (hover ? Chrome.wash : .clear))
+            }
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(text)
+        .onHover { hover = $0 }
+        .animation(.easeOut(duration: 0.12), value: hover)
+        .accessibilityLabel([value, label].compactMap { $0 }.joined(separator: " "))
     }
 }
 
@@ -195,20 +246,23 @@ struct ShellPalette: View {
 
     var body: some View {
         let rs = results
-        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: Chrome.radius + 4, style: .continuous)
         VStack(spacing: 0) {
             HStack(spacing: 10) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                Image(systemName: "magnifyingglass").font(.system(size: 15, weight: .medium)).foregroundStyle(.secondary)
                 TextField("Responder, settle, ir a un proyecto…", text: $shell.state.query)
-                    .textFieldStyle(.plain).font(.title3)
+                    .textFieldStyle(.plain).font(.system(size: 17))
                     .focused($focused)
                     .onSubmit { run(rs, cursor) }
+                Text("esc").font(.system(size: 10.5, weight: .medium)).foregroundStyle(.tertiary)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(RoundedRectangle(cornerRadius: 4, style: .continuous).strokeBorder(Chrome.hairline, lineWidth: 1))
             }
-            .padding(.horizontal, 16).padding(.vertical, 13)
-            Divider()
+            .padding(.horizontal, 18).padding(.vertical, 15)
+            Rectangle().fill(Chrome.hairline).frame(height: 1)
             if rs.isEmpty {
-                Text("Nada con «\(shell.state.query)»").font(.callout).foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading).padding(16)
+                Label("Nada con «\(shell.state.query)»", systemImage: "magnifyingglass").font(.callout).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(18)
             } else if flat {
                 list(rs)
             } else {
@@ -219,10 +273,8 @@ struct ShellPalette: View {
                 }
             }
         }
-        .frame(width: 640)
-        .background { background(shape) }
-        .clipShape(shape)
-        .shadow(color: .black.opacity(0.25), radius: 24, y: 10)
+        .frame(width: 620)
+        .floatingSurface(shape, flat: flat, lift: 1.4)
         .onKeyPress(.downArrow) { cursor = min(cursor + 1, max(0, rs.count - 1)); return .handled }
         .onKeyPress(.upArrow) { cursor = max(cursor - 1, 0); return .handled }
         .onChange(of: shell.state.query) { _, _ in cursor = 0 }
@@ -234,8 +286,8 @@ struct ShellPalette: View {
         return LazyVStack(alignment: .leading, spacing: 0) {
             ForEach(Array(rs.enumerated()), id: \.element.id) { i, c in
                 if grouped, i == 0 || rs[i - 1].group != c.group {
-                    Text(c.group.uppercased()).font(.caption2.weight(.semibold)).tracking(0.6).foregroundStyle(.tertiary)
-                        .padding(.horizontal, 16).padding(.top, i == 0 ? 8 : 12).padding(.bottom, 3)
+                    Text(c.group).font(.system(size: 11, weight: .medium)).foregroundStyle(.tertiary)
+                        .padding(.horizontal, 18).padding(.top, i == 0 ? 10 : 14).padding(.bottom, 4)
                 }
                 row(c, on: i == cursor)
                     .id(c.id)
@@ -243,24 +295,26 @@ struct ShellPalette: View {
                     .onTapGesture { run(rs, i) }
             }
         }
-        .padding(.bottom, 8)
+        .padding(.bottom, 6)
     }
 
     private func row(_ c: ShellCommand, on: Bool) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: symbol(c)).frame(width: 18)
+        HStack(spacing: 11) {
+            Image(systemName: symbol(c)).font(.system(size: 13)).frame(width: 18)
                 .foregroundStyle(c.attention ? Attention.needsYou : Color.secondary)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(c.title).font(.callout).lineLimit(1)
-                if let s = c.subtitle { Text(s).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(c.title).font(.system(size: 13.5)).lineLimit(1).layoutPriority(1)
+                if let s = c.subtitle { Text(s).font(.system(size: 12)).foregroundStyle(.tertiary).lineLimit(1) }
             }
             Spacer(minLength: 6)
             if case .panel(let p) = c.kind, let k = ShellKeymap.all.first(where: { $0.action.panel == p }) {
-                Text(k.display).font(.caption.monospaced()).foregroundStyle(.tertiary)
+                Text(k.display).font(.system(size: 11, weight: .medium).monospaced()).foregroundStyle(.tertiary)
+            } else if on {
+                Image(systemName: "return").font(.system(size: 11, weight: .medium)).foregroundStyle(.tertiary)
             }
         }
-        .padding(.horizontal, 16).padding(.vertical, 6)
-        .background { if on { RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.09)).padding(.horizontal, 6) } }
+        .padding(.horizontal, 18).frame(height: 34)
+        .background { if on { RoundedRectangle(cornerRadius: Chrome.rowRadius + 1, style: .continuous).fill(Color.primary.opacity(0.08)).padding(.horizontal, 8) } }
     }
 
     private func symbol(_ c: ShellCommand) -> String {
@@ -281,14 +335,6 @@ struct ShellPalette: View {
         guard rs.indices.contains(i) else { return }
         shell.run(rs[i])
     }
-
-    @ViewBuilder private func background(_ shape: RoundedRectangle) -> some View {
-        #if compiler(>=6.2)
-        if flat { shape.fill(Color(nsColor: .windowBackgroundColor)) } else { Color.clear.glassEffect(.regular, in: shape) }
-        #else
-        shape.fill(.regularMaterial)
-        #endif
-    }
 }
 
 // MARK: - Minimapa
@@ -305,7 +351,7 @@ struct ShellMinimapView: View {
 
     var body: some View {
         let map = ShellMinimap.layout(model, size: size)
-        let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: Chrome.radius, style: .continuous)
         Canvas { ctx, _ in
             for b in map.blocks {
                 let r = b.rect
@@ -329,17 +375,9 @@ struct ShellMinimapView: View {
         .frame(width: size.width, height: size.height)
         .contentShape(Rectangle())
         .gesture(SpatialTapGesture().onEnded { e in if let p = map.project(at: e.location) { pick(p) } })
-        .padding(6)
-        .background { background(shape) }
+        .padding(8)
+        .floatingSurface(shape, flat: flat, lift: 0.6)
         .accessibilityLabel("Minimapa")
-    }
-
-    @ViewBuilder private func background(_ shape: RoundedRectangle) -> some View {
-        #if compiler(>=6.2)
-        if flat { shape.fill(Color(nsColor: .windowBackgroundColor).opacity(0.92)) } else { Color.clear.glassEffect(.regular, in: shape) }
-        #else
-        shape.fill(.regularMaterial)
-        #endif
     }
 }
 
@@ -348,11 +386,15 @@ struct ShellMinimapView: View {
 @available(macOS 26.0, *)
 struct ShellNoticeView: View {
     let notice: ShellNotice
+    var flat = false
     var body: some View {
-        Text(notice.text).font(.callout).lineLimit(2)
-            .foregroundStyle(notice.error ? Attention.stuck : Color.primary)
-            .padding(.horizontal, 14).padding(.vertical, 8)
-            .background(Capsule().fill(Color(nsColor: .windowBackgroundColor).opacity(0.94)))
-            .overlay(Capsule().strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5))
+        HStack(spacing: 8) {
+            Image(systemName: notice.error ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(notice.error ? Attention.stuck : Color.secondary)
+            Text(notice.text).font(.system(size: 13, weight: .medium)).lineLimit(2)
+        }
+        .padding(.leading, 12).padding(.trailing, 16).padding(.vertical, 9)
+        .floatingSurface(Capsule(), flat: flat, lift: 0.7)
     }
 }
