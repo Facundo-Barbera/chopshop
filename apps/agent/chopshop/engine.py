@@ -95,27 +95,49 @@ def resolve_project(prof, host, hostcfg):
     """projectId de T3 en ese host (None si el perfil usa scratch)."""
     if prof.get("scratch"):
         return None
+    return find_project(prof, host, hostcfg)["id"]
+
+
+def find_project(prof, host, hostcfg, timeout=90):
     import os
     want = prof.get("t3_project")
     root = (prof.get("remote_repos") or {}).get(host) or (prof.get("repo") if t3.is_local(hostcfg) else None)
     if root:
         root = os.path.realpath(os.path.expanduser(root)) if t3.is_local(hostcfg) else root
-    out = t3.call(hostcfg, host, "t3_project_list", {"limit": 100})
+    out = t3.call(hostcfg, host, "t3_project_list", {"limit": 100}, timeout=timeout)
     for p in (out or {}).get("projects", []):
         if p.get("deletedAt"):
             continue
         wr = p.get("workspaceRoot") or ""
         if want and want in (p["id"], p["title"]):
-            return p["id"]
+            return p
         if root and (wr == root or (t3.is_local(hostcfg) and os.path.realpath(wr) == root)
                      or wr.replace("~", "") .endswith(root.replace("~", ""))):
-            return p["id"]
+            return p
     if not want and not root:
         for p in (out or {}).get("projects", []):
             if p["title"] == prof["project"] and not p.get("deletedAt"):
-                return p["id"]
+                return p
     raise t3.T3Error("no encontré el proyecto %s en T3 de %s (define t3_project o remote_repos en el perfil)"
                      % (prof["project"], host))
+
+
+def model_problem(prof, timeout=15):
+    if prof.get("model") or prof.get("scratch"):
+        return None
+    host = prof.get("host") or settings.general("default_host") or "local"
+    hostcfg = profile.hosts().get(host)
+    if hostcfg is None:
+        return None
+    try:
+        p = find_project(prof, host, hostcfg, timeout)
+    except (t3.T3Error, OSError):
+        return None
+    if p.get("defaultModelSelection"):
+        return None
+    return ("el perfil %s no tiene model y el proyecto %s de T3 (%s) no tiene modelo por defecto: toda tarea fallaría al "
+            "lanzarse. Añade model: instancia/modelo al perfil (p. ej. claudeAgent/claude-opus-5-5) o fija un modelo por "
+            "defecto en el proyecto de T3" % (prof["project"], p.get("title") or p["id"], host))
 
 
 def launch_args(prof, batch, task, hostcfg):
