@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "type": "error",
+  "id": "01M6A2QE5G8J0M2P4S6V8X0Z2A",
+  "ts": "2026-10-30T14:03:05.500Z",
+  "re": "01M6A2QE5F7H9K1N3Q5T7W9Y1Z",
+  "code": "forbidden",
+  "message": "un token viewer es solo lectura: solo acepta whoami y ping",
+  "close": false
+}

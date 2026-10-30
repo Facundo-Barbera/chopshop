@@ -1,0 +1,26 @@
+{
+  "v": 1,
+  "type": "event",
+  "id": "01M6A2QB2C4E6G8J0M2P4R6T8V",
+  "ts": "2026-10-30T14:02:13.120Z",
+  "machine_id": "contabo-dev",
+  "event_id": "01M646XHEM0W40J2GB1G6GW3RG",
+  "seq": 1843,
+  "event_ts": "2026-10-30T14:02:13.077Z",
+  "project": "nuskills",
+  "event_type": "task.state",
+  "severity": "info",
+  "needs": null,
+  "subject": {
+    "kind": "task",
+    "id": "mcp:a03694e5"
+  },
+  "body": {
+    "name": "body",
+    "media_type": "application/json",
+    "enc": "none",
+    "bytes": 143,
+    "sha256": "9fb93d5e3079f87d770e755273439d3e12627f33f198b03ce0ebfa25c3b3eeaa",
+    "data": "eyJwaGFzZSI6ImRvbmUiLCJhdHRlbnRpb24iOm51bGwsInNldHRsZWQiOmZhbHNlLCJ0aXRsZSI6IkJVRy0zIMK3IFJhY2hhIHNlIHJlaW5pY2lhIiwicm9sZSI6ImJhY2tlbmQiLCJzdW1tYXJ5IjoiUmFjaGEgY29ycmVnaWRhOyBQUiBhYmllcnRvIn0="
+  }
+}

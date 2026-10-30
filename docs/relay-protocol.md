@@ -1,0 +1,173 @@
+# Protocolo del relay (v1)
+
+El relay es un Cloudflare Worker que deja ver el estado de varias máquinas desde fuera de la tailnet sin abrir el agente a
+internet. Cada `chopshop-agent` abre una conexión saliente al relay y publica un **snapshot** (cabecera en lista blanca + partes
+opacas) y sus **eventos**; los visores (app de Mac, web) se conectan al mismo relay y **solo leen**. El relay no ejecuta nada,
+no habla con T3 y no interpreta las partes opacas.
+
+Schemas (JSON Schema 2020-12): `packages/api/relay/<mensaje>.schema.json`, con las definiciones compartidas en
+`common.schema.json` (`$id` base `https://schemas.chopshop.local/relay/v1/`). Un ejemplo válido por mensaje:
+`packages/api/relay/fixtures/<mensaje>.json`. Si este documento y los schemas no coinciden, mandan los schemas.
+
+## Transporte
+
+| canal | ruta | auth |
+|---|---|---|
+| WebSocket | `GET /v1/connect` (upgrade) | `Authorization: Bearer cr1_…` (agente o visor) |
+| HTTP JSON | `POST /v1/pair/codes` | `Bearer cr1_…` con scope `agent`, o el token de operador (ver «Pairing») |
+| HTTP JSON | `POST /v1/pair` | sin credencial (el código es la credencial) |
+| HTTP JSON | `DELETE /v1/tokens/<token_id>` | `Bearer cr1_…` con scope `agent` de la misma cuenta |
+
+- Cada frame del WebSocket es **un** objeto JSON UTF-8 (texto, nunca binario) con la cabecera común
+  `{"v": 1, "type": "...", "id": "<ULID>", "ts": "<ISO-8601 UTC con Z>"}`. Las respuestas llevan `re` = `id` del mensaje al que
+  responden. Un `type` desconocido → `error` `bad_request` (sin cerrar).
+- Frame máximo 1 MiB (`welcome.max_frame_bytes`); cada parte opaca, máx. 768 KiB decodificada. Más → `error` `too_large`.
+- Límites por conexión de agente: 1 `snapshot` cada 5 s, 50 `event` por segundo; exceso → `error` `rate_limited` con
+  `retry_after_s`. Un visor no tiene cuota de escritura porque no escribe.
+- Sin credencial o con una inválida/revocada, el upgrade responde **401** con un cuerpo `error` (`unauthorized`). Revocar un token
+  cierra sus WebSockets abiertos (`error` con `close: true` y luego cierre 4401).
+- No hay cookies, ni CORS con credenciales, ni tokens en la URL (no acaban en logs de acceso).
+
+## Mensajes
+
+| mensaje (`type`) | schema / fixture | sentido | quién puede enviarlo |
+|---|---|---|---|
+| `hello` | `hello` | agente → relay | solo scope `agent`; primer mensaje obligatorio |
+| `welcome` | `welcome` | relay → agente | respuesta al `hello` |
+| `snapshot` | `snapshot` | agente → relay → visores | solo scope `agent`, después de `welcome` |
+| `event` | `event` | agente → relay → visores | solo scope `agent`, después de `welcome` |
+| `ping` / `pong` | `ping`, `pong` | ambos sentidos | todos |
+| `whoami` / `whoami.result` | `whoami`, `whoami-result` | cliente → relay → cliente | todos |
+| `error` | `error` | relay → cliente (también cuerpo de errores HTTP) | relay |
+| pairing (HTTP) | `pair-create`, `pair-code`, `pair-redeem`, `pair-token` | ver «Pairing» | ver «Pairing» |
+
+### `hello`
+
+Lo primero que manda el agente tras el upgrade (en ≤ 10 s; si no, `error` `bad_request` + cierre):
+`machine_id` (mismo patrón que en el agente: `[A-Za-z0-9_.:-]{1,128}`), `agent_version` (semver), `protocol` (versiones que habla,
+p. ej. `[1]`), `last_seq` opcional (último `seq` del bus local, para que el visor sepa si se perdió algo) y `projects`:
+`[{name, roles}]` con los proyectos configurados y los **roles** de la oficina de cada uno (nombres, sin prompts ni configuración).
+
+- Un token de agente queda atado al `machine_id` con el que se emparejó: otro `machine_id` → `error` `forbidden` + cierre.
+- Sin versión común → `error` `unsupported_version` + cierre.
+- Una segunda conexión del mismo `machine_id` reemplaza a la primera (la vieja recibe `error` `conflict` con `close: true`).
+
+### `welcome`
+
+`re`, `session_id`, `protocol` (la elegida: 1), `snapshot_ttl_s` (TTL efectivo, 30–900), `max_frame_bytes` y `ping_interval_s`.
+
+### `snapshot`
+
+El estado completo de la máquina, reemplaza al anterior (sin diffs). El agente lo manda al conectar, cada vez que cambia (como
+mucho cada 5 s) y, aunque no cambie, al menos cada `ttl_s / 2`.
+
+- **Cabecera visible** (el relay la lee para listar máquinas y para `whoami.result`): `machine_id`, `seq`, `ttl_s`,
+  `agent_version`, `health`, `counts`, `projects`. Todos sus campos están en la lista blanca y el schema la cierra con
+  `additionalProperties: false`.
+- **`parts`**: sobres opacos `{name, media_type, enc, bytes, sha256, data}`. `data` es base64 de un JSON (`media_type`
+  `application/json`); `bytes` y `sha256` son del contenido decodificado (el visor descarta la parte si no coinciden).
+  `name` ∈ `state` (hilos y atención), `queue` (cola de tareas, ver «Puntos de contacto con #1»), `events` (últimos eventos),
+  `office` (pisos y escritorios). `enc`: `none` en v1; `e2e-v1` queda reservado para cifrado extremo a extremo entre agente y
+  visor (el relay no cambia: ya hoy no decodifica `data`).
+- **TTL**: el relay guarda **solo el último snapshot por máquina**, durante `ttl_s` (el agente propone; el relay lo recorta a
+  30–900 s y por defecto usa 120). Pasado el TTL sin otro snapshot, la máquina sale como `stale: true` en `whoami.result` y el
+  snapshot se borra; al reconectar un visor recibe el último snapshot vivo de cada máquina de su cuenta. No hay historial.
+
+### `event`
+
+Un sobre v1 (`docs/event-envelope.md`) reducido: la cabecera visible lleva `machine_id`, `event_id` (el `id` ULID del sobre),
+`seq`, `event_ts`, `project`, `event_type`, `severity`, `needs` y `subject {kind, id}` (**sin** `title` ni `url`); el `body` del
+sobre viaja como una parte opaca con `name: "body"`, ya filtrada por la lista blanca. El relay reenvía el evento a los visores
+conectados de la cuenta y **no lo guarda** (el estado que sobrevive es el snapshot; el `body` es estado completo, así que perder
+un evento no rompe nada: el siguiente lo arregla).
+
+### `ping` / `pong`
+
+Cualquier extremo manda `ping` cada `ping_interval_s` (30 s por defecto); el otro responde `pong` con `re`. Tres intervalos sin
+tráfico → el relay cierra la conexión y la máquina queda `online: false` (su snapshot sigue hasta el TTL).
+
+### `whoami` / `whoami.result`
+
+`whoami` (sin campos) → `whoami.result`: `token_id`, `scope` (`agent` | `viewer`), `account`, `token_name`, `machine_id` (el atado
+al token de agente; `null` en un visor) y `machines` (`[{machine_id, online, snapshot_age_s, stale}]` de toda la cuenta; para un
+agente, solo la suya). Nunca devuelve el token ni su hash.
+
+### `error`
+
+`{v, type: "error", id, ts, re, code, message, retry_after_s?, close?}`. `code` ∈ `bad_request` (400), `unauthorized` (401),
+`forbidden` (403), `not_found` (404), `gone` (410), `conflict` (409), `too_large` (413), `rate_limited` (429),
+`unsupported_version` (426), `internal` (500). En HTTP es el cuerpo de la respuesta con ese código de estado; en el WebSocket,
+`close: true` avisa que el relay cierra a continuación (código de cierre `4000 + estado HTTP`, p. ej. 4401, 4403). `message` es
+legible y nunca incluye tokens, códigos, hashes ni contenido de partes opacas.
+
+## Lista blanca: lo que sale de la máquina
+
+Regla: **todo lo que no está en esta lista se descarta en el agente antes de serializar** (deny por defecto), tanto en la
+cabecera visible como dentro de las partes opacas. Que una parte sea opaca para el relay no la exime: el relay es un tercero y
+las partes pueden acabar en cualquier visor de la cuenta.
+
+| dónde | campos permitidos |
+|---|---|
+| `hello` | `machine_id`, `agent_version`, `protocol`, `last_seq`, `projects[].name`, `projects[].roles[]` |
+| `snapshot` (visible) | `machine_id`, `seq`, `ttl_s`, `agent_version`; `health.{state, t3_ok, cpu_pct, ram_pct, disk_pct, load1}`; `counts.{running, queued, waiting, stuck, needs_human, waiting_bot, done, failed}`; `projects[].{name, roles, threads_running, threads_pending, attention}` |
+| parte `state` | `threads[].{key, project, title, phase, attention, role, desk, updated}`; `attention[].{key, project, needs, summary}` |
+| parte `queue` | `items[].{key, project, role, title, phase, position}` |
+| parte `events` | hasta 80 eventos con la forma de `event` (cabecera + `body` filtrado como abajo) |
+| parte `office` | `floors[].{name, desks[].{id, role, zone, occupant_key}}`, `company` |
+| `event` (visible) | `machine_id`, `event_id`, `seq`, `event_ts`, `project`, `event_type`, `severity`, `needs`, `subject.{kind, id}` |
+| parte `body` de `event` | `phase`, `attention`, `settled`, `title`, `role`, `summary` (resumen final, máx. 280 caracteres), `state`, `light`, `status`, `conclusion`, `count`, `desk`, `reason`, `zone` |
+
+`key` es un identificador opaco y estable por máquina (no el `thread_id` de T3 ni su URL). `title` y `summary` se truncan a
+120 y 280 caracteres. Nunca salen, aunque un tipo nuevo los traiga:
+
+- **rutas locales**: `worktree`, `cwd`, rutas de archivos, `webhook_file`, `secret_file`, `headers_file`, `db_path`, `branch`
+  (puede delatar rutas o nombres internos), `inheritance.worktree`;
+- **prompts y contenido de trabajo**: el prompt de la tarea o del rol, notas de escritorio (`desk.note.text`), opciones y texto de
+  preguntas (`question.opened.options`), `stdout_tail`, `error` en texto libre, `result`, `inputs`;
+- **secretos e identidad**: tokens, credenciales `cs1_`/`cr1_`, códigos de pairing, hashes, URLs de webhooks, cabeceras, IPs
+  (`last_ip`), logins de Tailscale, enlaces `t3-thread://`;
+- procesos y aplicaciones (`apps`, `cgroups`, comandos).
+
+Un campo nuevo solo sale cuando se añade aquí y a su schema, en el mismo cambio.
+
+## Pairing
+
+Modelo: `apps/agent/chopshop/agent/pairing.py`, con un prefijo de token propio (`cr1_`, no `cs1_`: son credenciales distintas y
+una no sirve en el otro sitio).
+
+1. **Crear código**: `POST /v1/pair/codes` con `{scope, name?, ttl_s?}` (`pair-create`). Lo pide un token `cr1_` de scope `agent`
+   de la cuenta (desde la máquina, con una CLI futura del tipo `chopshop relay pair create --scope viewer|agent`) o, para el primer agente de una cuenta, el
+   operador con el token de operador (ver «Deploy»). Respuesta (`pair-code`): `{id, code, scope, name, expires_at}`. El código
+   (`K7QM-93XD`: 8 símbolos base32 de Crockford, 40 bits) se muestra **una sola vez**; TTL por defecto 600 s, máx. 3600 s. El
+   relay guarda solo `sha256(sal + ":" + código)`, la sal, el scope, la cuenta y las fechas.
+2. **Canjear**: `POST /v1/pair` con `{code, client_name?, machine_id?}` (`pair-redeem`), sin credencial. El código se normaliza como
+   en el agente (sin guiones ni espacios, mayúsculas, `O→0`, `I/L→1`). `machine_id` es obligatorio si el código es de scope
+   `agent` (el token queda atado a esa máquina) y se ignora en `viewer`. Respuesta (`pair-token`):
+   `{token_id, token: "cr1_<43 car. base64url>", scope, machine_id, protocol}`: 32 bytes aleatorios; **el relay guarda solo
+   `sha256(token)`** y lo devuelve una única vez. El cliente lo guarda en su llavero (agente: archivo 0600 o Keychain; Mac: Keychain).
+3. **Fallos**: código usado, caducado o invalidado → 410 `gone`; inválido → 401 `unauthorized`; 5 fallos por minuto por IP → 429
+   `rate_limited`; cada fallo cuenta contra todos los códigos vivos de la cuenta y a los 20 se invalidan. Comparación en tiempo
+   constante. Re-emparejar el mismo `machine_id` emite un token nuevo y revoca el anterior.
+4. **Uso**: `Authorization: Bearer cr1_…` en el upgrade de `/v1/connect`. Sin expiración automática; `last_seen_at` se escribe
+   como mucho una vez por minuto. **Revocar**: `DELETE /v1/tokens/<token_id>` (efecto inmediato, cierra sus WebSockets).
+
+Nunca se registran ni se devuelven códigos, tokens ni hashes (salvo el código o el token recién emitidos, a quien los pidió).
+
+## Puntos de contacto con #1
+
+- **`hello` lleva proyectos y roles**: la lista `projects[].roles` es la de `office.roles` de cada perfil; el relay solo la usa
+  para mostrar qué hay en cada máquina. Cambiar los roles de un proyecto = el agente reconecta o manda otro `hello` en la misma
+  conexión (el relay acepta un `hello` repetido con el mismo `machine_id` y actualiza la lista).
+- **La cola viaja como parte opaca del snapshot** (`parts[name=queue]`): el relay no conoce su forma ni la ordena; la pinta el visor.
+- **El MCP despacha local, no por el relay**: lanzar, responder, asentar o asignar sigue siendo del MCP/agente en la propia
+  máquina (o de la API del agente en la tailnet). El protocolo no tiene ningún mensaje de escritura hacia el agente; el relay
+  nunca reenvía órdenes.
+- **El visor es solo lectura**: un token `viewer` solo puede enviar `whoami` y `ping`; cualquier otro `type` → `error`
+  `forbidden` (sin cerrar).
+
+## Deploy
+
+El Worker del relay **solo se despliega por GitHub Actions**, con los secrets del repositorio `CLOUDFLARE_API_TOKEN` y
+`CLOUDFLARE_ACCOUNT_ID`, al empujar un tag de release o al hacer merge a `main`. **Nunca desde una máquina local**: nada de
+`wrangler deploy` ni `wrangler secret put` a mano; las máquinas de desarrollo no tienen esas credenciales. El token de operador
+para el primer código de pairing de una cuenta se guarda en el Worker solo como su SHA-256 y lo sube el mismo workflow.
