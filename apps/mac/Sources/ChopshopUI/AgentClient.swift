@@ -42,7 +42,6 @@ struct AgentResult {
     }
 }
 
-/// Rol del token según `GET /whoami` del relay (`{role, machine_id}`). `agent` (scope del token, protocolo anterior) equivale a `machine`.
 enum AgentRole: String {
     case viewer, machine, admin
 
@@ -142,9 +141,7 @@ struct URLSessionTransport: HTTPTransport {
 
 // MARK: - Relay
 
-/// El relay por HTTP (docs/relay-protocol.md): `GET /whoami` da el rol del token y `GET /state` los snapshots vivos de la cuenta.
 enum RelayView {
-    /// `<base><path>` con esquema http(s) (un `ws(s)://` heredado se pasa a `http(s)://`).
     static func url(_ base: String, _ path: String) -> URL? {
         guard var c = URLComponents(string: base), let scheme = c.scheme?.lowercased(), c.host != nil else { return nil }
         switch scheme {
@@ -272,7 +269,6 @@ final class AgentClient {
 
     // --- operaciones ---
 
-    /// Relay: `GET /whoami` (rol del token) y luego `GET /state` (snapshots vivos; solo lo sirve a tokens viewer).
     func fetchRelaySnapshot() async -> AgentResult {
         var r = AgentResult(name: spec.name, status: .error)
         guard makeURL("/whoami") != nil else { r.error = "URL del relay inválida"; return r }

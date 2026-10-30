@@ -48,7 +48,6 @@ enum NavItem: Hashable {
 
 /// Estado de la app + puente con React. La app es un cliente puro de la API de los agentes (docs/agent-api.md):
 /// sondea `GET /snapshot` de cada agente configurado y entrega los resultados crudos a la UI web (mensaje `agents`),
-/// que los combina. Las acciones de la UI (responder, settle de hilos pendientes y cancelar de la cola) se traducen a POST de la API; el resto es de solo lectura.
 /// No ejecuta ningún proceso local ni toca T3: todo pasa por el agente.
 @MainActor
 final class AppModel: ObservableObject {
@@ -402,7 +401,6 @@ final class AppModel: ObservableObject {
         }, canAct: canAct)
     }
 
-    /// `POST /queue/cancel {employee, task}` al agente principal (quita la tarea de la cola del empleado). nil = hecho.
     func cancel(employee: String, task: String) async -> String? {
         guard canAct else { return AgentClient.viewerMessage }
         guard let c = primary else { return "no hay agente configurado" }
