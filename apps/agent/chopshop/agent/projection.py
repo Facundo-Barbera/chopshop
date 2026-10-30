@@ -175,7 +175,7 @@ LINEAGE = 5
 
 
 def _desks(office):
-    for f in (office or {}).get("floors") or []:
+    for f in ((office or {}).get("floors") or []) + (((office or {}).get("outsourced") or {}).get("floors") or []):
         for r in f.get("rooms") or []:
             for d in r.get("desks") or []:
                 yield d
@@ -195,13 +195,15 @@ def _apply_office(state, p, typ, env, body):
     if typ == "office.changed":
         old = {d["id"]: d for d in _desks(p.get("office")) if d.get("id")}
         floors = copy.deepcopy(body.get("floors") or [])
-        for d in _desks({"floors": floors}):
+        outsourced = copy.deepcopy(body.get("outsourced"))
+        for d in _desks({"floors": floors, "outsourced": outsourced}):
             prev = old.get(d.get("id")) or {}
             d["occupant"] = prev.get("occupant")
             d["lineage"] = prev.get("lineage") or []
             d["notes_pending"] = prev.get("notes_pending") or 0
         p["office"] = {"company": body.get("company"), "half_life_s": body.get("half_life_s") or DEFAULT_HALF_LIFE,
-                       "floors": floors, "machine_rooms": copy.deepcopy(body.get("machine_rooms") or [])}
+                       "floors": floors, "machine_rooms": copy.deepcopy(body.get("machine_rooms") or []),
+                       "capacity": copy.deepcopy(body.get("capacity")), "outsourced": outsourced}
         return
     tid = body.get("thread_id")
     if typ == "task.state":
@@ -222,7 +224,7 @@ def _apply_office(state, p, typ, env, body):
                          "phase": t.get("phase") or "running", "attention": t.get("attention"),
                          "since": body.get("since") or ts, "ended_at": t.get("ended_at"), "touched_at": t.get("touched_at"),
                          "half_life_s": (p.get("office") or {}).get("half_life_s") or DEFAULT_HALF_LIFE,
-                         "inheritance": body.get("inheritance")}
+                         "inheritance": body.get("inheritance"), "zone": body.get("zone") or "room"}
         if body.get("notes_pending") is not None:
             d["notes_pending"] = body["notes_pending"]
     elif typ == "desk.released" and body.get("desk"):
