@@ -3,7 +3,7 @@ import type { UserPrincipal } from "./auth";
 import type { LiveEnv } from "./hub";
 import { errorResponse, ulid } from "./http";
 import { parseObject, structureRev, UUID_RE } from "./structure";
-import type { LiveMachine, LiveState, ViewCtx } from "./viewer";
+import type { LiveMachine, LiveState, LiveSync, ViewCtx } from "./viewer";
 
 interface WorkspaceRow {
   id: string;
@@ -63,7 +63,20 @@ async function workspaceRows(db: D1Database, view: ViewCtx): Promise<WorkspaceRo
   return (await db.prepare(`${sql} AND w.id IN (${marks(ids)})${order}`).bind(...ids).all<WorkspaceRow>()).results;
 }
 
-async function city(db: D1Database, workspaces: WorkspaceRow[]) {
+type SyncErrors = Map<string, { message: string; rev: number }[]>;
+
+function syncErrors(sync: LiveSync[]): SyncErrors {
+  const out: SyncErrors = new Map();
+  for (const s of sync) {
+    for (const e of s.errors) {
+      const key = `${s.machine_id}/${e.project}`;
+      out.set(key, [...(out.get(key) ?? []), { message: e.message, rev: s.rev }]);
+    }
+  }
+  return out;
+}
+
+async function city(db: D1Database, workspaces: WorkspaceRow[], errors: SyncErrors) {
   const ids = workspaces.map((w) => w.id);
   if (ids.length === 0) return { workspaces: [], machineIds: [] as string[] };
   const [projects, roles, wm] = await Promise.all([
@@ -112,7 +125,7 @@ async function city(db: D1Database, workspaces: WorkspaceRow[]) {
           disabled: p.disabled_at !== null,
           layout: parseObject(p.layout),
           roles: rolesBy.get(p.id) ?? [],
-          sync_errors: [] as unknown[],
+          sync_errors: p.machine_id === null ? [] : (errors.get(`${p.machine_id}/${p.name}`) ?? []),
         })),
       machine_ids: machinesBy.get(w.id) ?? [],
     })),
@@ -150,7 +163,8 @@ async function liveState(env: LiveEnv, view: ViewCtx): Promise<LiveState | null>
 
 export async function cityState(env: LiveEnv, db: D1Database, p: UserPrincipal, view: ViewCtx): Promise<Record<string, unknown>> {
   const workspaces = await workspaceRows(db, view);
-  const [rev, built, live] = await Promise.all([structureRev(db), city(db, workspaces), liveState(env, view)]);
+  const [rev, live] = await Promise.all([structureRev(db), liveState(env, view)]);
+  const built = await city(db, workspaces, syncErrors(live?.sync ?? []));
   const machines = await machineRows(db, p, view, built.machineIds);
   const liveBy = new Map<string, LiveMachine>((live?.machines ?? []).map((m) => [m.id, m]));
   return {
