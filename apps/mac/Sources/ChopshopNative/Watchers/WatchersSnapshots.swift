@@ -17,9 +17,9 @@ extension Snapshots {
         let shots: [(String, AnyView)] = [
             ("lista", AnyView(WatchersScreen(model: model { _ in }))),
             ("enlace", AnyView(WatchersScreen(model: model { m in
-                await m.invite(email: "beto@ejemplo.com", workspaceIDs: ["w1"]); m.copyLink()
+                await m.invite(email: "beto@ejemplo.test", workspaceIDs: ["w1"]); m.copyLink()
             }))),
-            ("invitar", AnyView(WatchersScreen(model: model { _ in }, inviting: true, email: "carla@ejemplo.com", picked: ["w1", "w2"]))),
+            ("invitar", AnyView(WatchersScreen(model: model { _ in }, inviting: true, email: "carla@ejemplo.test", picked: ["w1", "w2"]))),
             ("detalle", AnyView(WatchersScreen(model: model { m in await m.loadSessions(userID: "u2") }, expanded: ["u2"]))),
         ]
         for (name, view) in shots {
@@ -54,14 +54,14 @@ private struct CannedWatchersTransport: HTTPTransport {
         switch key {
         case "GET /v1/users":
             body = #"""
-            {"users":[{"id":"u1","email":"dueno@ejemplo.com","display_name":"Dueño","role":"owner","status":"active","created_at":"2026-10-01T10:00:00.000Z"},
-             {"id":"u2","email":"ana@ejemplo.com","display_name":"Ana","role":"watcher","status":"active","created_at":"2026-10-20T10:00:00.000Z","workspace_ids":["w1","w2"],"last_login_at":"2026-10-30T09:12:00.000Z","sessions_active":2},
-             {"id":"u3","email":"luis@ejemplo.com","display_name":null,"role":"watcher","status":"disabled","created_at":"2026-10-22T10:00:00.000Z","workspace_ids":["w2"],"last_login_at":null,"sessions_active":0}]}
+            {"users":[{"id":"u1","email":"dueno@ejemplo.test","display_name":"Dueño","role":"owner","status":"active","created_at":"2026-10-01T10:00:00.000Z"},
+             {"id":"u2","email":"ana@ejemplo.test","display_name":"Ana","role":"watcher","status":"active","created_at":"2026-10-20T10:00:00.000Z","workspace_ids":["w1","w2"],"last_login_at":"2026-10-30T09:12:00.000Z","sessions_active":2},
+             {"id":"u3","email":"luis@ejemplo.test","display_name":null,"role":"watcher","status":"disabled","created_at":"2026-10-22T10:00:00.000Z","workspace_ids":["w2"],"last_login_at":null,"sessions_active":0}]}
             """#
         case "GET /v1/invitations":
             body = #"""
-            {"invitations":[{"id":"i1","email":"marta@ejemplo.com","kind":"watcher","role":"watcher","workspace_ids":["w1"],"created_at":"2026-10-29T10:00:00.000Z","expires_at":"2026-11-05T10:00:00.000Z","used_at":null,"revoked_at":null,"status":"pending"},
-             {"id":"i0","email":"ana@ejemplo.com","kind":"watcher","role":"watcher","workspace_ids":["w1","w2"],"created_at":"2026-10-20T10:00:00.000Z","expires_at":"2026-10-27T10:00:00.000Z","used_at":"2026-10-20T11:00:00.000Z","revoked_at":null,"status":"used"}]}
+            {"invitations":[{"id":"i1","email":"marta@ejemplo.test","kind":"watcher","role":"watcher","workspace_ids":["w1"],"created_at":"2026-10-29T10:00:00.000Z","expires_at":"2026-11-05T10:00:00.000Z","used_at":null,"revoked_at":null,"status":"pending"},
+             {"id":"i0","email":"ana@ejemplo.test","kind":"watcher","role":"watcher","workspace_ids":["w1","w2"],"created_at":"2026-10-20T10:00:00.000Z","expires_at":"2026-10-27T10:00:00.000Z","used_at":"2026-10-20T11:00:00.000Z","revoked_at":null,"status":"used"}]}
             """#
         case "GET /v1/workspaces":
             body = #"""
@@ -75,7 +75,7 @@ private struct CannedWatchersTransport: HTTPTransport {
             """#
         case "POST /v1/invitations":
             body = #"""
-            {"invitation":{"id":"i2","email":"beto@ejemplo.com","kind":"watcher","role":"watcher","workspace_ids":["w1"],"created_at":"2026-10-30T12:00:00.000Z","expires_at":"2026-11-06T12:00:00.000Z","used_at":null,"revoked_at":null,"status":"pending"},
+            {"invitation":{"id":"i2","email":"beto@ejemplo.test","kind":"watcher","role":"watcher","workspace_ids":["w1"],"created_at":"2026-10-30T12:00:00.000Z","expires_at":"2026-11-06T12:00:00.000Z","used_at":null,"revoked_at":null,"status":"pending"},
              "link":"https://chopshop.novarix.online/invite#t=ci1_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}
             """#
         default:
