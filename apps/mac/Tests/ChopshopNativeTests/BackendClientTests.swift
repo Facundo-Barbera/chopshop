@@ -191,7 +191,7 @@ final class LocalAgentLinkerTests: XCTestCase {
             try await linker.link(agentURL: agent, nonceFile: URL(fileURLWithPath: "/nonexistent/link.nonce"), payload: payload); XCTFail()
         } catch let e as LocalLinkError { XCTAssertEqual(e, .nonceUnavailable) }
         do {
-            try await linker.link(agentURL: URL(string: "http://mac-mini.tail.ts.net:8787")!, nonceFile: try nonceFile("n"), payload: payload)
+            try await linker.link(agentURL: URL(string: "http://mac-mini.test:8787")!, nonceFile: try nonceFile("n"), payload: payload)
             XCTFail()
         } catch let e as LocalLinkError { XCTAssertEqual(e, .notLoopback) }
         XCTAssertEqual(http.seen.count, 1)
