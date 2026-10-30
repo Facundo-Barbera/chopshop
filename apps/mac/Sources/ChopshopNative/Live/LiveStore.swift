@@ -42,6 +42,8 @@ public final class LiveStore: ObservableObject {
     private var relayMode = false
     private var relayWhy = ""
     private var relayMachines: [String: LiveState.RelayMachine] = [:]
+    @Published public private(set) var cloud: BackendState?
+    private var cloudSnapshots: [String: JSONValue] = [:]
 
     public init(backoff: Backoff = Backoff(), coalesceInterval: Double = 0.1, clock: @escaping () -> Date = { Date() },
                 sleep: @escaping @Sendable (Double) async -> Void = { s in try? await Task.sleep(nanoseconds: UInt64(max(0, s) * 1_000_000_000)) }) {
@@ -75,7 +77,7 @@ public final class LiveStore: ObservableObject {
     public func reset() {
         disconnect()
         remotes = [:]; local = LiveState(); lastEventID = nil; machine = nil; awaitingState = false; failures = 0
-        relayMode = false; relayMachines = [:]
+        relayMode = false; relayMachines = [:]; cloud = nil; cloudSnapshots = [:]
         status = .idle
         flush()
     }
@@ -136,6 +138,107 @@ public final class LiveStore: ObservableObject {
             if let id = id ?? e.seq.map(String.init) { lastEventID = id }
             if !awaitingState { scheduleFlush() }
         }
+    }
+
+    public func connect(cloud client: BackendClient, transport: ByteStreamTransport = URLSessionByteTransport()) {
+        let stream = CloudStream(apiURL: client.apiURL, token: { client.token }, userAgent: client.userAgent, transport: transport)
+        connect(cloud: stream, state: { try await client.state() }, revoked: { try? client.session.delete(apiURL: client.apiURL) })
+    }
+
+    public func connect(cloud stream: CloudStream, state fetch: @escaping @Sendable () async throws -> BackendState,
+                        revoked: (() -> Void)? = nil) {
+        reset()
+        self.revoked = revoked
+        relayMode = true
+        status = .connecting
+        let gen = generation
+        task = Task { [weak self] in await self?.cloudLoop(stream, fetch: fetch, gen: gen) }
+    }
+
+    private func cloudLoop(_ stream: CloudStream, fetch: @escaping @Sendable () async throws -> BackendState, gen: Int) async {
+        while !Task.isCancelled && gen == generation {
+            do {
+                try await stream.run(lastEventID: lastEventID) { [weak self] msg, id in
+                    try await self?.handleCloud(msg, id: id, gen: gen, fetch: fetch)
+                }
+            } catch {
+                guard !Task.isCancelled, gen == generation else { return }
+                if case StreamError.unauthorized = error {
+                    status = .unauthorized
+                    revoked?()
+                    onUnauthorized?()
+                    return
+                }
+                failures += 1
+                var d = backoff.delay(attempt: failures)
+                if case StreamError.busy(let ra?) = error { d = max(d, ra) }
+                status = .reconnecting(Self.describe(error))
+                await sleep(d)
+            }
+        }
+    }
+
+    func handleCloud(_ msg: CloudMessage, id: String?, gen: Int, fetch: @Sendable () async throws -> BackendState) async throws {
+        guard gen == generation else { return }
+        if let id { lastEventID = id }
+        switch msg {
+        case .hello:
+            try await refetchCloud(gen: gen, fetch: fetch)
+            failures = 0
+            status = .live
+        case .structure(let rev):
+            if rev == nil || rev != cloud?.rev { try await refetchCloud(gen: gen, fetch: fetch) }
+        case .snapshot(let j):
+            cloudSnapshots[Self.cloudKey(j)] = j
+            ingestCloud()
+        case .machine(let m):
+            guard var c = cloud, let mid = m["id"]?.string, let i = c.machines.firstIndex(where: { $0.id == mid }) else { return }
+            c.machines[i].online = m["online"]?.bool ?? c.machines[i].online
+            c.machines[i].paused = m["paused"]?.bool ?? c.machines[i].paused
+            cloud = c
+            ingestCloud()
+        case .error(_, let close):
+            if close { throw StreamError.ended }
+        case .event:
+            break
+        }
+    }
+
+    private func refetchCloud(gen: Int, fetch: @Sendable () async throws -> BackendState) async throws {
+        let st: BackendState
+        do { st = try await fetch() } catch BackendError.unauthorized { throw StreamError.unauthorized }
+        guard gen == generation else { return }
+        cloud = st
+        cloudSnapshots = Dictionary(st.snapshots.map { (Self.cloudKey($0), $0) }, uniquingKeysWith: { _, b in b })
+        ingestCloud()
+    }
+
+    static func cloudKey(_ snapshot: JSONValue) -> String {
+        let machine = snapshot["machine"]?["id"]?.string ?? snapshot["machine_id"]?.string ?? ""
+        return machine + "\u{1F}" + (snapshot["workspace_id"]?.string ?? "")
+    }
+
+    private func ingestCloud() {
+        let snaps = cloudSnapshots.sorted { $0.key < $1.key }.map(\.value)
+        var machines: [JSONValue] = []
+        for m in cloud?.machines ?? [] {
+            let local = snaps.first { $0["machine"]?["id"]?.string == m.id }?["machine_id"]?.string ?? m.name
+            var o: JSONValue.Object = ["machine_id": .string(local), "online": .bool(m.online && m.paused != true), "stale": .bool(m.stale)]
+            if let s = m.seq { o["seq"] = .number(Double(s)) }
+            if let a = m.snapshotAgeS { o["snapshot_age_s"] = .number(a.rounded()) }
+            machines.append(.object(o))
+        }
+        relayMachines = LiveState.relayMachines(machines)
+        var next: [String: LiveState] = [:]
+        for j in snaps {
+            guard let st = LiveState(relaySnapshot: j), let m = st.machine else { continue }
+            let key = m + "\u{1F}" + (j["workspace_id"]?.string ?? "")
+            if let old = next[key], old.headSeq > st.headSeq { continue }
+            next[key] = st
+        }
+        remotes = next
+        remerge()
+        flush()
     }
 
     public func connectRelay() {
