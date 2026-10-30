@@ -2,12 +2,12 @@
 import os
 import re
 
-from . import home, miniyaml, settings
+from . import cloudsync, home, miniyaml, settings
 
 KNOWN = {"project", "company", "repo", "host", "overflow_host", "remote_repos", "t3_project", "scratch",
          "provider", "model", "runtime_mode", "workspace", "base_ref", "tracker", "ready", "branches",
          "decider", "approvers", "can_run", "cannot_run", "autonomy", "reactions", "max_parallel", "graph", "integration",
-         "automations", "office", "rack", "machine_rooms", "capacity"}
+         "automations", "office", "rack", "machine_rooms", "capacity", "title", "worktree_root"}
 
 
 class ProfileError(Exception):
@@ -34,16 +34,33 @@ def hosts():
     return h
 
 
+def override_path(project):
+    return os.path.join(home.profiles_dir(), _safe(project) + ".local.yaml")
+
+
+def _override(project):
+    p = override_path(project)
+    if not os.path.exists(p):
+        return None
+    try:
+        return miniyaml.load(p)
+    except miniyaml.YamlError as e:
+        raise ProfileError("%s: %s" % (p, e))
+
+
 def load(project):
-    p = profile_path(project)
+    cloud = cloudsync.profile_file(_safe(project))
+    p = cloud or profile_path(project)
     if not os.path.exists(p):
         raise ProfileError("no existe el perfil %s (créalo en %s)" % (project, p))
     try:
-        d = miniyaml.load(p) or {}
-    except miniyaml.YamlError as e:
+        d = cloudsync.read_profile(p) if cloud else miniyaml.load(p) or {}
+    except (miniyaml.YamlError, OSError, ValueError) as e:
         raise ProfileError("%s: %s" % (p, e))
     if not isinstance(d, dict):
         raise ProfileError("%s: se esperaba un mapa" % p)
+    if cloud:
+        d = cloudsync.apply_override(d, _override(project), override_path(project))
     d.setdefault("project", project)
     if d["project"] != project:
         raise ProfileError("%s: project=%r no coincide con el nombre del archivo" % (p, d["project"]))
@@ -57,7 +74,8 @@ def load(project):
 
 def list_projects():
     d = home.profiles_dir()
-    return sorted(f[:-5] for f in os.listdir(d) if f.endswith(".yaml")) if os.path.isdir(d) else []
+    local = {f[:-5] for f in os.listdir(d) if f.endswith(".yaml") and not f.endswith(".local.yaml")} if os.path.isdir(d) else set()
+    return sorted(local | set(cloudsync.names()))
 
 
 def _all():
