@@ -222,7 +222,7 @@ public struct CityView: View {
                     // el mundo entero del proyecto, encuadrado al principio igual que el final del zoom (el piso pulsado)
                     OfficeWorldView(state: state, project: pr, now: officeNow,
                                     focusRegion: plan.kind == .lobby ? "lobby:\(plan.name ?? "")" : "floor:\(plan.floorIndex)",
-                                    onSelect: { tid in if let tid { onInspect?(tid) } })
+                                    onSelect: { tid in if let tid, FloorLayout.machinePart(tid) == nil { onInspect?(tid) } })
                 } else if office, let pr = target, let g = graph(pr) {
                     IsoOfficeView(graph: g, tasks: tasks(pr), hostOf: hosts(pr), frozenTime: frozenTime, flatChrome: flatChrome)
                 } else {

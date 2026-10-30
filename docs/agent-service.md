@@ -219,6 +219,11 @@ en el log y no degrada. Los logs llevan repo, código HTTP y motivo; nunca la sa
   próximo horario si tiene `schedule`).
 - `subscriptions`: los webhooks salientes con su último envío bueno y el último fallo (texto corto; nunca la URL ni el secreto).
 
+La app no tiene una vista aparte para esto: cada proyecto lo ve en las **salas de máquinas** que declara su perfil local
+(`machine_rooms:`, opcionales: 0, 1 o varias, cada una en un piso con los repos, listeners, scripts y webhooks que aloja; ver
+`docs/plans/office-redesign.md` §4). `GET /state` las publica en `projects[].machine_rooms` (y `machine_room` = la primera o
+`null`); sin el bloque, el proyecto no tiene sala.
+
 ## Troubleshooting
 
 | Síntoma | Causa y arreglo |

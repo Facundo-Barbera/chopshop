@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// Un piso suelto (o el vestíbulo) como mundo de una sola región: lo usan las previews y las capturas. La app monta
-/// `OfficeWorldView` con todos los pisos del proyecto. Visualizador puro: el detalle de un hilo va en el panel lateral.
+/// `OfficeWorldView` con todos los pisos del proyecto. Visualizador puro: el detalle de un hilo, o de un armario o la consola de
+/// una sala de máquinas del piso (`rack:<k>:<unidad>`, `machine:<k>`), va en el panel lateral.
 @available(macOS 26.0, *)
 public struct FloorOfficeView: View {
     let plan: FloorPlan
@@ -9,7 +10,8 @@ public struct FloorOfficeView: View {
     var selected: String?
     var onSelect: ((String?) -> Void)?
 
-    /// `selected`: hilo elegido (se resalta su escritorio). `flatChrome` se acepta por compatibilidad (no hay cromo encima).
+    /// `selected`: hilo elegido, o armario/consola de una sala de máquinas (se resalta su hueco). `flatChrome` se acepta por
+    /// compatibilidad (no hay cromo encima).
     public init(plan: FloorPlan, frozenNow: Date? = nil, selected: String? = nil, flatChrome: Bool = false, onSelect: ((String?) -> Void)? = nil) {
         self.plan = plan; self.frozenNow = frozenNow; self.selected = selected; self.onSelect = onSelect
     }
@@ -18,14 +20,23 @@ public struct FloorOfficeView: View {
         OfficeWorldView(floors: [plan], frozenNow: frozenNow, selected: selected, onSelect: onSelect)
     }
 
-    /// Etiqueta larga del hueco (panel lateral): `rol · n` en un piso, el rol que espera (o «sin rol») en el vestíbulo.
+    /// Etiqueta larga del hueco (panel lateral): `rol · n` en un piso, el rol que espera (o «sin rol») en el vestíbulo; en una sala
+    /// de máquinas, el repo del armario o el nombre de la sala (consola).
     static func label(_ plan: FloorPlan, _ id: String) -> String {
+        if let m = FloorLayout.machinePart(id), m.unit == nil { return plan.machineRoom(of: id)?.name ?? "Sala de máquinas" }
+        if let u = unit(plan, id) { return u.title }
         if id.hasPrefix("lobby:") {
             let g = plan.guest(String(id.dropFirst(6)))
             return g?.waitingRole.map { "espera · \($0)" } ?? "sin rol"
         }
-        guard let d = plan.desk(id), let r = plan.room(ofDesk: id) else { return id }
+        guard let r = plan.room(ofDesk: id), let d = plan.desk(id) else { return id }
         return "\(r.role) · \(d.slot + 1)"
+    }
+
+    /// Repo del armario `rack:<k>:<unidad>` (nil si `id` no es un armario).
+    static func unit(_ plan: FloorPlan, _ id: String) -> RackUnit? {
+        guard let u = FloorLayout.machinePart(id)?.unit else { return nil }
+        return plan.machineRoom(of: id)?.unit(u)
     }
 
     /// Lo que dice la etiqueta del hueco en el piso: el nombre corto del hilo; un escritorio sin hilo, su `rol · n`.
@@ -37,10 +48,11 @@ public struct FloorOfficeView: View {
         return label(plan, id)
     }
 
-    /// Etiquetas de escritorios (`<prefijo>d:<id>`) y departamentos (`<prefijo>r:<i>`) que resuelve FloorRenderer.
+    /// Etiquetas de escritorios (`<prefijo>d:<id>`), departamentos (`<prefijo>r:<i>`; la sala de máquinas k es `r:<-1-k>`) y
+    /// armarios (`<prefijo>m:<id>`) que resuelve FloorRenderer.
     @ViewBuilder static func labels(_ plan: FloorPlan, layout lay: FloorLayout, now: Date, dark: Bool, prefix: String = "") -> some View {
         // ids con prefijo: en el mundo hay varios pisos en el mismo lienzo y los símbolos de un Canvas no pueden repetirse
-        ForEach(lay.spots.map { (prefix + $0.id, $0) }, id: \.0) { _, sp in
+        ForEach(lay.spots.filter { !$0.isMachine }.map { (prefix + $0.id, $0) }, id: \.0) { _, sp in
             let lk = plan.look(sp.id, now: now)
             let tint = lk?.visual?.tint
             Text(tag(plan, sp.id, now: now))
@@ -60,12 +72,62 @@ public struct FloorOfficeView: View {
                 .foregroundStyle(Color.primary.opacity(0.75))
                 .tag("\(prefix)r:\(r.index)")
         }
+        ForEach(lay.machines.map { ("\(prefix)mr\($0.index)", $0) }, id: \.0) { _, m in
+            Text(machineTitle(plan, m.index))
+                .font(.system(size: 9, weight: .medium, design: .monospaced)).tracking(1.3)
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(Capsule().fill(dark ? Color(white: 0.11).opacity(0.92) : Color.white.opacity(0.9)))
+                .overlay(Capsule().strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.7))
+                .foregroundStyle(Color.primary.opacity(0.75))
+                .tag("\(prefix)r:\(FloorLayout.machineRoomIndex(m.index))")
+        }
+        ForEach(lay.machines.flatMap(\.cabinets).map { (prefix + $0.id, $0) }, id: \.0) { _, sp in
+            let u = unit(plan, sp.id)
+            Text(u?.title ?? sp.id)
+                .font(.system(size: 9, weight: .semibold))
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Capsule().fill(dark ? Color.black.opacity(0.5) : Color.white.opacity(0.78)))
+                .overlay(Capsule().strokeBorder((u?.light.color ?? Color.primary).opacity(0.6), lineWidth: 0.7))
+                .foregroundStyle(Color.primary.opacity(0.85))
+                .tag("\(prefix)m:\(sp.id)")
+        }
+    }
+
+    /// Rótulo de la sala de máquinas k: su nombre del perfil en mayúsculas.
+    static func machineTitle(_ plan: FloorPlan, _ k: Int) -> String {
+        guard plan.machineRooms.indices.contains(k), let n = plan.machineRooms[k].name, !n.isEmpty else { return "SALA DE MÁQUINAS" }
+        return n.uppercased()
     }
 
     static func roomTitle(_ plan: FloorPlan, _ r: FloorLayout.RoomBox) -> String {
         if plan.kind == .lobby { return ["VESTÍBULO", plan.company?.uppercased()].compactMap { $0 }.joined(separator: " · ") }
         let room = plan.rooms[r.index]
         return room.role.uppercased() + (room.permanent ? " · PERMANENTE" : "")
+    }
+}
+
+/// Detalle de un hueco de una sala de máquinas en el panel lateral: el rack del proyecto (el repo elegido con sus runs,
+/// disparador y origen), sus scripts, sus webhooks y los listeners del agente.
+@available(macOS 26.0, *)
+struct MachineRoomDetail: View {
+    let room: MachineRoom
+    let title: String
+    /// Armario elegido (`RackUnit.id`); nil = la consola.
+    let unit: String?
+    let frozenNow: Date?
+    var width: CGFloat = Self.defaultWidth
+
+    /// Ancho del contenido por defecto (el panel lateral, sin su margen).
+    static let defaultWidth: CGFloat = 328
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.headline)
+                if let n = room.name, !n.isEmpty, n != title { Text(n).font(.caption).foregroundStyle(.secondary) }
+            }
+            MachineRoomView(room: room, frozenNow: frozenNow, selected: unit, width: width).id(unit ?? "console")
+        }
     }
 }
 
@@ -107,15 +169,62 @@ enum FloorFixture {
     ]
     static let state: JSONValue = {
         let floor: JSONValue = ["index": 0, "name": "Producto", "rooms": .array(rooms)]
-        let office: JSONValue = ["company": "Awesome GB", "half_life_s": 1800, "floors": .array([floor])]
+        let office: JSONValue = ["company": "Awesome GB", "half_life_s": 1800, "floors": .array([floor]),
+                                 "machine_rooms": .array(machineRoomConfigs)]
         let project: JSONValue = ["name": "awesome-gb", "office": office]
         let lobby: [JSONValue] = [
             guest("mcp:c3", "Revisar dependencias", "running", since: 10),
             guest("mcp:c4", "[be] webhooks de pago", "queued", waiting: "backend", since: 4),
             guest("mcp:c1", "Pregunta suelta", "done", since: 60, ended: 25),
         ]
-        return ["api_version": 3, "projects": .array([project]), "lobby": .array(lobby)]
+        return ["api_version": 3, "projects": .array([project]), "lobby": .array(lobby), "machine_room": machineRoom]
     }()
+    static func run(_ id: String, _ wf: String, _ status: String, _ conclusion: JSONValue, _ event: String, ref: String,
+                    origin: JSONValue, ago: Double) -> JSONValue {
+        ["run_id": .string(id), "workflow": .string(wf), "status": .string(status), "conclusion": conclusion, "event": .string(event),
+         "head_branch": .string(ref), "head_sha": "3f2a9c1e", "updated_at": iso(ago), "origin": origin]
+    }
+    /// Dos salas declaradas en Producto: la principal (repo principal, todos los listeners, scripts y webhooks) y la de docs.
+    static let machineRoomConfigs: [JSONValue] = [
+        ["name": "Sala de máquinas", "floor": 0, "repos": ["<org>/<repo-principal>"], "listeners": ["*"], "automations": ["*"],
+         "subscriptions": ["*"]],
+        ["name": "Sala de docs", "floor": 0, "repos": ["<org>/<engine-cx>"], "listeners": ["forge"], "automations": ["docs-*"]],
+    ]
+    /// Sala de máquinas de toda la máquina: cada sala del piso la recorta a lo suyo de Awesome GB (lo de `otro` no sale).
+    static let listeners: [JSONValue] = [
+        ["name": "forge", "state": "degraded", "backoff_s": 120, "error": "rate limit", "ts": iso(1)],
+        ["name": "t3watch", "state": "ok", "ts": iso(0.5)],
+        ["name": "webhooks", "state": "ok", "ts": iso(2)],
+    ]
+    static let automations: [JSONValue] = [
+        ["project": "awesome-gb", "name": "triage", "trigger": "schedule", "exit": 0, "duration_ms": 2310, "ts": iso(200)],
+        ["project": "awesome-gb", "name": "docs-sync", "trigger": "forge.run.state", "exit": 1, "error": "exit 1", "ts": iso(30)],
+        ["project": "otro", "name": "backup", "trigger": "schedule", "exit": 0, "ts": iso(60)],
+    ]
+    static let subscriptions: [JSONValue] = [
+        ["name": "bots", "projects": ["*"], "last_ok": iso(3), "last_error": nil, "signed": true],
+        ["name": "otro-chat", "projects": ["otro"], "last_ok": nil, "last_error": "HTTP 500", "signed": false],
+    ]
+    static let mainRuns: [JSONValue] = [
+        run("9001", "ci", "in_progress", nil, "push", ref: "be/login", origin: ["kind": "thread", "id": "mcp:b7", "label": "backend · 1"], ago: 2),
+        run("9002", "triage-labels", "queued", nil, "workflow_dispatch", ref: "main",
+            origin: ["kind": "automation", "id": "triage", "label": "triage"], ago: 1),
+        run("8999", "nightly", "completed", "failure", "schedule", ref: "main", origin: ["kind": "schedule"], ago: 300),
+        run("8990", "ci", "completed", "success", "pull_request", ref: "fe/checkout",
+            origin: ["kind": "bot", "id": "grok", "label": "Grok · Facundo"], ago: 400),
+    ]
+    static let docsRuns: [JSONValue] = [
+        run("77", "docs", "in_progress", nil, "push", ref: "main", origin: ["kind": "human", "id": "<login-humano>"], ago: 1),
+    ]
+    static let rack: [JSONValue] = [
+        ["provider": "github", "repo": "<org>/<repo-principal>", "project": "awesome-gb", "kind": "main", "label": "repo-principal",
+         "light": "red", "default_branch": "main", "ci": "failure", "runs": .array(mainRuns)],
+        ["provider": "github", "repo": "<org>/<engine-cx>", "project": "awesome-gb", "kind": "docs", "label": "Engine CX",
+         "light": "amber", "default_branch": "main", "ci": "success", "runs": .array(docsRuns)],
+        ["provider": "github", "repo": "<org>/otro", "project": "otro", "kind": "main", "light": "green", "runs": []],
+    ]
+    static let machineRoom: JSONValue = ["listeners": .array(listeners), "automations": .array(automations),
+                                         "subscriptions": .array(subscriptions), "rack": .array(rack)]
     static var floor: FloorPlan { FloorPlan.floor(in: state, project: "awesome-gb", index: 0)! }
     static var lobby: FloorPlan { FloorPlan.lobby(in: state, company: "Awesome GB") }
 }
@@ -133,6 +242,13 @@ enum FloorFixture {
 #if NATIVE_PREVIEWS
 #Preview("Piso · escritorio dormido seleccionado", traits: .fixedLayout(width: 1100, height: 620)) {
     FloorOfficeView(plan: FloorFixture.floor, frozenNow: FloorFixture.now, selected: "mcp:b7", flatChrome: true)
+        .background(IsoBackdrop()).preferredColorScheme(.dark)
+}
+#endif
+#if NATIVE_PREVIEWS
+#Preview("Piso · sala de máquinas seleccionada", traits: .fixedLayout(width: 1100, height: 760)) {
+    FloorOfficeView(plan: FloorFixture.floor, frozenNow: FloorFixture.now, selected: FloorLayout.cabinetID(0, "github:<org>/<repo-principal>"),
+                    flatChrome: true)
         .background(IsoBackdrop()).preferredColorScheme(.dark)
 }
 #endif

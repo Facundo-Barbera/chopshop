@@ -1,7 +1,7 @@
 import Foundation
 
-/// La oficina de un proyecto como **un solo mundo**: el vestíbulo, todos los pisos (con sus departamentos por rol) y la sala de
-/// máquinas, cada uno como una losa sobre el mismo suelo, a la vista a la vez (sin pestañas). Cada región conserva el
+/// La oficina de un proyecto como **un solo mundo**: el vestíbulo y todos los pisos (con sus departamentos por rol y las salas de
+/// máquinas que el perfil pone en cada uno, `FloorPlan.machineRooms`), cada uno como una losa sobre el mismo suelo, a la vista a la vez (sin pestañas). Cada región conserva el
 /// `FloorLayout` de su piso, desplazado: un escritorio está siempre en el mismo sitio dentro de su piso. Puro (macOS 13).
 ///
 /// Las regiones se colocan en filas **de pantalla** (cada fila, horizontal y centrada; no en la rejilla del mundo, que en
@@ -11,7 +11,7 @@ public struct WorldLayout: Equatable, Sendable {
     /// Hueco entre losas de regiones y margen de la losa alrededor de sus salas.
     public static let gap = 96.0, margin = 30.0
 
-    public enum Kind: Equatable, Sendable { case lobby, floor, machines }
+    public enum Kind: Equatable, Sendable { case lobby, floor }
 
     public struct Region: Equatable, Sendable, Identifiable {
         public var id: String
@@ -39,26 +39,36 @@ public struct WorldLayout: Equatable, Sendable {
 
     /// Región y hueco (escritorio o `lobby:<hilo>`) donde está un hilo.
     public func spot(ofThread tid: String, now: Date) -> (region: Region, spot: FloorLayout.Spot)? {
-        for r in regions where r.kind != .machines {
+        for r in regions {
             if r.kind == .lobby, let sp = r.layout.spot("lobby:\(tid)") { return (r, sp) }
             if let d = r.plan.desks.first(where: { $0.occupant?.threadID == tid }), let sp = r.layout.spot(d.id) { return (r, sp) }
         }
         return nil
     }
 
-    /// `floors` en el orden de `ProjectOffice.floors` (vestíbulo primero); `machines`, la sala de máquinas (nil = sin ella).
-    public init(floors: [FloorPlan], machines: FloorPlan? = nil, aspect: Double = 16.0 / 10.0) {
-        var items: [(String, Kind, String, FloorPlan)] = floors.enumerated().map { i, f in
+    /// Región y hueco de un armario o la consola de una sala de máquinas (`rack:<k>:<unidad>`, `machine:<k>`): el primer piso
+    /// que lo tiene.
+    public func spot(ofMachine id: String) -> (region: Region, spot: FloorLayout.Spot)? {
+        guard FloorLayout.machinePart(id) != nil else { return nil }
+        for r in regions where r.kind == .floor {
+            if let sp = r.layout.spot(id) { return (r, sp) }
+        }
+        return nil
+    }
+
+    /// `floors` en el orden de `ProjectOffice.floors` (vestíbulo primero).
+    public init(floors: [FloorPlan], aspect: Double = 16.0 / 10.0) {
+        let items: [(String, Kind, String, FloorPlan)] = floors.enumerated().map { i, f in
             (f.kind == .lobby ? "lobby:\(f.name ?? "")" : "floor:\(f.floorIndex)", f.kind == .lobby ? .lobby : .floor,
              f.shortTitle.uppercased(), f)
         }
-        if let m = machines { items.append(("machines", .machines, "SALA DE MÁQUINAS", m)) }
         guard !items.isEmpty else { return }
         let lays = items.map { FloorLayout(plan: $0.3) }
-        // tamaño de cada losa: la caja de sus salas más el margen
+        // tamaño de cada losa: la caja de sus salas (departamentos y salas de máquinas) más el margen
         let boxes: [(minX: Double, minY: Double, w: Double, d: Double)] = lays.map { l in
-            let minX = l.rooms.map(\.x0).min() ?? 0, minY = l.rooms.map(\.y0).min() ?? 0
-            let maxX = l.rooms.map { $0.x0 + $0.w }.max() ?? 1, maxY = l.rooms.map { $0.y0 + $0.d }.max() ?? 1
+            let rs = l.rooms.map { ($0.x0, $0.y0, $0.w, $0.d) } + l.machines.map { ($0.x0, $0.y0, $0.w, $0.d) }
+            let minX = rs.map(\.0).min() ?? 0, minY = rs.map(\.1).min() ?? 0
+            let maxX = rs.map { $0.0 + $0.2 }.max() ?? 1, maxY = rs.map { $0.1 + $0.3 }.max() ?? 1
             return (minX, minY, maxX - minX + 2 * Self.margin, maxY - minY + 2 * Self.margin)
         }
         // filas en el plano de la pantalla (no a lo largo de +x / +y del mundo: eso es una diagonal en pantalla)
@@ -129,51 +139,5 @@ public struct WorldLayout: Equatable, Sendable {
             if score > best.score * (1 + 1e-9) { best = (rows, score) }
         }
         return best.rows
-    }
-}
-
-/// Sala de máquinas de la oficina de un proyecto, como un «piso» de dos salas: el rack (un armario por repo del proyecto, con su
-/// luz) y los listeners del agente (un armario por listener). Solo lectura de `LiveState.machineRoom`; nil si no hay nada.
-public enum MachineRoomPlan {
-    public static let maxUnits = 6
-
-    /// Luz de un armario: `green`, `amber`, `red` o `gray`.
-    public static func light(of desk: FloorPlan.Desk, in s: LiveState) -> String {
-        let id = desk.id
-        if id.hasPrefix("rack:") {
-            let repo = String(id.dropFirst(5))
-            return s.machineRoom.rack.first { $0["repo"]?.string == repo }?["light"]?.string ?? "gray"
-        }
-        let name = String(id.dropFirst("listener:".count))
-        switch s.machineRoom.listeners.first(where: { $0["name"]?.string == name })?["state"]?.string {
-        case "ok": return "green"
-        case "degraded": return "amber"
-        case "down": return "red"
-        default: return "gray"
-        }
-    }
-
-    public static func plan(in s: LiveState, project: String) -> FloorPlan? {
-        let rack = s.machineRoom.rack.filter { ($0["project"]?.string ?? project) == project }.compactMap { r -> (String, String)? in
-            guard let repo = r["repo"]?.string else { return nil }
-            return (repo, FloorPlan.nonEmpty(r["label"]?.string) ?? String(repo.split(separator: "/").last ?? Substring(repo)))
-        }
-        let listeners = s.machineRoom.listeners.compactMap { $0["name"]?.string }
-        guard !rack.isEmpty || !listeners.isEmpty else { return nil }
-        func desk(_ id: String, _ k: Int, _ title: String) -> FloorPlan.Desk {
-            // el nombre del módulo viaja como «ocupante» sin fase de hilo (no se desvanece, no cuenta como hilo)
-            let o = FloorPlan.Occupant(.object(["thread_id": .string(id), "title": .string(title), "phase": "rack"]), project: project, halfLife: 1)
-            return FloorPlan.Desk(id: id, slot: k, retired: false, occupant: o, notesPending: 0, lineage: [])
-        }
-        var plan = FloorPlan(kind: .floor(project: project, index: 99), company: nil, name: "Sala de máquinas", halfLife: 1)
-        if !rack.isEmpty {
-            plan.rooms.append(.init(role: "rack", permanent: false,
-                                    desks: rack.prefix(maxUnits).enumerated().map { k, r in desk("rack:\(r.0)", k, r.1) }))
-        }
-        if !listeners.isEmpty {
-            plan.rooms.append(.init(role: "listeners", permanent: false,
-                                    desks: listeners.prefix(maxUnits).enumerated().map { k, n in desk("listener:\(n)", k, n) }))
-        }
-        return plan
     }
 }

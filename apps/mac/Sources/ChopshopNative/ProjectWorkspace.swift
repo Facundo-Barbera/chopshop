@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// Proyecto en vivo a pantalla completa: el mundo de la oficina (o el grafo) ocupa todo el área y escala con la ventana; a la
-/// derecha, un panel lateral con el detalle del hilo elegido o, sin elección, lo que te necesita y la lista de hilos. La oficina
+/// derecha, un panel lateral con el detalle del hilo elegido (o del armario o la consola de una sala de máquinas) o, sin elección,
+/// lo que te necesita y la lista de hilos. La oficina
 /// no lleva nada encima: el detalle vive aquí.
 @available(macOS 26.0, *)
 public struct ProjectWorkspace: View {
@@ -23,8 +24,9 @@ public struct ProjectWorkspace: View {
             HStack(spacing: 0) {
                 stage.frame(maxWidth: .infinity, maxHeight: .infinity)
                 Divider()
-                ThreadPanel(project: project, snapshot: snapshot, state: state, now: frozenNow, selected: $selected)
-                    .frame(width: min(420, max(300, geo.size.width * 0.22)))
+                let panel = min(420, max(300, geo.size.width * 0.22))
+                ThreadPanel(project: project, snapshot: snapshot, state: state, now: frozenNow, selected: $selected, width: panel - 32)
+                    .frame(width: panel)
             }
         }
     }
@@ -60,7 +62,8 @@ public struct ProjectWorkspace: View {
     }
 }
 
-/// Panel lateral: detalle del hilo elegido, o lo que te necesita y los hilos (en curso, en cola, terminados).
+/// Panel lateral: detalle del hilo elegido (o de la sala de máquinas, si se eligió un armario `rack:<k>:<unidad>` o la consola
+/// `machine:<k>`), o lo que te necesita y los hilos (en curso, en cola, terminados).
 @available(macOS 26.0, *)
 struct ThreadPanel: View {
     let project: String
@@ -68,6 +71,8 @@ struct ThreadPanel: View {
     let state: LiveState
     let now: Date?
     @Binding var selected: String?
+    /// Ancho del contenido (sin márgenes): lo usa el rack de la sala de máquinas.
+    var width: CGFloat = MachineRoomDetail.defaultWidth
 
     private var tasks: [MockTask] { snapshot.tasks(of: project) }
     private var hostOf: [String: String] {
@@ -92,8 +97,13 @@ struct ThreadPanel: View {
                         Label("Todos los hilos", systemImage: "chevron.backward").font(.callout)
                     }
                     .buttonStyle(.plain).foregroundStyle(.secondary)
-                    ThreadDetail(threadID: tid, task: tasks.first { $0.id == tid }, host: hostOf[tid], project: project, state: state,
-                                 now: now ?? Date())
+                    if let m = machine(tid) {
+                        MachineRoomDetail(room: m.room, title: m.title, unit: FloorLayout.machinePart(tid)?.unit, frozenNow: now,
+                                          width: width)
+                    } else {
+                        ThreadDetail(threadID: tid, task: tasks.first { $0.id == tid }, host: hostOf[tid], project: project, state: state,
+                                     now: now ?? Date())
+                    }
                 } else {
                     Text(ProjectContent.subtitle(snapshot.summary(of: project)).capitalizedFirst).font(.headline)
                     attention
@@ -109,6 +119,15 @@ struct ThreadPanel: View {
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Sala de máquinas (y rótulo del hueco) de un armario o una consola elegidos; nil si `id` es un hilo.
+    private func machine(_ id: String) -> (room: MachineRoom, title: String)? {
+        guard FloorLayout.machinePart(id) != nil else { return nil }
+        for f in ProjectOffice.floors(in: state, project: project, now: now ?? Date()) {
+            if let room = f.machineRoom(of: id), FloorLayout(plan: f).spot(id) != nil { return (room, FloorOfficeView.label(f, id)) }
+        }
+        return nil
     }
 
     @ViewBuilder private var attention: some View {
