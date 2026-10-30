@@ -20,7 +20,7 @@ const exact = (...paths: string[]) => (path: string) => paths.includes(path);
 const prefix = (...prefixes: string[]) => (path: string) => prefixes.some((p) => path.startsWith(p) && path.length > p.length);
 
 export const ROUTES: readonly Route[] = [
-  { name: "redeem", method: "POST", match: exact("/v1/pair", "/pair"), roles: ["anonymous"] },
+  { name: "redeem", method: "POST", match: exact("/v1/pair"), roles: ["anonymous"] },
   { name: "create_code", method: "POST", match: exact("/v1/pair/codes"), roles: ["admin"] },
   { name: "revoke", method: "DELETE", match: prefix("/v1/tokens/", "/v1/pair/codes/"), roles: ["admin"] },
   { name: "agent_ws", method: "GET", match: exact(AGENT_WS_PATH, CONNECT_PATH), roles: ["machine"] },
