@@ -7,7 +7,7 @@ from . import home, miniyaml, settings
 KNOWN = {"project", "company", "repo", "host", "overflow_host", "remote_repos", "t3_project", "scratch",
          "provider", "model", "runtime_mode", "workspace", "base_ref", "tracker", "ready", "branches",
          "decider", "approvers", "can_run", "cannot_run", "autonomy", "reactions", "max_parallel", "graph", "integration",
-         "automations", "office", "rack", "machine_rooms"}
+         "automations", "office", "rack", "machine_rooms", "capacity"}
 
 
 class ProfileError(Exception):
@@ -60,15 +60,27 @@ def list_projects():
     return sorted(f[:-5] for f in os.listdir(d) if f.endswith(".yaml")) if os.path.isdir(d) else []
 
 
-def validate_building(project):
-    """Tope de pisos por edificio entre todos los perfiles locales que comparten empresa con `project`."""
-    from .agent import layout
+def _all():
     profs = []
     for name in list_projects():
         try:
             profs.append(load(name))
         except ProfileError:
             continue
+    return profs
+
+
+def building_floors(project):
+    from .agent import layout
+    profs = _all()
+    mine = next((p for p in profs if p["project"] == project), None)
+    return layout.building_floors(profs, mine) if mine else None
+
+
+def validate_building(project):
+    """Tope de pisos por edificio entre todos los perfiles locales que comparten empresa con `project`."""
+    from .agent import layout
+    profs = _all()
     mine = next((p for p in profs if p["project"] == project), None)
     if mine is None:
         return []
