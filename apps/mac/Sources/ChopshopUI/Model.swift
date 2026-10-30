@@ -3,12 +3,12 @@ import WebKit
 import ChopshopNative
 
 enum Section: String, CaseIterable, Identifiable {
-    case city, overview, questions, events, reactions, graph, batches, machines, project
+    case city, overview, questions, events, reactions, batches, machines, project
     var id: String { rawValue }
     /// Vistas fijas de la barra lateral (el proyecto y las máquinas tienen su propia sección).
     /// La sala de máquinas no es una vista aparte: es una sala del piso de cada proyecto (oficina nativa).
     static var views: [Section] {
-        var v: [Section] = [.overview, .questions, .events, .reactions, .graph, .batches]
+        var v: [Section] = [.overview, .questions, .events, .reactions, .batches]
         if #available(macOS 26.0, *) { v.insert(.city, at: 0) }       // la flota como ciudad (vista nativa): edificios → pisos
         return v
     }
@@ -19,7 +19,6 @@ enum Section: String, CaseIterable, Identifiable {
         case .questions: return "Preguntas"
         case .events: return "Actividad"
         case .reactions: return "Reacciones"
-        case .graph: return "Grafo"
         case .batches: return "Lotes"
         case .machines: return "Máquinas"
         case .project: return "Proyecto"
@@ -32,7 +31,6 @@ enum Section: String, CaseIterable, Identifiable {
         case .questions: return "questionmark.bubble"
         case .events: return "waveform.path.ecg"
         case .reactions: return "bolt.horizontal"
-        case .graph: return "point.3.connected.trianglepath.dotted"
         case .batches: return "square.stack.3d.up"
         case .machines: return "gauge.with.dots.needle.50percent"
         case .project: return "folder"
@@ -67,8 +65,10 @@ final class AppModel: ObservableObject {
     @Published var showSettings = false
     /// Sube cuando cambia un emparejamiento (para repintar lo que depende del Keychain).
     @Published var pairingRevision = 0
-    /// El usuario pidió la vista web para los proyectos en esta sesión (agente sin emparejamiento).
+    /// El usuario pidió la vista clásica (UI web con barra lateral) en esta sesión (agente sin emparejamiento).
     @Published var preferWeb = false
+    /// Armazón de la oficina (macOS 26): HUD, paleta, paneles y atajos del menú «Oficina».
+    let shell = ShellController()
 
     /// Credenciales de dispositivo (`cs1_…`) por agente: Keychain, nunca config.toml ni UserDefaults.
     let credentials: CredentialStore = KeychainCredentialStore()
@@ -107,6 +107,8 @@ final class AppModel: ObservableObject {
             else if let sec = Section(rawValue: s) { nav = sec == .machines ? .machines : .section(sec) }
         }
         if args.contains("--capture") { Capture.watch(model: self) }
+        shell.actions = attentionActions
+        shell.refresh = { [weak self] in _ = Task { await self?.refresh() } }
         startPolling()
         startLive()
         // Sin ningún agente configurado no hay nada que mostrar: se pide la conexión en los ajustes
@@ -317,7 +319,28 @@ final class AppModel: ObservableObject {
         AttentionActions(answer: { [weak self] task, option in
             guard let self else { return "la app se está cerrando" }
             return await self.answer(task, option)
-        }, open: { [weak self] url in self?.open(url) })
+        }, open: { [weak self] url in self?.open(url) }, settle: { [weak self] id in
+            guard let self else { return "la app se está cerrando" }
+            return await self.settle(id)
+        })
+    }
+
+    /// `POST /settle {thread_id}` al agente principal (cierra el hilo en T3, nunca archiva). nil = hecho.
+    func settle(_ threadID: String) async -> String? {
+        guard let c = primary else { return "no hay agente configurado" }
+        guard let action = AgentAction.route(type: "settle", payload: ["thread_id": threadID]) else { return "hilo no válido" }
+        let r = await c.perform(action)
+        if r.ok { Task { await refresh() }; return nil }
+        return r.message
+    }
+
+    /// Subtítulo de la ventana: estado de la conexión con los agentes.
+    var statusLine: String {
+        if link == .unconfigured { return "⚠︎ sin agente configurado" }
+        if let e = lastError { return "⚠︎ " + e.prefix(60) }
+        guard let d = lastUpdate else { return "cargando…" }
+        let f = DateFormatter(); f.dateFormat = "HH:mm:ss"
+        return "actualizado " + f.string(from: d)
     }
 
     /// `POST /answer {thread_id, choice, request}` al agente principal. nil = enviado.

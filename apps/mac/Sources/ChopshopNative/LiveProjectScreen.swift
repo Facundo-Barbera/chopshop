@@ -1,13 +1,12 @@
 import SwiftUI
 
-/// Detalle de un proyecto en vivo (macOS 26): `ProjectWorkspace` a pantalla completa (oficina o grafo, selector en la barra de la
-/// ventana, panel lateral con el hilo elegido, lo que te necesita y la lista) con el estado del `LiveStore`. Sin credencial (o revocada) muestra `unpaired` (la pantalla de emparejar de la app).
+/// Detalle de un proyecto en vivo (macOS 26): `ProjectWorkspace` a pantalla completa (la oficina,
+/// panel lateral con el hilo elegido, lo que te necesita y la lista) con el estado del `LiveStore`. Sin credencial (o revocada) muestra `unpaired` (la pantalla de emparejar de la app).
 @available(macOS 26.0, *)
 public struct LiveProjectScreen<Unpaired: View>: View {
     let project: String
     @ObservedObject var store: LiveStore
     let unpaired: Unpaired
-    @State private var mode: GraphMode = .office
 
     public init(project: String, store: LiveStore, @ViewBuilder unpaired: () -> Unpaired) {
         self.project = project; self.store = store; self.unpaired = unpaired()
@@ -42,8 +41,8 @@ public struct LiveProjectScreen<Unpaired: View>: View {
                 unpaired.frame(maxWidth: .infinity, maxHeight: .infinity)
             default:
                 if store.snapshot.projects.contains(project) {
-                    // a pantalla completa: la oficina (o el grafo) escala con la ventana; el detalle, en el panel lateral
-                    ProjectWorkspace(project: project, snapshot: store.snapshot, state: store.state, mode: $mode)
+                    // a pantalla completa: la oficina escala con la ventana; el detalle, en el panel lateral
+                    ProjectWorkspace(project: project, snapshot: store.snapshot, state: store.state)
                         .id(project)
                 } else {
                     placeholder
@@ -52,10 +51,6 @@ public struct LiveProjectScreen<Unpaired: View>: View {
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .toolbar {
-            ToolbarItem(placement: .principal) {
-                Picker("Vista", selection: $mode) { ForEach(GraphMode.allCases) { Text($0.rawValue).tag($0) } }
-                    .pickerStyle(.segmented).labelsHidden().fixedSize()
-            }
             ToolbarItem(placement: .primaryAction) { MachineStatusButton(machines: machines) }
         }
     }

@@ -165,33 +165,7 @@ public struct IsoOfficeView: View {
                     .foregroundStyle(Color.primary.opacity(0.75))
                     .tag("r:\(r.index)")
             }
-            if let h = hovered, let d = scene.desk(h) {
-                IsoTooltip(label: d.node.label, title: d.node.task.flatMap { tasks[$0]?.title } ?? d.node.title, visual: d.visual, host: d.node.task.flatMap { hostOf[$0] })
-                    .tag("tip")
-            }
         }
-    }
-}
-
-@available(macOS 26.0, *)
-struct IsoTooltip: View {
-    let label: String, title: String, visual: NodeVisual, host: String?
-    @Environment(\.colorScheme) private var scheme
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 6) {
-                Circle().fill(visual.tint ?? Color.secondary.opacity(0.8)).frame(width: 6, height: 6)
-                Text(label).font(.system(size: 12, weight: .semibold))
-                Text(visual.title).font(.system(size: 10.5)).foregroundStyle(visual.tint ?? Color.secondary)
-                if let h = host { Text("· \(h)").font(.system(size: 10.5)).foregroundStyle(.tertiary) }
-            }
-            Text(title).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(2).frame(maxWidth: 220, alignment: .leading)
-        }
-        .padding(.horizontal, 11).padding(.vertical, 8)
-        .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(scheme == .dark ? Color(white: 0.15).opacity(0.96) : Color.white.opacity(0.96)))
-        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(
-            LinearGradient(colors: scheme == .dark ? [.white.opacity(0.32), .white.opacity(0.06)] : [.black.opacity(0.14), .black.opacity(0.05)],
-                           startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 0.8))
     }
 }
 

@@ -73,6 +73,8 @@ public struct MockTask: Identifiable, Hashable, Sendable {
     public var botWait: String?
     public var answered: [MockAnswered] = []
     public var reactions: [MockReaction] = []
+    /// Hilo de T3 de la tarea (`thread_id` de la proyección); el mundo elige escritorios por hilo, el snapshot va por tarea.
+    public var threadID: String?
 
     public var state: TaskState {
         switch kind {

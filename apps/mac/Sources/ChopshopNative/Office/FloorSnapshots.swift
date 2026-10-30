@@ -31,7 +31,7 @@ public extension Snapshots {
             let st = ProjectOfficeFixture.state(office: office)
             for (sz, size) in sizes where sz == "1440x900" || name == "perfil" || name == "sin-perfil" {
                 let v = ProjectWorkspace(project: ProjectOfficeFixture.project, snapshot: SnapshotMapper.snapshot(st, now: ProjectOfficeFixture.now),
-                                         state: st, mode: .constant(.office), frozenNow: ProjectOfficeFixture.now, selected: sel)
+                                         state: st, frozenNow: ProjectOfficeFixture.now, selected: sel)
                     .background(Color(nsColor: .windowBackgroundColor))
                 write(v, dark: dark, size: size, to: "\(out)/floor-proyecto-46-\(name)-\(sz).png")
             }

@@ -4,7 +4,7 @@ Banco de pruebas de `ChopshopNative`, la capa nativa que **la app real** (`apps/
 para el detalle de proyecto en vivo. Aquí se ve con datos de prueba (`Fixtures`) o reproduciendo `ui-fixture.jsonl` (`FixtureStream`).
 
 - **Oficina isométrica** (`IsoOfficeView`): salas por rango, escritorios por tarea, cables, barra "Atención", inspector.
-- **Grafo en capas** (`GraphView`) y la vista de proyecto (`ProjectView`) con el selector Oficina / Grafo.
+- **Armazón de la oficina** (`Shell/`: `OfficeShell`, HUD, paleta ⌘K, paneles, minimapa) y la vista de proyecto (`ProjectView`). La vista Grafo se quitó (docs/plans/office-first-ui.md).
 - **Demo de población y crecimiento** (`DemoTimeline.swift`, `DemoView.swift`): un guion de eventos (con forma de *envelope*) se aplica
   a un store y la oficina se levanta sola: salas que suben, escritorios que brotan, figuras que caminan, cables que se dibujan,
   pregunta (ámbar), tarea atascada (rojo), tareas nuevas a mitad con la cámara ajustándose. ~56 s en bucle.
@@ -64,7 +64,7 @@ vestíbulo en planta baja, zoom al piso Docs y ese piso montado).
   `apps/agent/chopshop/agent/projection.py`), `SSEParser`, `AgentStream` (`GET /stream`), `LiveStore` (reconexión, backoff,
   `Last-Event-ID`), `FixtureStream`, `SnapshotMapper` (proyección → modelos de la oficina), `PairingClient` y `CredentialStore`
   (Keychain). Pruebas: `apps/mac/Tests/ChopshopNativeTests` (`cd apps/mac && swift test`).
-- Las vistas (`IsoOfficeView`, `GraphView`, `ProjectView`/`ProjectContent`, `LiveProjectScreen`, …) llevan `@available(macOS 26.0, *)`;
+- Las vistas (`IsoOfficeView`, `OfficeShell`, `ProjectView`/`ProjectContent`, `LiveProjectScreen`, …) llevan `@available(macOS 26.0, *)`;
   la app las usa tras `if #available(macOS 26, *)` y en macOS < 26 se queda con la vista web. El vidrio (`glassEffect`) va tras
   `#if compiler(>=6.2)`: con un Xcode anterior a 26 cae a un sustituto plano (no probado: solo se ha compilado con Xcode 27).
 - Acciones: `\.attentionActions` en el entorno (responder por `POST /answer`, abrir el hilo en T3). Sin ellas (aquí) los

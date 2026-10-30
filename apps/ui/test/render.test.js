@@ -67,11 +67,11 @@ test("Máquinas: apps y proyectos, de solo lectura (sin servidores de prueba)", 
   assert.match(b, /app-ejemplo/);
 });
 
-test("Actividad, Reacciones y Grafo se dibujan con los datos del orquestador", () => {
+test("Actividad y Reacciones se dibujan con los datos del orquestador", () => {
   const { snap, c, titles } = base();
   assert.match(render(ui.Events, { snap, c, now, titles }), /Línea de tiempo/);
   assert.match(render(ui.Reactions, { snap, now }), /Nivel 1/);
-  assert.match(render(ui.Graph, { snap, now }), /Planificador/);
+  assert.equal(ui.Graph, undefined, "la vista Grafo se quitó (docs/plans/office-first-ui.md)");
 });
 
 test("agente caído: banner con el estado y datos viejos; sin datos: pantalla de conexión", () => {
