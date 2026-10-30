@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/relay/v1/pair-code.schema.json",
+  "title": "Respuesta de POST /v1/pair/codes: el código en claro, una sola vez (relay -> dueño, HTTP)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "code",
+    "scope",
+    "name",
+    "expires_at"
+  ],
+  "properties": {
+    "id": {
+      "$ref": "common.schema.json#/$defs/code_id"
+    },
+    "code": {
+      "$ref": "common.schema.json#/$defs/pair_code"
+    },
+    "scope": {
+      "$ref": "common.schema.json#/$defs/scope"
+    },
+    "name": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 128
+    },
+    "expires_at": {
+      "$ref": "common.schema.json#/$defs/ts"
+    }
+  }
+}

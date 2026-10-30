@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "type": "welcome",
+  "id": "01M6A2Q8ZM0A2C4E6G8J0K2M4N",
+  "ts": "2026-10-30T14:02:11.391Z",
+  "re": "01M6A2Q8ZK3T5W7Y9B1D3F5H7J",
+  "session_id": "ss-4f1c9a7be03d5e21",
+  "protocol": 1,
+  "snapshot_ttl_s": 120,
+  "max_frame_bytes": 1048576,
+  "ping_interval_s": 30
+}

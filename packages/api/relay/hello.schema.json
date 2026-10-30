@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/relay/v1/hello.schema.json",
+  "title": "hello: el agente se presenta al relay (agente -> relay)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "v",
+    "type",
+    "id",
+    "ts",
+    "machine_id",
+    "agent_version",
+    "protocol",
+    "projects"
+  ],
+  "properties": {
+    "v": {
+      "$ref": "common.schema.json#/$defs/v"
+    },
+    "type": {
+      "const": "hello"
+    },
+    "id": {
+      "$ref": "common.schema.json#/$defs/msg_id"
+    },
+    "ts": {
+      "$ref": "common.schema.json#/$defs/ts"
+    },
+    "machine_id": {
+      "$ref": "common.schema.json#/$defs/machine_id"
+    },
+    "agent_version": {
+      "$ref": "common.schema.json#/$defs/version"
+    },
+    "protocol": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "uniqueItems": true
+    },
+    "last_seq": {
+      "$ref": "common.schema.json#/$defs/count"
+    },
+    "projects": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "roles"
+        ],
+        "properties": {
+          "name": {
+            "$ref": "common.schema.json#/$defs/name"
+          },
+          "roles": {
+            "type": "array",
+            "maxItems": 64,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "common.schema.json#/$defs/name"
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/relay/v1/whoami-result.schema.json",
+  "title": "whoami.result: identidad del token y máquinas visibles (relay -> cliente)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "v",
+    "type",
+    "id",
+    "ts",
+    "re",
+    "token_id",
+    "scope",
+    "account",
+    "machine_id",
+    "machines"
+  ],
+  "properties": {
+    "v": {
+      "$ref": "common.schema.json#/$defs/v"
+    },
+    "type": {
+      "const": "whoami.result"
+    },
+    "id": {
+      "$ref": "common.schema.json#/$defs/msg_id"
+    },
+    "ts": {
+      "$ref": "common.schema.json#/$defs/ts"
+    },
+    "re": {
+      "$ref": "common.schema.json#/$defs/msg_id"
+    },
+    "token_id": {
+      "$ref": "common.schema.json#/$defs/token_id"
+    },
+    "scope": {
+      "$ref": "common.schema.json#/$defs/scope"
+    },
+    "account": {
+      "type": "string",
+      "pattern": "^ac-[0-9a-f]{8}$"
+    },
+    "token_name": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 128
+    },
+    "machine_id": {
+      "oneOf": [
+        {
+          "$ref": "common.schema.json#/$defs/machine_id"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "machines": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "machine_id",
+          "online",
+          "snapshot_age_s",
+          "stale"
+        ],
+        "properties": {
+          "machine_id": {
+            "$ref": "common.schema.json#/$defs/machine_id"
+          },
+          "online": {
+            "type": "boolean"
+          },
+          "snapshot_age_s": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "stale": {
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  }
+}
