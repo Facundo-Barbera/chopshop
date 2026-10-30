@@ -73,8 +73,8 @@ public enum WorldGenerator {
     public static let tile = CityGeo.tile
     public static let cell = 31.0 * tile
     public static let road = 1.5 * tile
-    public static let jitter = 0.0
-    public static let bulge = 0.0
+    public static let jitter = 0.07
+    public static let bulge = 0.06
     public static let grid = 12
     public static let side = 3
     public static let capacity = 5
@@ -98,23 +98,13 @@ public enum WorldGenerator {
         var key: String { "\(i),\(j)" }
     }
 
-    static func node(_ seed: UInt64, _ i: Int, _ j: Int) -> CityPoint {
-        var r = SeededRandom(seed, "node", "\(i)", "\(j)")
-        let jx = (r.unit() - 0.5) * 2 * jitter * cell, jy = (r.unit() - 0.5) * 2 * jitter * cell
-        return CityPoint(x: margin + Double(i) * cell + jx, y: margin + Double(j) * cell + jy)
+    static func corner(_ i: Int, _ j: Int) -> CityPoint {
+        CityPoint(x: margin + Double(i) * cell, y: margin + Double(j) * cell)
     }
 
-    static func bend(_ seed: UInt64, _ axis: String, _ i: Int, _ j: Int) -> Double {
-        (WorldSeed.unit(seed, "bend-\(axis)", "\(i)", "\(j)") - 0.5) * 2 * bulge * cell
-    }
+    static func hRoad(_ seed: UInt64, _ i: Int, _ j: Int) -> [CityPoint] { [corner(i, j), corner(i + 1, j)] }
 
-    static func hRoad(_ seed: UInt64, _ i: Int, _ j: Int) -> [CityPoint] {
-        curve(node(seed, i, j), node(seed, i + 1, j), bend: bend(seed, "h", i, j))
-    }
-
-    static func vRoad(_ seed: UInt64, _ i: Int, _ j: Int) -> [CityPoint] {
-        curve(node(seed, i, j), node(seed, i, j + 1), bend: bend(seed, "v", i, j))
-    }
+    static func vRoad(_ seed: UInt64, _ i: Int, _ j: Int) -> [CityPoint] { [corner(i, j), corner(i, j + 1)] }
 
     static func roadY(_ seed: UInt64, _ c: Cell, x: Double) -> Double {
         let pts = hRoad(seed, c.i, c.j + 1)
@@ -135,16 +125,6 @@ public enum WorldGenerator {
         return (0..<(side * side)).map { k in
             let a = k % side, b = k / side
             return CityRect(x0: l.x0 + Double(a) * sw, y0: l.y0 + Double(b) * sd, x1: l.x0 + Double(a + 1) * sw, y1: l.y0 + Double(b + 1) * sd)
-        }
-    }
-
-    static func curve(_ a: CityPoint, _ b: CityPoint, bend: Double, steps: Int = 10) -> [CityPoint] {
-        let mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2
-        let dx = b.x - a.x, dy = b.y - a.y, len = max(1, (dx * dx + dy * dy).squareRoot())
-        let cx = mx - dy / len * bend, cy = my + dx / len * bend
-        return (0...steps).map { k in
-            let t = Double(k) / Double(steps), u = 1 - t
-            return CityPoint(x: u * u * a.x + 2 * u * t * cx + t * t * b.x, y: u * u * a.y + 2 * u * t * cy + t * t * b.y)
         }
     }
 
