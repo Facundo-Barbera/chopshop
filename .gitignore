@@ -18,5 +18,6 @@ node_modules/
 # Config local con datos reales: nunca al repo (la plantilla es config.example.toml)
 config.toml
 
-# Artefactos de las pruebas de renderizado de la UI
-.test-build/
+.venv/
+.mypy_cache/
+.ruff_cache/

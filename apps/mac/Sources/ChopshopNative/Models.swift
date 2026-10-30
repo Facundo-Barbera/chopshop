@@ -1,15 +1,11 @@
 import Foundation
 
-// Modelos nativos con la misma forma que `chopshop snapshot` / `chopshop metrics` (ver ui/Sources/ChopshopUI/Model.swift
-// y ui/web/dev/fixtures.js). Aquí son tipos Swift de verdad; el JSON real se podrá decodificar a ellos más adelante.
-
 public enum Level: String, Sendable { case auto, bot, human }
 
 public enum TaskKind: String, Sendable {
     case running, preparing, done, failed, queued, skipped, ask, approval, human, bot
 }
 
-/// Estado que importa para la vista de proyecto (qué corre, qué está trabado, qué te necesita).
 public enum TaskState: Int, Sendable, CaseIterable, Comparable {
     case needsYou, stuck, waitingBot, running, queued, done, skipped
     public static func < (a: TaskState, b: TaskState) -> Bool { a.rawValue < b.rawValue }
@@ -73,7 +69,6 @@ public struct MockTask: Identifiable, Hashable, Sendable {
     public var botWait: String?
     public var answered: [MockAnswered] = []
     public var reactions: [MockReaction] = []
-    /// Hilo de T3 de la tarea (`thread_id` de la proyección); el mundo elige escritorios por hilo, el snapshot va por tarea.
     public var threadID: String?
 
     public var state: TaskState {
@@ -159,7 +154,6 @@ public struct MockMachine: Identifiable, Hashable, Sendable {
     public var runNow: Int { Int(run.last ?? 0) }
 }
 
-/// Resumen por proyecto (equivalente a ProjectInfo + conteos de la vista de proyecto).
 public struct ProjectSummary: Identifiable, Hashable, Sendable {
     public var name: String
     public var running: Int

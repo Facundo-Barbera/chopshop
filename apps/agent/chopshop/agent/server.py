@@ -1,20 +1,3 @@
-"""Servidor HTTP del agente (stdlib: `ThreadingHTTPServer`), autenticación y lógica de las rutas de docs/agent-api.md.
-
-- `Authenticator`: quién es el origen de cada petición. Origen local (loopback o la propia IP de escucha) -> aceptado si
-  `agent.trust_local`. Si no, según `agent.auth`:
-    * `tailscale+token` (por defecto): `tailscale whois --json <ip>` (cache 60 s) -> `UserProfile.LoginName` debe ser
-      `owner_login` (lectura y escritura) o estar en `allowed_logins` (solo lectura); además TODA petición (salvo `GET /health` y
-      `POST /pair`) exige una credencial: la de un dispositivo emparejado (`cs1_...`, ver pairing.py) o el bearer legado;
-    * `token`: basta el bearer (`token_file`, 0600, o una credencial de dispositivo), también para leer;
-    * `none-local`: nada que no sea el origen local.
-  Sin identidad válida -> 403; sin credencial válida -> 401. Las credenciales se comparan en tiempo constante
-  (`hmac.compare_digest` o por hash); nunca se registran ni se devuelven.
-- Defensas web (todas las peticiones, también el origen local): se rechaza la cabecera `Origin` y un `Host` que no sea del agente
-  (anti DNS-rebinding); las escrituras exigen `Content-Type: application/json`. -> 403.
-- `AgentApp`: las rutas como métodos puros (sin HTTP), para poder probarlas sin sockets.
-- `AgentHTTPServer` + `Handler`: JSON UTF-8, cuerpo máximo `MAX_BODY`, timeout por conexión, errores siempre en JSON.
-  Nunca se devuelven ni se registran URLs de webhook ni tokens (las suscripciones solo guardan RUTAS de archivo).
-Todo lo externo es inyectable (`runner` de tailscale, reloj, módulos falsos)."""
 import hmac
 import ipaddress
 import json
@@ -29,36 +12,35 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import API_VERSION, __version__, collector as collector_mod, db, envelope, events, halflife, layout, notes as notes_mod, office as office_mod, pairing as pairing_mod, projection, stream, \
-    structure as structure_mod, t3watch, webhooks
+from . import API_VERSION, __version__, db, envelope, events, halflife, layout, projection, stream, t3watch, webhooks
+from . import collector as collector_mod
+from . import notes as notes_mod
+from . import office as office_mod
+from . import pairing as pairing_mod
+from . import structure as structure_mod
 
 log = logging.getLogger("chopshop.agent")
 
 AUTH_MODES = ("tailscale+token", "token", "none-local")
-MAX_BODY = 64 * 1024              # bytes de cuerpo aceptados en POST/DELETE
-CONN_TIMEOUT = 15                 # s de inactividad de una conexión (lectura de la petición)
-WHOIS_TTL = 60.0                  # s de cache de identidades de Tailscale
-WHOIS_FAIL_TTL = 5.0              # s de cache de un whois fallido (evita martillar al CLI)
-WHOIS_MAX = 256                   # entradas máximas del cache
+MAX_BODY = 64 * 1024
+CONN_TIMEOUT = 15
+WHOIS_TTL = 60.0
+WHOIS_FAIL_TTL = 5.0
+WHOIS_MAX = 256
 SNAPSHOT_EVENTS = 80
 SNAPSHOT_THREADS = 200
-ORCHESTRATOR_TTL = 5.0            # s de cache del snapshot del orquestador
+ORCHESTRATOR_TTL = 5.0
 _ID = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
-PUBLIC = {("GET", "/health"), ("POST", "/pair")}       # sin credencial (pero sí con identidad de Tailscale en ese modo)
+PUBLIC = {("GET", "/health"), ("POST", "/pair")}
 
 
 class ApiError(Exception):
-    """Error de la API con su código HTTP; el mensaje llega al cliente."""
-
     def __init__(self, status, message, extra=None):
         super().__init__(message)
-        self.status, self.message, self.extra = status, message, extra     # extra: campos añadidos a la respuesta
+        self.status, self.message, self.extra = status, message, extra
 
-
-# ---------------------------------------------------------------- autenticación
 
 def default_runner(argv, timeout=3):
-    """Ejecuta argv SIN shell -> (rc, stdout, stderr). Un fallo al lanzar es rc=127 (sin mensajes que arrastren datos)."""
     try:
         p = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=timeout)
     except (OSError, subprocess.TimeoutExpired) as e:
@@ -67,7 +49,6 @@ def default_runner(argv, timeout=3):
 
 
 def parse_ip(text):
-    """str -> ipaddress (IPv4-mapped IPv6 se normaliza a IPv4; se ignora el scope `%eth0`) o None."""
     try:
         ip = ipaddress.ip_address(str(text).split("%")[0])
     except ValueError:
@@ -76,8 +57,6 @@ def parse_ip(text):
 
 
 class Identity:
-    """Quién hace la petición: `via` = local | tailscale | token; `write` = podría escribir (credencial ya verificada);
-    `device` = id del dispositivo emparejado cuya credencial se usó (o None); `ip` = origen."""
     __slots__ = ("via", "login", "write", "device", "ip")
 
     def __init__(self, via, login=None, write=False, device=None, ip=None):
@@ -103,17 +82,16 @@ class Authenticator:
         self.runner = runner or default_runner
         self.clock = clock
         self._lock = threading.Lock()
-        self._whois = {}              # ip(str) -> (vence, login | None)
-        self._tok = (None, None)      # ((mtime, size), token | None)
+        self._whois = {}
+        self._tok = (None, None)
         self._warned = False
-        self.pairing = pairing            # pairing.Pairing (credenciales de dispositivo) o None
+        self.pairing = pairing
         mid = (cfg.get("machine_id") or socket.gethostname()).strip().lower()
         hn = socket.gethostname().strip().lower()
         self.host_names = {"localhost", mid, hn, hn.split(".")[0]} | {
             str(h).strip().lower() for h in (cfg.get("allowed_hosts") or []) if str(h).strip()}
         self.host_names.discard("")
 
-    # -- bearer
     def _token(self):
         try:
             st = os.stat(self.token_file)
@@ -145,9 +123,7 @@ class Authenticator:
             return False
         return hmac.compare_digest(value.encode("utf-8"), tok.encode("utf-8"))
 
-    # -- Tailscale
     def whois(self, ip_text):
-        """LoginName de Tailscale para esa IP (con cache) o None. Nunca lanza."""
         now = self.clock()
         with self._lock:
             hit = self._whois.get(ip_text)
@@ -168,12 +144,11 @@ class Authenticator:
             if rc != 0:
                 return None
             login = ((json.loads(out) or {}).get("UserProfile") or {}).get("LoginName")
-        except Exception:  # noqa: BLE001 - un whois roto equivale a "sin identidad"
+        except Exception:
             return None
         return login.strip().lower() if isinstance(login, str) and login.strip() else None
 
     def credential(self, header, ip=None):
-        """(ok, device_id): bearer legado (`token_file`) -> (True, None); credencial de dispositivo vigente -> (True, id)."""
         if not header:
             return False, None
         scheme, _, value = header.strip().partition(" ")
@@ -186,10 +161,7 @@ class Authenticator:
     def device_active(self, device_id):
         return self.pairing is not None and self.pairing.active(device_id)
 
-    # -- defensas web
     def host_ok(self, host, local_addrs):
-        """`Host` es una IP del agente (o loopback), su nombre (`localhost`, machine_id, hostname) o uno de `allowed_hosts`
-        (p. ej. el nombre MagicDNS completo). Anti DNS-rebinding: un dominio ajeno que resuelva a nuestra IP no pasa."""
         h = (host or "").strip().lower()
         if not h:
             return False
@@ -204,7 +176,6 @@ class Authenticator:
         return h in self.host_names
 
     def check_web(self, headers, local_addrs):
-        """ApiError(403) si la petición parece de un navegador (`Origin`) o va a un Host ajeno."""
         if headers.get("Origin") is not None:
             raise ApiError(403, "no se aceptan peticiones con cabecera Origin (navegadores)")
         if not self.host_ok(headers.get("Host"), local_addrs):
@@ -212,16 +183,12 @@ class Authenticator:
 
     @staticmethod
     def check_json(method, headers, has_body):
-        """Escrituras (POST/PUT, o DELETE con cuerpo): `Content-Type: application/json` o ApiError(403)."""
         if method != "GET" and (method in ("POST", "PUT") or has_body):
             ctype = (headers.get("Content-Type") or "").split(";")[0].strip().lower()
             if ctype != "application/json":
                 raise ApiError(403, "las escrituras exigen Content-Type: application/json")
 
-    # -- decisión
     def authorize(self, peer, local_addrs, write, auth_header, method=None, path=None):
-        """Identity del origen o ApiError (403 identidad/permiso, 401 credencial). `peer` = IP del cliente (str);
-        `local_addrs` = IPs propias del servidor; `method`/`path` deciden si la ruta es pública (`PUBLIC`)."""
         ip = parse_ip(peer)
         if ip is None:
             raise ApiError(403, "sin identidad válida")
@@ -246,23 +213,18 @@ class Authenticator:
         return Identity("tailscale", login, owner and cred, device, str(ip))
 
 
-# ---------------------------------------------------------------- estado en ejecución
-
 class Runtime:
-    """Estado vivo compartido entre el servicio (hilos de fondo) y la API (`/snapshot`, `/health`)."""
-
     def __init__(self, clock=time.time):
         self.clock = clock
         self.started = clock()
-        self.last_poll = None         # ts del último sondeo de T3 que llegó a ejecutarse
-        self.errors = {}              # hilo -> último error (texto corto)
-        self._logged = {}             # hilo -> (mensaje, ts) para no repetir el mismo aviso
+        self.last_poll = None
+        self.errors = {}
+        self._logged = {}
 
     def ok(self, name):
         self.errors.pop(name, None)
 
     def fail(self, name, exc):
-        """Registra el fallo; True si conviene escribirlo en el log (cambia el mensaje o pasó más de un minuto)."""
         msg = ("%s: %s" % (type(exc).__name__, exc))[:200]
         self.errors[name] = msg
         last = self._logged.get(name)
@@ -272,8 +234,6 @@ class Runtime:
         self._logged[name] = (msg, now)
         return True
 
-
-# ---------------------------------------------------------------- lógica de las rutas
 
 def _num(q, key, default=None, minimum=None):
     raw = q.get(key)
@@ -312,8 +272,6 @@ def _ident(body, key, required=False):
 
 
 class AgentApp:
-    """Cada ruta es un método `(ident, query, body, **path) -> objeto | (código, objeto)`."""
-
     ROUTES = {
         ("GET", "/health"): "health", ("GET", "/snapshot"): "snapshot", ("GET", "/metrics"): "metrics",
         ("GET", "/events"): "events", ("GET", "/threads"): "threads",
@@ -325,7 +283,7 @@ class AgentApp:
     def __init__(self, cfg, conn, collector, t3, auth, runtime=None, emit_fn=None, orchestrator_fn=None,
                  clock=time.time, pairing=None, stream_opts=None, office=None):
         self.cfg, self.conn = cfg, conn
-        self.office = office              # agent/office.py (None = sin oficina: las rutas /desks dan 503)
+        self.office = office
         self.collector, self.t3, self.auth = collector, t3, auth
         self.runtime = runtime or Runtime(clock)
         self.clock = clock
@@ -339,12 +297,10 @@ class AgentApp:
         self.projector = projection.Projector(conn, dict(cfg, machine_id=self.machine_id))
         self.stream = stream.StreamHub(conn, dict(cfg, machine_id=self.machine_id), self.projector,
                                        device_active=getattr(auth, "device_active", None), **(stream_opts or {}))
-        self.listen_ips = set()           # IPs de todos los listeners (las rellena el servicio; para validar Host)
-        self.desk_fn = notes_mod.declared_desk   # id de escritorio -> escritorio del perfil local o None (inyectable)
+        self.listen_ips = set()
+        self.desk_fn = notes_mod.declared_desk
 
-    # -- enrutado
     def match(self, method, path):
-        """(nombre del método, parámetros de ruta) o ApiError 404/405."""
         name = self.ROUTES.get((method, path))
         if name:
             return name, {}
@@ -380,7 +336,6 @@ class AgentApp:
         out = getattr(self, "r_" + name)(ident, query or {}, body or {}, **params)
         return out if isinstance(out, tuple) else (200, out)
 
-    # -- lectura
     def r_health(self, ident, q, body):
         now = self.clock()
         return {"ok": True, "api_version": API_VERSION, "version": __version__, "machine_id": self.machine_id,
@@ -432,7 +387,6 @@ class AgentApp:
     def r_subscriptions(self, ident, q, body):
         return {"subscriptions": events.list_subscriptions(self.conn)}
 
-    # -- snapshot
     def _orchestrator(self):
         now = time.monotonic()
         with self._orch_lock:
@@ -440,7 +394,7 @@ class AgentApp:
                 return self._orch[1]
         try:
             snap = self.orchestrator_fn()
-        except Exception:  # noqa: BLE001 - el orquestador es opcional: sin él, null
+        except Exception:
             snap = None
         with self._orch_lock:
             self._orch = (now, snap)
@@ -490,7 +444,6 @@ class AgentApp:
             "agent": agent,
         }
 
-    # -- T3
     def _t3(self, fn, *args):
         if not self.t3_enabled:
             raise ApiError(503, "T3 desactivado en este agente (agent.t3_enabled = false)")
@@ -514,11 +467,10 @@ class AgentApp:
         res = self._t3(t3watch.answer, thread, choice if isinstance(choice, dict) else str(choice), _text(body, "request", False, 128))
         log.info("respuesta enviada al hilo %s por %s", thread, ident.login or ident.via)
         self._answered(thread, res, by or ident.login or "human")
-        halflife.touch(self.conn, thread, self.clock())      # responder también reinicia la semivida
+        halflife.touch(self.conn, thread, self.clock())
         return dict(res, ok=True)
 
     def _answered(self, thread, res, by):
-        """Emite `question.answered` (needs: null) tras responder; un fallo aquí no deshace la respuesta."""
         if not self.emit_fn:
             return
         try:
@@ -533,7 +485,7 @@ class AgentApp:
             self.emit_fn("question.answered", row["project"] if row else None,
                          {"thread_id": thread, "request_id": rid, "choice": choice, "by": by,
                           "latency_s": round(time.time() - since) if since else None, "title": row["title"] if row else None})
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.exception("no pude registrar question.answered de %s", thread)
 
     def r_settle(self, ident, q, body):
@@ -542,7 +494,6 @@ class AgentApp:
         log.info("hilo %s settled por %s", thread, ident.login or ident.via)
         return {"ok": True, "thread_id": thread}
 
-    # -- oficina (api_version 3)
     def _office(self):
         if self.office is None:
             raise ApiError(503, "oficina no disponible en este agente")
@@ -563,14 +514,12 @@ class AgentApp:
         log.info("hilo %s asignado a %s por %s", thread, desk_id, ident.login or ident.via)
         return {"ok": True, "desk": desk_id, "thread_id": thread}
 
-    # -- semivida
     def r_touch(self, ident, q, body):
-        """Reinicia el reloj de semivida del hilo y reemite su último `task.state` con `touched_at` (misma atención)."""
         thread = _ident(body, "thread_id", True)
         now = halflife.touch(self.conn, thread, self.clock())
         try:
             self._retouch(thread, envelope.iso(now))
-        except Exception:  # noqa: BLE001 - el toque ya quedó guardado; el temporizador lo respeta igual
+        except Exception:
             log.exception("no pude reemitir task.state de %s tras tocarlo", thread)
         return {"ok": True, "thread_id": thread, "touched_at": envelope.iso(now)}
 
@@ -588,9 +537,7 @@ class AgentApp:
                 if env:
                     self.stream.bus.publish(env["seq"])
 
-    # -- escritorios
     def r_desk_note(self, ident, q, body, desk):
-        """Nota de un bot en la bandeja de un escritorio -> `desk.note` (la consume el hilo que despierta allí)."""
         d = self.desk_fn(desk)
         if d is None:
             raise ApiError(404, "escritorio desconocido (no lo declara el perfil de su proyecto)")
@@ -604,15 +551,14 @@ class AgentApp:
         if self.emit_fn:
             self.emit_fn("desk.note", d["project"], notes_mod.body(note, n))
         occ = ((self.office.desk(d["id"]) if self.office is not None else None) or {}).get("occupant")
-        if occ:                                       # dejar nota cuenta como tocar al ocupante (semivida)
+        if occ:
             now = halflife.touch(self.conn, occ["thread_id"], self.clock())
             try:
                 self._retouch(occ["thread_id"], envelope.iso(now))
-            except Exception:  # noqa: BLE001 - el toque ya quedó guardado
+            except Exception:
                 log.exception("no pude reemitir task.state de %s tras la nota", occ["thread_id"])
         return {"ok": True, "note_id": note["id"], "pending": n}
 
-    # -- suscripciones
     def r_subscribe(self, ident, q, body):
         name, wfile = _text(body, "name", True, 64), _text(body, "webhook_file", True, 1024)
         if not os.path.isfile(os.path.expanduser(wfile)):
@@ -647,7 +593,6 @@ class AgentApp:
             raise ApiError(404, "suscripción desconocida")
         return {"ok": True, "name": name}
 
-    # -- estructura de la oficina (bots; docs/agent-api.md «api_version 3»)
     def r_office_get(self, ident, q, body, project):
         try:
             return structure_mod.read(self.conn, project)
@@ -662,14 +607,14 @@ class AgentApp:
             raise ApiError(400, "reactivate debe ser una lista de ids de escritorio")
         if "office" not in body:
             raise ApiError(400, "office es obligatorio")
-        if self.office is not None and layout.parse_desk_id(project + "/0/x/0"):  # nombre sin `/` (si no, 400 de structure)
-            self.office.sync_project(project)               # la oficina conoce la estructura previa (no-op si ya estaba al día)
+        if self.office is not None and layout.parse_desk_id(project + "/0/x/0"):
+            self.office.sync_project(project)
         try:
             res = structure_mod.apply(self.conn, project, body.get("office"), body.get("rack"), by, base, react)
         except structure_mod.StructureError as e:
             raise ApiError(e.status, e.message, {"problems": e.problems} if e.problems else None)
         seq = None
-        if res["changed"] and self.office is not None:   # la oficina sincroniza su tabla `desks` y emite `office.changed {by}`
+        if res["changed"] and self.office is not None:
             env = self.office.sync_project(project, by=by)
             seq = (env or {}).get("seq")
         elif res["changed"] and self.emit_fn:
@@ -692,8 +637,6 @@ def _engine_snapshot():
     from .. import engine
     return engine.snapshot()
 
-
-# ---------------------------------------------------------------- HTTP
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "chopshop-agent"
@@ -729,22 +672,20 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
         return status
 
-    def send_error(self, code, message=None, explain=None):          # errores del propio http.server, también en JSON
+    def send_error(self, code, message=None, explain=None):
         self.close_connection = True
         try:
             self._reply(code, {"error": message or self.responses.get(code, ("error",))[0]})
         except OSError:
             pass
 
-    def log_request(self, code="-", size="-"):                         # el acceso se registra en _serve (sin query ni cabeceras)
+    def log_request(self, code="-", size="-"):
         pass
 
-    def log_message(self, fmt, *args):                                 # errores del parser HTTP: sin la línea de petición
+    def log_message(self, fmt, *args):
         log.debug("http.server: error de protocolo")
 
     def _read_raw(self):
-        """Bytes del cuerpo, siempre consumidos ANTES de responder (cerrar con datos sin leer provoca un RST que pisa la
-        respuesta). Un cuerpo mayor que MAX_BODY se descarta (hasta 1 MiB) y se rechaza con 413."""
         if self.headers.get("Transfer-Encoding"):
             raise ApiError(411, "Content-Length requerido (sin chunked)")
         raw = self.headers.get("Content-Length")
@@ -798,7 +739,7 @@ class Handler(BaseHTTPRequestHandler):
                     who += " dispositivo %s" % ident.device
                 if method not in ("GET", "POST", "DELETE", "PUT"):
                     raise ApiError(405, "método no permitido")
-                app.match(method, path)                      # 404/405 antes que la comprobación del Content-Type
+                app.match(method, path)
                 app.auth.check_json(method, self.headers, bool(raw))
                 body = self._parse_body(raw) if method != "GET" else {}
                 query = {k: v[0] for k, v in urllib.parse.parse_qs(parts.query, keep_blank_values=True).items()}
@@ -811,11 +752,11 @@ class Handler(BaseHTTPRequestHandler):
                 self.close_connection = True
                 hdrs = {"WWW-Authenticate": 'Bearer realm="chopshop-agent"'} if e.status == 401 else None
                 status = self._reply(e.status, dict(e.extra or {}, error=e.message), hdrs)
-            except Exception:  # noqa: BLE001 - nunca filtrar detalles internos al cliente
+            except Exception:
                 log.exception("error interno en %s %s", method, path)
                 status = self._reply(500, {"error": "error interno"})
         except OSError:
-            status = 0                                       # el cliente se fue a mitad de respuesta
+            status = 0
         finally:
             lvl = logging.INFO if (method != "GET" or status >= 400 or status == 0) else logging.DEBUG
             log.log(lvl, "%s %s %s -> %s (%s)", self.client_address[0], method, path, status, who)
@@ -836,6 +777,6 @@ class AgentHTTPServer(ThreadingHTTPServer):
         super().__init__(address, handler)
 
     def server_bind(self):
-        socketserver.TCPServer.server_bind(self)                      # sin getfqdn(): no queremos DNS inverso al arrancar
+        socketserver.TCPServer.server_bind(self)
         host, port = self.server_address[:2]
         self.server_name, self.server_port = host, port

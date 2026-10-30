@@ -1,14 +1,3 @@
-"""Cliente HTTP mínimo (urllib) hacia la API del chopshop-agent: lo usa `chopshop agent status`.
-
-    c = AgentClient(url=None, token_file=None, timeout=10)   # None = resolver desde entorno/config
-    c.get("/snapshot")                     -> dict (JSON)
-    c.post("/settle", {...})               -> dict (JSON)
-
-- URL: argumento `url` > variable `CHOPSHOP_AGENT_URL` > `http://127.0.0.1:<agent.port>` (puerto de config.toml).
-- Auth: `Authorization: Bearer <contenido de token_file>` si el archivo existe (el origen local también se acepta sin token).
-  El token nunca se imprime ni aparece en los mensajes de error.
-- Cualquier fallo (red, HTTP != 2xx, JSON inválido) lanza `AgentError`; nada más se propaga.
-"""
 import json
 import os
 import urllib.error
@@ -21,15 +10,12 @@ URL_ENV = "CHOPSHOP_AGENT_URL"
 
 
 class AgentError(Exception):
-    """Fallo al hablar con el agente. `status` es el código HTTP (None si no hubo respuesta)."""
-
     def __init__(self, message, status=None):
         super().__init__(message)
         self.status = status
 
 
 def load_cfg():
-    """Configuración del agente (sección [agent]); si el config.toml está roto cae a los valores por defecto."""
     try:
         from . import config
         return config.load()
@@ -49,7 +35,6 @@ def resolve_url(cfg=None, environ=None):
 
 
 def read_token(token_file):
-    """Contenido (sin espacios) del archivo de token, o None si no existe/no se puede leer."""
     if not token_file:
         return None
     try:
@@ -66,7 +51,6 @@ class AgentClient:
         self.url = url.rstrip("/") if url else resolve_url(cfg, environ)
         self.token = read_token(token_file if token_file is not None else cfg.get("token_file"))
         self.timeout = timeout
-        # sin proxies: el agente está en loopback o en la IP de Tailscale
         self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
     def _request(self, method, path, body=None, params=None, timeout=None):
@@ -101,7 +85,6 @@ class AgentClient:
 
 
 def _error_message(e):
-    """Mensaje del cuerpo `{"error": ...}` de la API, o el texto HTTP."""
     try:
         msg = json.loads(e.read().decode("utf-8")).get("error")
     except (ValueError, AttributeError, OSError):

@@ -1,13 +1,3 @@
-"""Cliente nativo (stdlib) del MCP HTTP de T3: JSON-RPC 2.0 por POST a <origin>/mcp.
-
-Reemplaza al cliente node anterior y al transporte remoto viejo. Autenticación: flujo
-OAuth MCP de T3 (registro de cliente público + PKCE S256) aprobado con un código de pairing de un solo
-uso emitido EN LOCAL por `t3 auth pairing create` y revocado siempre después. El resultado es una sesión
-"MCP client" normal de T3, cacheada 0600 en <CHOPSHOP_HOME>/t3-credential.json.
-El token nunca se imprime, ni se registra, ni aparece en mensajes de error.
-
-Todo lo externo es inyectable: `http(method, url, headers, body, timeout) -> (status, headers, text)`
-(cabeceras en minúsculas), `run(argv, timeout) -> objeto con returncode/stdout/stderr` y `clock() -> s`."""
 import base64
 import hashlib
 import json
@@ -27,7 +17,6 @@ PROTOCOL = "2025-06-18"
 REDIRECT = "http://127.0.0.1:1/chopshop-callback"
 RUNTIME_FILE = "~/.t3/userdata/server-runtime.json"
 MAX_MSG = 600
-# acciones de t3_thread_organize permitidas: jamás archivar desde Chopshop
 ORGANIZE_OK = ("settle", "unsettle")
 
 
@@ -52,7 +41,6 @@ _opener = urllib.request.build_opener(_NoRedirect)
 
 
 def _urllib_http(method, url, headers, body, timeout):
-    """Transporte por defecto: devuelve (status, cabeceras en minúsculas, texto); errores HTTP no lanzan."""
     req = urllib.request.Request(url, data=body, headers=headers, method=method)
     try:
         with _opener.open(req, timeout=timeout) as r:
@@ -100,10 +88,9 @@ class Client:
         self._sid = None
         self._ready = False
         self._n = 0
-        self._secrets = set()  # valores a tachar de cualquier mensaje (token, pairing, verifier, code)
+        self._secrets = set()
         self._lock = threading.RLock()
 
-    # ---- utilidades ----
     def _err(self, msg):
         msg = str(msg)
         for s in self._secrets:
@@ -153,10 +140,9 @@ class Client:
             return self._http("POST", url, headers, body, self.timeout)
         except T3Error as e:
             raise self._err(e)
-        except Exception as e:  # red, timeouts, DNS…
+        except Exception as e:
             raise self._err("error de red con T3 (%s): %s" % (urllib.parse.urlsplit(url).path, e))
 
-    # ---- credencial ----
     def _load_cache(self):
         path = self._cache_path()
         try:
@@ -209,7 +195,6 @@ class Client:
             raise self._err("%s devolvió algo que no es JSON" % path)
 
     def _t3(self, args):
-        """Ejecuta el CLI `t3` local; devuelve stdout o lanza OSError/RuntimeError."""
         r = self._run([self.t3_bin] + args, 30)
         if r.returncode != 0:
             raise RuntimeError(("%s" % (r.stderr or r.stdout or "")).strip()[:200] or "código %s" % r.returncode)
@@ -270,7 +255,6 @@ class Client:
             expires_in = float(tok.get("expires_in") or 0)
         except (TypeError, ValueError):
             expires_in = 0
-        # margen de 1 h como el cliente anterior; si T3 no da caducidad, se reintenta ante 401
         ttl = expires_in - 3600 if expires_in > 3600 else max(expires_in, 0) or 24 * 3600
         cred = {"origin": self.origin, "access": self.access, "token": token,
                 "expiresAt": int(self._now_ms() + ttl * 1000)}
@@ -286,7 +270,6 @@ class Client:
             self._cred = self._load_cache() or self._sign_in()
         return self._cred
 
-    # ---- JSON-RPC ----
     def _rpc(self, method, params, notify=False):
         cred = self._credential()
         headers = {"content-type": "application/json", "accept": "application/json, text/event-stream",
@@ -359,7 +342,6 @@ class Client:
                     log.info("sesión MCP caducada: la reabro")
                     self._reset_session()
 
-    # ---- API pública ----
     def list_tools(self):
         res = self._request("tools/list", {}) or {}
         return res.get("tools", []) if isinstance(res, dict) else []
@@ -377,14 +359,12 @@ class Client:
             data = res.get("content")
         if res.get("isError"):
             raise self._err("%s falló: %s" % (tool, _text_of(data)))
-        # errores de herramienta MCP que llegan como content=[{type:text,text:'{"_tag":...Failure...}'}]
         if isinstance(data, list) and data and isinstance(data[0], dict) and "_tag" in str(data[0].get("text", ""))[:20]:
             raise self._err("%s: %s" % (tool, data[0]["text"]))
         return data
 
 
 def _sse_events(text):
-    """Devuelve el payload (líneas data: unidas) de cada evento SSE."""
     buf = []
     for line in text.splitlines():
         if line.startswith("data:"):

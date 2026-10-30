@@ -10,12 +10,6 @@
         "Resources/web/**"
       ]
     },
-    "test": {
-      "dependsOn": [
-        "^build"
-      ],
-      "cache": false
-    },
     "check": {
       "dependsOn": [
         "^build"

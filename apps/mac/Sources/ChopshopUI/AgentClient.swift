@@ -1,12 +1,10 @@
 import Foundation
 import ChopshopNative
 
-/// Estado de la última consulta a un agente. Los textos para el usuario los compone la UI web (`statusMessage`).
 enum AgentStatus: String {
     case ok, unreachable, forbidden, unauthorized, incompatible, error
 }
 
-/// Resultado de consultar `GET /snapshot` a un agente. Nunca lanza: los fallos de red o de acceso son un estado visible.
 struct AgentResult {
     var name: String
     var status: AgentStatus
@@ -17,7 +15,6 @@ struct AgentResult {
     var isOK: Bool { status == .ok && snapshot != nil }
     var machineId: String? { snapshot?["machine_id"] as? String }
 
-    /// Texto corto para la barra de la ventana.
     var shortMessage: String {
         switch status {
         case .ok: return ""
@@ -28,7 +25,6 @@ struct AgentResult {
         }
     }
 
-    /// Lo que se entrega a la UI web por el puente (mensaje `agents`). El snapshot va tal cual lo devolvió el agente.
     var bridgeObject: [String: Any] {
         var o: [String: Any] = ["name": name, "status": status.rawValue, "fetched": fetchedAt.timeIntervalSince1970]
         if let error { o["error"] = error }
@@ -37,13 +33,11 @@ struct AgentResult {
     }
 }
 
-/// Acción de la UI traducida a una petición de la API (docs/agent-api.md). Lista cerrada: nada de rutas arbitrarias.
 struct AgentAction {
     var method: String
     var path: String
     var body: [String: Any]
 
-    /// `type` y `payload` son los del puente JS -> Swift. nil si el tipo no existe o faltan datos obligatorios.
     static func route(type: String, payload: [String: Any]) -> AgentAction? {
         func str(_ k: String) -> String? { (payload[k] as? String).flatMap { $0.isEmpty ? nil : $0 } }
         func copy(_ keys: [String]) -> [String: Any] {
@@ -64,7 +58,6 @@ struct AgentAction {
     }
 }
 
-/// Resultado de una acción, listo para el puente (mensaje `actionResult`).
 struct ActionResult {
     var ok: Bool
     var message: String
@@ -77,14 +70,10 @@ struct ActionResult {
     }
 }
 
-// MARK: - Transporte
-
 protocol HTTPTransport {
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse)
 }
 
-/// URLSession efímera (sin caché ni cookies) con tiempos de espera cortos; nunca sigue redirecciones
-/// (así el `Authorization` no puede acabar en otro host).
 struct URLSessionTransport: HTTPTransport {
     private let session: URLSession
 
@@ -110,10 +99,6 @@ struct URLSessionTransport: HTTPTransport {
     }
 }
 
-// MARK: - Cliente
-
-/// Cliente de la API de un agente. La credencial de dispositivo (`cs1_…`, emparejamiento) se lee del almacén (Keychain) en cada
-/// petición (así emparejar o desemparejar no exige reiniciar) y solo vive en la cabecera: nunca se guarda en otro sitio ni se imprime.
 final class AgentClient {
     let spec: AgentSpec
     private let transport: HTTPTransport
@@ -125,7 +110,6 @@ final class AgentClient {
         self.credentials = credentials
     }
 
-    /// Credencial guardada para este agente (nil = sin emparejar).
     var credential: String? { spec.baseURL.flatMap { credentials.find(baseURL: $0)?.credential } }
     var isPaired: Bool { credential != nil }
 
@@ -160,7 +144,6 @@ final class AgentClient {
         }
     }
 
-    /// Descripción corta de un fallo de red, sin URL ni cabeceras.
     static func describe(_ error: Error) -> String {
         guard let e = error as? URLError else { return "fallo de red" }
         switch e.code {
@@ -176,8 +159,6 @@ final class AgentClient {
         if let m = json?["error"] as? String, !m.isEmpty { return String(m.prefix(200)) }
         return "HTTP \(code)"
     }
-
-    // --- operaciones ---
 
     func fetchSnapshot() async -> AgentResult {
         var r = AgentResult(name: spec.name, status: .error)
@@ -220,7 +201,6 @@ final class AgentClient {
     }
 }
 
-/// Conjunto de agentes configurados.
 final class AgentHub {
     let clients: [AgentClient]
 
@@ -230,13 +210,11 @@ final class AgentHub {
 
     var isEmpty: Bool { clients.isEmpty }
 
-    /// Cliente por nombre; sin nombre (o desconocido) y con un solo agente, ese.
     func client(named name: String?) -> AgentClient? {
         if let name, let c = clients.first(where: { $0.spec.name == name }) { return c }
         return clients.count == 1 ? clients[0] : nil
     }
 
-    /// Consulta todos los agentes en paralelo; el resultado conserva el orden de la configuración.
     func fetchAll() async -> [AgentResult] {
         await withTaskGroup(of: (Int, AgentResult).self, returning: [AgentResult].self) { group in
             for (i, c) in clients.enumerated() { group.addTask { (i, await c.fetchSnapshot()) } }

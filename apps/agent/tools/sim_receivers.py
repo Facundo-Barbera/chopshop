@@ -1,14 +1,8 @@
 #!/usr/bin/env python3
-"""Receptores SIMULADOS para probar las reacciones en local (sin bots reales, sin red externa).
-  bot   -> recibe el webhook de nivel `bot`, decide con una heurística y responde con `chopshop answer --by bot-sim`
-  human -> recibe el webhook de nivel `human` y solo lo registra (una persona/test lo resuelve después)
-Escucha en 127.0.0.1 (puertos libres); escribe las URLs en archivos 0600 dentro de <home>/sim/ y los eventos en *.jsonl.
-Uso: sim_receivers.py [--home DIR]   (se detiene con SIGTERM/Ctrl-C; el PID lo imprime al arrancar)"""
 import http.server
 import json
 import os
 import subprocess
-import sys
 import threading
 import time
 
@@ -18,7 +12,6 @@ SIM = os.path.join(HOME, "sim")
 
 
 def decide(options, summary):
-    """Heurística del 'bot' simulado: prefiere lo simple/mínimo; si no hay pista, la primera opción."""
     for o in options or []:
         if any(k in str(o).lower() for k in ("simple", "minimal", "sin caché", "no cache", "recommended")):
             return str(o)

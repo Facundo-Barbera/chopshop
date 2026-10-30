@@ -1,24 +1,3 @@
-"""`machine_room` de `GET /state` v3 (docs/agent-api.md, «api_version 3»): registro de listeners, scripts y webhooks.
-
-`apply(state, env)` pliega en sitio los sobres que le tocan (`projection._apply` lo llama con cada sobre; misma regla que
-`LiveState.swift`):
-- `listener.state` -> upsert en `listeners` por `name` (cuerpo + `ts`), por nombre.
-- `automation.ran` -> upsert en `automations` por `(project, automation)`.
-`subscriptions` no sale de sobres: `live(state, conn)` la rellena desde SQLite (nunca la URL).
-- `forge.repo.state` -> upsert del módulo en `rack` por `(provider, repo)` (cuerpo + `ts`; `project` del sobre si falta),
-  conservando sus `runs`.
-- `forge.run.state` -> upsert del run (cuerpo sin `provider`/`repo`/`project`) por `run_id` en su módulo (si no existe, se
-  crea gris); se guardan todos los no completados y los `RACK_DONE` completados más recientes (por `updated_at`; sin fecha
-  cuentan como los más viejos; empate -> el que llegó después), en orden de llegada.
-`rack` se ordena por `(project, kind == main ? 0 : 1, repo)` (lo mismo que `MachineRoomModel.swift`).
-Los emisores son `forge/rack.py` (`forge.repo.state`) y `actions.py` (`forge.run.state`).
-
-Salas por proyecto (cada sala de máquinas es una SALA de un piso de su proyecto, no una vista aparte): opcionales, 0..N, las
-declara el perfil local en `machine_rooms:` (`layout.machine_rooms`) y llegan con `office.changed` a `projects[].office.machine_rooms`.
-`rooms(state)` deja en cada `projects[]` `machine_rooms` = [`scope(sala, proyecto, cfg)`]: `name`, `floor` y lo que la sala aloja
-según su configuración (nombres o globs): los módulos del `rack` del proyecto por `repos` (`<dueño>/<repo>`), las `automations`
-del proyecto por nombre, los `listeners` y las `subscriptions` por nombre. Sin salas declaradas -> `[]`. `machine_room` = la
-primera o null (clientes anteriores). `projection._apply` lo recalcula tras cada sobre y `live` tras rellenar `subscriptions`."""
 import fnmatch
 import re
 
@@ -46,7 +25,6 @@ def _clean(body):
 
 
 def apply(state, env):
-    """Aplica en sitio. Devuelve True si el sobre era de la sala de máquinas."""
     typ, body, ts = env.get("type") or "", env.get("body") or {}, env.get("ts")
     if typ == "listener.state" and body.get("name"):
         mr = _room(state)
@@ -95,7 +73,6 @@ def _unit(mr, provider, repo, env):
 
 
 def _trim(runs):
-    """Todos los activos y los RACK_DONE completados más recientes, en el orden en que estaban."""
     done = [(i, r) for i, r in enumerate(runs) if r.get("status") == "completed"]
     if len(done) <= RACK_DONE:
         return runs
@@ -108,7 +85,6 @@ def _sort(mr):
 
 
 def filter_project(mr, project):
-    """Sala de máquinas vista desde un proyecto: sus automatizaciones y sus módulos del rack; listeners y webhooks enteros."""
     if not isinstance(mr, dict):
         return mr
     return dict(mr, automations=[a for a in mr.get("automations") or [] if a.get("project") == project],
@@ -120,7 +96,6 @@ def _picks(name, pats):
 
 
 def scope(mr, project, cfg):
-    """Sala de máquinas `cfg` ({name, floor, repos, listeners, automations, subscriptions}) de un proyecto. No muta `mr`."""
     mr, cfg = mr if isinstance(mr, dict) else empty(), cfg or {}
     return {"name": cfg.get("name"), "floor": cfg.get("floor", 0),
             "listeners": [l for l in mr.get("listeners") or [] if _picks(l.get("name"), cfg.get("listeners"))],
@@ -131,8 +106,6 @@ def scope(mr, project, cfg):
 
 
 def rooms(state):
-    """`projects[].machine_rooms` (y `machine_room` = la primera o None) desde `machine_room` y la configuración de cada
-    proyecto. En sitio; devuelve `state`."""
     mr = state.get("machine_room")
     for p in state.get("projects") or []:
         cfgs = (p.get("office") or {}).get("machine_rooms") or []
@@ -142,7 +115,6 @@ def rooms(state):
 
 
 def subscriptions(conn):
-    """[{name, projects, last_ok, last_error, signed}] desde `subscriptions` + la última entrega de cada una. Nunca la URL."""
     with db.tx():
         subs = db.rows(conn.execute("SELECT * FROM subscriptions ORDER BY name"))
         out = []
@@ -159,9 +131,8 @@ def subscriptions(conn):
 
 
 def live(state, conn):
-    """Rellena `machine_room.subscriptions` (lo único que no viene de sobres) y las salas por proyecto. En sitio; devuelve `state`."""
     try:
         _room(state)["subscriptions"] = subscriptions(conn)
-    except Exception:  # noqa: BLE001 - una DB vieja sin columnas v4 no rompe /state
+    except Exception:
         _room(state)["subscriptions"] = []
     return rooms(state)

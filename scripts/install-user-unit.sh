@@ -1,13 +1,4 @@
 #!/bin/sh
-# Instala (solo COPIA) la unidad systemd --user del agente y hace `daemon-reload`.
-# NO ejecuta `enable`, NO ejecuta `start`, NO activa linger: eso lo decides tú (ver docs/agent-service.md).
-#
-# Uso: scripts/install-user-unit.sh [--dry-run] [--force] [--chopshop RUTA] [--dest DIR] [--no-reload] [-- ARGS_DE_PRINT_UNIT...]
-#   --dry-run     muestra qué haría y la unidad renderizada; no escribe nada ni llama a systemctl
-#   --force       reemplaza una unidad ya instalada que sea distinta (sin esto se muestra la diferencia y se aborta)
-#   --chopshop    ejecutable `chopshop` (por defecto apps/agent/bin/chopshop de este repo)
-#   --dest        carpeta destino (por defecto $XDG_CONFIG_HOME/systemd/user o ~/.config/systemd/user)
-#   --no-reload   no ejecuta `systemctl --user daemon-reload`
 set -eu
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"

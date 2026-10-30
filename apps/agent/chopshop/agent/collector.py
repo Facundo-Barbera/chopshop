@@ -1,18 +1,3 @@
-"""Colector de métricas del agente: CPU/RAM de la máquina y de los procesos agrupados por **app** y por **proyecto**.
-
-Solo lee `/proc` (stat, cmdline, cwd, cgroup, environ, meminfo, loadavg, uptime) y `os.statvfs`; nunca ejecuta `ps`.
-Persiste crudo en `machine_samples`/`samples`, agrega a `samples_agg` (1 min y 1 h) y aplica la retención de `cfg["retention"]`.
-
-Diseño para costar < 1 % de CPU:
-- solo se recorren los procesos (no los hilos): el `stat` del proceso ya suma todos sus hilos;
-- una lectura de `stat` por proceso y muestra; `cmdline`, `cgroup` y `environ` se leen una vez y se cachean por
-  (pid, starttime, comm) (un `exec` cambia `comm`, así que invalida el caché);
-- los hilos del kernel y los zombis se ignoran;
-- el intervalo se espacia (`Collector.interval()`) cuando la máquina está cargada.
-
-El parseo está en funciones puras de módulo (testeables sin /proc); `Collector(cfg, conn, proc_root=...)` acepta un
-árbol /proc falso."""
-import json
 import os
 import re
 import threading
@@ -21,12 +6,12 @@ import time
 from . import db
 
 GROUPS = ("machine", "app", "project")
-PF_KTHREAD = 0x00200000          # flag de hilo del kernel en /proc/<pid>/stat
-MACHINE_NAME = "machine"         # nombre de la serie/fila agregada de la máquina
-MAX_BACKOFF = 60.0               # tope (s) del intervalo con retroceso, salvo que sample_interval ya sea mayor
-TOP_N = 25                       # apps persistidas por muestra: las N con más CPU unidas a las N con más RAM
-DISK_EVERY = 60.0                # s entre lecturas de statvfs
-DEFAULT_STEP = 10.0              # paso crudo asumido si no hay datos para estimarlo
+PF_KTHREAD = 0x00200000
+MACHINE_NAME = "machine"
+MAX_BACKOFF = 60.0
+TOP_N = 25
+DISK_EVERY = 60.0
+DEFAULT_STEP = 10.0
 THREAD_ENV = "T3CODE_THREAD_ID"
 
 DEFAULT_RETENTION = {"raw_hours": 24, "m1_days": 30, "h1_days": 365}
@@ -38,15 +23,10 @@ except (ValueError, OSError, AttributeError):
 
 
 class CollectorError(ValueError):
-    """Parámetros inválidos del colector (grupo desconocido, rango invertido...)."""
+    pass
 
-
-# ---------------------------------------------------------------------------------------------------------------
-# Parseo puro de /proc
-# ---------------------------------------------------------------------------------------------------------------
 
 def parse_stat(text):
-    """`/proc/<pid>/stat` -> dict o None. `comm` puede llevar espacios y paréntesis: se corta en el último ')'."""
     i, j = text.find("("), text.rfind(")")
     if i < 0 or j < i:
         return None
@@ -55,14 +35,13 @@ def parse_stat(text):
         return None
     try:
         return {"pid": int(text[:i]), "comm": text[i + 1:j], "state": rest[0], "ppid": int(rest[1]),
-                "flags": int(rest[6]), "ticks": int(rest[11]) + int(rest[12]),   # utime + stime (ticks de CLK_TCK)
+                "flags": int(rest[6]), "ticks": int(rest[11]) + int(rest[12]),
                 "starttime": int(rest[19]), "rss_pages": int(rest[21])}
     except ValueError:
         return None
 
 
 def parse_cpu_stat(text):
-    """`/proc/stat` -> {"busy","total","cpus"} (jiffies agregados) o None."""
     out = None
     cpus = 0
     for line in text.splitlines():
@@ -73,8 +52,8 @@ def parse_cpu_stat(text):
                 return None
             if len(v) < 4:
                 return None
-            total = sum(v[:8])                      # user..steal; guest ya está dentro de user/nice
-            idle = v[3] + (v[4] if len(v) > 4 else 0)   # idle + iowait
+            total = sum(v[:8])
+            idle = v[3] + (v[4] if len(v) > 4 else 0)
             out = {"busy": total - idle, "total": total}
         elif line.startswith("cpu") and line[3:4].isdigit():
             cpus += 1
@@ -84,7 +63,6 @@ def parse_cpu_stat(text):
 
 
 def parse_meminfo(text):
-    """`/proc/meminfo` -> {clave: kB}."""
     kv = {}
     for line in text.splitlines():
         p = line.split()
@@ -97,7 +75,6 @@ def parse_meminfo(text):
 
 
 def parse_loadavg(text):
-    """`/proc/loadavg` -> (l1, l5, l15) o None."""
     p = text.split()
     try:
         return float(p[0]), float(p[1]), float(p[2])
@@ -106,7 +83,6 @@ def parse_loadavg(text):
 
 
 def parse_uptime(text):
-    """`/proc/uptime` -> segundos desde el arranque o None."""
     try:
         return float(text.split()[0])
     except (IndexError, ValueError):
@@ -114,14 +90,12 @@ def parse_uptime(text):
 
 
 def parse_cmdline(raw):
-    """Bytes de `/proc/<pid>/cmdline` -> lista de argumentos."""
     if not raw:
         return []
     return [a.decode("utf-8", "replace") for a in raw.rstrip(b"\0").split(b"\0")]
 
 
 def parse_environ_var(raw, name):
-    """Valor de `name` en los bytes de `/proc/<pid>/environ` o None."""
     prefix = name.encode() + b"="
     for item in raw.split(b"\0"):
         if item.startswith(prefix):
@@ -130,7 +104,6 @@ def parse_environ_var(raw, name):
 
 
 def parse_cgroup(text):
-    """`/proc/<pid>/cgroup` -> ruta del cgroup ('/user.slice/...'); cgroup v2 ('0::') o la jerarquía systemd de v1."""
     first = None
     for line in text.splitlines():
         parts = line.split(":", 2)
@@ -148,7 +121,7 @@ def parse_cgroup(text):
 _GENERIC_CG = {"-.slice", "user.slice", "system.slice", "app.slice", "session.slice", "background.slice",
                "init.scope", "machine.slice"}
 _GENERIC_CG_RX = re.compile(r"^(?:user-\d+\.slice|user@\d+\.service|session-\w+\.scope)$")
-_INSTANCE_SLICE_RX = re.compile(r"^(.+)-[0-9a-f]{8,}\.slice$")   # 'app-t3code-agents-2523669e90f4.slice'
+_INSTANCE_SLICE_RX = re.compile(r"^(.+)-[0-9a-f]{8,}\.slice$")
 
 
 def _cg_components(path):
@@ -156,9 +129,6 @@ def _cg_components(path):
 
 
 def cgroup_label(path):
-    """Nombre corto del cgroup que se reporta: la unidad `chopshop-*` más interna; si no, el slice no genérico más
-    interno (ignorando slices por instancia como `app-t3code-agents-<hex>.slice`, que se reportan como su padre);
-    si no, el service/scope más interno. None si solo hay cgroups genéricos."""
     comps = _cg_components(path or "")
     rev = list(reversed(comps))
     for c in rev:
@@ -185,7 +155,6 @@ _TS_UNIT_FALLBACK_RX = re.compile(r"^chopshop-ts-(.+)-[^-]+$")
 
 
 def project_from_cgroup(path):
-    """Proyecto de una unidad `chopshop-ts-<proyecto>-<id>[.service|.scope]` en la ruta del cgroup, o None."""
     for c in reversed(_cg_components(path or "")):
         if not c.startswith("chopshop-ts-"):
             continue
@@ -196,7 +165,6 @@ def project_from_cgroup(path):
     return None
 
 
-# Herramientas que corren sobre node/bun/deno y se reportan con su propio nombre de app.
 NODE_TOOLS = {"claude", "codex", "tsc", "tsserver", "vitest", "vite", "jest", "eslint", "prettier", "turbo", "pnpm",
               "npm", "npx", "yarn", "next", "esbuild", "webpack", "playwright", "storybook", "nodemon", "tsx"}
 _TOOL_ALIAS = {"claude-code": "claude"}
@@ -208,7 +176,6 @@ _SCRIPT_EXT_RX = re.compile(r"\.(?:c|m)?[jt]s$|\.cjs$|\.mjs$")
 
 
 def normalize_exe(name):
-    """Nombre de ejecutable -> nombre de app normalizado (python3.12 -> python, google-chrome-stable -> chrome...)."""
     n = name.strip().lstrip("-").lower()
     if n.endswith(".exe"):
         n = n[:-4]
@@ -225,7 +192,6 @@ def normalize_exe(name):
 
 
 def _node_tool(args):
-    """Herramienta detrás de `node <script>`: busca el nombre de la herramienta en la ruta del script (de atrás a delante)."""
     script = None
     it = iter(args)
     for a in it:
@@ -249,12 +215,11 @@ def _node_tool(args):
 
 
 def app_name(comm, cmdline):
-    """Nombre de app normalizado para un proceso: ejecutable de argv[0] (o `comm`); node + herramienta conocida -> la herramienta."""
     exe = ""
     if cmdline and cmdline[0]:
         first = cmdline[0]
         if len(cmdline) == 1 and " " in first and not first.startswith("/"):
-            first = first.split(" ", 1)[0]          # títulos de proceso tipo 'next-server (v14)'
+            first = first.split(" ", 1)[0]
         exe = os.path.basename(first.rstrip("/"))
     name = normalize_exe(exe or comm or "")
     if name in _NODE_LIKE and len(cmdline) > 1:
@@ -270,7 +235,6 @@ def _norm_path(p):
 
 
 def build_matchers(cfg):
-    """Prefijos para asignar un cwd a un proyecto -> (explicit [(prefijo, nombre)], roots [raíz])."""
     explicit, roots = [], set()
     for name, p in (cfg.get("projects") or {}).items():
         if isinstance(p, dict):
@@ -287,7 +251,6 @@ def build_matchers(cfg):
 
 
 def project_for_path(cwd, explicit, roots):
-    """Proyecto de un cwd: raíz/worktrees de un proyecto configurado, o `<worktrees_root|projects_root>/<proyecto>/...`."""
     if not cwd:
         return None
     if cwd.endswith(" (deleted)"):
@@ -303,12 +266,7 @@ def project_for_path(cwd, explicit, roots):
     return None
 
 
-# ---------------------------------------------------------------------------------------------------------------
-# E/S de /proc
-# ---------------------------------------------------------------------------------------------------------------
-
 def _read(path, limit=65536):
-    """Lee hasta `limit` bytes de un archivo de /proc; None si no existe o no hay permiso."""
     try:
         fd = os.open(path, os.O_RDONLY)
     except OSError:
@@ -329,12 +287,11 @@ def _read(path, limit=65536):
 
 
 class _Info(object):
-    """Datos estáticos de un proceso (cacheados por pid+starttime+comm)."""
     __slots__ = ("app", "cg", "cg_project", "tid")
 
     def __init__(self, app, cg, cg_project):
         self.app, self.cg, self.cg_project = app, cg, cg_project
-        self.tid = None      # None = environ sin leer; "" = leído y sin T3CODE_THREAD_ID
+        self.tid = None
 
 
 class _Group(object):
@@ -345,8 +302,6 @@ class _Group(object):
 
 
 class Collector(object):
-    """Muestrea /proc, persiste y compacta. Seguro entre hilos (un candado interno + `db.tx()` para escribir)."""
-
     def __init__(self, cfg, conn, proc_root="/proc", clock=time.time, disk_path="/", page_size=None, clk_tck=None):
         self.cfg, self.conn = cfg, conn
         self.proc_root = proc_root
@@ -355,20 +310,19 @@ class Collector(object):
         self.page_size = page_size or _page_size()
         self.clk_tck = clk_tck or CLK_TCK
         self.top_n = TOP_N
-        self.last_ts = None             # ts de la última muestra
-        self.last_error = None          # repr de la última excepción en run_forever
+        self.last_ts = None
+        self.last_error = None
         self._explicit, self._roots = build_matchers(cfg)
         self._lock = threading.RLock()
-        self._info = {}                 # (pid, starttime, comm) -> _Info
-        self._prev = {}                 # (pid, starttime) -> ticks de la muestra anterior
+        self._info = {}
+        self._prev = {}
         self._prev_ts = None
         self._prev_uptime = None
         self._prev_cpu = None
-        self._thread_proj = {}          # thread_id -> proyecto (válido solo durante una muestra)
-        self._disk = None               # (ts, used_gb, total_gb)
+        self._thread_proj = {}
+        self._disk = None
         self._latest = None
 
-    # -- utilidades ---------------------------------------------------------------------------------------------
 
     def _path(self, *parts):
         return os.path.join(self.proc_root, *parts)
@@ -378,7 +332,6 @@ class Collector(object):
         return raw.decode("utf-8", "replace") if raw else ""
 
     def interval(self):
-        """Segundos hasta la próxima muestra: `sample_interval`, x3 si load1 > 0.5*cpus y x6 si load1 > cpus (tope 60 s)."""
         try:
             base = float(self.cfg.get("sample_interval") or 10)
         except (TypeError, ValueError):
@@ -390,7 +343,6 @@ class Collector(object):
         mult = 6 if load1 > cpus else 3 if load1 > 0.5 * cpus else 1
         return min(base * mult, max(base, MAX_BACKOFF))
 
-    # -- muestreo -----------------------------------------------------------------------------------------------
 
     def _read_machine(self, now):
         cpu = parse_cpu_stat(self._text("stat"))
@@ -435,7 +387,7 @@ class Collector(object):
             with db.tx():
                 row = self.conn.execute("SELECT project FROM t3_threads WHERE thread_id=?", (tid,)).fetchone()
             proj = row[0] if row and row[0] else None
-        except Exception:    # DB ocupada o sin tabla: el proceso simplemente queda sin proyecto por este camino
+        except Exception:
             proj = None
         self._thread_proj[tid] = proj
         return proj
@@ -446,7 +398,6 @@ class Collector(object):
         return _Info(app_name(st["comm"], cmd), cgroup_label(cgpath), project_from_cgroup(cgpath))
 
     def _scan(self, uptime, dt):
-        """Recorre los procesos -> (apps {nombre: _Group}, projects {nombre: _Group}, n_procs)."""
         apps, projects = {}, {}
         info_cache, prev = self._info, self._prev
         new_info, new_prev = {}, {}
@@ -475,7 +426,6 @@ class Collector(object):
                 info = self._classify(pid_dir, st)
             new_info[ik] = info
             new_prev[pk] = st["ticks"]
-            # delta de CPU: contra la muestra anterior; un proceso nacido entre muestras cuenta todo lo que ha gastado
             if first:
                 delta = 0
             elif pk in prev:
@@ -508,7 +458,6 @@ class Collector(object):
             g.cgs[cg] = g.cgs.get(cg, 0) + 1
 
     def _project_of(self, pid_dir, info):
-        """cwd bajo un proyecto -> T3CODE_THREAD_ID (tabla t3_threads) -> unidad chopshop-ts-<proyecto>-..."""
         try:
             cwd = os.readlink(os.path.join(pid_dir, "cwd"))
         except OSError:
@@ -540,7 +489,6 @@ class Collector(object):
         return out
 
     def sample_once(self):
-        """Toma una muestra, la persiste y devuelve {"machine","apps","projects"}. La primera muestra tiene cpu_pct = 0."""
         with self._lock:
             now = self._clock()
             dt = (now - self._prev_ts) if self._prev_ts is not None else 0.0
@@ -576,9 +524,6 @@ class Collector(object):
                 raise
 
     def latest(self):
-        """Última muestra en memoria; tras un reinicio, la última guardada en la DB; vacía si no hay ninguna."""
-        # Sin `self._lock`: Resources llama aquí con `db.tx()` tomado y `sample_once` toma `_lock` y luego `db.tx()`
-        # (inversión de orden = interbloqueo). Leer la referencia es atómico y `_latest` se reemplaza entera, no se muta.
         snap = self._latest
         if snap is not None:
             return snap
@@ -605,8 +550,6 @@ class Collector(object):
         return snap
 
     def run_forever(self, stop, compact_every=300.0):
-        """Bucle de fondo para el servidor: muestrea, compacta cada `compact_every` s y espera `interval()`.
-        `stop` es un threading.Event. Un fallo no mata el hilo: queda en `last_error`."""
         last_compact = None
         while not stop.is_set():
             try:
@@ -621,11 +564,8 @@ class Collector(object):
             if stop.wait(self.interval()):
                 break
 
-    # -- compactación y retención ---------------------------------------------------------------------------------
 
     def compact(self, now=None):
-        """Agrega lo crudo a `samples_agg` 1m y lo de 1m a 1h (solo cubetas completas, de forma incremental e idempotente) y
-        aplica la retención de `cfg["retention"]`. Devuelve {"m1": filas, "h1": filas, "purged": filas}."""
         now = self._clock() if now is None else now
         with self._lock, db.tx():
             m1 = self._compact_m1(now)
@@ -695,7 +635,6 @@ class Collector(object):
         ret.update(self.cfg.get("retention") or {})
         m1_wm, h1_wm = self._meta_get("collector.m1_wm"), self._meta_get("collector.h1_wm")
         purged = 0
-        # lo crudo y los 1m solo se borran si ya están agregados al nivel siguiente (no se pierde nada sin compactar)
         if m1_wm is not None:
             cut = min(now - float(ret["raw_hours"]) * 3600, m1_wm)
             purged += self.conn.execute("DELETE FROM machine_samples WHERE ts<?", (cut,)).rowcount
@@ -715,14 +654,7 @@ def _page_size():
         return 4096
 
 
-# ---------------------------------------------------------------------------------------------------------------
-# Agregación y consulta
-# ---------------------------------------------------------------------------------------------------------------
-
 def _agg_raw(conn, lo, hi, step):
-    """Agrega lo crudo con ts en [lo, hi) en cubetas de `step` s ->
-    filas (ts_cubeta, kind, name, cpu_avg, cpu_max, rss_avg, rss_max, procs_max, n). La media de apps/proyectos se divide
-    entre las muestras de máquina de la cubeta: una app ausente en una muestra cuenta como 0."""
     b = "CAST(ts/%d AS INTEGER)*%d" % (step, step)
     mrows = conn.execute(
         "SELECT %s, COUNT(*), AVG(cpu_pct), MAX(cpu_pct), AVG(ram_total_mb-ram_avail_mb), MAX(ram_total_mb-ram_avail_mb)"
@@ -738,7 +670,6 @@ def _agg_raw(conn, lo, hi, step):
 
 
 def _merge_rows(rows, step):
-    """Re-cubetea filas (name, ts, cpu, rss, peso) a `step` s con media ponderada."""
     acc = {}
     for name, ts, cpu, rss, w in rows:
         k = (name, int(ts // step) * step)
@@ -760,8 +691,6 @@ def _meta(conn, key):
 
 
 def _load(conn, group, res, lo, hi, name=None):
-    """Filas (name, ts, cpu, rss, peso) de un grupo a la resolución `res` ('raw'|'1m'|'1h') en [lo, hi]. En 1m/1h
-    se completa con lo todavía no compactado (cola) calculado al vuelo desde el nivel inferior."""
     nf = " AND name=?" if name else ""
     na = (name,) if name else ()
     if res == "raw":
@@ -804,10 +733,6 @@ def _raw_step(conn, lo, hi):
 
 
 def query(conn, frm, to, group="machine", step=None, name=None):
-    """Series de métricas en [frm, to] (epoch s) -> {"group","step","res","series":[{"name","points":[[ts,cpu,rss],...]}]}.
-    Elige la resolución según el rango (<=2 h crudo, <=3 d 1m, si no 1h) o según `step`; si esa resolución no tiene datos
-    prueba la siguiente más gruesa. Si `step` es mayor que el paso nativo, re-agrega con media. `rss` de la máquina = RAM usada
-    (MB). `name` filtra una sola serie de app/proyecto."""
     if group not in GROUPS:
         raise CollectorError("group debe ser uno de %s" % ", ".join(GROUPS))
     try:

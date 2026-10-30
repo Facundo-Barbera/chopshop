@@ -1,9 +1,6 @@
 import SwiftUI
 import ChopshopNative
 
-/// En macOS 26 la ventana es la oficina (docs/plans/office-first-ui.md): el mundo a ventana completa con el armazón encima
-/// (HUD, paleta, paneles, minimapa). La UI web con barra lateral queda de reserva: macOS < 26, agente sin `/stream` (o sin
-/// configurar) y «Seguir con la vista clásica».
 struct RootView: View {
     @EnvironmentObject var model: AppModel
 
@@ -21,8 +18,6 @@ struct RootView: View {
     }
 }
 
-/// Oficina mientras el stream en vivo tenga algo que enseñar; si no (sin agente, o un agente anterior a api_version 2 sin
-/// `/stream`), la vista clásica.
 @available(macOS 26.0, *)
 private struct RootSwitch: View {
     @ObservedObject var store: LiveStore
@@ -40,7 +35,6 @@ private struct RootSwitch: View {
     }
 }
 
-/// La oficina a ventana completa: sin barra lateral; el título de la ventana lleva el estado de la conexión.
 @available(macOS 26.0, *)
 struct OfficeRoot: View {
     @EnvironmentObject var model: AppModel
@@ -58,7 +52,6 @@ struct OfficeRoot: View {
     }
 }
 
-/// La interfaz de siempre: barra lateral + UI web (y la sala de máquinas / el proyecto nativos encima en macOS 26).
 struct ClassicRoot: View {
     @EnvironmentObject var model: AppModel
 
@@ -67,7 +60,6 @@ struct ClassicRoot: View {
             Sidebar()
                 .navigationSplitViewColumnWidth(min: 220, ideal: 248, max: 300)
         } detail: {
-            // El WebView no se destruye nunca (se reconstruiría la UI web entera): en macOS 26 la oficina nativa se pone encima.
             ZStack {
                 GlassBackdrop()
                 WebView()
@@ -106,7 +98,6 @@ struct ClassicRoot: View {
     }
 }
 
-/// Menú «Oficina» (macOS 26, oficina): los atajos del armazón (`ShellKeymap`). En la vista clásica, las secciones de siempre.
 struct OfficeMenu: View {
     @ObservedObject var model: AppModel
 
@@ -132,7 +123,6 @@ struct OfficeMenu: View {
     }
 }
 
-/// Estado del stream en vivo (en vivo / reconectando / sin emparejar). Sin stream (macOS < 26, sin agente) no se ve.
 struct LiveIndicator: View {
     @ObservedObject var store: LiveStore
     var body: some View {
@@ -154,7 +144,6 @@ struct LiveIndicator: View {
     }
 }
 
-/// Detalle de proyecto sin credencial: emparejar aquí mismo, sin ir a Ajustes.
 struct PairingScreen: View {
     @EnvironmentObject var model: AppModel
     var body: some View {
@@ -176,7 +165,6 @@ struct PairingScreen: View {
     }
 }
 
-/// Hace que la ventana deje pasar el escritorio (vidrio de verdad); el relleno lo pone `GlassBackdrop`.
 struct WindowGlass: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let v = NSView()
@@ -190,7 +178,6 @@ struct WindowGlass: NSViewRepresentable {
     func updateNSView(_ v: NSView, context: Context) {}
 }
 
-/// Fondo neutro: grafito translúcido sobre material del sistema. Sin color propio; el acento vive en los controles.
 struct GlassBackdrop: View {
     var body: some View {
         ZStack {
@@ -214,9 +201,6 @@ struct VisualEffect: NSViewRepresentable {
     func updateNSView(_ v: NSVisualEffectView, context: Context) { v.material = material }
 }
 
-// MARK: - Logo
-
-/// «Bloque cortado»: un cuadrado de grafito partido en dos mitades desplazadas por un tajo en diagonal.
 struct ChopLogo: View {
     var size: CGFloat = 30
     var body: some View {
@@ -237,13 +221,11 @@ struct ChopMark: Shape {
         let w = r.width, h = r.height, x = r.minX, y = r.minY
         let gap = w * 0.09
         var p = Path()
-        // mitad superior-izquierda
         p.move(to: CGPoint(x: x, y: y + h * 0.05))
         p.addLine(to: CGPoint(x: x + w * 0.62 - gap, y: y + h * 0.05))
         p.addLine(to: CGPoint(x: x + w * 0.30 - gap, y: y + h * 0.95))
         p.addLine(to: CGPoint(x: x, y: y + h * 0.95))
         p.closeSubpath()
-        // mitad inferior-derecha, desplazada
         p.move(to: CGPoint(x: x + w * 0.72 + gap, y: y + h * 0.05))
         p.addLine(to: CGPoint(x: x + w, y: y + h * 0.05))
         p.addLine(to: CGPoint(x: x + w, y: y + h * 0.95))
@@ -252,8 +234,6 @@ struct ChopMark: Shape {
         return p
     }
 }
-
-// MARK: - Sidebar
 
 struct Sidebar: View {
     @EnvironmentObject var model: AppModel
@@ -421,7 +401,6 @@ struct MachineRow: View {
 }
 
 extension LinkState {
-    /// Con al menos un agente respondiendo, el punto de estado late.
     var isLive: Bool {
         switch self {
         case .ok, .partial: return true
@@ -430,16 +409,12 @@ extension LinkState {
     }
 }
 
-// MARK: - Compatibilidad con macOS 13+
-
 extension View {
-    /// `selectionDisabled` existe desde macOS 14; en macOS 13 la fila queda seleccionable y no pasa nada más.
     @ViewBuilder func noSelection() -> some View {
         if #available(macOS 14.0, *) { self.selectionDisabled() } else { self }
     }
 }
 
-/// Píldora de estado: vidrio líquido en macOS 26+ (compilando con el SDK de Xcode 26) y material translúcido en el resto.
 struct StatusCapsule<Content: View>: View {
     private let content: Content
 
@@ -459,8 +434,6 @@ struct StatusCapsule<Content: View>: View {
     }
 }
 
-/// «Ciudad» de la barra lateral (macOS 26): un edificio por proyecto; clic en un piso → zoom a la oficina del proyecto (vestíbulo,
-/// pisos por rol y sala de máquinas en un solo mundo). Sin credencial, la pantalla de emparejar.
 @available(macOS 26.0, *)
 private struct LiveCityRoot: View {
     @ObservedObject var store: LiveStore

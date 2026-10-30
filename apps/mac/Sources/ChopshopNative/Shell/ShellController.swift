@@ -1,24 +1,19 @@
 import AppKit
 import Combine
 
-/// Dueño del `ShellState` en la app: lo comparten la vista (`OfficeShell`) y los menús (atajos del menú «Oficina»). Traduce
-/// atajos y órdenes de la paleta a transiciones del estado y a acciones de la app (`AttentionActions`: responder, settle, abrir).
 @MainActor
 public final class ShellController: ObservableObject {
     @Published public var state = ShellState()
-    /// Resultado de la última orden («Respondido: Sí», un error, «Copiado…»). Se borra solo a los pocos segundos.
     @Published public private(set) var notice: ShellNotice?
 
     public var actions: AttentionActions?
     public var refresh: (() -> Void)?
-    /// Snapshot actual (lo pone la vista; los menús lo usan para ⌘J y ⌘O).
     public var snapshot = MockSnapshot(projects: [], batches: [], graphs: [], events: [], machines: [])
 
     private var noticeGen = 0
 
     public init() {}
 
-    /// Un atajo del menú «Oficina» (o del teclado dentro de la vista).
     public func perform(_ a: ShellAction) {
         if let p = a.panel { state.toggle(p); return }
         switch a {
@@ -36,7 +31,6 @@ public final class ShellController: ObservableObject {
         }
     }
 
-    /// Una orden de la paleta. Cierra la paleta antes de ejecutarla.
     public func run(_ c: ShellCommand) {
         state.closePalette()
         switch c.kind {

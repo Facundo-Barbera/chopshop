@@ -10,7 +10,7 @@ struct WebView: NSViewRepresentable {
         let cfg = WKWebViewConfiguration()
         cfg.userContentController.add(context.coordinator, name: "chopshop")
         let wv = WKWebView(frame: .zero, configuration: cfg)
-        wv.setValue(false, forKey: "drawsBackground")   // transparente: se ve el fondo de vidrio de SwiftUI
+        wv.setValue(false, forKey: "drawsBackground")
         if #available(macOS 13.3, *) { wv.isInspectable = true }
         wv.navigationDelegate = context.coordinator
         model.web = wv
@@ -22,7 +22,6 @@ struct WebView: NSViewRepresentable {
         return wv
     }
 
-    /// `web/index.html` dentro del .app; si no (swift run), `CHOPSHOP_WEB_DIR` o `Resources/web` del directorio actual.
     static func webIndex() -> URL? {
         var dirs: [URL] = []
         if let d = Bundle.main.resourceURL?.appendingPathComponent("web") { dirs.append(d) }
@@ -43,7 +42,6 @@ struct WebView: NSViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {
-            // Solo el index local; todo lo demás se abre fuera.
             if action.navigationType == .linkActivated, let u = action.request.url { NSWorkspace.shared.open(u); return .cancel }
             return .allow
         }

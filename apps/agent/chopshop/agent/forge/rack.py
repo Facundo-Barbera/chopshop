@@ -1,17 +1,9 @@
-"""Hilo `forge` del agente: el rack de repos de la sala de máquinas (docs/plans/office-redesign.md §4).
-
-Repos del rack = `rack.repos` de cada perfil (`layout.rack_repos`: proyecto, kind, label) más `[agent.github] repos` si
-`[agent.github] enabled` (kind `main`, proyecto por `github.project_map`; gana el perfil). En cada pasada pide a su proveedor
-`repo_status` y emite `forge.repo.state` **solo si cambió** (último cuerpo en `meta` `forge_repo:<proveedor>:<repo>`), así que
-un repo quieto no genera sobres. Sin proveedor, slug inválido o proveedor degradado -> luz gris con `error`.
-Un error que degrada la cuenta (cuota, `gh` caído) deja de preguntar a ese proveedor en la pasada (sus demás repos van grises)
-y aplica backoff exponencial (respeta `wait`). Inyectable: `providers` {nombre: ForgeProvider}, `entries_fn`, `clock`,
-`emit(type, project, body, severity)`."""
 import logging
 import time
 
-from .. import db, github as gh, layout
 from ... import profile as profile_mod
+from .. import db, layout
+from .. import github as gh
 from . import base
 
 log = logging.getLogger("chopshop.agent.forge")
@@ -22,13 +14,11 @@ BODY_KEYS = ("provider", "repo", "project", "kind", "label", "light", "default_b
 
 
 def enabled(cfg):
-    """`[agent.forge] enabled`; `"auto"` (o sin valor) sigue a `[agent.github] enabled` (mismo `gh`, mismo opt-in)."""
     v = (cfg.get("forge") or {}).get("enabled", "auto")
     return bool((cfg.get("github") or {}).get("enabled")) if v in ("auto", None) else v is True
 
 
 def check(cfg):
-    """Errores de `[agent.forge]` (lo usa `check_config`)."""
     f = cfg.get("forge") or {}
     errs = []
     if f.get("enabled", "auto") not in ("auto", None, True, False):
@@ -40,12 +30,11 @@ def check(cfg):
 
 
 def profile_entries():
-    """[{provider, repo, project, kind, label}] de `rack.repos` de ~/.chopshop/profiles/*.yaml (un perfil roto se ignora)."""
     out = []
     for name in profile_mod.list_projects():
         try:
             prof = profile_mod.load(name)
-        except Exception:  # noqa: BLE001 - un perfil roto no tumba el hilo
+        except Exception:
             continue
         prof.setdefault("project", name)
         out += layout.rack_repos(prof)
@@ -53,7 +42,6 @@ def profile_entries():
 
 
 def config_entries(cfg, profiles=None):
-    """Repos de `[agent.github] repos` como módulos del rack (solo con `[agent.github] enabled`)."""
     g = cfg.get("github") or {}
     if not g.get("enabled"):
         return []
@@ -68,7 +56,6 @@ def config_entries(cfg, profiles=None):
 
 
 def body_of(entry, status, light, prev=None):
-    """Cuerpo de `forge.repo.state`. Con error se conservan rama por defecto y url del último cuerpo bueno."""
     prev = prev or {}
     st = status or {}
     return {"provider": entry["provider"], "repo": entry["repo"], "project": entry.get("project"),
@@ -93,22 +80,21 @@ class Rack:
         prof = profile_entries()
         try:
             repos = gh.profile_repos()
-        except Exception:  # noqa: BLE001
+        except Exception:
             repos = None
         return prof + config_entries(self.cfg, repos)
 
     def _provider(self, name):
         if name not in self.providers:
-            from . import PROVIDERS  # noqa: PLC0415 - evita el ciclo forge/__init__ -> rack
+            from . import PROVIDERS
             cls = PROVIDERS.get(name)
             self.providers[name] = cls(self.conn, self.cfg, clock=self.clock, **self.provider_opts) if cls else None
         return self.providers[name]
 
     def entries(self):
-        """Repos únicos por (proveedor, slug canónico); el primero gana (perfiles antes que config)."""
         try:
             raw = self.entries_fn() or []
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.exception("forge: no pude leer los repos del rack")
             raw = []
         out, seen = [], set()
@@ -127,7 +113,6 @@ class Rack:
                 out.append(dict(e, provider=key[0], repo=repo))
         return out
 
-    # -- meta
     def _get(self, key):
         with db.tx():
             r = self.conn.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
@@ -137,7 +122,6 @@ class Rack:
         with db.tx():
             self.conn.execute("INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)", (key, db.jdump(value)))
 
-    # -- una pasada
     def poll_once(self):
         now = self.clock()
         if now < self.until:
@@ -159,7 +143,7 @@ class Rack:
                         down[name] = err.kind
                         if worst is None or (err.wait or 0) > (worst.wait or 0):
                             worst = err
-                except Exception:  # noqa: BLE001 - un adaptador roto no tumba el hilo
+                except Exception:
                     log.exception("forge: %s:%s", name, e["repo"])
                     status = {"error": "provider"}
             key = "forge_repo:%s:%s" % (name, e["repo"])

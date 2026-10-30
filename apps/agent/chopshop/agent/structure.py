@@ -1,25 +1,15 @@
-"""API de estructura de la oficina para los bots (fase 7 de docs/plans/office-redesign.md): `PUT /office/<proyecto>`.
-
-- `read(conn, project) -> {project, rev, office, rack, structure, limits}`: lo que un bot necesita para editar.
-- `apply(conn, project, office, rack=None, by=..., base_rev=None, reactivate=()) -> resultado`: valida igual que
-  `chopshop profile check` (bloques `office:`/`rack:` + tope de pisos por edificio), reescribe SOLO esos bloques del perfil
-  local (`~/.chopshop/profiles/<proyecto>.yaml`, escritura atómica, resto del archivo intacto) y calcula el diff de
-  escritorios. Nunca borra escritorios: los que el perfil deja de declarar quedan `retired`. Reactivar uno retirado exige
-  nombrarlo en `reactivate` (lo pide un humano). `base_rev` (opcional) evita pisar la edición de otro bot (409).
-- Escritorios conocidos por proyecto en `meta` (`office_desks:<proyecto>` = {"known": [...], "retired": [...]}); si falta,
-  se reconstruye del último `office.changed` del proyecto y de los escritorios del perfil actual.
-El emisor del sobre `office.changed` es el llamador (server.AgentApp). Errores -> `StructureError(status, message, problems)`."""
 import hashlib
 import json
 import os
 import re
 import threading
 
-from .. import miniyaml, profile as profile_mod
+from .. import miniyaml
+from .. import profile as profile_mod
 from . import db, layout
 
 META_KEY = "office_desks:%s"
-_lock = threading.Lock()                         # un PUT a la vez (lectura, validación y escritura del perfil)
+_lock = threading.Lock()
 _TOP = re.compile(r"^(?P<k>[A-Za-z_][A-Za-z0-9_]*)\s*:")
 _PLAIN_KEY = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
 LIMITS = {"floors_per_project": layout.MAX_FLOORS_PER_PROJECT, "rooms_per_floor": layout.MAX_ROOMS_PER_FLOOR,
@@ -32,8 +22,6 @@ class StructureError(Exception):
         super().__init__(message)
         self.status, self.message, self.problems = status, message, list(problems or [])
 
-
-# ---------------------------------------------------------------- YAML (subconjunto que entiende miniyaml)
 
 def _key(k):
     if not isinstance(k, str) or not k or any(ord(c) < 32 for c in k) or '"' in k or "\\" in k:
@@ -60,7 +48,6 @@ def _scalar(v):
 
 
 def dump(v, indent=0):
-    """Valor JSON -> líneas YAML en bloque (miniyaml las vuelve a leer igual; `write` lo comprueba)."""
     pad = " " * indent
     out = []
     if isinstance(v, dict):
@@ -89,7 +76,6 @@ def dump(v, indent=0):
 
 
 def replace_blocks(text, blocks):
-    """Sustituye (o añade al final) los bloques de primer nivel `blocks` = {clave: valor} en el texto del perfil."""
     lines = text.splitlines()
     for key, value in blocks.items():
         new = ["%s:" % key] + dump(value, 2) if _scalar(value) is None else ["%s: %s" % (key, _scalar(value))]
@@ -102,7 +88,7 @@ def replace_blocks(text, blocks):
         end = start + 1
         while end < len(lines) and (not lines[end].strip() or lines[end][0] in " \t"):
             end += 1
-        while end > start + 1 and not lines[end - 1].strip():      # conserva las líneas en blanco antes del siguiente bloque
+        while end > start + 1 and not lines[end - 1].strip():
             end -= 1
         lines[start:end] = new
     return "\n".join(lines) + "\n"
@@ -112,10 +98,7 @@ def rev(text):
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
-# ---------------------------------------------------------------- escritorios conocidos
-
 def _known(conn, project, prof):
-    """(known, retired): ids de escritorios que alguna vez existieron y los que hoy están retirados."""
     with db.tx():
         row = conn.execute("SELECT value FROM meta WHERE key=?", (META_KEY % project,)).fetchone()
         last = None if row else conn.execute(
@@ -152,8 +135,6 @@ def _save_known(conn, project, known, retired):
                      (META_KEY % project, db.jdump({"known": sorted(known), "retired": sorted(retired)})))
 
 
-# ---------------------------------------------------------------- lectura y escritura
-
 def _load(project):
     try:
         prof = profile_mod.load(project)
@@ -186,7 +167,6 @@ def _building_errs(project, candidate):
 
 
 def apply(conn, project, office, rack=None, by="bot", base_rev=None, reactivate=()):
-    """Valida y escribe. -> {project, rev, changed, by, structure, diff}. `structure` lleva los retirados."""
     if not isinstance(office, dict):
         raise StructureError(400, "office debe ser un mapa (el bloque office: del perfil)")
     if rack is not None and not isinstance(rack, dict):
@@ -224,7 +204,7 @@ def apply(conn, project, office, rack=None, by="bot", base_rev=None, reactivate=
         if rack is not None:
             blocks["rack"] = rack
         before = miniyaml.loads(text) or {}
-        if all(before.get(k) == v for k, v in blocks.items()):         # mismo contenido: no se reescribe ni se emite
+        if all(before.get(k) == v for k, v in blocks.items()):
             if known != _known_saved(conn, project):
                 _save_known(conn, project, known, retired)
             candidate["project"] = project
@@ -246,7 +226,6 @@ def apply(conn, project, office, rack=None, by="bot", base_rev=None, reactivate=
 
 
 def _write(path, text):
-    """Escritura atómica que conserva el modo del archivo (los perfiles son locales y privados)."""
     mode = os.stat(path).st_mode & 0o777
     tmp = "%s.tmp-%d" % (path, os.getpid())
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
@@ -265,7 +244,6 @@ def _write(path, text):
 
 
 def changed_body(res):
-    """Cuerpo del sobre `office.changed` (docs/event-envelope.md) a partir del resultado de `apply`."""
     s = res["structure"]
     return {"project": res["project"], "by": res["by"], "company": s["company"], "half_life_s": s["half_life_s"],
             "floors": s["floors"], "machine_rooms": s["machine_rooms"], "diff": res["diff"]}

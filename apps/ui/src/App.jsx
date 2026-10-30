@@ -4,8 +4,6 @@ import { on, request, send } from "./bridge.js";
 
 const Ctx = createContext({ fin: {} });
 
-// ---------- utilidades ----------
-// Las horas se muestran en la zona horaria local del Mac.
 const clock = (ts) => {
   const d = parseTs(ts);
   return d ? d.toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit", hour12: false }) : "";
@@ -27,7 +25,6 @@ const EVENT_META = {
   task_done: { label: "Tarea terminada", tone: "green", icon: "✓" },
   batch_done: { label: "Lote terminado", tone: "teal", icon: "◆" },
   reaction: { label: "Reacción", tone: "violet", icon: "⚡" },
-  // eventos del agente (por hilo de T3 y por máquina)
   thread_started: { label: "Hilo iniciado", tone: "blue", icon: "▶" },
   thread_done: { label: "Hilo terminado", tone: "green", icon: "✓" },
   thread_failed: { label: "Hilo falló", tone: "red", icon: "×" },
@@ -36,7 +33,6 @@ const EVENT_META = {
   machine_alert: { label: "Alerta de máquina", tone: "orange", icon: "!" },
 };
 
-// ---------- niveles de reacción ----------
 const LEVELS = {
   auto: { n: 1, label: "Auto", tone: "mint", what: "Chopshop lo resuelve solo" },
   bot: { n: 2, label: "Bot", tone: "violet", what: "despierta al bot por webhook" },
@@ -79,7 +75,6 @@ const secs = (a, b) => {
   return x && y ? Math.max(0, Math.round((y - x) / 1000)) : null;
 };
 const fmtDur = (s) => (s == null ? "" : s < 60 ? `${s} s` : s < 3600 ? `${Math.floor(s / 60)} min ${s % 60 ? (s % 60) + " s" : ""}`.trim() : `${Math.floor(s / 3600)} h`);
-// texto del resultado sin el bloque de diff (primera frase útil) y el diff aparte
 const splitResult = (r) => {
   if (!r) return { text: "", diff: "" };
   const m = r.match(/(`{3,})diff\n([\s\S]*?)\n\1/);
@@ -108,21 +103,6 @@ const Chip = ({ tone = "gray", children, pulse }) => (
   </span>
 );
 
-const Icon = ({ name }) => {
-  const p = {
-    overview: "M4 13h6V4H4v9zm0 7h6v-5H4v5zm9 0h7v-9h-7v9zm0-16v5h7V4h-7z",
-    question: "M12 3a9 9 0 100 18 9 9 0 000-18zm.9 14.2h-1.8v-1.8h1.8v1.8zm1.3-5.6l-.8.8c-.5.5-.7.9-.7 1.6h-1.7v-.4c0-.8.3-1.5.9-2.1l1-1a1.5 1.5 0 10-2.5-1.1H8.6a3.2 3.2 0 116.4 0c0 .8-.3 1.6-.8 2.2z",
-    layers: "M12 3l9 5-9 5-9-5 9-5zm-7.5 8.4L12 15.6l7.5-4.2L21 12.3l-9 5-9-5 1.5-.9zm0 4L12 19.6l7.5-4.2 1.5.9-9 5-9-5 1.5-.9z",
-    bolt: "M13 2L5 14h6l-1 8 8-12h-6l1-8z",
-  }[name];
-  return (
-    <svg viewBox="0 0 24 24" className="icon" aria-hidden="true">
-      <path d={p} fill="currentColor" />
-    </svg>
-  );
-};
-
-// ---------- tarjetas ----------
 function QuestionCard({ batch, task, q, onDone, since, queued, failed, watcher, bare, compact, by }) {
   const [custom, setCustom] = useState("");
   const [busy, setBusy] = useState(null);
@@ -133,7 +113,6 @@ function QuestionCard({ batch, task, q, onDone, since, queued, failed, watcher, 
     setBusy(choice);
     setMsg(null);
     try {
-      // POST /answer al agente dueño del hilo (la app nativa lo traduce)
       const r = await request("answer", { agent: batch.agent, thread_id: task.threadId || task.id, choice, request: q.request, by: by || (needsHuman(task) ? "humano" : undefined) });
       setMsg(r.payload);
       if (r.payload.ok) onDone && onDone();
@@ -243,7 +222,6 @@ function ProgressBar({ tasks }) {
   );
 }
 
-/** Contenedor de panel: cabecera fija + cuerpo con scroll propio. */
 function Pane({ title, count, action, children, className = "", flush }) {
   return (
     <section className={`glass pane ${className}`}>
@@ -278,7 +256,6 @@ function ViewHead({ title, sub, children }) {
   );
 }
 
-// ---------- detalle de una tarea ----------
 function TaskDetail({ t, b, c, now }) {
   const { fin } = useContext(Ctx);
   const st = taskState(t);
@@ -289,7 +266,6 @@ function TaskDetail({ t, b, c, now }) {
   const [settling, setSettling] = useState(false);
   const [settleMsg, setSettleMsg] = useState(null);
   const canSettle = t.done && !t.settled && !!t.threadId && !!b.agent;
-  // POST /settle: marca el hilo como cerrado en T3 (nunca lo archiva)
   const settle = async () => {
     setSettling(true);
     setSettleMsg(null);
@@ -377,7 +353,6 @@ function BatchSummary({ b }) {
   );
 }
 
-// ---------- listas ----------
 function BatchRow({ b, now, selected, onSelect, showProject }) {
   const done = b.tasks.filter((t) => t.done).length;
   const active = isActive(b);
@@ -458,18 +433,6 @@ function HistoryItem({ h, selected, onSelect }) {
   );
 }
 
-
-// ---------- vistas ----------
-function Empty({ title, text }) {
-  return (
-    <div className="empty glass">
-      <div className="empty-mark">✦</div>
-      <h3>{title}</h3>
-      <p className="muted">{text}</p>
-    </div>
-  );
-}
-
 const isActive = (b) => !b.tasks.every((t) => t.done);
 const byActivity = (batches) => [...batches].sort((a, b) => Number(isActive(b)) - Number(isActive(a)) || b.id.localeCompare(a.id));
 
@@ -520,7 +483,6 @@ function collect(snap) {
 
 const taskPick = (b) => (b && (b.tasks.find((t) => t.pending && ((t.pending.questions && t.pending.questions.length) || t.pending.approvals)) || b.tasks.find((t) => !t.done) || b.tasks[0])) || null;
 
-// ---------- Resumen: tres paneles ----------
 function Overview({ snap, c, now, go, titles, nav }) {
   const active = snap.batches.filter(isActive);
   const attn = c.questions.length + c.approvals.length;
@@ -605,7 +567,6 @@ function Overview({ snap, c, now, go, titles, nav }) {
   );
 }
 
-// ---------- Preguntas: lista + detalle ----------
 function Questions({ c, now }) {
   const items = [
     ...c.questions.map((x) => ({ key: "q:" + x.q.request, kind: "q", x })),
@@ -682,7 +643,6 @@ function TaskContext({ t, b }) {
   );
 }
 
-// ---------- Proyecto / Lotes: tres paneles (lotes · tareas · detalle) ----------
 function ProjectView({ snap, c, now, project }) {
   const all = !project;
   const batches = byActivity(all ? snap.batches : snap.batches.filter((b) => b.project === project));
@@ -729,7 +689,6 @@ function ProjectView({ snap, c, now, project }) {
   );
 }
 
-// ---------- Actividad: línea de tiempo + detalle ----------
 const EV_FILTERS = [
   ["all", "Todo", () => true],
   ["ask", "Preguntas", (e) => e.event === "pending_question" || e.event === "pending_approval"],
@@ -788,8 +747,6 @@ function Events({ snap, c, now, titles }) {
   );
 }
 
-
-// ---------- Reacciones: tres niveles ----------
 function rxEntries(snap) {
   const out = [];
   snap.batches.forEach((b) => b.tasks.forEach((t) => (t.reactions || []).forEach((r, i) => out.push({ b, t, r, k: t.id + ":" + i }))));
@@ -866,8 +823,7 @@ function Reactions({ snap, now }) {
   );
 }
 
-// ---------- Máquinas: lista · métricas · hilos y alertas ----------
-const HIST = 60; // muestras que guarda la app (una cada 3 s ≈ 3 min)
+const HIST = 60;
 const fmt1 = (n) => (Math.round(n * 100) / 100).toFixed(2);
 const gb = (mb) => (mb / 1024).toFixed(mb >= 10240 ? 0 : 1);
 const lvl = (v, warn = 85, bad = 100) => (v >= bad ? "red" : v >= warn ? "orange" : "blue");
@@ -886,7 +842,6 @@ function Gauge({ value, label, sub, tone }) {
   );
 }
 
-/** Gráfica de línea con área; el eje X es tiempo (derecha = ahora). */
 function Chart({ series, max = 100, unit = "%", h = 150, step, empty }) {
   const W = 300;
   const hi = Math.max(max, ...series.flatMap((s) => s.values));
@@ -967,7 +922,6 @@ function alertsFor(m) {
 
 const mb = (v) => (v >= 1024 ? (v / 1024).toFixed(1) + " GB" : Math.round(v) + " MB");
 
-/** Tabla de consumo por app o por proyecto (CPU 100 % = un núcleo). */
 function UsageTable({ rows, cols }) {
   const top = [...rows].sort((a, b) => b.cpu_pct - a.cpu_pct || b.rss_mb - a.rss_mb).slice(0, 8);
   if (!top.length) return <p className="muted small">Sin datos todavía.</p>;
@@ -1086,8 +1040,6 @@ class Guard extends Component {
   }
 }
 
-// ---------- estado de los agentes ----------
-/** Una línea por agente con problemas (no alcanzable, 403…); si hay datos viejos, lo dice. */
 function AgentBanner({ agents }) {
   const bad = (agents || []).filter((a) => a.status !== "ok" || a.warning);
   if (!bad.length) return null;
@@ -1125,7 +1077,6 @@ function Connecting({ agents, configPath }) {
   return <p className="muted">Conectando con los agentes…</p>;
 }
 
-// ---------- app ----------
 export default function App() {
   const [snap, setSnap] = useState(null);
   const [agents, setAgents] = useState(null);
@@ -1141,7 +1092,6 @@ export default function App() {
   useEffect(() => {
     const off = on((m) => {
       if (m.type === "agents") {
-        // resultados crudos por agente (ver AgentClient.swift): se combinan aquí
         const v = store.update(m.payload.agents || []);
         setConfigPath(m.payload.configPath || "");
         setAgents(v.agents);
@@ -1210,5 +1160,4 @@ export default function App() {
   );
 }
 
-// Para las pruebas de renderizado (apps/ui/test): las vistas se dibujan en Node sin DOM.
 export { collect, Overview, Questions, ProjectView, Machines, Reactions, Events, AgentBanner, Connecting };

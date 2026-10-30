@@ -1,23 +1,12 @@
 import Foundation
 
-// Sala de máquinas (docs/plans/office-redesign.md §4; forma en docs/agent-api.md «api_version 3»). Puro (sin SwiftUI, macOS 13).
-// `machine_room` de `GET /state` plegado con la MISMA regla `apply` que projection.py para `listener.state`, `automation.ran`,
-// `forge.repo.state` y `forge.run.state`. `subscriptions` no sale de sobres: solo cambia con cada `state` completo.
-// No es una vista aparte: cada proyecto declara en su perfil 0..N salas (`MachineRoomConfig`, `office.machine_rooms`), cada una
-// una SALA de un piso (`FloorPlan.machineRooms`), con `scoped(to:_:)` = lo que aloja (misma regla que `machine_room.scope` del
-// agente, que publica el resultado en `projects[].machine_rooms`).
-
-/// Luz de un módulo del rack: la decide el agente (verde = CI de la rama por defecto bien; ámbar = runs en curso o en cola;
-/// rojo = último run fallido o PR con CI rojo; gris = sin datos o proveedor degradado).
 public enum RackLight: String, Sendable, CaseIterable {
     case green, amber, red, gray
 
     public init(_ s: String?) { self = s.flatMap(RackLight.init(rawValue:)) ?? .gray }
 
-    /// El ámbar parpadea.
     public var blinks: Bool { self == .amber }
 
-    /// Peor primero (para el resumen de la sala).
     var rank: Int {
         switch self {
         case .red: return 0
@@ -28,13 +17,11 @@ public enum RackLight: String, Sendable, CaseIterable {
     }
 }
 
-/// Estado de un listener del agente.
 public enum ListenerHealth: String, Sendable {
     case ok, degraded, down, unknown
     public init(_ s: String?) { self = s.flatMap(ListenerHealth.init(rawValue:)) ?? .unknown }
 }
 
-/// Qué disparó un run, por prioridad: hilo · automatización · bot · cron · humano · desconocido.
 public struct RunOrigin: Hashable, Sendable {
     public enum Kind: String, Sendable { case thread, automation, bot, schedule, human, unknown }
     public var kind: Kind
@@ -58,7 +45,6 @@ public struct RunOrigin: Hashable, Sendable {
         }
     }
 
-    /// Texto corto para la fila del run.
     public var text: String {
         if let l = label, !l.isEmpty { return l }
         switch kind {
@@ -72,14 +58,11 @@ public struct RunOrigin: Hashable, Sendable {
     }
 }
 
-/// Un run de CI (GitHub Actions u otro proveedor).
 public struct ForgeRun: Hashable, Sendable, Identifiable {
     public var runID: String
     public var workflow: String
-    /// queued · in_progress · completed
     public var status: String
     public var conclusion: String?
-    /// push · pull_request · schedule · workflow_dispatch · repository_dispatch · …
     public var event: String
     public var actor: String?
     public var headBranch: String?
@@ -93,7 +76,6 @@ public struct ForgeRun: Hashable, Sendable, Identifiable {
     public var active: Bool { status != "completed" }
     public var failed: Bool { !active && ["failure", "timed_out", "startup_failure"].contains(conclusion ?? "") }
 
-    /// Luz propia del run (la del módulo la decide el agente).
     public var light: RackLight {
         if active { return .amber }
         switch conclusion {
@@ -120,12 +102,10 @@ public struct ForgeRun: Hashable, Sendable, Identifiable {
     }
 }
 
-/// Un módulo del rack: un repositorio de un proveedor.
 public struct RackUnit: Hashable, Sendable, Identifiable {
     public var provider: String
     public var repo: String
     public var project: String?
-    /// main · docs · … (`main` va primero dentro del proyecto)
     public var kind: String?
     public var label: String?
     public var light: RackLight
@@ -134,7 +114,6 @@ public struct RackUnit: Hashable, Sendable, Identifiable {
     public var url: String?
     public var error: String?
     public var ts: String?
-    /// Activos (en el orden en que llegaron) y como mucho 5 completados.
     public var runs: [ForgeRun] = []
 
     public var id: String { "\(provider):\(repo)" }
@@ -189,7 +168,6 @@ public struct ListenerStatus: Hashable, Sendable, Identifiable {
         ts = json["ts"]?.string
     }
 
-    /// Para qué sirve cada listener (texto de ayuda).
     public var purpose: String {
         switch name {
         case "t3watch": return "observa los hilos de T3"
@@ -231,16 +209,13 @@ public struct AutomationStatus: Hashable, Sendable, Identifiable {
     }
 }
 
-/// Suscripción saliente (webhook). Nunca trae la URL.
 public struct SubscriptionStatus: Hashable, Sendable, Identifiable {
     public var name: String
-    /// Proyectos que reparte (`*` o globs); sin el campo (agente anterior) = todos.
     public var projects: [String]
     public var lastOK: String?
     public var lastError: String?
     public var signed: Bool
     public var id: String { name }
-    /// El último envío falló (el agente limpia `last_error` con el siguiente éxito).
     public var failing: Bool { lastError?.isEmpty == false }
 
     init?(json: JSONValue.Object) {
@@ -253,20 +228,16 @@ public struct SubscriptionStatus: Hashable, Sendable, Identifiable {
         signed = json["signed"]?.bool ?? false
     }
 
-    /// ¿Reparte sobres de `project`? (`*` o glob con la sintaxis de `fnmatch`, como `webhooks.matches` del agente).
     public func serves(_ project: String) -> Bool {
         projects.contains { $0 == "*" || fnmatch($0, project, 0) == 0 }
     }
 }
 
-/// Sala declarada en el perfil (`machine_rooms:`; llega en `office.machine_rooms`): piso y lo que aloja, por nombre o glob.
 public struct MachineRoomConfig: Equatable, Sendable {
     public var name: String
     public var floor: Int
-    /// `<dueño>/<repo>` de los módulos del rack del proyecto.
     public var repos: [String]
     public var listeners: [String]
-    /// Automatizaciones del proyecto.
     public var automations: [String]
     public var subscriptions: [String]
 
@@ -283,7 +254,6 @@ public struct MachineRoomConfig: Equatable, Sendable {
                   automations: list("automations"), subscriptions: list("subscriptions"))
     }
 
-    /// ¿Algún patrón (`fnmatch`, como `fnmatchcase` del agente) casa con `name`?
     static func picks(_ name: String?, _ patterns: [String]) -> Bool {
         patterns.contains { fnmatch($0, name ?? "", 0) == 0 }
     }
@@ -292,25 +262,21 @@ public struct MachineRoomConfig: Equatable, Sendable {
 public struct MachineRoom: Equatable, Sendable {
     public static let completedRunsKept = 5
 
-    /// Nombre y piso de la sala (los del perfil); nil/0 en la sala de toda la máquina.
     public var name: String?
     public var floor = 0
     public var listeners: [ListenerStatus] = []
     public var automations: [AutomationStatus] = []
     public var subscriptions: [SubscriptionStatus] = []
-    /// Ordenado por (proyecto, main primero, repo).
     public var rack: [RackUnit] = []
     public var headSeq = 0
 
     public init() {}
 
-    /// Desde `GET /state` (o el evento `state`): lee `machine_room` si viene. Tolerante: ignora lo que no conoce.
     public init(state json: JSONValue) {
         self.init(room: json["machine_room"]?.object ?? [:])
         headSeq = json["head_seq"]?.int ?? 0
     }
 
-    /// Desde un objeto `machine_room` (el de arriba del estado o una sala de `projects[].machine_rooms`).
     public init(room mr: JSONValue.Object) {
         self.init(listeners: mr["listeners"]?.array ?? [], automations: mr["automations"]?.array ?? [],
                   subscriptions: mr["subscriptions"]?.array ?? [], rack: mr["rack"]?.array ?? [])
@@ -318,7 +284,6 @@ public struct MachineRoom: Equatable, Sendable {
         floor = mr["floor"]?.int ?? 0
     }
 
-    /// Desde la sala ya plegada de `LiveState` (lo que usa la app).
     public init(_ s: LiveState.MachineRoomState) {
         self.init(listeners: s.listeners.map(JSONValue.object), automations: s.automations.map(JSONValue.object),
                   subscriptions: s.subscriptions.map(JSONValue.object), rack: s.rack.map(JSONValue.object))
@@ -333,8 +298,6 @@ public struct MachineRoom: Equatable, Sendable {
         sortRack()
     }
 
-    /// La sala `cfg` de `project` (sobre la sala de toda la máquina): los módulos del rack del proyecto cuyo repo casa con `repos`,
-    /// sus automatizaciones por nombre y los listeners y webhooks por nombre. Misma regla que `machine_room.scope` del agente.
     public func scoped(to project: String, _ cfg: MachineRoomConfig) -> MachineRoom {
         var r = self
         r.name = cfg.name
@@ -346,7 +309,6 @@ public struct MachineRoom: Equatable, Sendable {
         return r
     }
 
-    /// Tipos que cambian la sala.
     public static let types: Set<String> = ["listener.state", "automation.ran", "forge.repo.state", "forge.run.state"]
 
     public static func fold(_ envs: [Envelope], from room: MachineRoom = MachineRoom()) -> MachineRoom {
@@ -361,7 +323,6 @@ public struct MachineRoom: Equatable, Sendable {
         return r
     }
 
-    /// Regla `apply` de la v3 (docs/agent-api.md) para los sobres de la sala; el resto se ignora. `seq <= headSeq` se ignora.
     public mutating func apply(_ env: Envelope) {
         if let seq = env.seq, seq <= headSeq { return }
         if let seq = env.seq { headSeq = seq }
@@ -401,7 +362,6 @@ public struct MachineRoom: Equatable, Sendable {
         }
     }
 
-    /// Todos los activos y los 5 completados más recientes (por `updated_at`; sin fecha, por orden de llegada). Conserva el orden.
     static func trim(_ runs: [ForgeRun]) -> [ForgeRun] {
         let done = runs.enumerated().filter { !$0.element.active }
         guard done.count > completedRunsKept else { return runs }
@@ -420,7 +380,6 @@ public struct MachineRoom: Equatable, Sendable {
 
     private mutating func sortRack() { rack.sort { $0.sortKey < $1.sortKey } }
 
-    /// Un `state` nuevo manda en todo; los sobres posteriores siguen plegándose encima.
     public mutating func replace(with state: JSONValue) { self = MachineRoom(state: state) }
 
     static func idString(_ v: JSONValue?) -> String? {
@@ -429,13 +388,10 @@ public struct MachineRoom: Equatable, Sendable {
         return nil
     }
 
-    // MARK: - Lecturas para la vista
-
     public var isEmpty: Bool { listeners.isEmpty && automations.isEmpty && subscriptions.isEmpty && rack.isEmpty }
 
     public func unit(_ id: String) -> RackUnit? { rack.first { $0.id == id } }
 
-    /// Módulos agrupados por proyecto (sin proyecto al final), en el orden del rack.
     public var rackByProject: [(project: String?, units: [RackUnit])] {
         var out: [(project: String?, units: [RackUnit])] = []
         for u in rack {
@@ -454,10 +410,8 @@ public struct MachineRoom: Equatable, Sendable {
 
     public var activeRuns: Int { rack.reduce(0) { $0 + $1.activeRuns.count } }
 
-    /// Peor luz del rack (gris si no hay módulos).
     public var worstLight: RackLight { rack.map(\.light).min { $0.rank < $1.rank } ?? .gray }
 
-    /// Listeners que no están ok.
     public var unhealthyListeners: [ListenerStatus] { listeners.filter { $0.state != .ok } }
 
     public var failingAutomations: [AutomationStatus] { automations.filter(\.failed) }

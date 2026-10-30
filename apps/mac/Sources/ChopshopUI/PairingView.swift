@@ -1,13 +1,9 @@
 import SwiftUI
 import ChopshopNative
 
-/// Emparejar este Mac con un agente (docs/agent-api.md «Emparejamiento por dispositivo»): en la máquina del agente,
-/// `chopshop pair create` imprime un código de un solo uso (`K7QM-93XD`, caduca en 10 min); aquí se canjea por una credencial
-/// de dispositivo que va al Keychain. Emparejado: botón «Desemparejar» (borra la credencial de este Mac).
 struct PairingView: View {
     @EnvironmentObject var model: AppModel
     let agent: AgentSpec
-    /// Sin nombre ni URL (la fila de ajustes ya los muestra).
     var compact = false
 
     enum Phase: Equatable { case idle, pairing, paired, failed(String) }

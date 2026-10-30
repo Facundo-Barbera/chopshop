@@ -1,6 +1,3 @@
-"""Buzón local: la UI (o un bot sin red hacia T3) deja respuestas en ~/.chopshop/inbox y `watch`/`poll`
-las envía a T3. Así la app de escritorio solo lee y escribe archivos locales; la red la hace un proceso aparte
-(en macOS un proceso hijo de una app GUI hereda sus permisos de privacidad de red local, y puede quedarse colgado)."""
 import json
 import os
 import time
@@ -44,14 +41,13 @@ def _items(name):
 
 
 def drain(answer_fn, log=print):
-    """Envía las respuestas en cola. Cada resultado queda en outbox/ (se conservan las últimas 20)."""
     sent = 0
     for it in _items("inbox"):
         try:
             ans = answer_fn(it["task"], it["choice"], it.get("request"), it.get("by"))
             res = {"ok": True, "answer": ans}
             log("buzón: %s -> %s enviada (%s)" % (it["id"], it["task"], it["choice"]))
-        except Exception as e:  # el error se devuelve a quien encoló, no rompe el ciclo
+        except Exception as e:
             res = {"ok": False, "error": str(e)[:300]}
             log("buzón: %s -> %s falló: %s" % (it["id"], it["task"], str(e)[:200]))
         res.update(id=it["id"], task=it["task"], choice=it["choice"], ts=state.now())

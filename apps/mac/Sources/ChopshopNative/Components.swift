@@ -1,6 +1,5 @@
 import SwiftUI
 
-/// Paleta mínima: el color existe solo para lo que necesita atención. Todo lo demás vive en grises del sistema.
 @available(macOS 26.0, *)
 enum Attention {
     static let needsYou = Color(nsColor: .systemOrange)
@@ -9,7 +8,6 @@ enum Attention {
 
 @available(macOS 26.0, *)
 extension TaskState {
-    /// nil = neutro (sin color propio).
     var attentionTint: Color? {
         switch self {
         case .needsYou: return Attention.needsYou
@@ -17,7 +15,6 @@ extension TaskState {
         default: return nil
         }
     }
-    /// Símbolo discreto para listas compactas (monocromo salvo atención).
     var plainSymbol: String {
         switch self {
         case .needsYou: return "questionmark.circle.fill"
@@ -49,7 +46,6 @@ struct Sparkline: View {
     }
 }
 
-/// Estado de las máquinas del proyecto, en línea (toolbar): punto + nombre + CPU. Neutral; solo "sin conexión" se tiñe.
 @available(macOS 26.0, *)
 struct MachineStatusLabel: View {
     let machines: [MockMachine]

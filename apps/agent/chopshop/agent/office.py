@@ -1,25 +1,3 @@
-"""Escritorios fijos por rol con herencia (docs/plans/office-redesign.md §2): asigna escritorios a los hilos con rol y
-gestiona la herencia y la espera por rol lleno. Emite `office.changed`, `desk.assigned`, `desk.released` y `desk.waiting`.
-El vestíbulo (hilos sin rol) y la salida por semivida (`desk.released reason: faded`) son de otros módulos.
-
-- `Office(conn, cfg, emit_fn, profiles_fn=None, clock=time.time)`; `emit_fn(type, project, body, **kw) -> sobre`
-  (el servicio lo envuelve sobre `events.emit_envelope` y despierta al `/stream`).
-- `reload()`: relee los perfiles con bloque `office:`; sincroniza la tabla `desks` (los que el perfil deja de declarar quedan
-  `retired`, nunca se borran; su ocupante sale con `reason: retired`) y emite `office.changed {by: "profile"}` cuando cambia la
-  estructura (o cuando el último ya no está retenido en `events`).
-- `tick()`: pliega los `task.state` nuevos del bus (cursor `office_cursor` en `meta`) y asigna/encola. La primera vez (sin
-  cursor) siembra en silencio con el historial retenido y solo sienta a los activos.
-- `assign(desk_id, thread_id)`: asignación manual (bot o humano): `desk.assigned reason: manual`.
-- `desk(desk_id)`: escritorio, ocupante, linaje completo (`GET /desks/<id>`).
-- `release(desk_id, reason)`: saca al ocupante (lo usa quien decida la salida, p. ej. la semivida con `faded`).
-
-Reglas de asignación (por rol y proyecto, piso más bajo primero): si algún ocupante del rol ya terminó (fase terminal y sin
-atención), el nuevo hilo lo **hereda** (el que terminó antes; sale con `desk.released reason: inherited`, entra con
-`desk.assigned reason: inherited`); si no, el primer escritorio libre (`reason: start`). La herencia es el último ocupante del
-escritorio (el que sale o, si estaba libre, el último del linaje). Rol lleno (o sin escritorios) -> `desk.waiting`; sube en
-cuanto un escritorio del rol queda libre o su ocupante termina. Los hilos sin rol no se sientan.
-El rol de un hilo: `role` del cuerpo de `task.state` (lo pone Chopshop al lanzar, o t3watch por las reglas `match`), o el
-último conocido; una asignación manual lo fija."""
 import logging
 import threading
 import time
@@ -30,15 +8,15 @@ from . import db, envelope, events, layout, notes
 log = logging.getLogger("chopshop.agent.office")
 
 CURSOR = "office_cursor"
-STRUCT = "office_struct:"           # meta: "<seq> <estructura JSON>" del último office.changed por proyecto
-LINEAGE = 20                         # ocupantes pasados guardados por escritorio
-LINEAGE_STATE = 5                    # los que manda la proyección
+STRUCT = "office_struct:"
+LINEAGE = 20
+LINEAGE_STATE = 5
 ACTIVE = ("queued", "preparing", "running", "waiting")
 TERMINAL = ("done", "failed", "settled", "skipped")
 BATCH = 500
-RELOAD = 60                          # s entre relecturas de perfiles
+RELOAD = 60
 INHERIT_KEYS = ("thread_id", "title", "summary", "branch", "worktree", "pull_requests", "phase", "ended_at")
-KEEP_KEYS = ("summary", "result", "role", "branch", "worktree", "title")   # no se pierden si un task.state posterior no los trae
+KEEP_KEYS = ("summary", "result", "role", "branch", "worktree", "title")
 
 
 def _load_profiles():
@@ -52,7 +30,6 @@ def _load_profiles():
 
 
 def _finished(body):
-    """El ocupante terminó y no espera a nadie: su escritorio se puede heredar."""
     return (body or {}).get("phase") in TERMINAL and not (body or {}).get("attention")
 
 
@@ -64,12 +41,11 @@ class Office:
     def __init__(self, conn, cfg, emit_fn, profiles_fn=None, clock=time.time):
         self.conn, self.cfg, self.emit_fn, self.clock = conn, cfg, emit_fn, clock
         self.profiles_fn = profiles_fn or _load_profiles
-        self.half_life = {}           # proyecto -> T½ (s)
-        self.company = {}             # proyecto -> empresa
+        self.half_life = {}
+        self.company = {}
         self._lock = threading.RLock()
-        self._loaded = None           # instante de la última relectura de perfiles
+        self._loaded = None
 
-    # ------------------------------------------------------------ utilidades de DB
 
     def _q(self, sql, args=()):
         with db.tx():
@@ -112,10 +88,8 @@ class Office:
     def _role_desks(self, project, role):
         return self._q("SELECT * FROM desks WHERE project=? AND role=? AND retired=0 ORDER BY floor, slot", (project, role))
 
-    # ------------------------------------------------------------ estructura
 
     def reload(self):
-        """Sincroniza `desks` con los perfiles. Devuelve los proyectos cuyo `office.changed` se emitió."""
         with self._lock:
             changed = []
             known = {r["project"] for r in self._q("SELECT DISTINCT project FROM desks")}
@@ -126,19 +100,17 @@ class Office:
                 try:
                     if self._sync(prof):
                         changed.append(project)
-                except Exception:  # noqa: BLE001 - un perfil roto no para a los demás
+                except Exception:
                     log.exception("oficina de %s", project)
             self._loaded = self.clock()
             return changed
 
     def sync_project(self, project, by="profile"):
-        """Resincroniza un proyecto tras reescribir su perfil (`PUT /office`): `office.changed {by}` si cambió. -> sobre o None."""
         with self._lock:
             prof = next((p for p in self.profiles_fn() if p.get("project") == project), None)
             return self._sync(prof, by=by) if prof else None
 
     def _sync(self, prof, by="profile"):
-        """Sincroniza la tabla `desks` de un perfil. Devuelve el sobre `office.changed` emitido o None."""
         project, now = prof["project"], self.clock()
         self.half_life[project] = layout.half_life_s(prof)
         self.company[project] = layout.company(prof)
@@ -187,10 +159,8 @@ class Office:
         r = self._q("SELECT COALESCE(MIN(seq),0) AS s FROM events")
         return r[0]["s"] if r else 0
 
-    # ------------------------------------------------------------ bus
 
     def tick(self):
-        """Pliega los sobres nuevos. Devuelve el número de `task.state` procesados."""
         with self._lock:
             if self._loaded is None or self.clock() - self._loaded >= RELOAD:
                 self.reload()
@@ -214,7 +184,6 @@ class Office:
             return n
 
     def _bootstrap(self):
-        """Primera pasada: guarda la última `task.state` de cada hilo sin decidir nada y luego sienta a los activos."""
         cur, n = 0, 0
         while True:
             page = events.list_after(self.conn, cur, BATCH)
@@ -233,7 +202,6 @@ class Office:
         return n
 
     def _remember(self, env):
-        """Guarda la última `task.state` del hilo (conservando `KEEP_KEYS` si la nueva no los trae). -> (tid, proyecto, cuerpo)."""
         body = {k: v for k, v in (env.get("body") or {}).items() if k not in ("legacy", "context")}
         tid = body.get("thread_id") or (env.get("subject") or {}).get("id")
         if not tid:
@@ -260,13 +228,13 @@ class Office:
                 self._decide(tid, project, body)
 
     def _decide(self, tid, project, body):
-        role = body.get("role")                           # un rol sin escritorios espera en el vestíbulo con su etiqueta
+        role = body.get("role")
         seat, active = self._seat(tid), body.get("phase") in ACTIVE
         if seat:
-            if active and role and role != seat["role"]:  # cambió de rol: se traslada si hay sitio
+            if active and role and role != seat["role"]:
                 self._place(tid, project, role, body)
             elif _finished(body):
-                self._promote(project, seat["role"])      # terminó: lo hereda quien espere ese rol
+                self._promote(project, seat["role"])
             return
         if active and role:
             w = self._waiting(tid)
@@ -276,10 +244,8 @@ class Office:
                 self._emit("desk.waiting", project, {"thread_id": tid, "role": role, "title": body.get("title"),
                                                      "phase": body.get("phase")})
 
-    # ------------------------------------------------------------ asignación
 
     def _candidates(self, project, role):
-        """(escritorio, ocupante|None) del rol: primero el ocupante que terminó antes, luego el primer libre."""
         finished, free = [], []
         for d in self._role_desks(project, role):
             occ = self._occupant(d["id"])
@@ -304,7 +270,6 @@ class Office:
         return {k: s.get(k) for k in INHERIT_KEYS}
 
     def _place(self, tid, project, role, body, desk=None, reason=None):
-        """Sienta al hilo en un escritorio del rol (o en `desk`). Devuelve el id del escritorio o None si está lleno."""
         cands = [(desk, self._occupant(desk["id"]))] if desk else self._candidates(project, role)
         if not cands:
             return None
@@ -316,7 +281,7 @@ class Office:
             self._release(d["id"], occ, "inherited", promote=False)
         now = self.clock()
         old = self._seat(tid)
-        if old:                                           # traslado: el escritorio anterior queda libre, sin linaje
+        if old:
             self._x("DELETE FROM desk_occupancy WHERE id=?", (old["id"],))
         self._x("INSERT INTO desk_occupancy(desk_id, thread_id, since, until, reason, inheritance) VALUES(?,?,?,NULL,?,?)",
                 (d["id"], tid, now, reason or ("inherited" if occ else "start"), db.jdump(inh) if inh else None))
@@ -342,7 +307,6 @@ class Office:
             self._promote(project, d[0]["role"])
 
     def _promote(self, project, role):
-        """Sube a los que esperan ese rol (los más antiguos primero) mientras haya escritorio."""
         for w in self._q("SELECT * FROM desk_waiting WHERE project=? AND role=? ORDER BY since", (project, role)):
             s = self._snap(w["thread_id"]) or {}
             if s.get("phase") not in ACTIVE:
@@ -350,10 +314,8 @@ class Office:
             if not self._place(w["thread_id"], project, role, s):
                 break
 
-    # ------------------------------------------------------------ acciones (API)
 
     def release(self, desk_id, reason):
-        """Saca al ocupante actual (`desk.released {reason}`) y sube a quien espere el rol. -> thread_id o None."""
         with self._lock:
             occ = self._occupant(desk_id)
             if occ is None:
@@ -362,7 +324,6 @@ class Office:
             return occ["thread_id"]
 
     def assign(self, desk_id, thread_id, reason="manual"):
-        """Asignación manual (`reason: manual`) o de un rol permanente despertado (`wake`). Lanza OfficeError(404/409/400)."""
         with self._lock:
             d = self._q("SELECT * FROM desks WHERE id=?", (desk_id,))
             if not d:
@@ -390,7 +351,6 @@ class Office:
             return desk_id
 
     def desk(self, desk_id):
-        """`GET /desks/<id>`: {desk, occupant, lineage:[…20]} o None."""
         with self._lock:
             d = self._q("SELECT * FROM desks WHERE id=?", (desk_id,))
             if not d:
@@ -421,5 +381,4 @@ class OfficeError(Exception):
 
 
 def thread_role(prof, title=None, branch=None):
-    """Rol por las reglas `match` del perfil (None sin perfil/oficina o si ninguna coincide)."""
     return layout.role_for(prof, title, branch) if prof else None

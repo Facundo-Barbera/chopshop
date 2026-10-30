@@ -1,16 +1,8 @@
 import Foundation
 
-/// Edición del `config.toml` desde la pantalla de ajustes. Solo Foundation (sin SwiftUI) para poder probarla aparte.
-/// La pantalla gestiona la lista de máquinas: las tablas `[app.agents.<nombre>]` (`url`, `enabled`), que se reescriben enteras
-/// (`update(text:agents:)`), y quita de `[app]` el `agent_url` suelto y el `token_file` de versiones anteriores (la credencial vive
-/// en el Keychain). El resto del archivo (otras secciones, `refresh_seconds`, comentarios, líneas en blanco) queda tal cual.
 enum ConfigWriter {
-    /// Claves de `[app]` que la pantalla de ajustes gestiona (`token_file` solo para borrarla).
     static let managedKeys = ["agent_url", "token_file"]
 
-    // MARK: - Validación
-
-    /// nil si la URL es válida; si no, el mensaje para mostrar en el formulario.
     static func validateURL(_ raw: String) -> String? {
         let u = AppConfig.normalizeURL(raw)
         if u.isEmpty { return "Escribe la URL del agente (por ejemplo http://100.64.0.10:3790)." }
@@ -26,8 +18,6 @@ enum ConfigWriter {
         return nil
     }
 
-    /// nil si el nombre sirve para una máquina nueva o editada (`others`: los nombres de las demás); si no, el mensaje.
-    /// Letras, números, `-` y `_` (así también vale como clave de entorno `CHOPSHOP_APP__AGENTS__<NOMBRE>__URL`).
     static func validateName(_ raw: String, others: [String]) -> String? {
         let n = raw.trimmingCharacters(in: .whitespaces)
         if n.isEmpty { return "Ponle un nombre a la máquina (por ejemplo mini o contabo)." }
@@ -36,23 +26,14 @@ enum ConfigWriter {
         return nil
     }
 
-    /// Clave TOML sin comillas: letras y números ASCII, `-` y `_`.
     static func isBareKey(_ s: String) -> Bool {
         !s.isEmpty && s.unicodeScalars.allSatisfy { ($0.isASCII && CharacterSet.alphanumerics.contains($0)) || $0 == "-" || $0 == "_" }
     }
-
-    // MARK: - Lectura de los valores actuales (solo del archivo, sin entorno)
 
     static func currentAgentURL(text: String) -> String {
         TomlLite.parse(text).first(where: { $0.path == ["app"] })?.values["agent_url"] ?? ""
     }
 
-    // MARK: - Lista de máquinas
-
-    /// Devuelve `text` con las máquinas de `agents` como tablas `[app.agents.<nombre>]`, en ese orden:
-    /// - las tablas `[app.agents.*]` que hubiera se quitan enteras (también claves que la app ya no usa, como `token_file`);
-    /// - las nuevas van justo después de la sección `[app]` (que se crea al final si no existe);
-    /// - de `[app]` se quitan `agent_url` y `token_file` (migración desde la configuración de un solo agente).
     static func update(text: String, agents: [AgentSpec]) -> String {
         let eol = text.contains("\r\n") ? "\r\n" : "\n"
         var blocks = split(update(text: text, agentURL: "")).filter { b in
@@ -86,21 +67,17 @@ enum ConfigWriter {
         return lines.joined(separator: eol)
     }
 
-    /// Si `text` es una configuración de un solo agente (`agent_url`/`token_file` sueltos en `[app]`), el texto migrado a
-    /// `[app.agents.*]` (el `agent_url` pasa a ser la máquina `agente`, el nombre que ya tenía); nil si no hay nada que migrar.
     static func migrateLegacy(text: String) -> String? {
         let app = TomlLite.parse(text).first(where: { $0.path == ["app"] })?.values ?? [:]
         guard app["agent_url"] != nil || app["token_file"] != nil else { return nil }
         return update(text: text, agents: AppConfig.parse(text).agents)
     }
 
-    /// Trozo del archivo: un encabezado `[tabla]` y sus líneas hasta el siguiente (el primero, sin encabezado: lo de antes).
     struct Block {
         var path: [String]?
         var lines: [String]
     }
 
-    /// Parte `text` en bloques por encabezado, sin confundir con encabezados los `[` de valores multilínea.
     static func split(_ text: String) -> [Block] {
         let lines = text.replacingOccurrences(of: "\r\n", with: "\n")
             .split(separator: "\n", omittingEmptySubsequences: false).map { String($0) }
@@ -127,13 +104,6 @@ enum ConfigWriter {
         return blocks
     }
 
-    // MARK: - Edición pura del texto
-
-    /// Devuelve `text` con `agent_url` de `[app]` actualizado:
-    /// - si la clave existe en `[app]`, se reemplaza esa línea (se conservan sangría y comentario final);
-    /// - si no existe, se agrega al final de la sección `[app]`; si no hay `[app]`, se agrega la sección al final del archivo;
-    /// - una URL vacía elimina la clave; `token_file` de `[app]` se elimina siempre (ya no se usa).
-    /// No toca claves homónimas de otras secciones (`[app.agents.*]`, etc.).
     static func update(text: String, agentURL: String) -> String {
         let url = AppConfig.normalizeURL(agentURL)
         let wanted: [(key: String, value: String?)] = [
@@ -142,22 +112,20 @@ enum ConfigWriter {
         ]
 
         let eol = text.contains("\r\n") ? "\r\n" : "\n"
-        // "\r\n" es un solo Character en Swift: se normaliza antes de partir y se restaura al unir
         let lines = text.replacingOccurrences(of: "\r\n", with: "\n")
             .split(separator: "\n", omittingEmptySubsequences: false).map { String($0) }
 
         var out: [String] = []
         var inApp = false
         var appSeen = false
-        var depth = 0                      // corchetes/llaves abiertos de un valor multilínea
-        var triple: String?                // delimitador de una cadena multilínea abierta
-        var lastContent = -1               // índice (en `out`) de la última línea con contenido dentro de [app]
+        var depth = 0
+        var triple: String?
+        var lastContent = -1
         var handled = Set<String>()
 
         for raw in lines {
             let line = raw.trimmingCharacters(in: .whitespaces)
 
-            // Continuación de un valor multilínea: se copia sin interpretarla
             if let t = triple {
                 if line.contains(t) { triple = nil }
                 out.append(raw)
@@ -202,7 +170,7 @@ enum ConfigWriter {
                 || rest.hasPrefix("[") || rest.hasPrefix("{")
 
             if inApp, let w = wanted.first(where: { $0.key == key }) {
-                if handled.contains(key) { continue }      // clave repetida: solo se conserva la primera
+                if handled.contains(key) { continue }
                 handled.insert(key)
                 if !multiline {
                     if let v = w.value {
@@ -210,9 +178,8 @@ enum ConfigWriter {
                         out.append(indent + key + " = " + quote(v) + trailingComment(rest))
                         lastContent = out.count - 1
                     }
-                    continue                               // sin valor: la línea se elimina
+                    continue
                 }
-                // Valor con forma rara (arreglo, cadena multilínea): se deja como está
             }
 
             if let t = opensTriple {
@@ -236,13 +203,12 @@ enum ConfigWriter {
                 if !out.isEmpty { out.append("") }
                 out.append("[app]")
                 out.append(contentsOf: added)
-                out.append("")                             // termina en salto de línea
+                out.append("")
             }
         }
         return out.joined(separator: eol)
     }
 
-    /// String TOML básico entre comillas dobles, con escapes.
     static func quote(_ s: String) -> String {
         var o = "\""
         for u in s.unicodeScalars {
@@ -258,8 +224,6 @@ enum ConfigWriter {
         return o + "\""
     }
 
-    /// Comentario final de la parte derecha de una línea `clave = valor  # comentario` ("" si no hay),
-    /// ignorando los `#` que van dentro de strings.
     static func trailingComment(_ rest: String) -> String {
         var q: Character?
         var escaped = false
@@ -278,8 +242,6 @@ enum ConfigWriter {
         return ""
     }
 
-    // MARK: - Guardado en disco
-
     enum WriteError: LocalizedError {
         case failed(String)
         var errorDescription: String? {
@@ -289,19 +251,14 @@ enum ConfigWriter {
         }
     }
 
-    /// Lee `path` (si existe), aplica `update` y lo escribe con permisos 600: primero a un temporal 600 en la misma
-    /// carpeta y luego lo mueve encima, para que el archivo nunca quede legible por otros ni a medio escribir.
-    /// Si `path` es un enlace simbólico (dotfiles), se escribe en su destino.
     static func save(path: String, agentURL: String) throws {
         try save(path: path) { update(text: $0, agentURL: agentURL) }
     }
 
-    /// Guarda la lista de máquinas (ver `update(text:agents:)`), igual que `save(path:agentURL:)`.
     static func save(path: String, agents: [AgentSpec]) throws {
         try save(path: path) { update(text: $0, agents: agents) }
     }
 
-    /// Lee `path` ("" si no existe), aplica `transform` y escribe el resultado (600, temporal + mover).
     static func save(path: String, transform: (String) -> String) throws {
         let fm = FileManager.default
         let target = URL(fileURLWithPath: path).resolvingSymlinksInPath()
@@ -331,8 +288,6 @@ enum ConfigWriter {
 
 #if DEBUG
 extension ConfigWriter {
-    /// Autocomprobación mínima de `update` (no se ejecuta al arrancar; llámala a mano o desde un REPL de depuración).
-    /// Las pruebas completas están en Tests/ChopshopUITests/ConfigWriterTests.swift.
     static func selfCheck() -> Bool {
         let src = "# c\n[app]\nagent_url = \"http://100.64.0.10:3790\"  # viejo\ntoken_file = \"~/t\"\nrefresh_seconds = 3\n"
         let out = update(text: src, agentURL: "http://100.64.0.11:3790/")

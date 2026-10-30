@@ -1,9 +1,5 @@
 import Foundation
 
-/// Lector mínimo de TOML (solo Foundation, sin SwiftUI: la lógica pura se prueba aparte).
-/// Devuelve las tablas `[a.b.c]` con sus pares `clave = valor` de tipo escalar: strings (`"…"` o `'…'`) y valores
-/// simples sin comillas (números, booleanos), tal cual vienen como texto. Ignora comentarios, `[[arreglos de tablas]]`,
-/// arreglos y tablas en línea (también los multilínea) y cadenas multilínea: no es un parser TOML completo.
 enum TomlLite {
     struct Table: Equatable {
         var path: [String]
@@ -12,9 +8,9 @@ enum TomlLite {
 
     static func parse(_ input: String) -> [Table] {
         var tables: [Table] = []
-        var current: Int?          // índice de la tabla abierta (nil: fuera de tablas útiles)
-        var depth = 0              // corchetes/llaves abiertos de un valor multilínea
-        var triple: String?        // delimitador de una cadena multilínea abierta
+        var current: Int?
+        var depth = 0
+        var triple: String?
         var text = input
         if text.hasPrefix("\u{FEFF}") { text.removeFirst() }
         for raw in text.split(whereSeparator: \.isNewline) {
@@ -59,7 +55,6 @@ enum TomlLite {
         return tables
     }
 
-    /// Ruta de un encabezado `[a."b c".d]` (admite comentario final). nil si está mal formado.
     static func headerPath(_ line: String) -> [String]? {
         var parts: [String] = []
         var cur = ""
@@ -80,7 +75,6 @@ enum TomlLite {
         return parts.contains(where: \.isEmpty) ? nil : parts
     }
 
-    /// Corchetes y llaves abiertos menos cerrados en `line`, sin contar los de dentro de strings ni de comentarios.
     static func bracketDelta(_ line: String) -> Int {
         var d = 0
         var quote: Character?
@@ -100,7 +94,6 @@ enum TomlLite {
         return d
     }
 
-    /// Lee un string TOML al inicio de `s` (lo que venga después de la comilla de cierre, p. ej. un comentario, se ignora).
     static func parseString(_ s: String) -> String? {
         guard let q = s.first, q == "\"" || q == "'" else { return nil }
         if s.hasPrefix("\"\"\"") || s.hasPrefix("'''") { return nil }

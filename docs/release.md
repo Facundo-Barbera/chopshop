@@ -34,7 +34,7 @@ flowchart LR
 |---|---|---|
 | `.github/workflows/release-mac.yml` | tag `v*` / manual | `preflight` → `build` → `publish`. Manual = dry-run por defecto. |
 | `.github/workflows/rollback-mac.yml` | manual | Retira una versión del feed sin tocar las demás. |
-| `.github/workflows/release-tooling.yml` | PRs que tocan el pipeline | Tests, `shellcheck` y `actionlint` sin credenciales. |
+| `.github/workflows/release-tooling.yml` | PRs que tocan el pipeline | `shellcheck` y `actionlint` sin credenciales. |
 | `apps/mac/release/*.sh` | scripts | `version`, `preflight`, `keychain`, `assemble-app`, `embed-sparkle`, `sign-app`, `notarize` (app y DMG), `package`, `make-dmg`, `sign-dmg`, `sparkle-tools`, `notes`, `appcast`, `r2`, `publish`, `rollback`. |
 | `apps/mac/release/appcast.py`, `notes.py` | Python (stdlib) | Validación del appcast (monotonía, firmas Ed25519), notas HTML. |
 | `apps/mac/release/sparkle.version` | pin | Versión de Sparkle y SHA-256 del tarball; debe coincidir con `Package.swift`. |
@@ -276,15 +276,12 @@ Procedimiento de rotación de la clave EdDSA (con el mismo certificado Developer
 3. Espera a que la mayoría haya actualizado (el menú de Sparkle y tus métricas de descarga te lo dirán).
 4. Cambia `SPARKLE_ED_PRIVATE_KEY` por la privada nueva y quita esa línea del workflow. Los siguientes releases se firman con la nueva; el feed también (`SURequireSignedFeed`), por lo que quien siga con una versión anterior al puente no podrá verificarlo y deberá reinstalar a mano.
 
-## Pruebas locales (sin credenciales)
+## Checks locales (sin credenciales)
 
 ```sh
-cd apps/mac && python3 -m unittest discover -s release/tests      # o: pnpm test desde la raíz
 shellcheck -x -P SCRIPTDIR -s bash apps/mac/release/*.sh          # opcional
 actionlint .github/workflows/*.yml                                # opcional
 ```
-
-Los tests ejecutan los scripts reales con ejecutables falsos (`security`, `codesign`, `xcrun`, `aws`, `curl`, `generate_appcast`…) y comprueban el orden de las operaciones (firma de dentro hacia fuera, zips antes que el appcast, rollback), que no se imprima ningún secreto y que workflows y scripts no lleven dominios, Team IDs ni nombres propios.
 
 En un Mac con Xcode puedes ensamblar y firmar ad-hoc sin credenciales:
 

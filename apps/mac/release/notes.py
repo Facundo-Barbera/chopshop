@@ -1,12 +1,4 @@
 #!/usr/bin/env python3
-"""Notas de versión del release (solo stdlib, Python >= 3.9).
-
-  notes.py changelog --file CHANGELOG.md --version 1.2.3   sección de esa versión (markdown) por stdout
-  notes.py html [--title T] [--page]                       markdown (stdin) -> HTML (fragmento, o página con --page)
-
-El conversor es mínimo a propósito: escapa TODO el texto antes de aplicar formato y solo admite enlaces
-http(s). Las notas se incrustan en el appcast (firmado), así que no debe colarse HTML arbitrario.
-"""
 import argparse
 import html
 import re
@@ -14,7 +6,6 @@ import sys
 
 
 def changelog_section(text, version):
-    """Cuerpo de la sección `## [1.2.3]` / `## 1.2.3` (con fecha opcional) hasta el siguiente `## `."""
     lines = text.splitlines()
     head = re.compile(r"^##\s+\[?v?%s\]?(\s|$|\()" % re.escape(version))
     out, inside = [], False
@@ -67,7 +58,7 @@ def md_to_html(md):
         m = re.match(r"^(#{1,6})\s+(.*)$", ln)
         if m:
             flush_para(); flush_list()
-            n = min(len(m.group(1)) + 1, 6)  # h1 -> h2: el título de la ventana ya es h1
+            n = min(len(m.group(1)) + 1, 6)
             out.append("<h%d>%s</h%d>" % (n, _inline(m.group(2)), n))
             continue
         m = re.match(r"^\s*([-*]|\d+\.)\s+(.*)$", ln)
@@ -91,7 +82,7 @@ def md_to_html(md):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(description="Notas de versión del release.")
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("changelog")
     p.add_argument("--file", required=True)

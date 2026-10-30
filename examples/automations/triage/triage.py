@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-"""Ejemplo de automatización: lee el sobre disparador (CHOPSHOP_EVENT_FILE) y emite `triage.result` en stdout (JSONL).
-Solo stdlib; no toca la red. Sin disparador (schedule/manual sin --event-file) emite un resumen vacío."""
 import json
 import os
 import sys

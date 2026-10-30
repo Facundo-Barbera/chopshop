@@ -2,8 +2,6 @@ import SwiftUI
 import AppKit
 import ChopshopNative
 
-/// Ventana de juego: solo datos de prueba (ChopshopNative.Fixtures), sin motor ni red.
-/// `swift run ChopshopPlayground`, o abre ui/Package.swift en Xcode y usa los #Preview.
 struct PlaygroundApp: App {
     var body: some Scene {
         WindowGroup("Chopshop · Playground") {
@@ -15,7 +13,6 @@ struct PlaygroundApp: App {
         .windowToolbarStyle(.unified)
         .commands { CityCommands() }
 
-        // La ciudad (city-fixture.jsonl): Ventana → Abrir la ciudad (⌘⇧C).
         Window("Chopshop · Ciudad", id: "city") {
             CityPlaygroundScreen()
                 .frame(minWidth: 1100, minHeight: 720)

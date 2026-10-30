@@ -1,13 +1,8 @@
 import Foundation
 
-/// Reproduce un `.jsonl` de sobres (p. ej. `ui-fixture.jsonl` del agente) como si fuera el `/stream`: `hello` y luego cada sobre
-/// respetando la separación de sus `ts`, acelerada `speed` veces (con tope `maxGap` por hueco). Para Previews, tests y el modo
-/// demo de la app sin agente. Al reanudar con un cursor salta lo ya entregado, como el agente.
 public struct FixtureStream: MessageSource {
     public var envelopes: [Envelope]
-    /// 1 = tiempo real; 60 = un minuto por segundo; 0 = sin esperas.
     public var speed: Double
-    /// Segundos máximos de espera entre dos sobres (ya acelerados).
     public var maxGap: Double
     public var machine: String?
     private let sleep: @Sendable (Double) async -> Void
@@ -18,7 +13,6 @@ public struct FixtureStream: MessageSource {
         machine = envelopes.lazy.compactMap(\.machine).first
     }
 
-    /// Una línea por sobre; las que no son un sobre válido se saltan.
     public init(jsonl: Data, speed: Double = 30, maxGap: Double = 2) {
         self.init(envelopes: Self.parse(jsonl), speed: speed, maxGap: maxGap)
     }
@@ -32,7 +26,6 @@ public struct FixtureStream: MessageSource {
     }
 
     #if NATIVE_PREVIEWS
-    /// `ui-fixture.jsonl` incluido en el banco de pruebas (apps/mac/native).
     public static func bundled(speed: Double = 30) -> FixtureStream {
         guard let url = Bundle.module.url(forResource: "ui-fixture", withExtension: "jsonl"),
               let s = try? FixtureStream(contentsOf: url, speed: speed) else { return FixtureStream(envelopes: [], speed: speed) }

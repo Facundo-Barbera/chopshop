@@ -1,9 +1,7 @@
-// Cliente mínimo (fetch) de la API de chopshop-agent. Sin dependencias: sirve en Node o en tests
-// (la app de Mac no lo usa para la red: URLSession hace las peticiones y entrega los resultados a `createStore`).
 export * from "./view.js";
 
 export class ChopshopClient {
-  constructor({ baseUrl, token = null, fetchImpl = globalThis.fetch } = {}) {
+  constructor({ baseUrl = "", token = null, fetchImpl = globalThis.fetch } = {}) {
     if (!baseUrl) throw new Error("baseUrl requerido");
     this.baseUrl = baseUrl.replace(/\/+$/, "");
     this.token = token;
@@ -20,7 +18,7 @@ export class ChopshopClient {
   }
   health() { return this._req("GET", "/health"); }
   snapshot() { return this._req("GET", "/snapshot"); }
-  metrics({ from, to, group = "project", step } = {}) {
+  metrics({ from = "", to = "", group = "project", step = "" } = {}) {
     const q = new URLSearchParams({ group, ...(from && { from }), ...(to && { to }), ...(step && { step }) });
     return this._req("GET", "/metrics?" + q);
   }

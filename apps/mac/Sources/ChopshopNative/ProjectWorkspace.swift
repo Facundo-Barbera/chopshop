@@ -1,9 +1,5 @@
 import SwiftUI
 
-/// Proyecto en vivo a pantalla completa: el mundo de la oficina ocupa todo el área y escala con la ventana; a la
-/// derecha, un panel lateral con el detalle del hilo elegido (o del armario o la consola de una sala de máquinas) o, sin elección,
-/// lo que te necesita y la lista de hilos. La oficina
-/// no lleva nada encima: el detalle vive aquí.
 @available(macOS 26.0, *)
 public struct ProjectWorkspace: View {
     let project: String
@@ -29,7 +25,6 @@ public struct ProjectWorkspace: View {
         }
     }
 
-    /// Cada cuánto se rehacen los pisos con el reloj (semivida).
     static let refresh = 15.0
 
     private func office(now: Date?) -> some View {
@@ -42,15 +37,11 @@ public struct ProjectWorkspace: View {
     @ViewBuilder private var stage: some View {
         if frozenNow != nil { office(now: frozenNow) }
         else {
-            // los pisos se rehacen cada `refresh` s aunque no llegue nada del stream: lo que la semivida ya desvaneció sale
-            // del mundo (sin dejar el hueco del invitado ni el escritorio «ocupado» por alguien invisible)
             TimelineView(.periodic(from: .now, by: Self.refresh)) { _ in office(now: nil) }
         }
     }
 }
 
-/// Panel lateral: detalle del hilo elegido (o de la sala de máquinas, si se eligió un armario `rack:<k>:<unidad>` o la consola
-/// `machine:<k>`), o lo que te necesita y los hilos (en curso, en cola, terminados).
 @available(macOS 26.0, *)
 struct ThreadPanel: View {
     let project: String
@@ -58,7 +49,6 @@ struct ThreadPanel: View {
     let state: LiveState
     let now: Date?
     @Binding var selected: String?
-    /// Ancho del contenido (sin márgenes): lo usa el rack de la sala de máquinas.
     var width: CGFloat = MachineRoomDetail.defaultWidth
 
     private var tasks: [MockTask] { snapshot.tasks(of: project) }
@@ -69,7 +59,6 @@ struct ThreadPanel: View {
     }
 
     var body: some View {
-        // con el reloj congelado (capturas: ImageRenderer no pinta ScrollView) el panel va sin desplazamiento
         if now != nil {
             content.frame(maxHeight: .infinity, alignment: .top).background(Color(nsColor: .windowBackgroundColor))
         } else {
@@ -88,7 +77,6 @@ struct ThreadPanel: View {
                         MachineRoomDetail(room: m.room, title: m.title, unit: FloorLayout.machinePart(tid)?.unit, frozenNow: now,
                                           width: width)
                     } else {
-                        // el mundo elige por hilo de T3 (`MockTask.threadID`); el snapshot y los hosts van por tarea
                         let task = tasks.first { $0.threadID == tid || $0.id == tid }
                         ThreadDetail(threadID: tid, task: task, host: hostOf[task?.id ?? tid], project: project, state: state,
                                      now: now ?? Date())
@@ -110,7 +98,6 @@ struct ThreadPanel: View {
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// Sala de máquinas (y rótulo del hueco) de un armario o una consola elegidos; nil si `id` es un hilo.
     private func machine(_ id: String) -> (room: MachineRoom, title: String)? {
         guard FloorLayout.machinePart(id) != nil else { return nil }
         for f in ProjectOffice.floors(in: state, project: project, now: now ?? Date()) {
@@ -149,7 +136,6 @@ struct ThreadPanel: View {
     }
 }
 
-/// Detalle de un hilo: estado, dónde está en la oficina (escritorio o vestíbulo), semivida, herencia, linaje y lo que dijo.
 @available(macOS 26.0, *)
 struct ThreadDetail: View {
     let threadID: String

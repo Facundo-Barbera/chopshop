@@ -1,11 +1,10 @@
-"""CLI de Chopshop (stdlib). Uso: chopshop <comando> ... (ver README.md)."""
 import argparse
 import json
 import os
 import sys
 import time
 
-from . import engine, events, graph, home, inbox, integrate, metrics, miniyaml, profile, state, t3
+from . import engine, graph, inbox, integrate, metrics, miniyaml, profile, state, t3
 
 HELP_EPILOG = """comandos: profile list|show|check | fanout | run | poll | watch | status | snapshot | metrics | wait | gather | answer [--queue] | stop | settle | integrate | subscribe | graph new|run|status | automation list|check|run|logs|add | agent run|status|token|check-config|print-unit | pair create|list|revoke|prune"""
 
@@ -219,7 +218,6 @@ def cmd_graph(a):
         if not gs:
             print("sin grafos")
         return 0
-    # run
     g = st.get("graphs", {}).get(a.target)
     if not g:
         raise profile.ProfileError("grafo desconocido: %s" % a.target)
@@ -262,7 +260,6 @@ def _file_arg(path, what):
 
 
 def _subscribe_agent(a):
-    """Suscripción v2 en el chopshop-agent (POST /subscriptions). Las rutas viajan como rutas: nunca la URL ni el secreto."""
     from .agent import client
     c = _agent_client()
     try:
@@ -374,13 +371,13 @@ def build():
 
 
 def main(argv):
-    if argv and argv[0] == "agent":  # servicio chopshop-agent: tiene su propio parser (run|status|token|check-config|print-unit)
+    if argv and argv[0] == "agent":
         from .agent import service
         return service.main(argv[1:])
-    if argv and argv[0] == "pair":   # emparejamiento de dispositivos con el agente local (create|list|revoke|prune)
+    if argv and argv[0] == "pair":
         from .agent import pairing
         return pairing.main(argv[1:])
-    if argv and argv[0] == "automation":  # automatizaciones por proyecto (perfil `automations:`)
+    if argv and argv[0] == "automation":
         from .agent import automations
         return automations.main(argv[1:])
     a = build().parse_args(argv)

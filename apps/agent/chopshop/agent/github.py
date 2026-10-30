@@ -1,18 +1,3 @@
-"""Ingreso de GitHub por polling con ETag (diseño §6, opción 1): hilo `github` del agente.
-
-Por cada repo de `[agent.github] repos`:
-- `GET /repos/{o}/{r}/events` con `If-None-Match` (un 304 no gasta cuota ni emite). Cursor en `meta`:
-  `gh_etag:<repo>` y `gh_last_event_id:<repo>`; solo se emiten eventos con id mayor que el cursor.
-- `GET /repos/{o}/{r}/pulls?state=open` + check-runs del HEAD de cada PR abierto -> `github.ci.completed` cuando el
-  agregado de CI de ese HEAD pasa a `success|failure`. Estado (ETags, HEADs y CI por PR) en `meta` `gh_ci:<repo>` (JSON).
-- La primera pasada de cada repo siembra los cursores SIN emitir (como `t3watch`).
-- `X-Poll-Interval` de GitHub sube el intervalo; 403/429/rate-limit/5xx/fallo de `gh` -> backoff exponencial (respeta
-  `Retry-After` y `X-RateLimit-Reset`) y UNA emisión `machine.health` degradada (y otra `ok` al recuperar). El hilo sigue.
-
-Se usa el `gh` ya autenticado de la máquina (`gh api -i`): este módulo nunca lee, pasa ni imprime el token. Los logs solo
-llevan repo, código HTTP y motivo; los cuerpos emitidos son metadatos (texto largo truncado a 2 KB) y se les quitan
-patrones de credenciales (`gh?_…`, `github_pat_…`, `Authorization: …`, `usuario:clave@` en URLs).
-Inyectable: `runner(argv, timeout) -> (rc, stdout, stderr)`, `clock`, `emit(event, project, body)`, `projects_fn()`."""
 import json
 import logging
 import re
@@ -23,11 +8,11 @@ from . import db
 
 log = logging.getLogger("chopshop.agent.github")
 
-GH_TIMEOUT = 20                   # s por llamada a `gh api`
-MAX_BACKOFF = 900.0               # s, tope del backoff
-MAX_TEXT = 2048                   # bytes del texto largo (cuerpo del issue/PR, mensaje de commit)
+GH_TIMEOUT = 20
+MAX_BACKOFF = 900.0
+MAX_TEXT = 2048
 MAX_TITLE = 300
-MAX_PRS = 30                      # PRs abiertos por repo a los que se mira el CI
+MAX_PRS = 30
 PER_PAGE = 100
 _REPO = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 _FAIL = {"failure", "timed_out", "cancelled", "action_required", "startup_failure", "stale"}
@@ -40,17 +25,12 @@ _SECRET = [
 
 
 class GitHubError(Exception):
-    """Respuesta no utilizable de `gh api`. `kind`: rate_limit | forbidden | server_error | not_found | gh | http."""
-
     def __init__(self, kind, status=None, wait=None):
         super().__init__("%s%s" % (kind, " (HTTP %s)" % status if status else ""))
         self.kind, self.status, self.wait = kind, status, wait
 
 
-# ---------------------------------------------------------------- utilidades puras
-
 def norm_repo(value):
-    """'Owner/Name', URL https/ssh de GitHub o 'github.com/Owner/Name(.git)' -> 'owner/name' (o None)."""
     if not isinstance(value, str):
         return None
     s = value.strip()
@@ -60,14 +40,12 @@ def norm_repo(value):
 
 
 def scrub(s):
-    """Quita patrones de credenciales de un texto."""
     for rx, rep in _SECRET:
         s = rx.sub(rep, s)
     return s
 
 
 def clip(s, limit=MAX_TEXT):
-    """Texto limpio y truncado a `limit` BYTES UTF-8 (sin romper un carácter)."""
     if s is None:
         return None
     s = scrub(str(s))
@@ -78,7 +56,6 @@ def clip(s, limit=MAX_TEXT):
 
 
 def _clean(o):
-    """Limpieza recursiva de los cuerpos emitidos (cinturón y tirantes: nada con forma de credencial sale)."""
     if isinstance(o, str):
         return scrub(o)
     if isinstance(o, dict):
@@ -89,7 +66,6 @@ def _clean(o):
 
 
 def parse_include(out):
-    """Salida de `gh api -i` -> (status, {cabecera_minúsculas: valor}, cuerpo). status None si no hay línea HTTP."""
     text = (out or "").replace("\r\n", "\n")
     head, sep, body = text.partition("\n\n")
     lines = head.split("\n")
@@ -129,7 +105,6 @@ def _base_body(repo, **kw):
 
 
 def map_event(ev, repo):
-    """Un evento de `/repos/{r}/events` -> (tipo, cuerpo) o None si no se publica."""
     t = ev.get("type")
     p = ev.get("payload") or {}
     actor = _login(ev.get("actor"))
@@ -171,7 +146,6 @@ def map_event(ev, repo):
 
 
 def ci_state(check_runs):
-    """Agregado de check-runs: None (sin CI) | pending | failure | success."""
     runs = [r for r in check_runs or [] if isinstance(r, dict)]
     if not runs:
         return None
@@ -183,7 +157,6 @@ def ci_state(check_runs):
 
 
 def project_map(cfg, profiles=None):
-    """{'owner/name': proyecto} desde `[agent.projects.<p>] repo` y los perfiles (`profile.repo`, ganan los perfiles)."""
     out = {}
     for name, p in (cfg.get("projects") or {}).items():
         r = norm_repo(p.get("repo")) if isinstance(p, dict) else None
@@ -197,23 +170,18 @@ def project_map(cfg, profiles=None):
 
 
 def profile_repos():
-    """{proyecto: repo} de ~/.chopshop/profiles/*.yaml. Un perfil roto se ignora."""
     out = {}
     for name in profile_mod.list_projects():
         try:
             d = profile_mod.load(name)
-        except Exception:  # noqa: BLE001 - un perfil roto no tumba el hilo
+        except Exception:
             continue
         if d.get("repo"):
             out[name] = d["repo"]
     return out
 
 
-# ---------------------------------------------------------------- poller
-
 class GitHubPoller:
-    """Estado del sondeo. `poll_once()` hace una pasada (nunca lanza por errores de GitHub); `next_delay()` = espera."""
-
     def __init__(self, conn, cfg, emit, runner=None, clock=time.time, projects_fn=profile_repos):
         gcfg = cfg.get("github") or {}
         self.conn, self.cfg, self.emit, self.clock = conn, cfg, emit, clock
@@ -227,19 +195,17 @@ class GitHubPoller:
             n = norm_repo(r)
             if n and n not in self.repos:
                 self.repos.append(n)
-        self.poll_interval = 0.0      # X-Poll-Interval más alto visto en la pasada
+        self.poll_interval = 0.0
         self.failures = 0
-        self.until = 0.0              # no sondear antes de este instante (backoff)
+        self.until = 0.0
         self.degraded_since = None
         self._warned = set()
 
-    # -- gh api
     def _api(self, path, etag=None):
-        """-> (status, headers, datos JSON o None). Lanza GitHubError para todo lo que no sea 2xx/304."""
         argv = [self.gh, "api", "-i", "-H", "Accept: application/vnd.github+json"]
         if etag:
             argv += ["-H", "If-None-Match: " + etag]
-        rc, out, _err = self.runner(argv + [path], GH_TIMEOUT)     # stderr no se usa ni se registra
+        rc, out, _err = self.runner(argv + [path], GH_TIMEOUT)
         status, headers, body = parse_include(out)
         if status is None:
             raise GitHubError("gh", wait=None)
@@ -267,7 +233,6 @@ class GitHubPoller:
             raise GitHubError("server_error", status)
         raise GitHubError("http", status)
 
-    # -- meta
     def _get(self, key):
         with db.tx():
             r = self.conn.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
@@ -284,7 +249,6 @@ class GitHubPoller:
     def _emit(self, event, project, body):
         self.emit(event, project, _clean(body))
 
-    # -- una pasada
     def poll_once(self):
         now = self.clock()
         if now < self.until:
@@ -292,7 +256,7 @@ class GitHubPoller:
         self.poll_interval = 0.0
         try:
             projects = project_map(self.cfg, self.projects_fn() if self.projects_fn else None)
-        except Exception:  # noqa: BLE001
+        except Exception:
             projects = project_map(self.cfg)
         res = {"emitted": 0, "seeded": [], "errors": {}}
         error = None
@@ -300,7 +264,7 @@ class GitHubPoller:
             try:
                 res["emitted"] += self._poll_repo(repo, projects.get(repo), res)
             except GitHubError as e:
-                if e.kind == "not_found":          # repo mal escrito o sin acceso: aviso una vez, no degrada
+                if e.kind == "not_found":
                     if repo not in self._warned:
                         self._warned.add(repo)
                         log.warning("github: %s no existe o no es accesible (HTTP %s)", repo, e.status)
@@ -308,7 +272,7 @@ class GitHubPoller:
                     continue
                 error = e
                 res["errors"][repo] = e.kind
-                break                               # cuota y fallos de gh son de toda la cuenta: se para la pasada
+                break
         if error is not None:
             self._degrade(error, now)
         else:
@@ -383,12 +347,11 @@ class GitHubPoller:
                     emitted += 1
             done = True
         finally:
-            if done or not seed:                   # una siembra a medias no se guarda: se repite entera
+            if done or not seed:
                 st["prs"] = prs
                 self._set({key: db.jdump(st)})
         return emitted
 
-    # -- salud
     def _degrade(self, e, now):
         self.failures += 1
         wait = min(MAX_BACKOFF, self.interval * (2 ** min(self.failures - 1, 6)))
@@ -410,7 +373,6 @@ class GitHubPoller:
         self.failures, self.until, self.degraded_since = 0, 0.0, None
 
     def next_delay(self):
-        """Segundos hasta la próxima pasada: backoff vigente o max(interval_s, X-Poll-Interval)."""
         left = self.until - self.clock()
         if left > 0:
             return left
@@ -423,7 +385,6 @@ def _default_runner(argv, timeout=GH_TIMEOUT):
 
 
 def check(cfg, which=None):
-    """(errores, avisos) de `[agent.github]` (lo usa `check_config`)."""
     g = cfg.get("github") or {}
     errs, warns = [], []
     if not g.get("enabled"):

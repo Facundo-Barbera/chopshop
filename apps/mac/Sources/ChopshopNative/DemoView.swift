@@ -1,6 +1,5 @@
 import SwiftUI
 
-/// Tarjeta de la demo: encabezado (objetivo, progreso, reinicio) + oficina animada + ticker de eventos aplicados al store.
 @available(macOS 26.0, *)
 struct DemoOfficeCard: View {
     let playback: DemoPlayback
@@ -78,7 +77,6 @@ private struct ProgressTrack: View {
     }
 }
 
-/// La demo en vivo: reproduce el guion en bucle; "Reiniciar" vuelve a t = 0.
 @available(macOS 26.0, *)
 struct DemoScreen: View {
     let playback = DemoPlayback.shared

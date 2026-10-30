@@ -1,4 +1,3 @@
-"""Paso 1: cargador de perfiles locales ~/.chopshop/profiles/<proyecto>.yaml (nunca en el repo)."""
 import os
 import re
 
@@ -25,7 +24,6 @@ def profile_path(project):
 
 
 def hosts():
-    """Hosts de T3: sección [hosts.*] de ~/.config/chopshop/config.toml (más el legado ~/.chopshop/config.yaml)."""
     h = {k: dict(v) for k, v in settings.load()["hosts"].items()}
     p = home.config_path()
     if os.path.exists(p):
@@ -61,7 +59,6 @@ def list_projects():
 
 
 def validate_building(project):
-    """Tope de pisos por edificio entre todos los perfiles locales que comparten empresa con `project`."""
     from .agent import layout
     profs = []
     for name in list_projects():
@@ -77,7 +74,6 @@ def validate_building(project):
 
 
 def validate(d):
-    """Devuelve lista de problemas (vacía si el perfil es usable)."""
     errs = []
     hs = hosts()
     if d["host"] not in hs:
@@ -108,7 +104,6 @@ INTEGRATION_KEYS = ("test_cmd", "test_cwd", "timeout")
 
 
 def validate_integration(d):
-    """Bloque opcional `integration:` (lo usa `chopshop integrate`)."""
     g = d.get("integration")
     if g is None:
         return []

@@ -233,7 +233,6 @@ Entorno (tiene prioridad): `CHOPSHOP_APP__AGENT_URL`, `CHOPSHOP_APP__TOKEN_FILE`
 
 - Cada `refresh_seconds` la app consulta `GET /snapshot` de cada agente (URLSession, con `Authorization: Bearer <token>` leído del archivo en cada petición; el token no se imprime ni se guarda) y entrega los resultados crudos a la UI web, que los combina por `machine_id` (`packages/api/src/view.js`).
 - Puente JSON `{type, payload, id?}`. JS→Swift (`window.webkit.messageHandlers.chopshop.postMessage`): `ready`, `refresh`, `navigate`, `openLink` y las acciones `answer` y `settle` (las únicas escrituras; el resto es de solo lectura; cada una un `POST` de la API al agente indicado en `agent`). Swift→JS (`window.chopshop.receive`): `agents`, `select`, `error`, `actionResult`.
-- Pruebas: la lógica pura de Swift (config, cliente con transporte falso, resumen) está en `apps/mac/Tests` (`swift test`, requiere Xcode); la combinación de snapshots y el cliente JS, en `packages/api/test` (`pnpm test`).
 - Argumentos de la app: `--select overview|questions|batches|events|project:<nombre>`, `--capture`.
 
 ### Permisos de macOS
@@ -253,14 +252,18 @@ Para regenerarlas con datos de ejemplo, ver [`docs/screenshots.md`](docs/screens
 
 `apps/agent/chopshop/agent` es el servicio (v0.6, en desarrollo) que corre sin interfaz en cada máquina: mide CPU/RAM/disco por app y proyecto, guarda el historial en SQLite, vigila los hilos de T3 y expone una API HTTP por Tailscale. La app pasa a ser un cliente puro. Diseño en [`docs/agent-architecture.md`](docs/agent-architecture.md) contrato en [`docs/agent-api.md`](docs/agent-api.md) e instalación como servicio `systemd --user` en [`docs/agent-service.md`](docs/agent-service.md). Su configuración vive en la sección `[agent]` del `config.toml`.
 
-## Tests
+## Checks estáticos
+
+El repo no tiene tests unitarios: se valida con checks estáticos (también en CI, `.github/workflows/lint.yml`).
 
 ```sh
-pnpm test      # python unittest (apps/agent) + node --test (packages/api) + chequeos
-pnpm check     # compileall, node --check y bash -n
+uv sync && pnpm install   # dependencias de desarrollo (ruff, mypy, typescript, eslint)
+pnpm lint                 # ruff + mypy, tsc --noEmit, eslint y la regla «sin comentarios»
+pnpm lint:swift           # swiftlint (macOS, apps/mac/.swiftlint.yml)
+pnpm check                # compileall, node --check y bash -n
 ```
 
-Sin pnpm, solo el motor: `cd apps/agent && python3 -m unittest discover -s tests`. Los tests no arrancan servicios ni tocan tu configuración real.
+El código no lleva comentarios: lo prohíben `scripts/check-no-comments.py` (Python, shell, workflows, CSS y `.d.ts`), la regla `local/no-comments` de ESLint y la regla `no_comments` de SwiftLint.
 
 ## Seguridad y datos personales
 

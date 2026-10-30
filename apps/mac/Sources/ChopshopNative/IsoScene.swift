@@ -1,14 +1,6 @@
 import SwiftUI
 import simd
 
-// Oficina isométrica: cada rango de dependencias es una sala (losa extruida con dos muros bajos al fondo);
-// cada tarea es un escritorio con un muñeco. Proyección isométrica 2:1 hecha a mano (sin SceneKit), así se ve igual
-// en Previews, en la app y en capturas headless con ImageRenderer.
-//
-//   pantalla.x = (x - y) · s          pantalla.y = ((x + y) / 2 - z) · s
-//
-// +x baja a la derecha, +y baja a la izquierda, +z sube. Cara izquierda = +y, cara derecha = +x; la luz viene de arriba-izquierda.
-
 @available(macOS 26.0, *)
 enum Iso {
     static let slabH = 8.0, wallH = 15.0, wallT = 4.0
@@ -17,7 +9,6 @@ enum Iso {
     static let zoom = 1.85
 }
 
-/// Muelle subamortiguado (0 → 1 con un pequeño rebote). `x` en segundos.
 @available(macOS 26.0, *)
 func isoSpring(_ x: Double, zeta: Double = 0.62, omega: Double = 9) -> Double {
     if x <= 0 { return 0 }
@@ -43,19 +34,17 @@ struct IsoDesk: Identifiable {
     let node: MockGraphNode
     let visual: NodeVisual
     let room: Int
-    var cx: Double, cy: Double              // centro de la celda
-    // Animación (la rellena DemoPlayback; en la vista estática quedan en su valor final).
-    var pop = 1.0                           // 0 → 1 (con rebote): el escritorio sube del suelo
-    var walk = 1.0                          // 0 → 1: el muñeco entra caminando desde la puerta
-    var since = 99.0                        // segundos desde el último cambio de estado
-    var floorZ = Iso.slabH                  // altura del suelo de su sala (sube con la sala)
-    var entryX = 0.0                        // por dónde entra el muñeco (x del muro de la sala)
+    var cx: Double, cy: Double
+    var pop = 1.0
+    var walk = 1.0
+    var since = 99.0
+    var floorZ = Iso.slabH
+    var entryX = 0.0
     var id: String { node.id }
     var deskX: Double { cx - Iso.deskW / 2 }
     var deskY: Double { cy - 20 }
     var figX0: Double { cx }
     var figY0: Double { cy + 13 }
-    /// Posición del muñeco: camina por el pasillo delantero y gira hacia su escritorio.
     var figX: Double { walk >= 1 ? figX0 : walkPos.x }
     var figY: Double { walk >= 1 ? figY0 : walkPos.y }
     private var walkPos: (x: Double, y: Double) {
@@ -73,8 +62,8 @@ struct IsoDesk: Identifiable {
 struct IsoRoom {
     let index: Int
     var x0: Double, y0: Double, w: Double, d: Double
-    var rise = 1.0, wallRise = 1.0          // 0 → 1: la losa y los muros se extruyen desde el suelo
-    var doors: [Double] = []                // y de los cables que entran por el muro x-min
+    var rise = 1.0, wallRise = 1.0
+    var doors: [Double] = []
     var needs = false, stuck = false
     var count = 0
 }
@@ -84,9 +73,8 @@ struct IsoWire {
     let from: String, to: String
     let pts: [SIMD2<Double>]
     let cum: [Double]
-    var draw = 1.0                          // fracción ya dibujada del cable
+    var draw = 1.0
     var length: Double { cum.last ?? 0 }
-    /// Polilínea recortada a `frac` de su longitud (el cable "se dibuja solo").
     func trimmed(_ frac: Double) -> [SIMD2<Double>] {
         if frac >= 0.999 { return pts }
         let target = max(0, frac) * length
@@ -149,7 +137,6 @@ struct IsoScene {
         computeBounds(visible: nil)
     }
 
-    /// Cables: de la salida del escritorio origen al pasillo, a la puerta de la sala destino y al escritorio destino.
     mutating func routeWires() {
         wires = []
         for i in rooms.indices { rooms[i].doors = [] }
@@ -174,7 +161,6 @@ struct IsoScene {
         }
     }
 
-    /// Límites en coordenadas iso (para encuadrar). `visible` = solo esas salas.
     mutating func computeBounds(visible: Set<Int>?) {
         var us: [Double] = [], vs: [Double] = []
         for r in rooms where visible?.contains(r.index) ?? true {
@@ -186,7 +172,6 @@ struct IsoScene {
         minU = us.min()! - 14; maxU = us.max()! + 14; minV = vs.min()! - 6; maxV = vs.max()! + 6
     }
 
-    /// Mezcla dos disposiciones (antes/después de añadir tareas): las salas crecen y los escritorios se deslizan.
     static func blend(from a: IsoScene, to b: IsoScene, f: Double) -> IsoScene {
         var r = b
         func l(_ x: Double, _ y: Double) -> Double { x + (y - x) * f }
@@ -222,7 +207,6 @@ struct IsoScene {
     }
 }
 
-/// Estado mutable de cámara/interacción (fuera de @State para no invalidar la vista a 30 fps).
 @available(macOS 26.0, *)
 final class IsoCameraBox {
     var s = 1.0, cu = 0.0, cv = 0.0, ax = 0.0, ay = 0.0

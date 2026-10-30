@@ -1,5 +1,3 @@
-"""Lector de un subconjunto de YAML (stdlib, sin PyYAML): mapas, listas, escalares,
-listas en línea [a, b], bloques | y >, comentarios #. Suficiente para perfiles y tasks.yaml."""
 import json
 import re
 
@@ -117,7 +115,6 @@ class _P:
                 nxt = self._peek()
                 out.append(self.block(nxt[0]) if nxt and nxt[0] > indent else None)
             elif _KEY.match(rest) and not rest.startswith(("[", "{")):
-                # elemento mapa: reescribe la línea como si estuviera indentada tras el guion
                 line = self.raw[self.i]
                 n = len(line) - len(line.lstrip(" "))
                 after = line.lstrip(" ")[1:]

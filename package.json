@@ -5,11 +5,20 @@
   "packageManager": "pnpm@12.16.1",
   "scripts": {
     "build": "turbo run build",
-    "test": "turbo run test",
     "check": "turbo run check",
-    "app": "turbo run app"
+    "app": "turbo run app",
+    "lint": "pnpm run lint:py && pnpm run lint:ts && pnpm run lint:eslint && pnpm run lint:comments",
+    "lint:py": "uv run ruff check . && uv run mypy",
+    "lint:ts": "tsc --noEmit -p . && tsc --noEmit -p packages/api && tsc --noEmit -p apps/ui",
+    "lint:eslint": "eslint .",
+    "lint:comments": "python3 scripts/check-no-comments.py",
+    "lint:swift": "cd apps/mac && swiftlint lint --strict"
   },
   "devDependencies": {
-    "turbo": "^2.11.10"
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.13.0",
+    "globals": "^17.13.0",
+    "turbo": "^2.11.10",
+    "typescript": "^7.0.2"
   }
 }

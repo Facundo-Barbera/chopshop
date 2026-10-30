@@ -1,7 +1,5 @@
 import SwiftUI
 
-/// Dibujo de la oficina isométrica. Orden (de atrás hacia delante):
-/// sombras de losa → losas y muros → cables (+ sombras de contacto, anillos de suelo) → escritorios + muñecos por profundidad → etiquetas.
 @available(macOS 26.0, *)
 struct IsoRenderer {
     let scene: IsoScene
@@ -12,8 +10,6 @@ struct IsoRenderer {
     let selected: String?
     let hovered: String?
     let size: CGSize
-
-    // MARK: paleta (grafito en oscuro, papel cálido en claro)
 
     private func c(_ dk: Double, _ lt: (Double, Double, Double)) -> Color {
         dark ? Color(white: dk) : Color(red: lt.0, green: lt.1, blue: lt.2)
@@ -39,8 +35,6 @@ struct IsoRenderer {
     private func poly(_ pts: [CGPoint]) -> Path {
         var p = Path(); p.move(to: pts[0]); for q in pts.dropFirst() { p.addLine(to: q) }; p.closeSubpath(); return p
     }
-
-    // MARK: primitivas
 
     @discardableResult
     private func prism(_ g: inout GraphicsContext, _ x: Double, _ y: Double, _ z: Double, _ w: Double, _ d: Double, _ h: Double,
@@ -80,7 +74,6 @@ struct IsoRenderer {
         return Array(lo.dropLast() + up.dropLast())
     }
 
-    /// Sombra proyectada hacia la derecha (la luz viene de arriba-izquierda).
     private func castShadow(_ x: Double, _ y: Double, _ w: Double, _ d: Double, _ h: Double, z: Double, grow: Double = 0) -> Path {
         let sx = h * 0.55, sy = -h * 0.30
         var pts: [CGPoint] = []
@@ -90,8 +83,6 @@ struct IsoRenderer {
         return poly(hull(pts))
     }
 
-    // MARK: escena
-
     func draw(_ ctx: inout GraphicsContext) {
         guard !scene.desks.isEmpty else { return }
         let near: Set<String>? = (hovered ?? selected).map { scene.data.neighborhood(of: $0) }
@@ -99,31 +90,25 @@ struct IsoRenderer {
 
         box.hits.removeAll(keepingCapacity: true); box.heads.removeAll(keepingCapacity: true)
 
-        // 1· sombras de las losas sobre el suelo (todas en una capa con desenfoque)
         ctx.drawLayer { l in
             l.addFilter(.blur(radius: 9 * cam.s))
             for r in scene.rooms where r.rise > 0.01 {
                 l.fill(castShadow(r.x0, r.y0, r.w, r.d, (Iso.slabH + 14) * r.rise, z: 0, grow: 2), with: .color(.black.opacity((dark ? 0.55 : 0.20) * min(1, r.rise * 1.5))))
             }
         }
-        // sombra de cables en el suelo (se ven donde cruzan entre salas)
         for w in scene.wires where w.draw > 0.001 {
             var p = Path()
             for (i, q) in w.trimmed(w.draw).enumerated() { let pt = P(q.x, q.y, 0); if i == 0 { p.move(to: pt) } else { p.addLine(to: pt) } }
             ctx.stroke(p, with: .color(.black.opacity(dark ? 0.35 : 0.10)), style: StrokeStyle(lineWidth: 2.6 * cam.s, lineCap: .round, lineJoin: .round))
         }
 
-        // 2· salas
         for r in scene.rooms.sorted(by: { $0.x0 < $1.x0 }) where r.rise > 0.01 { drawRoom(&ctx, r) }
 
-        // 3· cables, y suelo (sombras de contacto, marcas)
         for w in scene.wires { drawWire(&ctx, w, near: near) }
         drawFloor(&ctx, faded: faded)
 
-        // 4· escritorios + muñecos, de atrás hacia delante
         for d in scene.desks.sorted(by: { $0.key < $1.key }) { drawDesk(&ctx, d, dim: faded(d.id)) }
 
-        // 5· etiquetas (siempre encima)
         for r in scene.rooms where r.wallRise > 0.3 {
             if let s = ctx.resolveSymbol(id: "r:\(r.index)") {
                 let p = P(r.x0 + r.w * 0.5, r.y0, Iso.slabH * r.rise + Iso.wallH * r.wallRise + 16)
@@ -142,14 +127,11 @@ struct IsoRenderer {
         }
     }
 
-    // Salas ----------------------------------------------------------------
-
     private func drawRoom(_ ctx: inout GraphicsContext, _ r: IsoRoom) {
         var g = ctx
         g.opacity = min(1, r.rise * 2.2)
         let z = Iso.slabH * r.rise
         _ = prism(&g, r.x0, r.y0, 0, r.w, r.d, z, top: slabTop, topEnd: slabTopEnd, left: slabL, right: slabR, edge: dark ? 0.16 : 0.9)
-        // baldosas muy tenues
         var grid = Path()
         var gx = r.x0 + 22.0
         while gx < r.x0 + r.w - 1 { grid.move(to: P(gx, r.y0, z)); grid.addLine(to: P(gx, r.y0 + r.d, z)); gx += 22 }
@@ -157,7 +139,6 @@ struct IsoRenderer {
         while gy < r.y0 + r.d - 1 { grid.move(to: P(r.x0, gy, z)); grid.addLine(to: P(r.x0 + r.w, gy, z)); gy += 22 }
         g.stroke(grid, with: .color((dark ? Color.white : Color.black).opacity(dark ? 0.028 : 0.04)), lineWidth: 0.6)
 
-        // canto de color en el frente: solo la sala que necesita algo
         let needs = Attention.needsYou, stuck = Attention.stuck
         let live = scene.desks.filter { $0.room == r.index && $0.pop > 0.5 }
         let rNeeds = live.contains { $0.visual == .needsYou }, rStuck = live.contains { $0.visual == .stuck }
@@ -172,7 +153,6 @@ struct IsoRenderer {
         if let lc = leftC { rim(P(r.x0, r.y0 + r.d, z), P(r.x0 + r.w, r.y0 + r.d, z), lc) }
         if let rc = rightC { rim(P(r.x0 + r.w, r.y0 + r.d, z), P(r.x0 + r.w, r.y0, z), rc) }
 
-        // muros bajos al fondo (con puertas donde entran cables)
         let wh = Iso.wallH * r.wallRise
         guard wh > 0.2 else { return }
         _ = prism(&g, r.x0, r.y0, z, r.w, Iso.wallT, wh, top: wallTop, left: wallL, right: wallR, edge: dark ? 0.2 : 0.9)
@@ -185,8 +165,6 @@ struct IsoRenderer {
             _ = prism(&g, r.x0, s.0, z, Iso.wallT, s.1 - s.0, wh, top: wallTop, left: wallL, right: wallR, edge: dark ? 0.2 : 0.9)
         }
     }
-
-    // Cables ---------------------------------------------------------------
 
     private func drawWire(_ ctx: inout GraphicsContext, _ w: IsoWire, near: Set<String>?) {
         guard let a = scene.desk(w.from), let b = scene.desk(w.to) else { return }
@@ -201,17 +179,14 @@ struct IsoRenderer {
         let o = (near != nil && !inFocus) ? 0.25 : 1.0
         let lw = max(1.2, 1.7 * cam.s)
         var g = ctx; g.opacity = o
-        // base del cable + cable
         g.stroke(path, with: .color((dark ? Color.black : Color.white).opacity(dark ? 0.5 : 0.55)), style: StrokeStyle(lineWidth: lw + 2, lineCap: .round, lineJoin: .round))
         let base: Double = traced ? 0.75 : (active ? 0.55 : (pending ? 0.28 : 0.38))
         g.stroke(path, with: .color(ink.opacity(base * (dark ? 0.85 : 0.8))),
                  style: StrokeStyle(lineWidth: lw, lineCap: .round, lineJoin: .round, dash: pending && !traced ? [3.2, 3.6] : []))
-        // conectores
         for q in (w.draw >= 0.999 ? [w.pts.first!, w.pts.last!] : [w.pts.first!]) {
             let p = P(q.x, q.y, z), r = max(1.8, 2.2 * cam.s)
             g.fill(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)), with: .color(ink.opacity(0.55)))
         }
-        // partículas por los cables activos o por el camino trazado
         if (active || traced) && w.draw >= 0.999 {
             let L = w.length
             let seed = Double(abs(w.from.hashValue ^ w.to.hashValue) % 89) / 89 * 70
@@ -236,8 +211,6 @@ struct IsoRenderer {
         }
     }
 
-    // Suelo: sombras de contacto, marcas de selección --------------------------
-
     private func drawFloor(_ ctx: inout GraphicsContext, faded: (String) -> Bool) {
         ctx.drawLayer { l in
             l.addFilter(.blur(radius: 2.4 * cam.s))
@@ -254,7 +227,6 @@ struct IsoRenderer {
         for d in scene.desks where d.pop > 0.3 && d.walk >= 1 {
             let z = d.floorZ
             let tint = d.visual.tint
-            // marca de celda: seleccionado = discontinua, hover = tenue
             if d.id == selected || d.id == hovered {
                 let r = poly([P(d.cx - 34, d.cy - 34, z + 0.2), P(d.cx + 34, d.cy - 34, z + 0.2), P(d.cx + 34, d.cy + 34, z + 0.2), P(d.cx - 34, d.cy + 34, z + 0.2)])
                 let g = ctx
@@ -262,7 +234,6 @@ struct IsoRenderer {
                 g.stroke(r, with: .color((tint ?? ink).opacity(d.id == selected ? 0.75 : 0.35)),
                          style: StrokeStyle(lineWidth: 1.1, lineJoin: .round, dash: d.id == selected ? [4, 3] : []))
             }
-            // anillos de estado en el suelo
             let idx = Double(abs(d.id.hashValue) % 13)
             switch d.visual {
             case .needsYou, .stuck:
@@ -288,25 +259,20 @@ struct IsoRenderer {
         }
     }
 
-    // Escritorio + muñeco ------------------------------------------------------
-
     private func drawDesk(_ ctx: inout GraphicsContext, _ d: IsoDesk, dim: Bool) {
         let v = d.visual
         let z0 = d.floorZ
-        let k = max(0, d.pop)                       // el escritorio "crece" del suelo con un pequeño rebote
+        let k = max(0, d.pop)
         let dh = Iso.deskH * k
         let idx = Double(abs(d.id.hashValue) % 13)
         var g = ctx
         let baseOp: Double = v == .skipped ? 0.5 : 1
         g.opacity = (dim ? 0.28 : 1) * baseOp * min(1, k * 3)
         let isHover = hovered == d.id, isSel = selected == d.id
-        let lit = min(1, d.since / 0.6)             // la pantalla se enciende con un fundido
+        let lit = min(1, d.since / 0.6)
 
-        // escritorio
         let sil = prism(&g, d.deskX, d.deskY, z0, Iso.deskW, Iso.deskD, dh, top: deskTop, topEnd: deskTopEnd, left: deskL, right: deskR, edge: dark ? 0.28 : 0.95)
-        // teclado
         _ = prism(&g, d.cx - 8, d.deskY + Iso.deskD - 8, z0 + dh, 16, 5.5, 0.9 * k, top: c(0.40, (0.88, 0.86, 0.82)), left: c(0.28, (0.80, 0.78, 0.74)), right: c(0.2, (0.70, 0.68, 0.64)), edge: 0)
-        // monitor
         let my = d.deskY + 2.5, zt = z0 + dh
         _ = prism(&g, d.cx - 10, my, zt, 20, 2.6, 13.5 * k, top: monBody, left: monBody.opacity(0.95), right: monBody.opacity(0.85), edge: dark ? 0.2 : 0.3)
         let sy = my + 2.6
@@ -342,7 +308,6 @@ struct IsoRenderer {
                 gl.fill(Path(ellipseIn: CGRect(x: p.x - r * cam.s, y: p.y - r * cam.s, width: r * 2 * cam.s, height: r * 2 * cam.s)), with: .color(c(0.2, (0.3, 0.3, 0.3)).opacity(0.4 + 0.5 * a)))
             }
         }
-        // resalte hover/selección sobre la silueta
         if isHover || isSel {
             g.fill(sil, with: .color(.white.opacity(dark ? 0.07 : 0.10)))
             g.stroke(sil, with: .color((v.tint ?? ink).opacity(isSel ? 0.95 : 0.7)), style: StrokeStyle(lineWidth: isSel ? 1.4 : 1.1, lineJoin: .round))
@@ -350,7 +315,6 @@ struct IsoRenderer {
 
         figure(&g, d, idx: idx)
 
-        // zona de impacto
         guard k > 0.6 else { return }
         let pts = [P(d.deskX, d.deskY, z0 + Iso.deskH + 14), P(d.deskX + Iso.deskW, d.deskY, z0 + Iso.deskH + 14),
                    P(d.deskX, d.deskY + Iso.deskD, z0), P(d.deskX + Iso.deskW, d.deskY + Iso.deskD, z0),
@@ -384,7 +348,6 @@ struct IsoRenderer {
         let bl = dark ? 1.0 : 1.0
         f.fill(body, with: .linearGradient(Gradient(colors: [figBody.opacity(bl), figBody.opacity(0.78)]),
                                            startPoint: CGPoint(x: foot.x - bw / 2, y: bodyTop), endPoint: CGPoint(x: foot.x + bw / 2, y: bodyTop + bh)))
-        // brillo mate en el lado izquierdo
         let sheen = RoundedRectangle(cornerRadius: bw / 4, style: .continuous).path(in: CGRect(x: foot.x - bw / 2 + 1.1 * s, y: bodyTop + 2.2 * s, width: 2.2 * s, height: bh * 0.5))
         f.fill(sheen, with: .color(.white.opacity(dark ? 0.16 : 0.22)))
         let hc = CGPoint(x: foot.x, y: bodyTop - hr * 0.55)
@@ -393,7 +356,6 @@ struct IsoRenderer {
                                            center: CGPoint(x: hc.x - hr * 0.4, y: hc.y - hr * 0.45), startRadius: 0, endRadius: hr * 1.6))
         box.heads[d.id] = CGPoint(x: hc.x, y: hc.y - hr)
 
-        // burbujas
         let top = hc.y - hr
         switch v {
         case .needsYou, .stuck:

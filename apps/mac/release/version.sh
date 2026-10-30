@@ -1,14 +1,4 @@
 #!/usr/bin/env bash
-# Deriva versión, canal y número de build a partir del tag.
-#   version.sh --ref-type tag|branch --ref-name <nombre> [--dry-run]
-# Salida (clave=valor, también a $GITHUB_OUTPUT): tag, short_version, build_number, channel, prerelease
-#
-# - CFBundleShortVersionString = tag sin la `v` (semver estricto; sin metadatos de build `+`).
-# - CFBundleVersion (lo que compara Sparkle) = UTC AAAAMMDDHHmm del momento del release: monótono por
-#   construcción, independiente del repo/workflow (run_number se reinicia al renombrar o migrar el
-#   workflow). Se puede forzar con BUILD_NUMBER (tests). El publicador además comprueba que sea
-#   estrictamente mayor que el máximo del appcast publicado.
-# - Con prerelease (-beta.N, -rc.N...) el canal de Sparkle es `beta`; sin prerelease, estable (sin canal).
 set -euo pipefail
 # shellcheck source=lib.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"

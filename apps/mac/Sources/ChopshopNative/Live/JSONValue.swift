@@ -1,7 +1,5 @@
 import Foundation
 
-/// JSON dinámico. Los sobres del bus (docs/event-envelope.md) llevan un `body` cuyo contenido depende del `type`
-/// y puede crecer sin romper a los clientes, así que se conserva tal cual y se lee con los accesores de abajo.
 public enum JSONValue: Hashable, Sendable {
     case null
     case bool(Bool)
@@ -30,7 +28,6 @@ public enum JSONValue: Hashable, Sendable {
     public var int: Int? { if case .number(let n) = self, n == n.rounded(), abs(n) < 9e15 { return Int(n) } else { return nil } }
     public var array: [JSONValue]? { if case .array(let a) = self { return a } else { return nil } }
     public var object: Object? { if case .object(let o) = self { return o } else { return nil } }
-    /// Lista de cadenas (descarta lo que no sea cadena); nil si no es un arreglo.
     public var strings: [String]? { array.map { $0.compactMap(\.string) } }
 }
 

@@ -1,9 +1,6 @@
 import SwiftUI
 
 #if NATIVE_PREVIEWS
-/// Escena "Ciudad" del banco de pruebas: la ciudad alimentada por `city-fixture.jsonl` (`CityTimeline.bundled()`).
-/// - Reproducir cronología: el mismo fotograma que capturas y vídeo (`CitySnapshotFrame` sin la barra), reloj acelerable y en bucle.
-/// - Interactivo: el estado final (antes del zoom), sin crecimiento; clic en un piso → zoom a su oficina, Esc vuelve.
 @available(macOS 26.0, *)
 public struct CityPlaygroundScreen: View {
     enum Mode: String, CaseIterable, Identifiable {
@@ -18,7 +15,6 @@ public struct CityPlaygroundScreen: View {
     @State private var mode: Mode = .replay
     @State private var playing = true
     @State private var speed: Double = 1
-    /// Reloj: `t = base + (ahora − anchor) · speed` (en bucle) mientras reproduce; `base` en pausa.
     @State private var base: Double = 0
     @State private var anchor = Date()
 
@@ -47,7 +43,6 @@ public struct CityPlaygroundScreen: View {
         .navigationTitle("Ciudad")
         .navigationSubtitle("\(Self.timeline.finalModel.buildings.count) empresas · \(Self.timeline.finalModel.projectCount) proyectos")
         .onChange(of: speed) { old, _ in
-            // el instante actual no salta al cambiar de velocidad
             base = clock(Date(), speed: old); anchor = Date()
         }
         .toolbar {
@@ -71,13 +66,10 @@ public struct CityPlaygroundScreen: View {
         }
     }
 
-    /// Estado final de la cronología (todos los pisos, rojo y ámbar), con el reloj real: CityView hace el zoom ella sola.
     private var interactive: some View {
         let s = CityTimelineState(timeline: Self.timeline, t: CityTimeline.zoomStart)
         return CityView(model: s.frame.model, lights: s.frame.lights, snapshot: s.snapshot, state: s.frame.state)
     }
-
-    // MARK: reloj
 
     private func clock(_ now: Date) -> Double { clock(now, speed: speed) }
 

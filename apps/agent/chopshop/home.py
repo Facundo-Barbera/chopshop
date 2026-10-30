@@ -1,4 +1,3 @@
-"""Rutas locales de Chopshop. Estado en ~/.chopshop (o general.home de ~/.config/chopshop/config.toml); fuera del repo, sin versionar."""
 import os
 
 from . import settings

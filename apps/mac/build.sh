@@ -1,20 +1,9 @@
 #!/bin/bash
-# Construye Chopshop.app: un único .app (SwiftUI + WKWebView), cliente de la API del agente, que además lleva dentro el
-# agente de este Mac (Python fijado + apps/agent; lo registra la app con SMAppService, ver release/embed-agent.sh).
-#
-#   pnpm app                       # desde la raíz: construye la UI (apps/ui) y llama a este script
-#   apps/mac/build.sh              # solo el .app, con la UI ya construida en apps/mac/Resources/web
-#
-# Salida: apps/mac/dist/Chopshop.app (ignorada por git). Variables opcionales:
-#   CHOPSHOP_APP=/ruta/Chopshop.app   otra ruta de salida
-#   REBUILD_WEB=1                     reconstruir antes la UI (requiere `pnpm install`)
-#   UNIVERSAL=1                       binario arm64 + x86_64 (requiere Xcode completo)
-#   EMBED_AGENT=0                     sin el agente incrustado (sin descargar Python; el ajuste «Usar esta Mac» queda inactivo)
 set -euo pipefail
 cd "$(dirname "$0")"
 
 if [ "$(uname -s)" != "Darwin" ]; then
-  echo "Chopshop.app solo se construye en macOS (Swift/SwiftUI). En otro sistema usa 'pnpm test' para el resto del monorepo." >&2
+  echo "Chopshop.app solo se construye en macOS (Swift/SwiftUI). En otro sistema usa 'pnpm lint' para el resto del monorepo." >&2
   exit 1
 fi
 command -v swift >/dev/null || { echo "Falta swift: instala Xcode o las Command Line Tools (xcode-select --install)." >&2; exit 1; }
@@ -43,8 +32,6 @@ if [ -d assets/AppIcon.iconset ]; then
   iconutil -c icns assets/AppIcon.iconset -o "$APP/Contents/Resources/AppIcon.icns"
 fi
 
-# ATS: el agente habla HTTP plano, pero solo por Tailscale (cifrado WireGuard), a veces con nombres MagicDNS que ATS
-# bloquearía; la app solo se conecta a las URLs que el usuario pone en su config.toml.
 cat > "$APP/Contents/Info.plist" <<PL
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -65,8 +52,6 @@ cat > "$APP/Contents/Info.plist" <<PL
 </dict></plist>
 PL
 
-# Agente incrustado: lanzador + LaunchAgent (BundleProgram relativo al bundle; la app lo registra con SMAppService, nunca
-# launchctl). Label y AssociatedBundleIdentifiers siguen al bundle id (release/assemble-app.sh los ajusta al de release).
 if [ "${EMBED_AGENT:-1}" != 0 ]; then
   cp "$BIN_DIR/ChopshopAgent" "$APP/Contents/MacOS/chopshop-agent"
   mkdir -p "$APP/Contents/Library/LaunchAgents"
@@ -89,11 +74,8 @@ PL
   bash "$PWD/release/embed-agent.sh" "$APP"
 fi
 
-# Sparkle (auto-actualización): el ejecutable enlaza Sparkle.framework, así que va dentro del bundle. Sin SUFeedURL en
-# el Info.plist (build local) el updater queda inactivo; las claves de release las pone release/assemble-app.sh.
 bash "$PWD/release/embed-sparkle.sh" "$APP"
 
-# Firma ad-hoc (sin cuenta de desarrollador): Gatekeeper pedirá «Abrir» la primera vez (ver docs/mac-build.md).
 codesign --force --deep --sign - "$APP"
 codesign --verify --deep --strict "$APP"
 echo "listo: $APP"

@@ -5,7 +5,6 @@ import CoreVideo
 
 #if NATIVE_PREVIEWS
 public extension CityTimeline {
-    /// `city-fixture.jsonl` incluido en el banco de pruebas (apps/mac/native).
     static func bundled(target: String = CityTimeline.defaultTarget) -> CityTimeline {
         guard let url = Bundle.module.url(forResource: "city-fixture", withExtension: "jsonl"),
               let data = try? Data(contentsOf: url) else { return CityTimeline(envelopes: [], target: target) }
@@ -14,14 +13,11 @@ public extension CityTimeline {
 }
 #endif
 
-/// Lo que pinta la cronología en `t`: fotograma, instantánea (con el reloj del fixture) y zoom fijo. Lo comparten las capturas,
-/// el vídeo y el playground.
 @available(macOS 26.0, *)
 struct CityTimelineState {
     let frame: CityTimeline.Frame
     let snapshot: MockSnapshot
     let zoom: CityFocus?
-    /// Reloj del fixture en `t` (semivida de los pisos v3).
     let now: Date
 
     init(timeline: CityTimeline, t: Double) {
@@ -33,17 +29,14 @@ struct CityTimelineState {
         zoom = t >= CityTimeline.zoomStart ? CityFocus(project: timeline.target, p: CityTimeline.zoom(t)) : nil
     }
 
-    /// Fundido de la cabecera "ciudad" → proyecto (el mismo que la cabecera de la tarjeta).
     var chrome: Double { zoom.map { CityTransition.chrome($0.p) } ?? 0 }
 
-    /// La ciudad congelada en `t` (crecimiento y zoom de la cronología).
     func cityView(t: Double) -> CityView {
         CityView(model: frame.model, lights: frame.lights, snapshot: snapshot, state: frame.state, frozenTime: t, frozenNow: now, growth: t,
                  frozenZoom: zoom, flatChrome: true)
     }
 }
 
-/// Fotograma de captura/vídeo: barra de título emulada (ImageRenderer no dibuja la toolbar) + la ciudad, como `Snapshots.Frame`.
 @available(macOS 26.0, *)
 struct CitySnapshotFrame: View {
     let timeline: CityTimeline
@@ -88,7 +81,6 @@ struct CitySnapshotFrame: View {
     }
 }
 
-/// Bandera de fin de `finishWriting` (el completion llega en otra cola).
 private final class CityWriteDone: @unchecked Sendable {
     private let lock = NSLock()
     private var value = false
@@ -96,12 +88,9 @@ private final class CityWriteDone: @unchecked Sendable {
     func set() { lock.lock(); value = true; lock.unlock() }
 }
 
-/// Capturas y vídeo de la ciudad (los usa `ChopshopSnap city-keys` / `city-video`). Deterministas: cada fotograma es
-/// `CityTimeline.frame(at: t)` con el tiempo congelado (como `renderDemo`).
 @available(macOS 26.0, *)
 @MainActor
 public extension Snapshots {
-    /// Un fotograma de la cronología de la ciudad en `t` (PNG, o JPEG con `jpeg`).
     static func renderCity(timeline: CityTimeline, t: Double, dark: Bool = true, width: CGFloat = 1400, height: CGFloat = 900,
                            scale: CGFloat = 1, jpeg: Bool = false, to path: String) {
         NSApp?.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
@@ -115,8 +104,6 @@ public extension Snapshots {
         try? data.write(to: URL(fileURLWithPath: path))
     }
 
-    /// La cronología completa como MP4 H.264 (AVAssetWriter + CVPixelBuffer), `fps` fotogramas por segundo.
-    /// Devuelve false si no pudo escribir el vídeo.
     @discardableResult
     static func renderCityVideo(timeline: CityTimeline, to path: String, dark: Bool = true, width: Int = 1400, height: Int = 900,
                                 fps: Double = CityTimeline.fps, duration: Double = CityTimeline.duration,
@@ -195,7 +182,6 @@ public extension Snapshots {
             CVPixelBufferUnlockBaseAddress(pb, [])
             guard drawn else { writer.cancelWriting(); return false }
 
-            // el hilo principal tiene que seguir girando (ImageRenderer y el codificador)
             while !input.isReadyForMoreMediaData {
                 if writer.status != .writing { print("vídeo: \(writer.error?.localizedDescription ?? "falló")"); return false }
                 RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.002))

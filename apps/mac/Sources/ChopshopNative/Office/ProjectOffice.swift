@@ -1,15 +1,5 @@
 import Foundation
 
-/// Pisos que pinta la pestaña «Oficina» de un proyecto (y el zoom de la ciudad), en orden: el vestíbulo (planta baja, en páginas
-/// de `guestsPerLobby`) y los pisos de escritorios. Puro (macOS 13).
-///
-/// - Proyecto con `office` (perfil): sus pisos tal cual (escritorios fijos) y los invitados del vestíbulo de ese proyecto.
-/// - Sin `office`: pisos sintéticos con un departamento por rol (`task.state.role`) de hasta `desksPerRoom` escritorios, como
-///   mucho `roomsPerFloor` departamentos y `desksPerFloor` escritorios por piso (lo que sobra sube a otro piso); los hilos sin rol,
-///   al vestíbulo (docs/plans/office-redesign.md §1–3).
-///
-/// La semivida (§7) se aplica aquí: lo que ya se desvaneció en `now` no entra (no deja huecos en la rejilla), y a un hilo terminado
-/// sin `ended_at` (agente o sobre antiguo) se le toma la hora de su último `task.state`, para que no se quede para siempre.
 public enum ProjectOffice {
     public static let desksPerFloor = 24
     public static let desksPerRoom = 6
@@ -48,12 +38,9 @@ public enum ProjectOffice {
             plan.lobby = Array(lobby[i..<min(i + guestsPerLobby, lobby.count)])
             return plan
         }
-        // Sin nadie en el vestíbulo y con pisos, el vestíbulo vacío no hace falta.
         return (lobby.isEmpty && !floors.isEmpty ? [] : pages) + floors
     }
 
-    /// Índice del piso con el que abrir: el primero con alguien que te necesita, luego el primero con alguien trabajando, luego
-    /// el primero con alguien.
     public static func initialIndex(_ floors: [FloorPlan], now: Date = Date()) -> Int {
         func people(_ f: FloorPlan) -> [FloorPlan.Occupant] {
             (f.kind == .lobby ? f.lobby : f.desks.compactMap(\.occupant)).filter { !$0.gone(at: now) }
@@ -67,7 +54,6 @@ public enum ProjectOffice {
         return 0
     }
 
-    /// Nombre corto de un hilo para su etiqueta: sin el prefijo de rol (`[mac] …`, ya lo dice la sala) y con tope de largo.
     public static func shortName(_ title: String?, max n: Int = 18) -> String {
         var t = (title ?? "").trimmingCharacters(in: .whitespaces)
         if t.hasPrefix("["), let close = t.firstIndex(of: "]") {
@@ -79,9 +65,6 @@ public enum ProjectOffice {
         return String(t.prefix(n - 1)).trimmingCharacters(in: .whitespaces) + "…"
     }
 
-    // MARK: - piezas
-
-    /// La `task.state` más nueva de cada hilo (por `thread_id`, o por id de tarea si no lo trae).
     static func latestByThread(_ p: LiveState.Project) -> [String: JSONValue.Object] {
         var out: [String: JSONValue.Object] = [:]
         for t in p.tasks {
@@ -92,7 +75,6 @@ public enum ProjectOffice {
         return out
     }
 
-    /// Fin de un hilo terminado: su `ended_at` o, si no lo trae, la hora de su último `task.state`.
     static func endedAt(_ t: JSONValue.Object?) -> String? {
         guard let t else { return nil }
         return FloorPlan.nonEmpty(t["ended_at"]?.string) ?? (FloorPlan.terminal.contains(t["phase"]?.string ?? "") ? t["updated"]?.string : nil)
@@ -115,8 +97,6 @@ public enum ProjectOffice {
         return FloorPlan.Occupant(o, project: project, halfLife: FloorPlan.defaultHalfLife)
     }
 
-    /// Departamentos por rol (orden alfabético; un rol con más de `desksPerRoom` hilos ocupa varias salas «rol · 2»…) repartidos en
-    /// pisos de como mucho `roomsPerFloor` salas y `desksPerFloor` escritorios.
     static func synthetic(_ occ: [FloorPlan.Occupant], project: String) -> [FloorPlan] {
         let byRole = Dictionary(grouping: occ) { $0.role ?? "" }
         var rooms: [(role: String, people: [FloorPlan.Occupant])] = []
@@ -150,7 +130,6 @@ public enum ProjectOffice {
 }
 
 extension FloorPlan {
-    /// Título corto del piso para el selector: «Vestíbulo», el nombre del perfil o «Piso n».
     public var shortTitle: String {
         switch kind {
         case .lobby: return name.map { "Vestíbulo \($0)" } ?? "Vestíbulo"

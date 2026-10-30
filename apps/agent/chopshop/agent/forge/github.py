@@ -1,26 +1,13 @@
-"""Adaptador de GitHub para `ForgeProvider`: el cliente `gh api -i` de `agent/github.py` (mismo `gh` autenticado, mismos
-límites, ETag y limpieza de credenciales) más `actions/runs` para el rack.
-
-- `poll_events(repo, project)`: delega en `GitHubPoller._poll_repo` (emite los `github.*` de siempre; cursores `gh_*`).
-- `poll_runs(repo, branch)`: `GET /repos/{r}/actions/runs` vía `RunsFeed` (abajo) y normalizado con `map_run`.
-- `repo_status(repo)`: `GET /repos/{r}` (rama por defecto, también con ETag) + runs de todas las ramas + runs de la rama por
-  defecto -> `{default_branch, url, ci, active, pr_failing, error: None}`.
-Los errores de `gh`/HTTP salen como `ProviderError` (404 no degrada: solo ese repo queda gris).
-
-`RunsFeed` es el único sondeo de `actions/runs` y `/repos/{r}` del agente: lo comparten el rack (este adaptador) y el hilo
-`actions` (`agent/actions.py`), así un repo cuesta una petición por ronda y no dos con ETags cruzados. Cada recurso lleva su
-ETag en `meta` (`forge_etag:<clave>`) y su última respuesta ya recortada (`forge_body:<clave>`, campos crudos de GitHub que
-usan ambos consumidores) para servir el 304; una respuesta de hace menos de `max_age` s se reutiliza sin preguntar. La
-versión devuelta es el ETag: igual = nada cambió desde la última 200 (lo que antes era el 304 de cada consumidor)."""
 import threading
 import time
 from urllib.parse import quote
 
-from .. import db, github as gh
+from .. import db
+from .. import github as gh
 from . import base
 
-RUNS_PAGE = 50                    # runs recientes de todas las ramas (en curso + PRs)
-BRANCH_RUNS_PAGE = 20             # runs de la rama por defecto (CI)
+RUNS_PAGE = 50
+BRANCH_RUNS_PAGE = 20
 
 
 RUN_KEYS = ("id", "name", "path", "workflow_id", "display_title", "status", "conclusion", "event", "head_branch",
@@ -28,7 +15,6 @@ RUN_KEYS = ("id", "name", "path", "workflow_id", "display_title", "status", "con
 
 
 def map_run(r):
-    """Run de `actions/runs` -> run normalizado (base.py)."""
     return {"run_id": str(r.get("id")), "workflow": gh.clip(r.get("name") or r.get("display_title"), gh.MAX_TITLE),
             "status": r.get("status") if r.get("status") in base.RUN_STATUSES else ("completed" if r.get("conclusion")
                                                                                     else r.get("status") or "queued"),
@@ -39,7 +25,6 @@ def map_run(r):
 
 
 def trim_runs(data):
-    """Respuesta de `actions/runs` -> lista de runs crudos con solo lo que usan `map_run` y `actions.map_run`."""
     runs = data.get("workflow_runs") if isinstance(data, dict) else None
     out = []
     for r in runs or []:
@@ -62,21 +47,17 @@ def _repo(data):
 
 
 class RunsFeed:
-    """Caché compartida (entre hilos) de `actions/runs` y `/repos/{r}` con ETag. `client` = el `GitHubPoller` de quien
-    pregunta (su `gh`, su `X-Poll-Interval`); los errores salen tal cual (`github.GitHubError`)."""
-
     def __init__(self, clock=time.time, max_age=30.0):
         self.clock, self.max_age = clock, float(max_age)
-        self.memo = {}                # clave -> (instante, etag, datos) de la última respuesta (200 o 304)
+        self.memo = {}
         self._lock = threading.Lock()
-        self._locks = {}              # clave -> Lock: dos hilos no piden lo mismo a la vez
+        self._locks = {}
 
     def _key_lock(self, key):
         with self._lock:
             return self._locks.setdefault(key, threading.Lock())
 
     def fetch(self, client, key, path, shrink):
-        """-> (datos recortados, versión). GET con ETag salvo que la última respuesta tenga menos de `max_age` s."""
         with self._key_lock(key):
             now = self.clock()
             hit = self.memo.get(key)
@@ -95,16 +76,14 @@ class RunsFeed:
             return out, etag
 
     def runs(self, client, repo, branch=None):
-        """Runs crudos recortados (los más nuevos primero) de `repo` (slug canónico); `branch` filtra por rama."""
         path = "/repos/%s/actions/runs?per_page=%d" % (repo, BRANCH_RUNS_PAGE if branch else RUNS_PAGE)
         if branch:
             path += "&branch=" + quote(branch, safe="")
-        key = "github:%s:runs/raw%s" % (repo, "@" + branch if branch else "")   # `/raw`: el `:runs` viejo era otro formato
+        key = "github:%s:runs/raw%s" % (repo, "@" + branch if branch else "")
         out, version = self.fetch(client, key, path, trim_runs)
         return out or [], version
 
     def repo(self, client, repo):
-        """`{default_branch, html_url}` de `repo`."""
         out, _v = self.fetch(client, "github:%s:repo" % repo, "/repos/%s" % repo, _repo)
         return out or {}
 

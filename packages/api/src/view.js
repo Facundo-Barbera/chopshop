@@ -1,21 +1,12 @@
-// Normalización de los snapshots de uno o varios agentes (GET /snapshot, ver docs/agent-api.md) a lo que pinta la UI.
-// Puro y sin DOM: lo usan la UI (WKWebView) y los tests de Node. La app nativa solo entrega los resultados crudos por agente:
-//   [{ name, status, error?, snapshot? }]   status: ok | unreachable | forbidden | unauthorized | incompatible | error
-
-/** Estados de un hilo de T3 que ya no avanzan (mismo criterio que engine.TERMINAL). */
 export const TERMINAL = new Set(["completed", "failed", "rolled_back", "cancelled", "interrupted"]);
-/** Versión de la API que entiende este cliente. */
 export const SUPPORTED_API = 1;
-/** Muestras de historial por máquina en la sesión (una por sondeo). */
 export const HISTORY_LEN = 60;
-/** Hilos terminados que se muestran aún en los lotes sintéticos: recientes y con tope por proyecto. */
 export const RECENT_DONE_SECONDS = 24 * 3600;
 export const MAX_DONE_PER_PROJECT = 30;
 
 const num = (v, d = 0) => (typeof v === "number" && Number.isFinite(v) ? v : d);
 const arr = (v) => (Array.isArray(v) ? v : []);
 
-/** Fecha desde un ts de la API: epoch (segundos), o ISO con offset `-0600` o `-06:00`. */
 export function parseTs(ts) {
   if (ts == null || ts === "") return null;
   const d = typeof ts === "number" ? new Date(ts * 1000) : new Date(String(ts).replace(/([+-]\d\d)(\d\d)$/, "$1:$2"));
@@ -30,7 +21,6 @@ const isoTs = (ts) => {
   return ts || "";
 };
 
-/** Texto para el usuario según el estado de un agente. */
 export function statusMessage(status, error) {
   switch (status) {
     case "ok": return "";
@@ -41,8 +31,6 @@ export function statusMessage(status, error) {
     default: return error || "error del agente";
   }
 }
-
-// ---------- historial de métricas (por máquina, en memoria) ----------
 
 export function createHistory(len = HISTORY_LEN) {
   const by = new Map();
@@ -62,7 +50,6 @@ export function createHistory(len = HISTORY_LEN) {
     get(label) {
       return by.get(label) || { cpu: [], ram: [], load1: [], run: [] };
     },
-    /** Precarga series (herramientas de captura): { etiqueta: {cpu:[], ram:[], load1:[], run:[]} } */
     seed(map) {
       for (const [label, h] of Object.entries(map || {})) {
         const cur = get(label);
@@ -79,9 +66,6 @@ function sampleOf(snap) {
   return { cpu: num(m.cpu_pct), ram: num(m.ram_pct), load1: num(arr(m.load)[0]), run: arr(snap.projects).length ? running : fallback };
 }
 
-// ---------- hilos y preguntas ----------
-
-/** Pregunta pendiente en la forma de la UI: {request, summary, options[]}. Acepta la forma del orquestador y la cruda de T3. */
 export function normQuestion(q, requestId = "") {
   if (typeof q === "string") return { request: requestId, summary: q, options: [] };
   q = q || {};
@@ -101,7 +85,6 @@ function pendingOf(snap, threadId, thread) {
   return questions.length || approvals ? { questions, approvals } : null;
 }
 
-/** Tarea de la UI a partir de un hilo que el orquestador no conoce (solo lo ve el agente por T3). */
 function threadTask(snap, th) {
   const done = TERMINAL.has(th.status);
   return {
@@ -111,7 +94,6 @@ function threadTask(snap, th) {
   };
 }
 
-/** Lotes sintéticos (uno por proyecto) con los hilos del agente que no pertenecen a ningún lote del orquestador. */
 function syntheticBatches(snap, label, name, known) {
   const now = num(snap.ts, Date.now() / 1000);
   const byProject = new Map();
@@ -136,8 +118,6 @@ function syntheticBatches(snap, label, name, known) {
   return out;
 }
 
-// ---------- eventos ----------
-
 function agentEvent(e, label, name, batchOfThread) {
   const body = e.body || {};
   const task = body.task || body.thread_id || body.thread || "";
@@ -148,13 +128,6 @@ function agentEvent(e, label, name, batchOfThread) {
   };
 }
 
-// ---------- vista completa ----------
-
-/**
- * `rows`: [{ name, label, status, error, snapshot|null, stale, age }] (ver createStore).
- * Devuelve { state, machines, agents }: `state` tiene la forma que ya consumían las vistas
- * (batches, events, graphs, inbox, hosts, profiles, subscriptions); `machines` alimenta la vista Máquinas.
- */
 export function buildView(rows, history = createHistory()) {
   const state = { generated: "", hosts: {}, profiles: [], subscriptions: {}, inbox: { pending: [], results: [], watcher: null }, batches: [], events: [], graphs: [] };
   const machines = [], agents = [];
@@ -190,7 +163,6 @@ export function buildView(rows, history = createHistory()) {
     Object.assign(state.subscriptions, snap.subscriptions || {});
     if (!state.hosts[label]) state.hosts[label] = { cap: null, purpose: "", transport: "agent" };
   }
-  // eventos: los del orquestador (bitácora de lotes) y los del agente (hilos, T3, métricas), más nuevos primero
   const evs = [];
   for (const r of withSnap) {
     const o = r.snapshot.orchestrator;
@@ -220,10 +192,6 @@ export function buildView(rows, history = createHistory()) {
   return { state, machines, agents, hasData: withSnap.length > 0 };
 }
 
-/**
- * Estado de la sesión: recuerda el último snapshot bueno de cada agente (si cae, la UI sigue mostrando sus datos marcados
- * como viejos) y el historial de métricas. `update(resultados)` devuelve la vista completa (ver buildView).
- */
 export function createStore({ historyLen = HISTORY_LEN, now = Date.now } = {}) {
   const history = createHistory(historyLen);
   const lastOk = new Map();

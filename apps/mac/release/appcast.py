@@ -1,21 +1,4 @@
 #!/usr/bin/env python3
-"""Utilidades de appcast/Sparkle para el pipeline de release (solo stdlib, Python >= 3.9).
-
-Subcomandos:
-  derive-public            lee por stdin la clave privada EdDSA de Sparkle (base64) e imprime la pública
-  check-key --public B64   exit 0 si la privada (stdin) corresponde a esa clave pública
-  verify-sig --public B64 --file F --sig B64   verificación Ed25519 independiente de sign_update
-  get-sig --appcast F --version V   firma EdDSA (base64) del zip de esa versión, para sign_update --verify
-  max-build --appcast F    imprime el mayor sparkle:version del feed (vacío si no hay)
-  list-files --appcast F   nombres de archivo (zips y deltas) que referencia el feed
-  check-new ...            valida que la versión nueva sea publicable (monótona, sin pisar un zip distinto)
-  verify ...               valida el appcast generado (urls, firmas, versión nueva, sistema mínimo, canal)
-  find --appcast F --version V   versión (corta) -> build y archivos asociados (zip y deltas)
-  remove-item --appcast F --version V   quita un item del feed (el re-firmado lo hace sign_update)
-  prune --appcast F --dir D --version V   quita el item y los deltas huérfanos (rollback de emergencia; re-firmar después)
-
-Nunca imprime claves ni firmas completas. La clave privada solo se lee de stdin.
-"""
 import argparse
 import base64
 import hashlib
@@ -29,10 +12,6 @@ NS = "http://www.andymatuschak.org/xml-namespaces/sparkle"
 SP = "{%s}" % NS
 
 
-# ---------------------------------------------------------------------------
-# Ed25519 (RFC 8032, sección 6). Referencia lenta pero suficiente para firmas sueltas;
-# Sparkle usa Ed25519 estándar, así que sirve para verificar sus firmas.
-# ---------------------------------------------------------------------------
 _P = 2 ** 255 - 19
 _Q = 2 ** 252 + 27742317777372353535851937790883648493
 _D = -121665 * pow(121666, _P - 2, _P) % _P
@@ -127,10 +106,6 @@ def ed25519_verify(public, msg, sig):
 
 
 def public_from_sparkle_secret(secret_b64):
-    """Clave pública a partir del secreto exportado por generate_keys -x.
-
-    Formato nuevo: 32 bytes (semilla). Formato antiguo: 96 bytes = clave privada de 64 + pública de 32.
-    """
     raw = base64.b64decode(secret_b64.strip(), validate=True)
     if len(raw) == 32:
         return ed25519_public_from_seed(raw)
@@ -139,11 +114,7 @@ def public_from_sparkle_secret(secret_b64):
     raise ValueError("la clave privada de Sparkle debe decodificar a 32 o 96 bytes")
 
 
-# ---------------------------------------------------------------------------
-# Appcast
-# ---------------------------------------------------------------------------
 def version_key(v):
-    """Clave de orden para versiones numéricas con puntos (suficiente para CFBundleVersion)."""
     parts = []
     for p in re.split(r"[.]", v.strip()):
         m = re.match(r"^(\d+)(.*)$", p)
@@ -154,7 +125,6 @@ def version_key(v):
 
 
 def load_items(path):
-    """Devuelve la lista de items del feed como dicts planos."""
     root = ET.parse(path).getroot()
     channel = root.find("channel")
     items = []
@@ -200,7 +170,6 @@ def sha256_file(path):
 
 
 def cmd_check_new(a):
-    """0 = publicable; 3 = ya publicada idéntica (reintento idempotente); 1 = error."""
     zip_path = a.archive
     appcast = os.path.join(a.dir, "appcast.xml")
     items = load_items(appcast) if os.path.exists(appcast) else []
@@ -302,7 +271,6 @@ def cmd_find(a):
         return 1
     it = hit[0]
     files = [basename_of(it["url"])]
-    # deltas que la tienen como destino (en su propio item) y deltas hacia otras versiones desde ella
     files += [basename_of(d["url"]) for d in it["deltas"]]
     for other in items:
         if other is not it:
@@ -336,7 +304,6 @@ def cmd_get_sig(a):
 
 
 def cmd_prune(a):
-    """Rollback de emergencia: quita el item de la versión y los deltas cuyo archivo ya no está en --dir."""
     ET.register_namespace("sparkle", NS)
     ET.register_namespace("dc", "http://purl.org/dc/elements/1.1/")
     tree = ET.parse(a.appcast)
@@ -410,7 +377,7 @@ def cmd_verify_sig(a):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(description="Utilidades de appcast/Sparkle para el pipeline de release.")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("derive-public").set_defaults(fn=cmd_derive_public)
     p = sub.add_parser("check-key")

@@ -1,6 +1,5 @@
 import SwiftUI
 
-/// Fila de "te necesita" / "trabada": lo único con color. Controles nativos (botones bordered pequeños).
 @available(macOS 26.0, *)
 struct AttentionRow: View {
     let task: MockTask
@@ -40,7 +39,6 @@ struct AttentionRow: View {
     }
 }
 
-/// Fila compacta, monocroma, estilo lista de Finder.
 @available(macOS 26.0, *)
 struct CompactTaskRow: View {
     let task: MockTask

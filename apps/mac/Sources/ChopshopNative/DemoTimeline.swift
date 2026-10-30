@@ -1,13 +1,5 @@
 import SwiftUI
 
-// Mini demo de la oficina creciendo. No hay motor ni red: un guion de eventos (con forma de "envelope") se aplica a un
-// store, igual que se hará con el stream de eventos real (LiveStore). La vista nunca lee el guion: solo el estado del store
-// en el instante t, más las marcas de tiempo que el store apunta (cuándo cambió cada cosa) para animar.
-//
-//   DemoEnvelope  { seq, at, event }       ← la forma del futuro envelope
-//   DemoStore.apply(envelope)              ← un reductor puro, como el de LiveStore
-//   DemoPlayback.scene(at:)                ← estado en t + animación (salas que suben, escritorios que brotan, cables que se dibujan…)
-
 @available(macOS 26.0, *)
 enum DemoEvent {
     case projectCreated(goal: String)
@@ -42,7 +34,7 @@ enum DemoEvent {
 @available(macOS 26.0, *)
 struct DemoEnvelope: Identifiable {
     let seq: Int
-    let at: Double          // segundos desde el inicio de la demo
+    let at: Double
     let event: DemoEvent
     var id: Int { seq }
 }
@@ -51,7 +43,7 @@ struct DemoEnvelope: Identifiable {
 struct DemoStore {
     var graph = MockGraph(id: "g-demo", project: "demo", batch: "b-demo", goal: "", status: "running", threadBudget: 6, threads: 0, throttleMode: "auto", nodes: [])
     var tasks: [String: MockTask] = [:]
-    var lastChange: [String: Double] = [:]      // id de nodo → cuándo cambió su estado por última vez
+    var lastChange: [String: Double] = [:]
     var applied = 0
 
     mutating func apply(_ e: DemoEnvelope) {
@@ -79,8 +71,6 @@ struct DemoStore {
         }
     }
 }
-
-// MARK: - Guion
 
 @available(macOS 26.0, *)
 enum DemoScript {
@@ -137,20 +127,16 @@ enum DemoScript {
     }()
 }
 
-// MARK: - Reproductor determinista
-
-/// Calcula, para cualquier t, la escena animada. Todo se precalcula una vez (un store + escena por evento; la cámara en una pista de 30 Hz),
-/// así que se puede saltar a cualquier instante (capturas, scrubbing) y da lo mismo que reproducirlo en vivo.
 @available(macOS 26.0, *)
 final class DemoPlayback {
     let events: [DemoEnvelope]
     let duration: Double
-    private(set) var stores: [DemoStore] = []       // estado tras cada evento (índice = evento)
+    private(set) var stores: [DemoStore] = []
     private var scenes: [IsoScene] = []
     private let empty: IsoScene
-    private let structural: [Int]                   // índices de eventos que cambian la disposición
-    private var births: [String: Double] = [:]      // cuándo brota el escritorio
-    private var roomBorn: [Int: Double] = [:]       // cuándo empieza a subir la sala
+    private let structural: [Int]
+    private var births: [String: Double] = [:]
+    private var roomBorn: [Int: Double] = [:]
     private var fitTrack: [(minU: Double, maxU: Double, minV: Double, maxV: Double)] = []
     private var cache: (t: Double, scene: IsoScene)?
 
@@ -212,7 +198,6 @@ final class DemoPlayback {
             if vis.isEmpty { tg = (-330, 330, -90, 190) } else {
                 sc.computeBounds(visible: vis)
                 tg = (sc.minU, sc.maxU, sc.minV, sc.maxV)
-                // una sala sola no debe llenar toda la pantalla
                 let w = tg.1 - tg.0
                 if w < 640 { let m = (tg.0 + tg.1) / 2; tg.0 = m - 320; tg.1 = m + 320 }
             }
@@ -223,8 +208,6 @@ final class DemoPlayback {
         }
     }
 
-    // MARK: lecturas
-
     private func index(at t: Double) -> Int? {
         var lo = -1
         for (i, e) in events.enumerated() { if e.at <= t { lo = i } else { break } }
@@ -232,7 +215,6 @@ final class DemoPlayback {
     }
 
     func store(at t: Double) -> DemoStore { index(at: t).map { stores[$0] } ?? DemoStore() }
-    /// Los últimos eventos aplicados (para el ticker).
     func recent(at t: Double, _ n: Int = 4) -> [DemoEnvelope] {
         guard let k = index(at: t) else { return [] }
         return Array(events[max(0, k - n + 1)...k])
@@ -254,7 +236,6 @@ final class DemoPlayback {
     private func rawScene(at t: Double, route: Bool) -> IsoScene {
         guard let k = index(at: t) else { return empty }
         var sc = scenes[k]
-        // disposición: mezcla con la anterior justo después de añadir tareas
         if let s = structural.last(where: { $0 <= k }), let p = structural.last(where: { $0 < s }) {
             let f = (t - events[s].at) / 1.2
             if f < 1 { sc = IsoScene.blend(from: scenes[p], to: sc, f: isoEase(f)) }

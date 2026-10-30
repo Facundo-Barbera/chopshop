@@ -1,13 +1,10 @@
 import Foundation
 
-/// Port a Swift de ui/web/dev/fixtures.js: 3 proyectos, 5 lotes, ~25 tareas en todos los estados,
-/// el grafo de nuskills, eventos y métricas de máquinas. Determinista (sin azar) para que los Previews no parpadeen.
 public enum Fixtures {
     public static let projects = ["bixku-utilities", "nuskills", "chopshop"]
 
     private static func link(_ id: String) -> URL? { URL(string: "https://t3.example/thread/\(id)") }
 
-    /// t(id, title, kind, ...): réplica de la fábrica `t()` del JS.
     private static func t(_ id: String, _ title: String, _ kind: TaskKind, q: String? = nil, opts: [String]? = nil,
                           result: String? = nil, error: String? = nil, level: Level? = nil) -> MockTask {
         var x = MockTask(id: id, title: title, kind: kind, link: link(id))
@@ -90,7 +87,6 @@ public enum Fixtures {
         return MockSnapshot(projects: projects, batches: batches, graphs: [graph(threads: nusk.count), bixkuGraph, chopGraph], events: events, machines: machines)
     }
 
-    // Grafos pequeños para los otros dos proyectos (el de nuskills es el grande).
     static var bixkuGraph: MockGraph {
         let nodes = [
             MockGraphNode(id: "n0", parent: nil, depth: 0, kind: "root", label: "meta", title: "Limpieza semanal de utilidades", status: .expanding),
@@ -150,7 +146,6 @@ public enum Fixtures {
                          status: "running", threadBudget: 12, threads: threads, throttleMode: "mitad", nodes: nodes)
     }
 
-    /// Series deterministas (onda + ruido fijo) en lugar del paseo aleatorio del JS.
     static func series(base: Double, amp: Double, phase: Double, n: Int = 60) -> [Double] {
         (0..<n).map { i in
             let v = base + amp * sin(Double(i) / 6 + phase) + amp * 0.35 * sin(Double(i) * 1.7 + phase * 2)

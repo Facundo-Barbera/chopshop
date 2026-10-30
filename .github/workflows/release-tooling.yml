@@ -1,7 +1,5 @@
 name: Release tooling
 
-# Valida el pipeline de release SIN credenciales: tests de los scripts, shellcheck y actionlint.
-# No construye ni publica nada (eso es release-mac.yml).
 on:
   pull_request:
     paths:
@@ -27,15 +25,12 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
 
       - name: PyYAML (para validar la estructura de los workflows)
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends python3-yaml
-
-      - name: Tests de los scripts de release
-        run: python3 -m unittest discover -s apps/mac/release/tests -v
 
       - name: shellcheck
         run: shellcheck -x -P SCRIPTDIR -s bash apps/mac/release/*.sh

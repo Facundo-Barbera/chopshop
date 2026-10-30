@@ -2,19 +2,10 @@ import SwiftUI
 import AppKit
 import os
 
-/// La oficina de un proyecto como un solo mundo (`WorldLayout`): vestíbulo y pisos con sus departamentos y sus salas de máquinas
-/// (0..N, las del perfil) en un mismo lienzo. Es un visualizador puro: sin globos al pasar el ratón, sin barras ni listas encima;
-/// el detalle vive en el panel lateral de quien la monta (`onSelect`): un hilo, o un armario (`rack:<k>:<unidad>`) o la consola
-/// (`machine:<k>`) de una sala de máquinas.
-///
-/// Cámara: arrastrar = mover; rueda del ratón o pellizco del trackpad = zoom alrededor del cursor; dos dedos en el trackpad =
-/// mover; doble clic = encuadrar todo. Todo animado con suavizado y a la frecuencia de la pantalla; el estado de la cámara vive
-/// fuera de `@State` (`WorldCameraBox`), así arrastrar no reevalúa la vista ni rehace etiquetas por evento.
 @available(macOS 26.0, *)
 public struct OfficeWorldView: View {
     let floors: [FloorPlan]
     var frozenNow: Date?
-    /// Región con la que abrir encuadrada (p. ej. `floor:0` al entrar desde la ciudad); nil = el mundo entero.
     var focusRegion: String?
     var selected: String?
     var onSelect: ((String?) -> Void)?
@@ -29,7 +20,6 @@ public struct OfficeWorldView: View {
         self.focusRegion = focusRegion; self.selected = selected; self.onSelect = onSelect
     }
 
-    /// El mundo de un proyecto de la proyección viva (pisos de `ProjectOffice`, con sus salas de máquinas).
     public init(state: LiveState, project: String, now: Date? = nil, focusRegion: String? = nil, selected: String? = nil,
                 onSelect: ((String?) -> Void)? = nil) {
         self.init(floors: ProjectOffice.floors(in: state, project: project, now: now ?? Date()),
@@ -48,7 +38,7 @@ public struct OfficeWorldView: View {
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { r in
             box.frameInWindow = r
             let a = Double(r.width / max(1, r.height))
-            if abs(a - aspect) / aspect > 0.12 { aspect = a }     // la rejilla de regiones solo cambia con la proporción
+            if abs(a - aspect) / aspect > 0.12 { aspect = a }
         }
         .onContinuousHover(coordinateSpace: .local) { phase in
             switch phase {
@@ -72,7 +62,6 @@ public struct OfficeWorldView: View {
         .onAppear { box.installScrollMonitor() }
         .onDisappear { box.removeScrollMonitor() }
         .onChange(of: selected) { _, tid in
-            // elegido desde fuera (la lista del panel): la cámara va a su escritorio (o armario)
             if let tid, tid != box.lastTapped, let hit = world.spot(ofMachine: tid) ?? world.spot(ofThread: tid, now: frozenNow ?? Date()) {
                 box.focus(hit.region, hit.spot)
             }
@@ -104,7 +93,6 @@ public struct OfficeWorldView: View {
     }
 }
 
-/// Etiquetas de todo el mundo (cortas: nombre del hilo, rol · n, título de sala y de región).
 @available(macOS 26.0, *)
 struct WorldLabels: View {
     let world: WorldLayout
@@ -147,7 +135,6 @@ struct WorldRenderer {
                           selected: selected, hovered: hovered, prefix: "\(r.id)|")
         }
         let looks = rs.map { $0.looks() }
-        // losas de las regiones (suelo del piso) con su sombra: una sola capa desenfocada para todo el mundo
         ctx.drawLayer { l in
             l.addFilter(.blur(radius: 9 * cam.s))
             for r in regions {
@@ -163,7 +150,6 @@ struct WorldRenderer {
         }
         for (i, f) in rs.enumerated() { f.drawContents(&ctx, looks: looks[i]) }
         for (i, f) in rs.enumerated() { f.drawLabels(&ctx, looks: looks[i]) }
-        // nombre del piso sobre la esquina del fondo de su losa (el vestíbulo ya lo dice su sala)
         for r in regions where r.kind != .lobby {
             guard let s = ctx.resolveSymbol(id: "\(r.id)|title") else { continue }
             let p = cam.pt(r.x0, r.y0, 2)
@@ -183,7 +169,6 @@ struct WorldRenderer {
         return p
     }
 
-    /// Losa baja bajo todas las salas de la región: agrupa un piso (o el vestíbulo) sin muros ni rótulos encima.
     private func plate(_ ctx: inout GraphicsContext, _ r: WorldLayout.Region) {
         let z = -1.0, h = 3.0
         let a = P(r.x0, r.y0, z + h), b = P(r.x0 + r.w, r.y0, z + h), c = P(r.x0 + r.w, r.y0 + r.d, z + h), e = P(r.x0, r.y0 + r.d, z + h)
@@ -197,8 +182,6 @@ struct WorldRenderer {
     }
 }
 
-/// Cámara e interacción del mundo, fuera de `@State`: los eventos (arrastre, rueda, pellizco) solo cambian números aquí y el
-/// lienzo los lee en el próximo fotograma.
 @available(macOS 26.0, *)
 final class WorldCameraBox {
     let floorBox = FloorCameraBox()
@@ -207,7 +190,6 @@ final class WorldCameraBox {
     var lastTapped: String?
     var frameInWindow = CGRect.zero
 
-    // mundo en caché (la rejilla depende de la proporción de la vista)
     private var cacheKey: (floors: [FloorPlan], aspect: Double)?
     private var cached: WorldLayout?
 
@@ -218,7 +200,6 @@ final class WorldCameraBox {
         return w
     }
 
-    // cámara: actual (la que se pinta) y objetivo (hacia el que se suaviza)
     private var cur: IsoFrame?
     private var target: IsoFrame?
     private var fit = IsoFrame(s: 1, cu: 0, cv: 0, ax: 0, ay: 0)
@@ -242,12 +223,10 @@ final class WorldCameraBox {
         size = sz; bounds = w.bounds
         fit = Self.fitFrame(w.bounds, size: sz)
         if cur == nil || (resized && !touched) || focusRegion != focusedRegion {
-            // primer fotograma: el mundo entero, o la región pedida con el mismo encuadre que el zoom de la ciudad
             let f = focusRegion.flatMap { w.region($0) }.map { OfficeFraming.frame($0.bounds, size: sz) } ?? fit
             cur = f; target = f; focusedRegion = focusRegion
             if focusRegion != nil { touched = true }
         } else if resized, var c = cur, var g = target {
-            // conservar el punto central al cambiar el tamaño
             c.ax = Double(sz.width) / 2; c.ay = Double(sz.height) / 2; g.ax = c.ax; g.ay = c.ay
             cur = c; target = g
         }
@@ -261,8 +240,6 @@ final class WorldCameraBox {
         return IsoCam(s: c.s, cu: c.cu, cv: c.cv, ax: c.ax, ay: c.ay)
     }
 
-    // MARK: interacción
-
     private var minS: Double { fit.s * 0.6 }
     private var maxS: Double { max(fit.s * 10, 3.2) }
 
@@ -272,7 +249,6 @@ final class WorldCameraBox {
         f.cv = min(bounds.maxV, max(bounds.minV, f.cv))
     }
 
-    /// Mover en pantalla (dx, dy) puntos. `immediate`: también la cámara actual (arrastre 1:1, sin retardo).
     func pan(_ dx: Double, _ dy: Double, immediate: Bool) {
         guard var g = target, var c = cur else { return }
         touched = true
@@ -282,7 +258,6 @@ final class WorldCameraBox {
         target = g
     }
 
-    /// Zoom por `factor` manteniendo quieto el punto de pantalla `p`.
     func zoom(_ factor: Double, at p: CGPoint) {
         guard var g = target else { return }
         touched = true
@@ -309,7 +284,6 @@ final class WorldCameraBox {
 
     func fitAll() { touched = false; target = fit }
 
-    /// Centrar un escritorio (elegido desde la lista), con algo de zoom si el mundo está muy lejos.
     func focus(_ r: WorldLayout.Region, _ sp: FloorLayout.Spot) {
         guard var g = target else { return }
         touched = true
@@ -323,7 +297,6 @@ final class WorldCameraBox {
 
     func hit(_ p: CGPoint) -> String? { hits.filter { $0.rect.contains(p) }.max { $0.key < $1.key }?.id }
 
-    /// Lo que se elige al pulsar un hueco: su hilo, o el propio id si es un armario o la consola de una sala de máquinas.
     func selection(ofSpot id: String, in w: WorldLayout) -> String? {
         if FloorLayout.machinePart(id) != nil { return id }
         if id.hasPrefix("lobby:") { return String(id.dropFirst(6)) }
@@ -333,8 +306,6 @@ final class WorldCameraBox {
         return nil
     }
 
-    // MARK: rueda / trackpad
-
     private var monitor: Any?
 
     func installScrollMonitor() {
@@ -342,14 +313,12 @@ final class WorldCameraBox {
         monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] e in
             guard let self, let win = e.window, let content = win.contentView else { return e }
             let loc = e.locationInWindow
-            let p = CGPoint(x: loc.x, y: content.bounds.height - loc.y)          // a coordenadas de SwiftUI (origen arriba)
+            let p = CGPoint(x: loc.x, y: content.bounds.height - loc.y)
             guard self.frameInWindow.contains(p) else { return e }
             let local = CGPoint(x: p.x - self.frameInWindow.minX, y: p.y - self.frameInWindow.minY)
             if e.hasPreciseScrollingDeltas && !e.modifierFlags.contains(.command) {
-                // trackpad: dos dedos mueven (el pellizco hace zoom)
                 self.pan(Double(e.scrollingDeltaX), Double(e.scrollingDeltaY), immediate: true)
             } else {
-                // rueda del ratón (o ⌘ + dos dedos): zoom alrededor del cursor, animado
                 let dy = e.hasPreciseScrollingDeltas ? Double(e.scrollingDeltaY) * 0.01 : Double(e.scrollingDeltaY) * 0.12
                 self.zoom(exp(dy), at: local)
             }

@@ -1,13 +1,9 @@
 import SwiftUI
 import AppKit
 
-/// Capturas de la oficina por departamentos (las usa `ChopshopSnap <salida> floor` / `city-office`): las previews de
-/// `FloorOfficeView` y la ciudad v3 de `CityOfficeFixture` (varios pisos por proyecto, vestíbulo en planta baja, zoom a un piso).
 @available(macOS 26.0, *)
 @MainActor
 public extension Snapshots {
-    /// Piso Producto con sus dos salas de máquinas (oscuro/claro), un hilo elegido, armario del repo principal elegido y vestíbulo:
-    /// `floor-*.png`.
     static func renderFloors(to out: String) {
         let shots: [(String, FloorPlan, Bool, String?, CGSize)] = [
             ("floor-producto-dark", FloorFixture.floor, true, nil, CGSize(width: 1100, height: 620)),
@@ -22,8 +18,6 @@ public extension Snapshots {
                 .background(IsoBackdrop())
             write(v, dark: dark, size: size, to: "\(out)/\(name).png")
         }
-        // El proyecto con 46 hilos (1 corriendo) a pantalla completa, con perfil y sin él, a 1440×900 y 2560×1440, y con un hilo
-        // elegido (panel lateral con su detalle): `floor-proyecto-46-*.png`.
         let sizes: [(String, CGSize)] = [("1440x900", CGSize(width: 1440, height: 900)), ("2560x1440", CGSize(width: 2560, height: 1440))]
         let cases: [(String, Bool, Bool, String?)] = [("perfil", true, true, nil), ("perfil-claro", true, false, nil),
                                                      ("sin-perfil", false, true, nil), ("perfil-elegido", true, true, "mcp:k00")]
@@ -38,8 +32,6 @@ public extension Snapshots {
         }
     }
 
-    /// Ciudad de `CityOfficeFixture`: vista general (oscuro/claro), zoom a medias y al final hacia el piso Docs (el segundo del
-    /// proyecto, no el primero) y ese piso ya montado como `FloorOfficeView`: `city-office-*.png`.
     static func renderCityOffice(to out: String) {
         guard let state = CityOfficeFixture.state else { print("sin CityOfficeFixture"); return }
         let model = CityModel.build(state)
@@ -59,7 +51,6 @@ public extension Snapshots {
               to: "\(out)/city-office-zoom-mitad.png")
         write(city(CityFocus(project: "awesome-gb", p: 1, floor: "awesome-gb#1")), dark: true, size: size,
               to: "\(out)/city-office-zoom-fin.png")
-        // 46 hilos de chopshop: la ciudad y el zoom ya montado en su piso Producto (`city-office-46-*.png`).
         let st46 = ProjectOfficeFixture.state(office: true)
         let m46 = CityModel.build(st46)
         var l46 = CityLights()
@@ -75,7 +66,6 @@ public extension Snapshots {
             write(city46(CityFocus(project: ProjectOfficeFixture.project, p: 1, floor: "\(ProjectOfficeFixture.project)#0")), dark: true, size: s46,
                   to: "\(out)/city-office-46-piso-\(sz).png")
         }
-        // la «Ciudad» de la barra lateral: un edificio por proyecto (`city-por-proyecto-*.png`), y su zoom terminado en el piso Docs
         let mp = CityModel.build(state, perProject: true)
         var lp = CityLights()
         lp.observe(mp, at: 0)
@@ -85,7 +75,6 @@ public extension Snapshots {
                     .padding(10).background(Color(nsColor: .windowBackgroundColor)),
                   dark: true, size: size, to: "\(out)/city-por-proyecto-\(name).png")
         }
-        // el piso más bajo trae la sala de máquinas del proyecto
         write(city(CityFocus(project: "awesome-gb", p: 0.7, floor: "awesome-gb#0")), dark: true, size: size,
               to: "\(out)/city-office-zoom-producto.png")
         if let docs = FloorPlan.floor(in: state, project: "awesome-gb", index: 1) {

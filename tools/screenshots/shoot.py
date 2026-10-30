@@ -1,14 +1,4 @@
 #!/usr/bin/env python3
-"""Genera las capturas de assets/ con datos FICTICIOS (fixture.json), sin servidores.
-
-Toma el bundle estático de la UI (apps/mac/Resources/web), genera un HTML en un directorio
-temporal que emula el puente nativo (window.webkit.messageHandlers.chopshop) alimentándolo con
-el fixture (lo que devolverían los agentes en GET /snapshot), y lo captura con Chromium headless vía file:// (playwright, solo como librería).
-
-    python3 tools/screenshots/shoot.py [--out assets] [--only overview,events] [--build]
-
-Requisitos: `pip install playwright && playwright install chromium` y alguna fuente del sistema.
-"""
 import argparse
 import json
 import math
@@ -17,13 +7,13 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from typing import Any
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 WEB = os.path.join(ROOT, "apps", "mac", "Resources", "web")
-HIST = 60  # igual que App.jsx: una muestra cada 3 s
+HIST = 60
 
-# nombre del archivo -> hash que lee el stub (vista[:argumento])
 SCENES = {
     "overview": "overview",
     "machines": "machines:host-b",
@@ -34,10 +24,8 @@ SCENES = {
     "batches": "batches",
 }
 
-# Escenas que necesitan otro tamaño.
-SIZES = {}
+SIZES: dict[Any, Any] = {}
 
-# Fondo que en la app pone el shell SwiftUI (la web es transparente sobre vidrio nativo).
 BACKDROP = """<style>
 html{background:radial-gradient(1100px 700px at 15% 0%,#26418f 0%,transparent 60%),
 radial-gradient(900px 700px at 100% 100%,#4a2a7a 0%,transparent 60%),#0d1330}
@@ -61,7 +49,6 @@ window.webkit = {messageHandlers: {chopshop: {postMessage: function (m) {
 
 
 def series(spec, phase, lo=0.0, hi=100.0, integer=False):
-    """Serie suave y determinista de HIST muestras alrededor de base ± amp."""
     out = []
     for i in range(HIST):
         v = spec["base"] + spec["amp"] * (0.6 * math.sin(i / 5.0 + phase) + 0.4 * math.sin(i / 2.3 + 2 * phase))
@@ -71,7 +58,6 @@ def series(spec, phase, lo=0.0, hi=100.0, integer=False):
 
 
 def machines(fx):
-    """Historial de métricas por máquina (lo que la app acumula sondeo a sondeo), desde los parámetros del fixture."""
     out = {}
     for n, (name, m) in enumerate(fx["history"].items()):
         cpu = series(m["cpu"], n)
@@ -95,7 +81,6 @@ def build_page(tmp, fx):
 
 
 def build_bundle(tmp):
-    """Recompila la UI a un directorio temporal (sin tocar apps/mac/Resources/web)."""
     global WEB
     ui = os.path.join(ROOT, "apps", "ui")
     out = os.path.join(tmp, "web")
@@ -108,7 +93,7 @@ def build_bundle(tmp):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap = argparse.ArgumentParser(description="Genera las capturas de assets/ con datos ficticios.")
     ap.add_argument("--out", default=os.path.join(ROOT, "assets"))
     ap.add_argument("--only", default="", help="lista separada por comas de: " + ", ".join(SCENES))
     ap.add_argument("--build", action="store_true", help="recompilar la UI desde apps/ui en vez de usar el bundle de la app")

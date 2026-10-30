@@ -1,18 +1,4 @@
-"""Automatizaciones por proyecto (perfil `automations:`): scripts locales sin versionar que reaccionan a sobres del bus.
-
-- Declaración en `~/.chopshop/profiles/<proyecto>.yaml`; los scripts viven en `<home>/automations/<proyecto>/` (0700),
-  con `state/` y `logs/`. `validate(perfil)` lo llama `profile.validate` (igual que `reactions.validate`).
-- Disparadores: `type` (glob de tipo de sobre, con `where`), `schedule` (`every: 6h` o `cron` de 5 campos en hora local
-  de la máquina) y `manual` (`chopshop automation run`).
-- Runner: `Popen(argv)` sin shell, grupo de procesos propio, entorno limpio (PATH mínimo + lista blanca `env` +
-  `CHOPSHOP_EVENT_FILE/PROJECT/AUTOMATION` + `<SECRETO>_FILE`), stdin=/dev/null, timeout que mata el grupo (SIGTERM, gracia,
-  SIGKILL), RLIMIT_CPU/AS/NOFILE, tope de 256 KB en stdout/stderr, `max_runs_per_hour` y `concurrency`.
-- Salida: JSONL en stdout -> sobres (solo tipos de `emits`, `cause = {id: disparador, depth+1}`). Siempre `automation.ran`.
-- Anti-bucles: `cause.depth >= 3` no dispara; una automatización no se dispara con sus `emits` ni con su `automation.ran`.
-No es un sandbox contra scripts hostiles: el modelo de confianza es «scripts escritos por los agentes del dueño».
-El agente nunca crea ni ejecuta scripts a petición de la API HTTP (no hay ruta para eso)."""
 import argparse
-import calendar
 import collections
 import fnmatch
 import json
@@ -37,17 +23,17 @@ MAX_TIMEOUT = 900
 MIN_TIMEOUT = 1
 DEFAULT_RUNS_PER_HOUR = 60
 MAX_CONCURRENCY = 8
-KILL_GRACE = 5.0                  # s entre SIGTERM y SIGKILL al vencer el timeout
-OUT_CAP = 256 * 1024              # bytes guardados de stdout y de stderr (el resto se descarta)
-MAX_EMITS = 100                   # sobres por ejecución
-MAX_DEPTH = 3                     # cause.depth >= MAX_DEPTH no dispara
-QUEUE_MAX = 20                    # ejecuciones en espera por automatización
-TAIL = 2000                       # caracteres de stdout/stderr en automation.ran
-MIN_EVERY = 60                    # s mínimos de `every`
+KILL_GRACE = 5.0
+OUT_CAP = 256 * 1024
+MAX_EMITS = 100
+MAX_DEPTH = 3
+QUEUE_MAX = 20
+TAIL = 2000
+MIN_EVERY = 60
 MIN_PATH = "/usr/local/bin:/usr/bin:/bin"
-AS_LIMIT = 1024 * 1024 * 1024     # RLIMIT_AS (1 GB)
+AS_LIMIT = 1024 * 1024 * 1024
 NOFILE_LIMIT = 256
-LOG_MAX = 1024 * 1024             # bytes por archivo de log antes de recortar
+LOG_MAX = 1024 * 1024
 
 KEYS = ("name", "description", "on", "run", "cwd", "timeout", "max_runs_per_hour", "concurrency", "env", "secrets",
         "emits", "enabled", "on_failure")
@@ -56,14 +42,13 @@ SEVERITY = ("info", "notice", "warn", "error")
 NEEDS = (None, "human", "bot", "approval")
 WHERE_ROOTS = ("type", "project", "severity", "needs", "subject", "body")
 WHERE_OPS = ("in", "not", "regex")
-# Espacios de nombres de tipos del agente (§2.2): se pueden escuchar pero no emitir desde un script.
 RESERVED = ("task", "question", "approval", "batch", "graph", "node", "reaction", "machine", "github", "automation", "agent",
             "desk", "office", "forge", "listener")
-RESERVED_EMITTABLE = ("forge.dispatch",)   # tipos del agente que un script sí puede emitir (anuncia un workflow_dispatch)
+RESERVED_EMITTABLE = ("forge.dispatch",)
 RESERVED_ENV = ("PATH", "CHOPSHOP_EVENT_FILE", "CHOPSHOP_PROJECT", "CHOPSHOP_AUTOMATION")
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _ENVNAME = re.compile(r"^[A-Z_][A-Z0-9_]{0,63}$")
-_TYPE = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z0-9_]+)+$")         # el de envelope.py
+_TYPE = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z0-9_]+)+$")
 _GLOB = re.compile(r"^[a-z0-9_*?]+(\.[a-z0-9_*?]+)*$")
 _EVERY = re.compile(r"^\s*(\d+)\s*([smhd])\s*$")
 _UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
@@ -73,10 +58,7 @@ class AutomationError(Exception):
     pass
 
 
-# ---------------------------------------------------------------- rutas
-
 def base_dir(root=None):
-    """Raíz de los scripts: `<home>/automations` (CHOPSHOP_HOME) o `root` inyectado."""
     return os.path.expanduser(root) if root else os.path.join(home.home(), "automations")
 
 
@@ -96,18 +78,14 @@ def secrets_dir(root=None):
 
 
 def secret_var(name):
-    """`triage_token` -> `TRIAGE_TOKEN_FILE`."""
     return re.sub(r"[^A-Z0-9]", "_", name.upper()) + "_FILE"
 
-
-# ---------------------------------------------------------------- validación
 
 def _num(v):
     return isinstance(v, (int, float)) and not isinstance(v, bool)
 
 
 def parse_every(v):
-    """`6h` / `30m` / `90s` / `1d` / segundos -> segundos (None si no es válido)."""
     if _num(v):
         return float(v) if v > 0 else None
     m = _EVERY.match(str(v or ""))
@@ -118,7 +96,6 @@ _CRON_RANGES = ((0, 59), (0, 23), (1, 31), (1, 12), (0, 7))
 
 
 def parse_cron(text):
-    """`m h dom mes dow` -> 5 conjuntos (dow: 0 y 7 = domingo) + si dom/dow están restringidos. Lanza AutomationError."""
     parts = str(text or "").split()
     if len(parts) != 5:
         raise AutomationError("cron necesita 5 campos (minuto hora día mes día-semana)")
@@ -150,7 +127,6 @@ def parse_cron(text):
 
 
 def cron_match(c, ts):
-    """¿El minuto local de `ts` cumple el cron? (dom y dow restringidos a la vez = cualquiera de los dos, como cron)."""
     t = time.localtime(ts)
     if t.tm_min not in c["min"] or t.tm_hour not in c["hour"] or t.tm_mon not in c["month"]:
         return False
@@ -207,7 +183,6 @@ def _known_type(glob, emitted):
 
 
 def triggers(a):
-    """`on` normalizado: lista de dicts (`"manual"` o `"github.*"` sueltos = {type: ...})."""
     on = a.get("on")
     if isinstance(on, (str, dict)):
         on = [on]
@@ -215,7 +190,6 @@ def triggers(a):
 
 
 def validate(prof):
-    """Problemas del bloque `automations:` (lista vacía si está bien o no existe)."""
     items = prof.get("automations")
     if items is None:
         return []
@@ -290,7 +264,6 @@ def _item_errs(a, i, names, emitted):
 
 
 def trigger_errs(t, tat, emitted=()):
-    """Problemas de un disparador ya normalizado (mapa con `type`); lo reutiliza `wake:` de los roles permanentes."""
     if not isinstance(t, dict):
         return ["%s: se esperaba un mapa o un tipo" % tat]
     errs = []
@@ -326,7 +299,6 @@ def trigger_errs(t, tat, emitted=()):
 
 
 def specs(prof):
-    """Automatizaciones válidas del perfil con valores por defecto (las inválidas se omiten: las reporta `validate`)."""
     out, names = [], set()
     items = prof.get("automations")
     items = items if isinstance(items, list) else []
@@ -348,8 +320,6 @@ def specs(prof):
         out.append(s)
     return out
 
-
-# ---------------------------------------------------------------- where
 
 _MISSING = object()
 
@@ -391,19 +361,14 @@ def _cond(actual, cond):
 
 
 def where_match(where, env):
-    """¿El sobre cumple todas las condiciones? Escalar = igualdad (en listas: contiene), lista = in, {in|not|regex}."""
     return all(_cond(_get(env, path), cond) for path, cond in (where or {}).items())
 
-
-# ---------------------------------------------------------------- sobres
 
 def new_id():
     return envelope.new_id()
 
 
 def normalize(row):
-    """Sobre del bus (`events.list_after`) o sobre suelto -> sobre con `cause`, `subject` y `body` bien formados.
-    Un dict con el nombre viejo (`event`) y sin `type` se traduce con `envelope.from_legacy`."""
     if not isinstance(row, dict):
         return None
     env = dict(row)
@@ -425,7 +390,6 @@ def normalize(row):
 
 
 def _clean_subject(o, spec):
-    """Sujeto que da el script, si cumple el contrato (kind conocido, id texto); si no, el de la automatización."""
     if not isinstance(o, dict) or o.get("kind") not in envelope.SUBJECT_KINDS or o.get("id") in (None, ""):
         return _subject(spec)
     out = {"kind": o["kind"], "id": str(o["id"])[:200]}
@@ -436,7 +400,6 @@ def _clean_subject(o, spec):
 
 
 def parse_output(text, spec, trigger_env):
-    """JSONL de stdout -> (sobres parciales, descartadas). Solo tipos de `emits`; el runner completa el resto."""
     out, discarded = [], 0
     cause = {"id": (trigger_env or {}).get("id"), "depth": int(((trigger_env or {}).get("cause") or {}).get("depth") or 0) + 1}
     allowed = set(spec["emits"])
@@ -465,11 +428,9 @@ def _subject(spec):
     return envelope.subject("automation", spec["name"])
 
 
-# ---------------------------------------------------------------- runner
-
 def _limits(timeout):
     def apply():
-        import resource  # noqa: PLC0415 - solo POSIX, dentro del hijo
+        import resource
         cpu = int(timeout) + 5
         for lim, val in ((resource.RLIMIT_CPU, cpu), (resource.RLIMIT_AS, AS_LIMIT), (resource.RLIMIT_NOFILE, NOFILE_LIMIT)):
             try:
@@ -482,7 +443,6 @@ def _limits(timeout):
 
 
 def _reader(stream, buf):
-    """Lee todo el flujo (para que el hijo no se bloquee) y guarda como mucho OUT_CAP bytes."""
     try:
         while True:
             chunk = stream.read(65536)
@@ -511,7 +471,6 @@ def _killpg(pgid, sig):
 
 
 def build_env(spec, event_file, environ=None, secrets_root=None):
-    """Entorno limpio: PATH mínimo + lista blanca + CHOPSHOP_* del disparo + `<SECRETO>_FILE` (solo si el archivo existe)."""
     src = os.environ if environ is None else environ
     env = {"PATH": MIN_PATH}
     for k in spec["env"]:
@@ -526,7 +485,6 @@ def build_env(spec, event_file, environ=None, secrets_root=None):
 
 
 def execute(spec, trigger_env=None, root=None, secrets_root=None, environ=None, grace=KILL_GRACE, clock=time.monotonic):
-    """Ejecuta el script una vez. Devuelve {exit, timed_out, duration_ms, stdout, stderr, truncated, error}."""
     pdir = project_dir(spec["project"], root, create=True)
     cwd = os.path.realpath(os.path.join(pdir, spec["cwd"]))
     res = {"exit": None, "timed_out": False, "duration_ms": 0, "stdout": "", "stderr": "", "truncated": False, "error": None}
@@ -560,7 +518,7 @@ def execute(spec, trigger_env=None, root=None, secrets_root=None, environ=None, 
                 p.wait(timeout=grace)
             except subprocess.TimeoutExpired:
                 pass
-        _killpg(p.pid, signal.SIGKILL)         # el grupo entero (nietos incluidos): un script no deja procesos vivos
+        _killpg(p.pid, signal.SIGKILL)
         if p.poll() is None:
             p.wait()
         for r in readers:
@@ -587,7 +545,6 @@ def _fmt_s(v):
 
 
 def next_run(spec, store, now):
-    """Próximo disparo por horario de la automatización (epoch) o None si no tiene `schedule`. `store` = cursores de `tick`."""
     best = None
     for i, t in enumerate(spec.get("on") or []):
         if t.get("type") != "schedule":
@@ -598,7 +555,7 @@ def next_run(spec, store, now):
             cand = max(now, (float(last) if last is not None else now) + t["_every"])
         elif t.get("_cron"):
             m = (int(now) // 60 + 1) * 60
-            for _ in range(8 * 1440):              # una semana y un día cubre cualquier cron de 5 campos usado aquí
+            for _ in range(8 * 1440):
                 if cron_match(t["_cron"], m):
                     cand = m
                     break
@@ -609,7 +566,6 @@ def next_run(spec, store, now):
 
 
 def ran_envelope(spec, trigger, trigger_env, res, emitted, discarded, next_run_ts=None):
-    """Sobre `automation.ran` (siempre: éxito, fallo o timeout)."""
     failed = res["timed_out"] or res["exit"] != 0
     err = res["error"]
     if discarded:
@@ -627,7 +583,6 @@ def ran_envelope(spec, trigger, trigger_env, res, emitted, discarded, next_run_t
 
 
 def write_log(spec, rec, root=None):
-    """Una línea JSON por ejecución en `logs/<nombre>.log` (se recorta a la mitad al pasar de LOG_MAX)."""
     try:
         p = os.path.join(project_dir(spec["project"], root, create=True), "logs", spec["name"] + ".log")
         if os.path.exists(p) and os.path.getsize(p) > LOG_MAX:
@@ -663,7 +618,7 @@ def read_log(project, name=None, n=20, root=None):
 
 def _publish(emit_fn, e):
     stored = emit_fn(e)
-    if isinstance(stored, dict):                     # el bus pone id/seq/ts/machine definitivos
+    if isinstance(stored, dict):
         e.update({k: stored[k] for k in ("id", "seq", "ts", "machine") if k in stored})
     else:
         e.setdefault("id", new_id())
@@ -671,24 +626,23 @@ def _publish(emit_fn, e):
 
 def run_once(spec, emit_fn, trigger="manual", trigger_env=None, root=None, secrets_root=None, environ=None,
              grace=KILL_GRACE, wall=time.time, next_run_fn=None):
-    """Ejecuta, convierte la salida en sobres, los emite (más `automation.ran`) y deja una línea en el log."""
     res = execute(spec, trigger_env, root, secrets_root, environ, grace)
     envs, discarded = parse_output(res["stdout"], spec, trigger_env)
     if res["timed_out"]:
-        envs = []                                    # una ejecución que no terminó no publica nada a medias
+        envs = []
     sent = []
     for e in envs:
         try:
             _publish(emit_fn, e)
             sent.append(e)
-        except envelope.EnvelopeError:               # el bus lo rechaza (esquema del tipo): se descarta y se cuenta
+        except envelope.EnvelopeError:
             discarded += 1
     envs = sent
     nxt = None
     if next_run_fn is not None:
         try:
             nxt = next_run_fn()
-        except Exception:  # noqa: BLE001 - el próximo horario es informativo
+        except Exception:
             nxt = None
     ran = ran_envelope(spec, trigger, trigger_env, res, len(envs), discarded, nxt)
     _publish(emit_fn, ran)
@@ -698,14 +652,7 @@ def run_once(spec, emit_fn, trigger="manual", trigger_env=None, root=None, secre
     return dict(res, emitted=len(envs), discarded=discarded, envelopes=envs, ran=ran)
 
 
-# ---------------------------------------------------------------- motor (hilo del agente)
-
 class Automations:
-    """Despacha sobres del bus y horarios a las automatizaciones de todos los perfiles.
-
-    `emit_fn(sobre_parcial)` publica en el bus. `profiles_fn() -> [perfil]` (por defecto los de `profile.py`).
-    `store` = dict persistente para los cursores de `schedule` (el servicio lo guarda en `meta`). Reloj inyectable."""
-
     def __init__(self, emit_fn, profiles_fn=None, root=None, secrets_root=None, clock=time.time, store=None,
                  environ=None, grace=KILL_GRACE, enabled=True):
         self.emit_fn, self.root, self.secrets_root, self.clock = emit_fn, root, secrets_root, clock
@@ -717,7 +664,7 @@ class Automations:
         self._running = collections.Counter()
         self._queues = collections.defaultdict(collections.deque)
         self._history = collections.defaultdict(collections.deque)
-        self._subjects = collections.Counter()        # (proyecto, nombre, kind, id) en ejecución
+        self._subjects = collections.Counter()
         self._active = 0
         self.stats = collections.defaultdict(lambda: collections.Counter())
         self.threads = []
@@ -727,7 +674,7 @@ class Automations:
         for prof in self.profiles_fn():
             try:
                 out += specs(prof)
-            except Exception as e:  # noqa: BLE001 - un perfil roto no para a los demás
+            except Exception as e:
                 log.warning("automatizaciones de %s: %s", prof.get("project"), e)
         self.specs = out
         return out
@@ -735,9 +682,7 @@ class Automations:
     def find(self, project, name):
         return next((s for s in self.specs if s["project"] == project and s["name"] == name), None)
 
-    # -- qué dispara
     def matches(self, env):
-        """[(spec, trigger)] que este sobre dispara (con anti-bucles)."""
         env = normalize(env)
         if not env or not self.enabled or env["cause"]["depth"] >= MAX_DEPTH:
             return []
@@ -763,7 +708,6 @@ class Automations:
         return [(s["project"], s["name"]) for s, _ in hits]
 
     def tick(self, now=None):
-        """Revisa los `schedule`. Primera vez = siembra sin disparar. Tras una caída larga dispara una sola vez."""
         now = self.clock() if now is None else now
         fired = []
         if not self.enabled:
@@ -796,7 +740,6 @@ class Automations:
                     self.submit(s, "schedule", None)
         return fired
 
-    # -- cola, límites y ejecución
     def _rate_ok(self, s, now):
         h = self._history[(s["project"], s["name"])]
         while h and now - h[0] >= 3600:
@@ -807,7 +750,6 @@ class Automations:
         return True
 
     def submit(self, s, trigger, env, wait=False):
-        """Encola una ejecución. Devuelve "started" | "queued" | "duplicate" | "rate_limited" | "queue_full"."""
         key = (s["project"], s["name"])
         subj = ((env or {}).get("subject") or {})
         skey = (subj.get("kind"), subj.get("id")) if subj.get("id") else None
@@ -858,7 +800,7 @@ class Automations:
             self.stats[key]["runs"] += 1
             if r["error"]:
                 self.stats[key]["failed"] += 1
-        except Exception:  # noqa: BLE001 - el hilo nunca se cae
+        except Exception:
             log.exception("automatización %s/%s", *key)
         finally:
             with self._lock:
@@ -881,25 +823,23 @@ class Automations:
 
 
 class MetaStore:
-    """Cursores de `schedule` en la tabla `meta` del agente (clave `automation:<...>`): sobreviven a reinicios."""
-
     def __init__(self, conn):
         self.conn = conn
 
     def get(self, key, default=None):
-        from . import db  # noqa: PLC0415
+        from . import db
         with db.tx():
             row = self.conn.execute("SELECT value FROM meta WHERE key=?", ("automation:" + key,)).fetchone()
         return row["value"] if row else default
 
     def __setitem__(self, key, value):
-        from . import db  # noqa: PLC0415
+        from . import db
         with db.tx():
             self.conn.execute("INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)", ("automation:" + key, str(value)))
 
 
 def _load_profiles():
-    from .. import profile  # noqa: PLC0415
+    from .. import profile
     out = []
     for p in profile.list_projects():
         try:
@@ -912,15 +852,12 @@ def _load_profiles():
     return out
 
 
-# ---------------------------------------------------------------- CLI: chopshop automation ...
-
 def _profile(project):
-    from .. import profile  # noqa: PLC0415
+    from .. import profile
     return profile.load(project)
 
 
 def runtime_problems(spec, root=None, secrets_root=None):
-    """Lo que `check` mira además del perfil: carpeta, cwd, ejecutable y secretos (errores, avisos)."""
     errs, warns = [], []
     pdir = project_dir(spec["project"], root)
     if not os.path.isdir(pdir):
@@ -957,7 +894,7 @@ def _summary(t):
 
 
 def _projects(a):
-    from .. import profile  # noqa: PLC0415
+    from .. import profile
     return [a.project] if a.project else profile.list_projects()
 
 
@@ -993,16 +930,14 @@ def cmd_check(a, out, err):
 
 
 def _db_emitter():
-    """Publica en la DB del agente (SQLite WAL admite varios procesos), con entrega de webhooks esperando al final."""
-    from . import config, db  # noqa: PLC0415
+    from . import config, db
     cfg = config.load()
     conn = db.connect(cfg["db_path"])
     return lambda env: bus_emit(conn, cfg, env, wait=True)
 
 
 def bus_emit(conn, cfg, env, poster=None, wait=False):
-    """Sobre parcial -> bus del agente (`events.emit_envelope`, que valida y asigna id/seq/ts). Devuelve el sobre guardado."""
-    from . import events  # noqa: PLC0415
+    from . import events
     return events.emit_envelope(conn, cfg, env["type"], env.get("project"), env.get("body") or {}, env.get("subject"),
                                 env.get("severity"), env.get("needs"), env.get("cause"), poster=poster, wait=wait)
 
@@ -1058,8 +993,7 @@ def snippet(name, script, on, emits, timeout):
 
 
 def cmd_add(a, out, err):
-    """Copia el script a la carpeta del proyecto (0700) e imprime (o añade) la declaración del perfil."""
-    from .. import profile  # noqa: PLC0415
+    from .. import profile
     if not _NAME.match(a.name):
         print("error: nombre inválido: %s" % a.name, file=err)
         return 2
@@ -1096,8 +1030,8 @@ def cmd_add(a, out, err):
 
 def build_parser():
     p = argparse.ArgumentParser(prog="chopshop automation", description="Automatizaciones por proyecto (perfil `automations:`)")
-    p.add_argument("--root", help=argparse.SUPPRESS)        # carpeta de scripts (tests); por defecto <home>/automations
-    p.add_argument("--secrets", help=argparse.SUPPRESS)     # carpeta de secretos (tests); por defecto <home>/secrets
+    p.add_argument("--root", help=argparse.SUPPRESS)
+    p.add_argument("--secrets", help=argparse.SUPPRESS)
     sp = p.add_subparsers(dest="cmd", required=True)
     x = sp.add_parser("list", help="automatizaciones declaradas")
     x.add_argument("project", nargs="?")
@@ -1131,7 +1065,7 @@ def build_parser():
 
 
 def main(argv, stdout=None, stderr=None):
-    from .. import miniyaml, profile  # noqa: PLC0415
+    from .. import miniyaml, profile
     out, err = stdout or sys.stdout, stderr or sys.stderr
     try:
         a = build_parser().parse_args(argv)

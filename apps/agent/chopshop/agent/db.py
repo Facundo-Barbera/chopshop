@@ -1,5 +1,3 @@
-"""SQLite (WAL) del agente. Un solo archivo; `user_version` lleva el esquema y migra hacia adelante.
-Todos los módulos reciben una conexión de `connect()`; filas = sqlite3.Row. Timestamps = epoch float (UTC)."""
 import json
 import os
 import sqlite3
@@ -39,7 +37,7 @@ _lock = threading.RLock()
 
 def connect(path):
     os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
-    conn = sqlite3.connect(path, timeout=15, check_same_thread=False, isolation_level=None)  # autocommit
+    conn = sqlite3.connect(path, timeout=15, check_same_thread=False, isolation_level=None)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
@@ -57,7 +55,6 @@ def migrate(conn):
     if v < 1:
         conn.executescript(SCHEMA)
     if v < 2:
-        # v2: Chopshop deja de gestionar servers de prueba y puertos (eso es de T3); se borran las tablas de la v1
         conn.executescript("DROP TABLE IF EXISTS leases; DROP TABLE IF EXISTS ports;")
     if v < 3:
         _migrate_v3(conn)
@@ -71,14 +68,11 @@ def migrate(conn):
         conn.execute("PRAGMA user_version=%d" % SCHEMA_VERSION)
 
 
-# v3: columnas del sobre (agent/envelope.py) en `events`. Nulables; `event` (nombre viejo) se conserva.
 EVENT_COLUMNS = (("id", "TEXT"), ("type", "TEXT"), ("severity", "TEXT"), ("needs", "TEXT"), ("subject_kind", "TEXT"),
                  ("subject_id", "TEXT"), ("subject", "TEXT"), ("cause_id", "TEXT"), ("cause_depth", "INTEGER"))
 
 
 def _migrate_v3(conn):
-    """Añade las columnas que falten y rellena las filas sin `id` traduciendo el nombre viejo (LEGACY_MAP).
-    Idempotente: se puede repetir (solo toca filas con `id` nulo)."""
     from . import envelope
     with _lock:
         have = {r[1] for r in conn.execute("PRAGMA table_info(events)")}
@@ -105,8 +99,6 @@ def _migrate_v3(conn):
             raise
 
 
-# v4: filtros de suscripciones v2 (todas nulables: NULL = comportamiento viejo con `project` + `events`)
-# y el seguimiento de reintentos en `deliveries`.
 V4_COLUMNS = {
     "subscriptions": (("projects", "TEXT"), ("types", "TEXT"), ("exclude_types", "TEXT"), ("min_severity", "TEXT"),
                       ("needs", "TEXT"), ("only_changes", "INTEGER"), ("context", "INTEGER"), ("debounce_s", "REAL"),
@@ -116,7 +108,6 @@ V4_COLUMNS = {
 
 
 def _add_columns(conn, spec):
-    """Añade las columnas que falten (idempotente: no depende del orden respecto de otras migraciones)."""
     for table, cols in spec.items():
         have = {r[1] for r in conn.execute("PRAGMA table_info(%s)" % table)}
         for name, typ in cols:
@@ -128,9 +119,6 @@ def _migrate_v4(conn):
     _add_columns(conn, V4_COLUMNS)
 
 
-# v5: escritorios por rol (agent/office.py, docs/plans/office-redesign.md). `desk_occupancy` con `until` nulo = ocupante
-# actual; el resto es linaje (se poda a office.LINEAGE por escritorio). `office_threads` = última `task.state` de cada hilo
-# (la misma que ve la proyección); `desk_waiting` = hilos con rol que esperan escritorio.
 OFFICE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS desks (
   id TEXT PRIMARY KEY, project TEXT NOT NULL, floor INTEGER NOT NULL, role TEXT NOT NULL, slot INTEGER NOT NULL,
@@ -148,12 +136,10 @@ V5_COLUMNS = {"t3_threads": (("role", "TEXT"), ("ended_at", "REAL"))}
 
 
 def _migrate_v5_office(conn):
-    """Tablas de la oficina y columnas `role`/`ended_at` de `t3_threads` (idempotente)."""
     conn.executescript(OFFICE_SCHEMA)
     _add_columns(conn, V5_COLUMNS)
 
 
-# v6: cabeceras HTTP extra por suscripción (ruta a un archivo 0600 con líneas `Nombre: valor`; NULL = ninguna).
 V6_COLUMNS = {"subscriptions": (("headers_file", "TEXT"),)}
 
 
@@ -162,7 +148,6 @@ def _migrate_v6(conn):
 
 
 def tx():
-    """Candado de proceso para secuencias lectura-modificación-escritura entre hilos del agente."""
     return _lock
 
 

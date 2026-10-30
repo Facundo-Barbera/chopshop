@@ -1,8 +1,3 @@
-"""Grafo de tareas que crece. Un grafo = un lote (`batch["graph"]`) + nodos en `state["graphs"]`.
-Raíz (meta) -> hilo de triage -> un nodo por bug -> hijos opcionales (SPLIT) o dependencias entre nodos.
-Chopshop programa los nodos listos (deps cumplidas) en paralelo según el monitor de rendimiento, sube los resultados
-al padre sin hilos extra y solo despierta a un bot/humano por excepciones, usando el sistema de niveles (reactions).
-Perfil: `graph: {max_depth, thread_budget, done: all|ratio, min_ratio, throttle_cpu, stop_cpu, stop_ram}`."""
 import json
 import math
 import re
@@ -39,7 +34,6 @@ def validate(prof):
     return errs
 
 
-# ---------- creación ----------
 def _node(g, parent, title, kind, depth, deps=None, label=None, text="", ask=None, hint=None):
     nid = "n%d" % g["seq"]
     g["seq"] += 1
@@ -55,7 +49,6 @@ def _log(g, kind, msg, node=None):
 
 
 def new_graph(st, b, prof, goal, bugs):
-    """Crea el grafo dentro del estado (el lote `b` ya existe). `bugs`: [{id,title,text,ask?,options?,hint?}]."""
     st["gcounter"] = st.get("gcounter", 0) + 1
     gid = "g-%04d" % st["gcounter"]
     g = {"id": gid, "project": b["project"], "batch": b["id"], "goal": goal or GOAL, "status": "running",
@@ -100,9 +93,7 @@ def node_prompt(g, n):
     return head + "Reply with a short analysis and finish with one line: RESULT: <the fix, one short sentence>."
 
 
-# ---------- parseo de respuestas ----------
 def parse_triage(text, known):
-    """-> {bug_id: [deps]} ; None si no es JSON utilizable."""
     a, z = (text or "").find("["), (text or "").rfind("]")
     if a < 0 or z <= a:
         return None
@@ -119,7 +110,6 @@ def parse_triage(text, known):
 
 
 def parse_node(text):
-    """-> ("split", [..]) | ("result", texto)."""
     text = text or ""
     m = re.search(r"SPLIT:\s*(\[.*\])", text, re.S)
     if m:
@@ -137,9 +127,7 @@ def parse_node(text):
     return "result", (lines[-1] if lines else "(sin texto)")[:300]
 
 
-# ---------- monitor de rendimiento ----------
 def throttle(g, host, cap, active, mx=None):
-    """-> (permitidos, info). Con CPU alta baja a la mitad; saturado: no se lanza nada nuevo (siempre ≥ 1 si no corre nada)."""
     lim = g["limits"]
     m = ((mx or metrics.read())["hosts"].get(host)) or {}
     cpu, ram = m.get("cpu_pct"), m.get("ram_pct")
@@ -155,7 +143,6 @@ def throttle(g, host, cap, active, mx=None):
     return info["allowed"], info
 
 
-# ---------- planificador ----------
 def _cur(b, tid):
     by = {t["id"]: t for t in b["tasks"]}
     t = by.get(tid)
@@ -168,7 +155,7 @@ def _children(g, nid):
     return [n for n in g["nodes"].values() if n["parent"] == nid]
 
 
-PHASE = {"pending": "queued", "running": "running", "done": "done", "failed": "failed", "skipped": "skipped"}   # nodo -> phase
+PHASE = {"pending": "queued", "running": "running", "done": "done", "failed": "failed", "skipped": "skipped"}
 
 
 def _exception(st, b, g, node, why):
@@ -223,7 +210,6 @@ def _finish_ok(st, b, g, n, t):
 
 
 def _rollup(st, b, g):
-    """Nodos que se expanden: cuando todos sus hijos terminaron, resuelve según los criterios y sube el resultado."""
     lim = g["limits"]
     changed = True
     while changed:
@@ -246,7 +232,6 @@ def _rollup(st, b, g):
 
 
 def step(st, b, prof, log=print, adhoc=None, emit_fn=None):
-    """Una pasada del grafo del lote. `emit_fn` (firma de `events.emit`) sustituye la emisión; si no, la del contexto."""
     with events.using(emit_fn):
         return _step(st, b, prof, log, adhoc)
 
@@ -255,7 +240,6 @@ def _step(st, b, prof, log, adhoc):
     g = st.get("graphs", {}).get(b.get("graph"))
     if not g or g["status"] != "running":
         return
-    # 1) resultados de los hilos
     for n in list(g["nodes"].values()):
         if n["status"] != "running" or not n.get("task"):
             continue
@@ -271,7 +255,6 @@ def _step(st, b, prof, log, adhoc):
             n.update(status="failed", reason="hilo %s (%s)" % (t.get("status"), t.get("t3status") or t.get("last_error") or "-"))
             _exception(st, b, g, n, "%s falló: %s" % (n["label"], n["reason"]))
     _rollup(st, b, g)
-    # 2) dependencias fallidas -> bloqueados
     pend = [n for n in g["nodes"].values() if n["status"] == "pending"]
     for n in pend:
         bad = [g["nodes"][d] for d in n["deps"] if g["nodes"][d]["status"] in ("failed", "skipped")]
@@ -279,7 +262,6 @@ def _step(st, b, prof, log, adhoc):
             n.update(status="skipped", reason="depende de %s, que no salió" % bad[0]["label"])
             _exception(st, b, g, n, "%s bloqueado: %s" % (n["label"], n["reason"]))
     _rollup(st, b, g)
-    # 3) liberar nodos listos según cupo, rendimiento y presupuesto
     active = sum(1 for t in b["tasks"] if t["status"] in ("queued", "launched") and not t["done"])
     allowed, info = throttle(g, b["host"], b["max_parallel"], active)
     if not g.get("throttle") or g["throttle"].get("mode") != info["mode"]:
@@ -300,7 +282,6 @@ def _step(st, b, prof, log, adhoc):
         slots -= 1
         _log(g, "launch", "%s -> %s" % (n["label"], t["id"]), n["id"])
     _rollup(st, b, g)
-    # 4) bloqueos sin salida (ciclos) y fin del grafo
     left = [n for n in g["nodes"].values() if n["status"] == "pending"]
     if left and not any(n["status"] == "running" for n in g["nodes"].values()):
         for n in left:
@@ -328,7 +309,6 @@ def finished(st, b):
     return bool(g) and g["status"] != "running"
 
 
-# ---------- vista para la UI / CLI ----------
 def view(st):
     out = []
     for g in sorted(st.get("graphs", {}).values(), key=lambda x: x["id"], reverse=True):

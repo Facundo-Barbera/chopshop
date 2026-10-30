@@ -1,10 +1,6 @@
 import Foundation
 
-// `api_version 3` (docs/agent-api.md «api_version 3»): oficina por escritorios, vestíbulo y sala de máquinas. Mismas reglas
-// `apply` que `projection.py`; aquí solo los tipos y el plegado de los sobres nuevos (el resto sigue en LiveState.swift).
-
 extension LiveState {
-    /// Ocupante de un escritorio: el hilo de T3 que lo usa (o lo usó y se está desvaneciendo).
     public struct Occupant: Equatable, Sendable {
         public var threadID: String
         public var title: String?
@@ -15,7 +11,6 @@ extension LiveState {
         public var endedAt: String?
         public var touchedAt: String?
         public var halfLifeS: Double
-        /// `{thread_id, title, summary, branch, worktree, pull_requests, phase, ended_at}` del ocupante anterior.
         public var inheritance: JSONValue.Object?
 
         public init(threadID: String, title: String? = nil, role: String? = nil, phase: String = "running", attention: String? = nil,
@@ -34,7 +29,6 @@ extension LiveState {
         }
     }
 
-    /// Un paso del linaje de un escritorio (el más nuevo primero, tope 5 en la proyección).
     public struct Lineage: Equatable, Sendable {
         public var threadID: String
         public var since: String?
@@ -50,7 +44,6 @@ extension LiveState {
         }
     }
 
-    /// Hueco estable `<proyecto>/<piso>/<rol>/<n>`: nunca se borra (como mucho queda `retired`).
     public struct Desk: Equatable, Sendable, Identifiable {
         public var id: String
         public var slot: Int
@@ -70,7 +63,6 @@ extension LiveState {
         }
     }
 
-    /// Departamento: una sala por rol dentro del piso.
     public struct Room: Equatable, Sendable {
         public var role: String
         public var permanent: Bool
@@ -101,7 +93,6 @@ extension LiveState {
         public var company: String?
         public var halfLifeS: Double
         public var floors: [Floor]
-        /// Salas de máquinas que declara el perfil (0..N; vacío = ninguna).
         public var machineRooms: [MachineRoomConfig]
 
         init?(json: JSONValue) {
@@ -114,10 +105,8 @@ extension LiveState {
 
         public var desks: [Desk] { floors.flatMap { $0.rooms.flatMap(\.desks) } }
         public func desk(_ id: String) -> Desk? { desks.first { $0.id == id } }
-        /// Escritorio que ocupa un hilo (si ocupa alguno).
         public func desk(occupiedBy thread: String) -> Desk? { desks.first { $0.occupant?.threadID == thread } }
 
-        /// Cambia el escritorio `id` en su sitio. Devuelve false si no existe.
         @discardableResult
         mutating func update(_ id: String, _ f: (inout Desk) -> Void) -> Bool {
             for fi in floors.indices {
@@ -135,7 +124,6 @@ extension LiveState {
         }
     }
 
-    /// Hilo en el vestíbulo de su edificio: activo sin rol, o esperando escritorio (`waitingRole`).
     public struct LobbyEntry: Equatable, Sendable, Identifiable {
         public var threadID: String
         public var project: String
@@ -167,16 +155,10 @@ extension LiveState {
         }
     }
 
-    /// Sala de máquinas. Se guarda como JSON (igual que `tasks`): `MachineRoomModel` la convierte en lo que pinta la vista.
-    /// No se llama `MachineRoom` para no tapar, dentro de `LiveState`, al `MachineRoom` tipado de nivel superior.
     public struct MachineRoomState: Equatable, Sendable {
-        /// `{name, state, last_ok, last_cycle, backoff_s, error, ts}` por nombre.
         public var listeners: [JSONValue.Object] = []
-        /// `{project, name, trigger, exit, duration_ms, error, ts, next_run, severity}` por (project, name).
         public var automations: [JSONValue.Object] = []
-        /// `{name, last_ok, last_error, signed}`: no viene de sobres, solo del `state` completo.
         public var subscriptions: [JSONValue.Object] = []
-        /// `{provider, repo, project, kind, label, light, default_branch, ci, url, ts, runs: [...]}`.
         public var rack: [JSONValue.Object] = []
 
         public init() {}
@@ -189,18 +171,14 @@ extension LiveState {
         }
     }
 
-    // MARK: - Reductor v3
-
     static let activePhases: Set<String> = ["queued", "preparing", "running", "waiting"]
     static let rackCompletedKept = 5
     static let lineageKept = 5
 
-    /// Última `task.state` de un hilo en un proyecto.
     static func task(of thread: String, in p: Project) -> JSONValue.Object? {
         p.tasks.last { $0["thread_id"]?.string == thread }
     }
 
-    /// Sobres de escritorios y vestíbulo del proyecto `pi` (y el refresco de ocupantes/vestíbulo con cada `task.state`).
     mutating func applyOffice(_ env: Envelope, project pi: Int) {
         let body = env.body
         let name = projects[pi].name
@@ -220,7 +198,6 @@ extension LiveState {
             guard let did = body["desk"]?.string, let tid = body["thread_id"]?.string, var office = projects[pi].office,
                   office.desk(did) != nil else { return }
             let t = Self.task(of: tid, in: projects[pi])
-            // si ocupaba otro escritorio, ese queda libre (traslado: sin linaje)
             office.updateAll { d in if d.id != did, d.occupant?.threadID == tid { d.occupant = nil } }
             let occ = Occupant(threadID: tid, title: Self.nonEmpty(t?["title"]?.string) ?? body["title"]?.string, role: body["role"]?.string,
                                phase: t?["phase"]?.string ?? "running", attention: Self.nonEmpty(t?["attention"]?.string),
@@ -277,7 +254,6 @@ extension LiveState {
         }
     }
 
-    /// Upsert en el vestíbulo con los campos de la última `task.state` del hilo. `waitingRole`: nil = conservar el que tuviera.
     private mutating func upsertLobby(thread tid: String, project pi: Int, ts: String?, waitingRole: String??, fallback: JSONValue.Object) {
         let p = projects[pi]
         let t = Self.task(of: tid, in: p)
@@ -307,7 +283,6 @@ extension LiveState {
         lobby.sort { ($0.company ?? "", $0.project, $0.since ?? "") < ($1.company ?? "", $1.project, $1.since ?? "") }
     }
 
-    /// `listener.state`, `automation.ran`, `forge.repo.state` y `forge.run.state` (con o sin proyecto).
     mutating func applyMachineRoom(_ env: Envelope) {
         let body = env.body
         let ts: JSONValue = env.ts.map { .string($0) } ?? .null
@@ -363,8 +338,6 @@ extension LiveState {
         }
     }
 
-    /// Todos los runs sin terminar y los 5 terminados más recientes (por `updated_at`; si falta, por orden de llegada), en el
-    /// orden en que estaban (como `_trim` de `agent/machine_room.py`).
     static func trimRuns(_ runs: [JSONValue.Object]) -> [JSONValue.Object] {
         let done = runs.enumerated().filter { $0.element["status"]?.string == "completed" }
         guard done.count > rackCompletedKept else { return runs }

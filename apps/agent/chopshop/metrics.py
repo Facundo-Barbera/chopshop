@@ -1,7 +1,3 @@
-"""Monitor de máquinas: CPU≈load1/cpus, RAM, load y disco.
-- Host local (sin `origin`): se lee del propio sistema (stdlib; macOS vía sysctl/vm_stat, Linux vía /proc), sin red.
-- Host remoto (con `origin`): no se recolecta desde aquí. Cada máquina corre su propio chopshop-agent y la app
-  de Mac combina sus métricas."""
 import os
 import re
 import shutil
@@ -21,7 +17,6 @@ def _sh(*cmd):
 
 
 def _mem_mb():
-    """(total_mb, disponible_mb) o (None, None)."""
     try:
         if os.path.exists("/proc/meminfo"):
             kv = {}
@@ -58,7 +53,6 @@ def local():
 
 
 def read(now=None):
-    """Métricas de todos los hosts configurados. Sin red."""
     now = now or time.time()
     out = {}
     for name, cfg in profile.hosts().items():

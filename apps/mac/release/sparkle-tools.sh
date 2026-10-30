@@ -1,12 +1,9 @@
 #!/usr/bin/env bash
-# Descarga las herramientas de Sparkle (generate_appcast, sign_update, BinaryDelta...) de la release FIJADA en
-# sparkle.version, verifica su SHA-256 y las deja en <dir>. Exporta SPARKLE_BIN y SPARKLE_FRAMEWORK_SRC.
-#   sparkle-tools.sh install <dir>
 set -euo pipefail
 # shellcheck source=lib.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 # shellcheck source=sparkle.version
-source "${SPARKLE_VERSION_FILE:-$RELEASE_SCRIPTS/sparkle.version}"  # SPARKLE_VERSION_FILE: solo para pruebas
+source "${SPARKLE_VERSION_FILE:-$RELEASE_SCRIPTS/sparkle.version}"
 
 if [ "${1:-}" != install ] || [ -z "${2:-}" ]; then die "uso: sparkle-tools.sh install <dir>"; fi
 DEST="$2"

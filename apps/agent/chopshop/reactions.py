@@ -1,9 +1,3 @@
-"""Reacciones por eventos (perfil `reactions:`). Tres niveles:
-  auto  -> Chopshop lo resuelve solo (settle al terminar, reintento único de un hilo atascado, respuesta fija)
-  bot   -> despierta a un bot (webhook a la suscripción `notify`) que responde con `chopshop answer`
-  human -> escala a una persona (webhook `notify`) y marca la tarea «necesita humano» hasta que alguien responda
-Cada regla: {on, match?, after?, level, do?, choice?, notify?, escalate_after?, escalate_to?}.
-Eventos (`on`): pending_question | task_done | task_stalled | task_failed. Sin `reactions` en el perfil no cambia nada."""
 import re
 import time
 
@@ -43,7 +37,6 @@ def validate(prof):
 
 
 def find(prof, on, text=""):
-    """Primera regla que aplica. Las reglas `human` tienen prioridad sobre bot/auto si ambas coinciden."""
     hits = []
     for r in rules(prof):
         if r["on"] != on:
@@ -90,9 +83,7 @@ def _new_task(b, t, why):
     return rec
 
 
-# ---------- puntos de enganche (los llama engine.tick, con el estado bloqueado) ----------
 def on_question(st, b, t, prof, q, hc, log, adhoc, rid):
-    """Una pregunta nueva. Devuelve True si la reacción ya la resolvió (nivel auto)."""
     t.setdefault("reacted", []).append(rid)
     text = " ".join([q.get("summary") or ""] + [str(o) for o in q.get("options") or []])
     rule = find(prof, "pending_question", text)
@@ -116,7 +107,6 @@ def on_question(st, b, t, prof, q, hc, log, adhoc, rid):
                          "delivery": res}
         log("reacción bot %s -> %s %s" % (t["id"], rule.get("notify"), res))
         return False
-    # human
     res = _notify(st, b, t, rule, "human", "pending_question", body, adhoc)
     _log(t, "human", "pending_question", rule, "escalar a %s" % rule.get("notify"), "entrega: %s" % (res or "sin destinatario"))
     t["escalation"] = {"request": rid, "summary": q.get("summary"), "options": q.get("options"), "since": state.now(),
@@ -126,7 +116,6 @@ def on_question(st, b, t, prof, q, hc, log, adhoc, rid):
 
 
 def check_waiting(st, b, t, prof, qs_now, adhoc, log):
-    """Cada pasada con preguntas abiertas: escalada del bot al humano si no respondió a tiempo."""
     bw = t.get("bot_wait")
     if bw and not bw.get("escalated") and bw.get("escalate_after") and time.time() - bw["since"] > bw["escalate_after"] \
             and any(q["request"] == bw["request"] for q in qs_now):
@@ -142,7 +131,6 @@ def check_waiting(st, b, t, prof, qs_now, adhoc, log):
 
 
 def check_resolved(t, qs_now):
-    """Si ya no hay pregunta abierta, la escalada/espera del bot se da por resuelta."""
     open_ids = {q["request"] for q in qs_now}
     es = t.get("escalation")
     if es and es.get("status") == "open" and es["request"] not in open_ids:
@@ -155,12 +143,11 @@ def check_resolved(t, qs_now):
 
 
 def on_progress(st, b, t, th, prof, hc, log, adhoc):
-    """Hilo en marcha: si no cambia nada en `after` segundos → task_stalled."""
     fp = "%s|%s|%s" % (th.get("status"), th.get("itemCount"), th.get("updatedAt"))
     pend = t.get("pending") or {}
     if pend.get("questions") or pend.get("approvals") or (t.get("escalation") or {}).get("status") == "open" \
             or (t.get("bot_wait") and not t["bot_wait"].get("done")):
-        t["fp"], t["progress_at"] = fp, time.time()   # espera una respuesta: no es "sin progreso"
+        t["fp"], t["progress_at"] = fp, time.time()
         return
     if t.get("fp") != fp:
         t["fp"] = fp
@@ -208,7 +195,7 @@ def _apply_terminal_rule(st, b, t, rule, on, hc, log, adhoc, interrupt=False):
             if not t["done"]:
                 t["done"] = True
             try:
-                _settle(hc, b, t)  # el hilo viejo queda settled (nunca archivado) para que no estorbe
+                _settle(hc, b, t)
             except t3.T3Error:
                 pass
             _log(t, "auto", on, rule, "retry_once", "nueva tarea %s (hilo viejo settled)" % nt["id"])

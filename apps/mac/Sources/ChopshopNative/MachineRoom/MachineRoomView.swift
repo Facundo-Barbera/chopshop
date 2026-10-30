@@ -1,6 +1,5 @@
 import SwiftUI
 
-/// Textos de la sala de máquinas (puros, para la vista y los tests).
 public enum MachineRoomText {
     public static func light(_ l: RackLight) -> String {
         switch l {
@@ -20,7 +19,6 @@ public enum MachineRoomText {
         }
     }
 
-    /// Estado de un run: «en cola», «en curso» o la conclusión.
     public static func run(_ r: ForgeRun) -> String {
         switch r.status {
         case "queued": return "en cola"
@@ -38,7 +36,6 @@ public enum MachineRoomText {
         }
     }
 
-    /// Hace cuánto (`12 s`, `5 min`, `3 h`, `2 d`); nil sin fecha.
     public static func ago(_ ts: String?, now: Date) -> String? {
         guard let d = SnapshotMapper.date(ts) else { return nil }
         let s = max(0, Int(now.timeIntervalSince(d)))
@@ -48,7 +45,6 @@ public enum MachineRoomText {
         return "\(s / 86400) d"
     }
 
-    /// Dentro de cuánto (próximo horario); «ya» si pasó.
     public static func until(_ ts: String?, now: Date) -> String? {
         guard let d = SnapshotMapper.date(ts) else { return nil }
         let s = Int(d.timeIntervalSince(now))
@@ -65,7 +61,6 @@ public enum MachineRoomText {
         return "\(ms / 60_000) min \(ms % 60_000 / 1000) s"
     }
 
-    /// `rama@sha7`
     public static func ref(_ r: ForgeRun) -> String? {
         let sha = r.headSHA.map { String($0.prefix(7)) }
         switch (r.headBranch, sha) {
@@ -94,13 +89,9 @@ extension ListenerHealth {
     }
 }
 
-/// Contenido de la sala de máquinas de un proyecto (el panel lateral al elegir su sala en el piso, `MachineRoomDetail`): resumen, rack
-/// de sus repos con luces (clic → runs del módulo con disparador y origen), sus scripts, sus webhooks y los listeners del agente.
-/// Columna estrecha: cabe en el panel lateral del piso.
 @available(macOS 26.0, *)
 public struct MachineRoomView: View {
     let room: MachineRoom
-    /// Reloj fijo (capturas); nil = ahora, refrescado cada 15 s.
     var frozenNow: Date?
     let width: CGFloat
     @State private var selected: String?
@@ -155,8 +146,6 @@ public struct MachineRoomView: View {
         }
     }
 }
-
-// MARK: - Piezas
 
 @available(macOS 26.0, *)
 private struct SectionTitle: View {
@@ -214,7 +203,6 @@ private struct Panel<Content: View>: View {
     }
 }
 
-/// Runs del módulo elegido: workflow, estado, disparador, rama@sha y origen.
 @available(macOS 26.0, *)
 private struct UnitDetail: View {
     let unit: RackUnit?

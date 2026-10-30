@@ -1,7 +1,3 @@
-"""Lector de TOML mínimo (solo stdlib, Python >= 3.9) para config.toml.
-Si existe `tomllib` (3.11+) se usa; este módulo cubre lo que usa Chopshop: tablas `[a.b]`, claves con comillas/puntos,
-cadenas ("..." con escapes y '...' literales), enteros, flotantes, booleanos, arrays (también multilínea) y tablas inline `{a = 1}`.
-No soporta fechas ni cadenas multilínea (\"\"\"); lanza TomlError."""
 import re
 
 

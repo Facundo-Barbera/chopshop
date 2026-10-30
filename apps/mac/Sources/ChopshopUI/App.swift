@@ -22,7 +22,7 @@ struct ChopshopApp: App {
                     .keyboardShortcut(",", modifiers: .command)
             }
             CommandMenu("Oficina") { OfficeMenu(model: model) }
-            UpdaterCommands()  // Sparkle: «Buscar actualizaciones…» (inactivo sin SUFeedURL; ver Updater.swift)
+            UpdaterCommands()
         }
     }
 }
