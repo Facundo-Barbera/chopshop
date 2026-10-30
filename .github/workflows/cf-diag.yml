@@ -1,0 +1,56 @@
+name: cf-diag
+
+on:
+  push:
+    branches: [diag-cf]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diag:
+    runs-on: ubuntu-24.04
+    env:
+      CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CF_ACCT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Diagnóstico de permisos del token
+        shell: bash
+        run: |
+          set -u
+          ACCT=05d3c2280f6bb937db76bbf39a1d8580
+          ZONE=8dac278cd769cdedd21c73eba9dab153
+          if [ "${CF_ACCT:-}" = "$ACCT" ]; then
+            echo "account_id coincide: sí"
+          else
+            echo "account_id coincide: no"
+          fi
+          if [ -z "${CF_TOKEN:-}" ]; then
+            echo "token presente: no"
+          fi
+          for ep in \
+            "user/tokens/verify" \
+            "accounts/$ACCT/d1/database" \
+            "accounts/$ACCT/workers/scripts" \
+            "accounts/$ACCT/workers/domains" \
+            "zones/$ZONE/dns_records?per_page=1" \
+            "zones/$ZONE/workers/routes" \
+            "accounts/$ACCT/r2/buckets"; do
+            rm -f /tmp/r.json
+            code=$(curl -s -o /tmp/r.json -w '%{http_code}' \
+              -H "Authorization: Bearer $CF_TOKEN" \
+              "https://api.cloudflare.com/client/v4/$ep")
+            summary=$(python3 -c '
+          import json, sys
+          try:
+              d = json.load(open("/tmp/r.json"))
+          except Exception:
+              print("success=? errors=(cuerpo no JSON)")
+              sys.exit(0)
+          errs = ["%s: %s" % (e.get("code"), e.get("message")) for e in (d.get("errors") or [])]
+          print("success=%s errors=%s" % (d.get("success"), errs))
+          ')
+            echo "$ep -> HTTP $code $summary"
+          done
+          rm -f /tmp/r.json
