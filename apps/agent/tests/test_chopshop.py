@@ -2,11 +2,13 @@ import http.server
 import io
 import json
 import os
+import shutil
 import sys
 import tempfile
 import threading
 import unittest
 from contextlib import redirect_stdout
+from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from chopshop import engine, events, home, inbox, miniyaml, profile, settings, state, t3  # noqa: E402
@@ -30,8 +32,11 @@ purpose = "tests-only"
 class Env(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
-        os.environ["CHOPSHOP_HOME"] = self.tmp
-        os.environ["CHOPSHOP_CONFIG"] = os.path.join(self.tmp, "config.toml")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        env = mock.patch.dict(os.environ, {"CHOPSHOP_HOME": self.tmp,  # se restaura al acabar: no contamina tests posteriores
+                                           "CHOPSHOP_CONFIG": os.path.join(self.tmp, "config.toml")})
+        env.start()
+        self.addCleanup(env.stop)
         with open(os.environ["CHOPSHOP_CONFIG"], "w") as f:
             f.write(TEST_CONFIG)
         os.makedirs(home.profiles_dir())
