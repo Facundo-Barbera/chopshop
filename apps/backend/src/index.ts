@@ -28,8 +28,6 @@ const api = createApi<Env>(
     ...workspaceHandlers,
     ...projectHandlers,
     ...liveHandlers,
-    ...invitationHandlers,
-    ...userHandlers,
   },
   { resolvePrincipal, csrfHash },
 );
