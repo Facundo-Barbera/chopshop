@@ -38,8 +38,6 @@ _lock = threading.RLock()
 
 
 class _Rows:
-    """Resultado ya leído (bajo `_lock`): el cursor nunca se recorre fuera del candado."""
-
     def __init__(self, cur):
         self._rows, self.lastrowid, self.rowcount = cur.fetchall(), cur.lastrowid, cur.rowcount
 
@@ -55,9 +53,6 @@ class _Rows:
 
 
 class _Locked:
-    """Conexión compartida entre los hilos del agente. Con `sqlite3.threadsafety` 1 (el python3 del sistema en macOS) dos
-    hilos usando la misma conexión a la vez corrompen su estado (segfault, «file is not a database»): toda llamada va bajo `_lock`."""
-
     def __init__(self, conn):
         self._conn = conn
 
