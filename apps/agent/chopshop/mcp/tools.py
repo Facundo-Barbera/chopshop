@@ -1,7 +1,9 @@
 import re
 import uuid
 
+from .. import profile
 from ..agent import client as agent_client
+from ..agent import layout, registry
 from .fleet import ACTIVE, ToolError
 
 RUNTIME_MODES = ["approval-required", "auto-accept-edits", "auto", "full-access"]
@@ -90,6 +92,15 @@ class Tools:
              self.subscribe),
             ("unsubscribe", "Elimina una suscripción de webhook.", _obj({"name": S}, ["name"]), self.unsubscribe),
             ("subscriptions_list", "Suscripciones de webhook activas (sin URLs).", _obj({}), self.subscriptions_list),
+            ("registry_list", "Proyectos del registro de Chopshop (projects.toml): empresa, proyecto de T3, host, roles.",
+             _obj({"include_disabled": B}), self.registry_list),
+            ("project_register", "Registra (o reactiva y actualiza) un proyecto en el registro. Idempotente; crea un perfil mínimo si falta.",
+             _obj({"name": {"type": "string", "description": "Nombre del proyecto (perfil)."},
+                   "company": {"type": "string", "description": "Empresa. Obligatoria al registrar uno nuevo."},
+                   "t3_project": S, "repo": S, "host": S}, ["name"]), self.project_register),
+            ("role_list", "Roles del perfil de un proyecto: escritorios, permanentes y disparadores de wake.",
+             _obj({"project": {"type": "string", "description": "Nombre del proyecto (perfil)."}}, ["project"]),
+             self.role_list),
         ]
         self.by_name = {n: fn for n, _d, _s, fn in self.specs}
 
@@ -253,3 +264,38 @@ class Tools:
 
     def subscriptions_list(self):
         return {"subscriptions": self.hooks.list()}
+
+    def registry_list(self, include_disabled=True):
+        try:
+            rows = registry.listing()
+        except registry.RegistryError as e:
+            raise ToolError(e.message)
+        return {"projects": [p for p in rows if include_disabled or p["enabled"]], "path": registry.path()}
+
+    def project_register(self, name, company=None, t3_project=None, repo=None, host=None):
+        try:
+            return registry.api_register({"name": name, "company": company, "t3_project": t3_project, "repo": repo,
+                                          "host": host})
+        except (registry.RegistryError, OSError) as e:
+            raise ToolError(getattr(e, "message", None) or str(e))
+
+    def role_list(self, project):
+        try:
+            prof = profile.load(project)
+        except profile.ProfileError as e:
+            raise ToolError(str(e))
+        specs, out = layout.roles(prof), {}
+        for d in layout.desks(prof):
+            r = out.setdefault(d["role"], {"role": d["role"], "desks": 0, "permanent": 0, "zones": []})
+            r["desks"] += 1
+            r["permanent"] += 1 if d["permanent"] else 0
+            if d["zone"] not in r["zones"]:
+                r["zones"].append(d["zone"])
+        for role in specs:
+            out.setdefault(role, {"role": role, "desks": 0, "permanent": 0, "zones": []})
+        for role, r in out.items():
+            r["wake"] = [t.get("type") for t in layout.wake_triggers(prof, role)]
+            spec = specs.get(role)
+            r["prompt_file"] = spec.get("prompt_file") if isinstance(spec, dict) else None
+        return {"project": prof.get("project") or project, "registered": registry.counts(project),
+                "roles": list(out.values())}
