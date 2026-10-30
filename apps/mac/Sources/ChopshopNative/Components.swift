@@ -8,6 +8,31 @@ enum Attention {
 }
 
 @available(macOS 26.0, *)
+enum Chrome {
+    static let radius: CGFloat = 14
+    static let rowRadius: CGFloat = 7
+    static let hairline = Color.primary.opacity(0.1)
+    static let wash = Color.primary.opacity(0.045)
+}
+
+@available(macOS 26.0, *)
+extension View {
+    @ViewBuilder func floatingSurface<S: InsettableShape>(_ shape: S, flat: Bool, lift: CGFloat = 1) -> some View {
+        self
+            .background {
+                #if compiler(>=6.2)
+                if flat { shape.fill(Color(nsColor: .windowBackgroundColor).opacity(0.96)) } else { Color.clear.glassEffect(.regular, in: shape) }
+                #else
+                shape.fill(.regularMaterial)
+                #endif
+            }
+            .clipShape(shape)
+            .overlay { shape.strokeBorder(Chrome.hairline, lineWidth: 0.5) }
+            .shadow(color: .black.opacity(0.18 * lift), radius: 18 * lift, y: 8 * lift)
+    }
+}
+
+@available(macOS 26.0, *)
 extension TaskState {
     /// nil = neutro (sin color propio).
     var attentionTint: Color? {
