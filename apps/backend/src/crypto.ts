@@ -1,10 +1,12 @@
 export const PASSWORD_SCHEME = "pbkdf2-sha256";
-export const PBKDF2_ITERATIONS = 100_000;
+export const PBKDF2_ITERATIONS = 10_000;
+export const PBKDF2_MAX_ITERATIONS = 100_000;
+export const PEPPER_MIN_LEN = 32;
 export const SALT_BYTES = 16;
 export const HASH_BYTES = 32;
 export const TOKEN_BYTES = 32;
 export const TOKEN_LEN = 43;
-export const DUMMY_PASSWORD_HASH = "pbkdf2-sha256$100000$4VA-6Fx-BjCVVPQqk4wjCA$RYn-xVzyfbtuHVviOenLPhN4eaSVIhQDZkEfSu_SNPQ";
+export const DUMMY_PASSWORD_HASH = "pbkdf2-sha256-p1$10000$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
 export const TOKEN_PREFIX = {
   session: "ss1_",
@@ -26,6 +28,8 @@ const TOKEN_RE: Record<TokenKind, RegExp> = {
   csrf: /^cx1_[A-Za-z0-9_-]{43}$/,
 };
 
+const SCHEME_RE = /^pbkdf2-sha256(?:-p([1-9][0-9]{0,2}))?$/;
+const PEPPER_VERSION_RE = /^[1-9][0-9]{0,2}$/;
 const B64URL_RE = /^[A-Za-z0-9_-]+$/;
 const encoder = new TextEncoder();
 
@@ -62,50 +66,89 @@ export function timingSafeEqual(a: string | Uint8Array, b: string | Uint8Array):
   return diff === 0;
 }
 
-async function pbkdf2(password: string, salt: Uint8Array, iterations: number): Promise<Uint8Array> {
-  const key = await crypto.subtle.importKey("raw", encoder.encode(password.normalize("NFC")), "PBKDF2", false, ["deriveBits"]);
+async function pepperedMaterial(password: string, secret: string | null): Promise<Uint8Array> {
+  const raw = encoder.encode(password.normalize("NFC"));
+  if (secret === null) return raw;
+  const key = await crypto.subtle.importKey("raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return new Uint8Array(await crypto.subtle.sign("HMAC", key, raw));
+}
+
+async function pbkdf2(material: Uint8Array, salt: Uint8Array, iterations: number): Promise<Uint8Array> {
+  const key = await crypto.subtle.importKey("raw", material, "PBKDF2", false, ["deriveBits"]);
   const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations }, key, HASH_BYTES * 8);
   return new Uint8Array(bits);
 }
 
-export async function hashPassword(password: string): Promise<string> {
+export interface Pepper {
+  version: number;
+  secrets: ReadonlyMap<number, string>;
+}
+
+export function pepperFromEnv(env: Record<string, unknown>): Pepper {
+  const current = env.PASSWORD_PEPPER;
+  const versionText = env.PASSWORD_PEPPER_VERSION ?? "1";
+  if (typeof current !== "string" || current.length < PEPPER_MIN_LEN) throw new Error("PASSWORD_PEPPER ausente o corto");
+  if (typeof versionText !== "string" || !PEPPER_VERSION_RE.test(versionText)) throw new Error("PASSWORD_PEPPER_VERSION inválido");
+  const version = Number(versionText);
+  const secrets = new Map<number, string>();
+  for (const [name, value] of Object.entries(env)) {
+    const m = /^PASSWORD_PEPPER_V([1-9][0-9]{0,2})$/.exec(name);
+    if (m && typeof value === "string" && value.length >= PEPPER_MIN_LEN) secrets.set(Number(m[1]), value);
+  }
+  secrets.set(version, current);
+  return { version, secrets };
+}
+
+function schemeFor(pepperVersion: number): string {
+  return pepperVersion === 0 ? PASSWORD_SCHEME : `${PASSWORD_SCHEME}-p${pepperVersion}`;
+}
+
+export async function hashPassword(password: string, pepper: Pepper): Promise<string> {
   const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTES));
-  const hash = await pbkdf2(password, salt, PBKDF2_ITERATIONS);
-  return `${PASSWORD_SCHEME}$${PBKDF2_ITERATIONS}$${base64urlEncode(salt)}$${base64urlEncode(hash)}`;
+  const hash = await pbkdf2(await pepperedMaterial(password, pepper.secrets.get(pepper.version)!), salt, PBKDF2_ITERATIONS);
+  return `${schemeFor(pepper.version)}$${PBKDF2_ITERATIONS}$${base64urlEncode(salt)}$${base64urlEncode(hash)}`;
 }
 
 interface ParsedHash {
-  scheme: string;
+  pepperVersion: number;
   iterations: number;
   salt: Uint8Array;
   hash: Uint8Array;
 }
 
-function parsePasswordHash(stored: string): ParsedHash | null {
+function parsePasswordHash(stored: string | null): ParsedHash | null {
+  if (typeof stored !== "string") return null;
   const parts = stored.split("$");
   if (parts.length !== 4) return null;
   const [scheme, iter, salt, hash] = parts as [string, string, string, string];
-  if (scheme !== PASSWORD_SCHEME || !/^[1-9][0-9]{0,5}$/.test(iter)) return null;
+  const m = SCHEME_RE.exec(scheme);
+  if (!m || !/^[1-9][0-9]{0,5}$/.test(iter)) return null;
   const iterations = Number(iter);
-  if (iterations > PBKDF2_ITERATIONS) return null;
+  if (iterations > PBKDF2_MAX_ITERATIONS) return null;
   const saltBytes = base64urlDecode(salt);
   const hashBytes = base64urlDecode(hash);
   if (!saltBytes || !hashBytes || saltBytes.byteLength === 0 || hashBytes.byteLength !== HASH_BYTES) return null;
-  return { scheme, iterations, salt: saltBytes, hash: hashBytes };
+  return { pepperVersion: m[1] ? Number(m[1]) : 0, iterations, salt: saltBytes, hash: hashBytes };
 }
 
-export async function verifyPassword(password: string, stored: string): Promise<boolean> {
+export async function verifyPassword(password: string, stored: string | null, pepper: Pepper): Promise<boolean> {
   const parsed = parsePasswordHash(stored);
-  if (!parsed) {
-    await pbkdf2(password, new Uint8Array(SALT_BYTES), PBKDF2_ITERATIONS);
+  const secret = parsed ? (parsed.pepperVersion === 0 ? null : pepper.secrets.get(parsed.pepperVersion)) : undefined;
+  if (!parsed || secret === undefined) {
+    await pbkdf2(await pepperedMaterial(password, pepper.secrets.get(pepper.version)!), new Uint8Array(SALT_BYTES), PBKDF2_ITERATIONS);
     return false;
   }
-  return timingSafeEqual(await pbkdf2(password, parsed.salt, parsed.iterations), parsed.hash);
+  return timingSafeEqual(await pbkdf2(await pepperedMaterial(password, secret), parsed.salt, parsed.iterations), parsed.hash);
 }
 
-export function needsRehash(stored: string): boolean {
+export function needsRehash(stored: string | null, pepper: Pepper): boolean {
   const parsed = parsePasswordHash(stored);
-  return !parsed || parsed.iterations !== PBKDF2_ITERATIONS || parsed.salt.byteLength !== SALT_BYTES;
+  return (
+    !parsed ||
+    parsed.pepperVersion !== pepper.version ||
+    parsed.iterations !== PBKDF2_ITERATIONS ||
+    parsed.salt.byteLength !== SALT_BYTES
+  );
 }
 
 export function newToken(kind: TokenKind): string {
