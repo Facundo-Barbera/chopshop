@@ -391,6 +391,11 @@ defecto porque **lanza hilos de T3**, y solo si algún perfil declara escritorio
 Sin el despachador habilitado o sin empleados declarados el agente no hace nada de esto (la cola se ve igual en `/state` y
 `/snapshot`).
 
+`task_enqueue` acepta `prompt` opcional (se guarda en `extra.prompt` y es el mensaje del hilo; sin él, el título). Si el perfil
+no tiene `model` y el proyecto de T3 no tiene modelo por defecto (`defaultModelSelection: null`), `task_enqueue` y
+`project_register` (MCP y `POST /projects`, que acepta `model` para el perfil nuevo) fallan antes de encolar o escribir con un
+mensaje que dice qué falta (400 en HTTP). Si T3 no responde, no se comprueba.
+
 | Método y ruta | Descripción |
 |---|---|
 | `POST /queue/cancel` | `{employee, task, by?, note?}` (`by` por defecto `human`) → cancela una tarea **en cola** (`task.cancelled {phase: queued, reason: manual}` + `queue.changed reason: cancelled`) → `{ok, task, employee, state: "cancelled", queue_len}`. 404 si la tarea no existe, es de otro empleado o ya salió de la cola; 400 si el cuerpo es inválido. Exige permiso de escritura. Funciona aunque el despachador esté apagado |
