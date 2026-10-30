@@ -1353,7 +1353,7 @@ class TestWorkflows(unittest.TestCase):
         for name, job in jobs.items():
             self.assertIn("timeout-minutes", job, name)
             self.assertNotIn("secrets.", json.dumps(job.get("env", {})), name)
-        self.assertEqual(jobs["build"]["runs-on"], "macos-15")
+        self.assertEqual(jobs["build"]["runs-on"], "xcode-27")
         self.assertEqual(jobs["publish"]["runs-on"], "macos-15")
         self.assertEqual(jobs["build"]["needs"], "preflight")
         self.assertEqual(jobs["publish"]["environment"], "release")
