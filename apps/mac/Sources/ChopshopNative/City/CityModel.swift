@@ -97,6 +97,7 @@ public struct CityBuilding: Hashable, Sendable, Identifiable {
     /// De abajo arriba.
     public var floors: [CityFloor]
     public var id: String { company }
+    var symbolID: String { "cb:\(company)" }
     public var x1: Double { x0 + w }
     public var y1: Double { y0 + d }
     /// Altura del techo (sin la azotea).
