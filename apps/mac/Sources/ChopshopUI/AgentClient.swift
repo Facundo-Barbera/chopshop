@@ -17,6 +17,7 @@ struct AgentResult {
 
     var role: AgentRole? = nil
     var relaySnapshots: [[String: Any]] = []
+    var relayMachines: [[String: Any]] = []
 
     var isOK: Bool { status == .ok && snapshot != nil }
     var machineId: String? { snapshot?["machine_id"] as? String }
@@ -331,6 +332,7 @@ final class AgentClient {
         r.status = .ok
         r.snapshot = snap
         r.relaySnapshots = machines
+        r.relayMachines = info
         return r
     }
 

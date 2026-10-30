@@ -206,12 +206,16 @@ public enum SnapshotMapper {
     static func machines(_ s: LiveState, host: String) -> [MockMachine] {
         var names = s.series.keys.sorted()
         if s.machineHealth != nil, !names.contains(host) { names.insert(host, at: 0) }
+        names += s.relayMachines.keys.filter { !names.contains($0) }.sorted()
         return names.map { name in
             let sr = s.series[name] ?? LiveState.Series()
             let h = name == host ? s.machineHealth : nil
             let st = h?["state"]?.string
-            return MockMachine(name: name, ok: st == nil || st == "ok", stale: false,
-                               reason: st.flatMap { $0 == "ok" ? nil : $0 } ?? (h?["t3_ok"]?.bool == false ? "T3 no responde" : nil),
+            let relay = s.relayMachines[name]
+            return MockMachine(name: name, ok: (st == nil || st == "ok") && relay?.stale != true,
+                               stale: relay?.badge != nil,
+                               reason: relay?.reason ?? st.flatMap { $0 == "ok" ? nil : $0 } ?? (h?["t3_ok"]?.bool == false ? "T3 no responde" : nil),
+                               badge: relay?.badge,
                                os: "", role: "", cpus: 0, ramTotalMB: 0, disk: "", diskPct: h?["disk_pct"]?.int ?? 0,
                                cpu: sr.cpu, ram: sr.ram, run: sr.run)
         }
