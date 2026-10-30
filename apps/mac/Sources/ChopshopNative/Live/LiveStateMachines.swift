@@ -27,6 +27,7 @@ extension LiveState {
             projects[pi].attention.append(Attention(key: key, seq: 0, type: "relay", needs: needs, subjectKind: key.split(separator: ":").first.map(String.init),
                                                     subjectID: sid, summary: a["summary"]?.string))
         }
+        if let e = parts["employees"]?.object { readEmployees(e) }
         for i in projects.indices { projects[i].counts = Self.counts(projects[i]) }
         if let h = json["health"]?.object {
             machineHealth = h
