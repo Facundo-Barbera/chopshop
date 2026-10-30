@@ -65,7 +65,7 @@ public struct OfficeShell<World: View, Unpaired: View>: View {
             }
         }
         .inspector(isPresented: inspectorShown) {
-            ShellInspectorView(shell: shell, snapshot: store.snapshot, machineRoom: store.machineRoom)
+            ShellInspectorView(shell: shell, snapshot: store.snapshot, machineRoom: MachineRoom(store.state.machineRoom))
                 .inspectorColumnWidth(min: 300, ideal: shell.state.inspector == .panel(.machineRoom) ? 640 : 380, max: 920)
         }
         // Esc: la paleta, luego el panel; si no hay nada abierto el Esc sigue hacia el mundo (salir del piso)
