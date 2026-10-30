@@ -2,7 +2,7 @@ import { Component, createContext, useContext, useEffect, useMemo, useState } fr
 import { createStore, parseTs } from "@chopshop/api";
 import { on, request, send } from "./bridge.js";
 
-const Ctx = createContext({ fin: {} });
+const Ctx = createContext({ fin: {}, canAct: true });
 
 // ---------- utilidades ----------
 // Las horas se muestran en la zona horaria local del Mac.
@@ -127,9 +127,11 @@ function QuestionCard({ batch, task, q, onDone, since, queued, failed, watcher, 
   const [custom, setCustom] = useState("");
   const [busy, setBusy] = useState(null);
   const [msg, setMsg] = useState(null);
+  const { canAct } = useContext(Ctx);
+  const ro = !canAct ? "Modo visualizador: solo lectura" : undefined;
 
   const submit = async (choice) => {
-    if (!choice || busy) return;
+    if (!choice || busy || !canAct) return;
     setBusy(choice);
     setMsg(null);
     try {
@@ -157,7 +159,7 @@ function QuestionCard({ batch, task, q, onDone, since, queued, failed, watcher, 
       {needsHuman(task) && <p className="note esc">Escalada a <b>{task.escalation.notify}</b> · {task.escalation.reason}</p>}
       <div className="options">
         {(q.options || []).map((o) => (
-          <button key={o} className="pill" disabled={!!busy || !!queued} onClick={() => submit(o)}>
+          <button key={o} className="pill" disabled={!!busy || !!queued || !canAct} title={ro} onClick={() => submit(o)}>
             {busy === o ? <span className="spin" /> : null}
             {o}
           </button>
@@ -170,8 +172,8 @@ function QuestionCard({ batch, task, q, onDone, since, queued, failed, watcher, 
           submit(custom.trim());
         }}
       >
-        <input value={custom} onChange={(e) => setCustom(e.target.value)} placeholder="o escribe otra respuesta…" disabled={!!busy || !!queued} />
-        <button className="pill primary" disabled={!custom.trim() || !!busy || !!queued}>Responder</button>
+        <input value={custom} onChange={(e) => setCustom(e.target.value)} placeholder="o escribe otra respuesta…" disabled={!!busy || !!queued || !canAct} title={ro} />
+        <button className="pill primary" disabled={!custom.trim() || !!busy || !!queued || !canAct} title={ro}>Responder</button>
       </form>
       {queued && (
         <p className="note ok">
@@ -280,7 +282,7 @@ function ViewHead({ title, sub, children }) {
 
 // ---------- detalle de una tarea ----------
 function TaskDetail({ t, b, c, now }) {
-  const { fin } = useContext(Ctx);
+  const { fin, canAct } = useContext(Ctx);
   const st = taskState(t);
   const { text, diff } = splitResult(t.result);
   const dur = t.done ? fmtDur(secs(b.created, fin[t.id])) : "";
@@ -288,7 +290,7 @@ function TaskDetail({ t, b, c, now }) {
   const appr = t.pending && t.pending.approvals;
   const [settling, setSettling] = useState(false);
   const [settleMsg, setSettleMsg] = useState(null);
-  const canSettle = t.done && !t.settled && !!t.threadId && !!b.agent;
+  const canSettle = canAct && t.done && !t.settled && !!t.threadId && !!b.agent;
   // POST /settle: marca el hilo como cerrado en T3 (nunca lo archiva)
   const settle = async () => {
     setSettling(true);
@@ -1129,6 +1131,7 @@ function Connecting({ agents, configPath }) {
 export default function App() {
   const [snap, setSnap] = useState(null);
   const [agents, setAgents] = useState(null);
+  const [canAct, setCanAct] = useState(true);
   const [configPath, setConfigPath] = useState("");
   const [view, setView] = useState("overview");
   const [project, setProject] = useState("");
@@ -1143,6 +1146,7 @@ export default function App() {
       if (m.type === "agents") {
         // resultados crudos por agente (ver AgentClient.swift): se combinan aquí
         const v = store.update(m.payload.agents || []);
+        setCanAct(m.payload.canAct !== false && !(m.payload.agents || []).some((a) => a.role === "viewer"));
         setConfigPath(m.payload.configPath || "");
         setAgents(v.agents);
         setMetrics(v.machines);
@@ -1192,7 +1196,7 @@ export default function App() {
     );
   }
   return (
-    <Ctx.Provider value={{ fin }}>
+    <Ctx.Provider value={{ fin, canAct }}>
       <main className="page" key={view + ":" + project}>
         <Guard key={view + ":" + project}>
         <AgentBanner agents={agents} />
