@@ -4,8 +4,10 @@ import type { MachinesEnv } from "./machines";
 import { authHandlers } from "./routes/auth";
 import { invitationHandlers } from "./routes/invitations";
 import { machineHandlers } from "./routes/machines";
+import { projectHandlers } from "./routes/projects";
 import { sessionHandlers } from "./routes/sessions";
 import { userHandlers } from "./routes/users";
+import { workspaceHandlers } from "./routes/workspaces";
 import { createApi, dispatchHost } from "./router";
 
 export const VERSION = "0.1.0";
@@ -13,7 +15,16 @@ export const VERSION = "0.1.0";
 export interface Env extends MachinesEnv {}
 
 const api = createApi<Env>(
-  { health: () => json({ ok: true, version: VERSION }), ...authHandlers, ...sessionHandlers, ...invitationHandlers, ...userHandlers, ...machineHandlers },
+  {
+    health: () => json({ ok: true, version: VERSION }),
+    ...authHandlers,
+    ...sessionHandlers,
+    ...invitationHandlers,
+    ...userHandlers,
+    ...machineHandlers,
+    ...workspaceHandlers,
+    ...projectHandlers,
+  },
   { resolvePrincipal, csrfHash },
 );
 
