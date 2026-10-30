@@ -63,8 +63,9 @@ enum ConfigWriter {
         for a in agents {
             tables += ["[app.agents.\(isBareKey(a.name) ? a.name : quote(a.name))]",
                        "url = " + quote(AppConfig.normalizeURL(a.url)),
-                       "enabled = \(a.enabled)",
-                       ""]
+                       "enabled = \(a.enabled)"]
+            if a.isRelay { tables.append("destination = " + quote(a.destination.rawValue)) }
+            tables.append("")
         }
         func trimTail(_ i: Int) {
             while let l = blocks[i].lines.last, l.trimmingCharacters(in: .whitespaces).isEmpty { blocks[i].lines.removeLast() }
