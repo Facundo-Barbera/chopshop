@@ -135,12 +135,6 @@ public struct FloorOfficeView: View {
                           selected: selected, hovered: hovered).draw(&ctx)
         } symbols: {
             Self.labels(plan, layout: lay, now: now, dark: scheme == .dark)
-            if let h = hovered {
-                let o = plan.occupant(of: h, now: now)
-                IsoTooltip(label: label(for: h), title: o?.title ?? o?.threadID ?? deskState(h, now: now),
-                           visual: o?.visual ?? .pending, host: nil)
-                    .tag("tip")
-            }
         }
     }
 

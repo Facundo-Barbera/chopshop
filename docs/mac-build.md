@@ -85,14 +85,17 @@ cuenta `<máquina>@<host:puerto>`, solo este dispositivo, sin sincronizar con iC
 
 ## Oficina en vivo (macOS 26)
 
-En macOS 26 o posterior el detalle de un **proyecto** es la vista nativa `ChopshopNative` (oficina isométrica / grafo en capas,
-«necesita tu atención», lista compacta), alimentada por el stream de eventos del agente principal (el primero configurado):
+En macOS 26 o posterior la ventana entera es la **oficina** (`OfficeShell`, ver [`plans/office-first-ui.md`](plans/office-first-ui.md)):
+la ciudad a ventana completa, sin barra lateral, con el HUD en la barra de la ventana, la paleta de órdenes (⌘K), el minimapa y
+los paneles del inspector (Atención, Actividad, Lotes, Reacciones, Sala de máquinas, Máquinas; menú «Oficina», ⌘1…⌘6). La vista
+clásica (barra lateral + UI web) queda para macOS < 26, agentes sin `/stream` y «Seguir con la vista clásica». Todo se alimenta
+del stream de eventos del agente principal (el primero configurado):
 
 - `LiveStore` abre `GET /stream` (SSE) con la credencial, pliega cada sobre con la misma regla que `projection.py`
   (`LiveState.apply`; hay test de equivalencia con la proyección dorada) y reconecta con `Last-Event-ID` y backoff 3→30 s.
   El indicador de la barra dice **en vivo**, **reconectando** o **sin emparejar**.
 - Los botones de una pregunta responden por `POST /answer`; permitir/denegar y reintentar no tienen API: el botón abre el hilo en T3.
-- La vista web (`WKWebView`) sigue cargada detrás: Resumen, Preguntas, Actividad… y todo en macOS < 26 siguen con `GET /snapshot`.
+- La vista web (`WKWebView`) solo se carga en la vista clásica: en macOS < 26 todo sigue con `GET /snapshot`.
   Si el stream no responde y no hay datos (agente antiguo), se ve la vista web.
 - Modo demo sin agente: `Chopshop.app/Contents/MacOS/Chopshop --demo-fixture apps/agent/tests/fixtures/events/ui-fixture.jsonl`
   (o `CHOPSHOP_DEMO_FIXTURE=…`): reproduce la secuencia acelerada.

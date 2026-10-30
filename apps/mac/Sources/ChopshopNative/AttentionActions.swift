@@ -4,13 +4,16 @@ import SwiftUI
 /// Previews, capturas) los botones se ven como en la maqueta y no hacen nada.
 /// - `answer`: responde la pregunta de la tarea con esa opción (la app: `POST /answer`). Devuelve el error para mostrar, o nil.
 /// - `open`: abre un enlace (el hilo en T3). Permitir/Denegar y Reintentar no tienen API: en vivo se cambian por "Abrir en T3".
+/// - `settle`: cierra el hilo en T3 (`POST /settle`, nunca archiva). nil = la app no lo ofrece (los botones no aparecen).
 public struct AttentionActions: @unchecked Sendable {
     public var answer: @MainActor (_ task: MockTask, _ option: String) async -> String?
     public var open: @MainActor (_ url: URL) -> Void
+    public var settle: (@MainActor (_ threadID: String) async -> String?)?
 
     public init(answer: @escaping @MainActor (_ task: MockTask, _ option: String) async -> String?,
-                open: @escaping @MainActor (_ url: URL) -> Void) {
-        self.answer = answer; self.open = open
+                open: @escaping @MainActor (_ url: URL) -> Void,
+                settle: (@MainActor (_ threadID: String) async -> String?)? = nil) {
+        self.answer = answer; self.open = open; self.settle = settle
     }
 }
 
