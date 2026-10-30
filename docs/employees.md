@@ -80,6 +80,16 @@ Campos del cuerpo (obligatorios en **negrita**; los extra se permiten):
 Orden típico: `task.enqueued` → `queue.changed (enqueued)` → … → `queue.changed (dequeued)` → `desk.assigned` →
 `employee.assigned (queue)` → `task.state` del hilo → `desk.released` → `employee.idle` (o el siguiente `employee.assigned`).
 
+Quién emite cada uno fuera del despachador (herramientas del MCP de Chopshop, mismo bus que el agente):
+
+- `task_cancel {task, reason?, note?, by?}`: si la tarea sigue en cola, `task.cancelled phase: queued` + `queue.changed
+  reason: cancelled`. Si ya salió de la cola y su hilo está vivo, interrumpe el hilo (`t3_thread_interrupt`, nunca archiva),
+  marca la tarea del motor terminada (el empleado queda libre para el despachador) y emite `task.cancelled phase: running` con
+  `thread_id`, sin `queue.changed` (la cola no cambió). En su próxima pasada el despachador hace settle del hilo y libera el
+  escritorio con `employee.idle reason: cancelled`. Si la tarea aún no tiene hilo o ya terminó, error.
+- `employee_rename {employee, name, by?}`: `employees.rename` (`name: null` quita el nombre; el nombre queda fijado y el
+  perfil ya no lo pisa) y `employee.renamed` con `by` del llamador (`human` por defecto o el nombre del bot).
+
 ## Fixtures
 
 ```
