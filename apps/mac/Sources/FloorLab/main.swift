@@ -116,6 +116,15 @@ struct FloorLabRoot: View {
                 Stepper("Salas de máquinas: \(config.machineRooms)", value: $config.machineRooms, in: 0...6)
                 Toggle("Oficina de Grok", isOn: $config.grok)
             }
+            Section("Escritorios elásticos") {
+                Stepper("Agentes ui-mac de más: \(config.overflow)", value: $config.overflow, in: 0...160)
+                Stepper("Flex por piso: \(config.flexPerFloor)", value: $config.flexPerFloor, in: 0...8)
+                Stepper("Pisos en obra (tope): \(config.maxExtraFloors)", value: $config.maxExtraFloors, in: 0...4)
+                Toggle("Contratista", isOn: $config.outsourcing)
+                Button("Caso de referencia (7 ui · 4 escritorios)") {
+                    config.desksPerRole = 4; config.overflow = 3
+                }
+            }
             Section("Ciudad") {
                 Stepper("Empresas: \(config.companies)", value: $config.companies, in: 1...10)
                 Stepper("Proyectos por empresa: \(config.projectsPerCompany)", value: $config.projectsPerCompany, in: 1...8)
