@@ -362,7 +362,7 @@ public struct CityView: View {
                     OfficeWorldView(floors: all, frozenNow: officeNow, focusRegion: officeAll ? nil : (officeRegion ?? Self.regionID(plan)),
                                     frame: FloorFrame.building(all), fitRequest: fitToken,
                                     onSelect: { tid in if let tid, FloorLayout.machinePart(tid) == nil { onInspect?(tid) } },
-                                    onExit: { zoomOut() }, layered: true,
+                                    layered: true,
                                     onActiveRegion: { officeRegion = $0; officeAll = false })
                 } else if office, let pr = target, let g = graph(pr) {
                     IsoOfficeView(graph: g, tasks: tasks(pr), hostOf: hosts(pr), frozenTime: frozenTime, flatChrome: flatChrome)
