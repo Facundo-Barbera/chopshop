@@ -18,6 +18,17 @@ public struct CityRoad: Hashable, Sendable {
     }
 }
 
+public struct CityLink: Hashable, Sendable {
+    public var from: String
+    public var to: String
+    public var campus: String
+    public var points: [CityPoint]
+
+    public init(from: String, to: String, campus: String, points: [CityPoint]) {
+        self.from = from; self.to = to; self.campus = campus; self.points = points
+    }
+}
+
 public struct CityCommon: Hashable, Sendable {
     public enum Kind: String, Hashable, Sendable { case plaza, garden, cafe, lawn }
     public var kind: Kind
@@ -53,6 +64,7 @@ public struct WorldMap: Equatable, Sendable {
     public var plots: [String: CityRect] = [:]
     public var campusOf: [String: String] = [:]
     public var trees: [CityPoint] = []
+    public var links: [CityLink] = []
     public var groundX = 1.0
     public var groundY = 1.0
 }
@@ -156,7 +168,13 @@ public enum WorldGenerator {
         }
     }
 
-    public static func layout(seed: UInt64, campuses input: [(name: String, projects: [String])]) -> WorldMap {
+    static func door(seed: UInt64, key: String, _ rect: CityRect) -> CityPoint {
+        let bay = CityBuildingStyle(seed: styleSeed(seed, key)).doorBay
+        return CityPoint(x: rect.x0 + rect.w * (0.04 + 0.92 * (Double(bay) + 0.5) / Double(CityGeo.windowsLeft)), y: rect.y1)
+    }
+
+    public static func layout(seed: UInt64, campuses input: [(name: String, projects: [String])],
+                              annexes: [String: String] = [:]) -> WorldMap {
         var map = WorldMap()
         guard !input.isEmpty else { return map }
         var taken: [Cell: String] = [:]
@@ -225,6 +243,7 @@ public enum WorldGenerator {
             }
 
             var filled = Set<String>()
+            var slotOf: [String: (ci: Int, k: Int)] = [:]
             var count = Array(repeating: 0, count: cells.count)
             let projects = Array(Set(c.projects)).sorted {
                 (WorldSeed.hash(seed, "project", $0), $0) < (WorldSeed.hash(seed, "project", $1), $1)
@@ -242,6 +261,7 @@ public enum WorldGenerator {
                 }
                 guard let b = best else { continue }
                 filled.insert("\(b.ci).\(b.k)")
+                slotOf[p] = (b.ci, b.k)
                 count[b.ci] += 1
                 let s = layouts[b.ci][b.k]
                 let shape = buildingShape(seed: seed, key: p)
@@ -255,6 +275,38 @@ public enum WorldGenerator {
                 let bay = CityBuildingStyle(seed: styleSeed(seed, p)).doorBay
                 let dx = rect.x0 + rect.w * (0.04 + 0.92 * (Double(bay) + 0.5) / Double(CityGeo.windowsLeft))
                 campus.paths.append(route(seed, cells[b.ci], b.k, door: CityPoint(x: dx, y: rect.y1), slots: layouts[b.ci], plaza: plazas[b.ci]))
+            }
+
+            let hosted = annexes.filter { slotOf[$0.value] != nil }.map(\.key).sorted()
+            for a in hosted {
+                guard let host = annexes[a], let hs = slotOf[host], let hr = map.plots[host] else { continue }
+                var best: (d: Int, h: UInt64, ci: Int, k: Int)? = nil
+                for ci in cells.indices {
+                    for k in 0..<(side * side) where k != center && !(ci == 0 && k == cafeK) && !filled.contains("\(ci).\(k)") {
+                        let gi = cells[ci].i * side + k % side, gj = cells[ci].j * side + k / side
+                        let hi = cells[hs.ci].i * side + hs.k % side, hj = cells[hs.ci].j * side + hs.k / side
+                        let d = abs(gi - hi) + abs(gj - hj)
+                        let h = WorldSeed.hash(seed, "annex", a, cells[ci].key, "\(k)")
+                        if let b = best, (b.d, b.h) <= (d, h) { continue }
+                        best = (d, h, ci, k)
+                    }
+                }
+                guard let b = best else { continue }
+                filled.insert("\(b.ci).\(b.k)")
+                let s = layouts[b.ci][b.k]
+                let shape = buildingShape(seed: seed, key: a)
+                var pr = SeededRandom(seed, "plot", a)
+                let mx = max(0, s.w - shape.w - tile), my = max(0, s.d - shape.d - 1.8 * tile)
+                let x0 = (s.x0 + 0.5 * tile + mx * (0.2 + 0.6 * pr.unit())).rounded()
+                let y0 = (s.y0 + 0.6 * tile + my * (0.15 + 0.5 * pr.unit())).rounded()
+                let rect = CityRect(x0: x0, y0: y0, x1: x0 + shape.w, y1: y0 + shape.d)
+                map.plots[a] = rect
+                map.campusOf[a] = c.name
+                let ad = door(seed: seed, key: a, rect), hd = door(seed: seed, key: host, hr)
+                campus.paths.append(route(seed, cells[b.ci], b.k, door: ad, slots: layouts[b.ci], plaza: plazas[b.ci]))
+                let y = max(ad.y, hd.y) + 0.7 * tile
+                map.links.append(CityLink(from: host, to: a, campus: c.name,
+                                          points: [hd, CityPoint(x: hd.x, y: y), CityPoint(x: ad.x, y: y), ad]))
             }
 
             if projects.count >= 3, let k = cafeK {

@@ -31,6 +31,10 @@ public struct FloorOfficeView: View {
             return g?.waitingRole.map { "espera · \($0)" } ?? "sin rol"
         }
         guard let r = plan.room(ofDesk: id), let d = plan.desk(id) else { return id }
+        if r.flex {
+            let who = d.occupant?.role.map { " · \($0)" } ?? ""
+            return "\(plan.outsourced ? "contratista" : "flex") \(d.slot + 1)\(who)"
+        }
         return "\(r.role) · \(d.slot + 1)"
     }
 
@@ -114,6 +118,7 @@ public struct FloorOfficeView: View {
         if plan.kind == .lobby { return ["VESTÍBULO", plan.company?.uppercased()].compactMap { $0 }.joined(separator: " · ") }
         guard plan.rooms.indices.contains(r.index) else { return extraTitle(r) }
         let room = plan.rooms[r.index]
+        if room.flex { return plan.outsourced ? (plan.outsourcedLabel ?? "Contratista").uppercased() : "SIN ASIGNACIÓN" }
         return room.role.uppercased() + (room.permanent ? " · PERMANENTE" : "")
     }
 

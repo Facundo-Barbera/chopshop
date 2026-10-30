@@ -12,6 +12,10 @@ public struct FloorLabConfig: Equatable, Sendable {
     public var setupSeed: UInt64
     public var companies: Int
     public var projectsPerCompany: Int
+    public var overflow = 0
+    public var flexPerFloor = 4
+    public var maxExtraFloors = 2
+    public var outsourcing = true
 
     public static let defaultWidth = (CityGeo.footprintW * FloorPlanGenerator.baseScale).rounded()
     public static let defaultDepth = (CityGeo.footprintD * FloorPlanGenerator.baseScale).rounded()
@@ -37,6 +41,61 @@ public struct FloorLabConfig: Equatable, Sendable {
                                "kelp", "lumen", "mistral", "nimbus", "onyx", "pico", "quartz", "rivet", "sable", "tundra"]
 
     public var floorCount: Int { max(1, floors) }
+
+    public static let overflowRole = "ui-mac"
+
+    func flexDesks(floor f: Int) -> Int {
+        let declared = max(0, roles) * max(1, desksPerRole)
+        return max(0, min(min(8, flexPerFloor), ProjectOffice.desksPerFloor - declared))
+    }
+
+    var elasticFloorDesks: Int {
+        let declared = max(0, roles) * max(1, desksPerRole)
+        return min(ProjectOffice.desksPerFloor, max(4, declared + flexDesks(floor: 0)))
+    }
+
+    public var elastic: (flex: [Int], extra: [Int], outsourced: [Int]) {
+        guard roles > 0 else { return ([], [], []) }
+        var left = max(0, overflow)
+        let order = (0..<floorCount).sorted { (abs($0), $0) < (abs($1), $1) }
+        var flex = Array(repeating: 0, count: floorCount)
+        for f in order {
+            let n = min(left, flexDesks(floor: f)); flex[f] = n; left -= n
+        }
+        var extra: [Int] = []
+        while left > 0, extra.count < max(0, min(4, maxExtraFloors)) {
+            let n = min(left, elasticFloorDesks); extra.append(n); left -= n
+        }
+        var outsourced: [Int] = []
+        while outsourcing, left > 0, outsourced.count < CityOffice.maxOutsourcedFloors {
+            let n = min(left, elasticFloorDesks); outsourced.append(n); left -= n
+        }
+        return (flex, extra, outsourced)
+    }
+
+    func overflowAgent(_ i: Int, t0: Double) -> FloorPlan.Occupant? {
+        let o: JSONValue = [
+            "thread_id": .string("lab:ui:\(i)"), "title": .string("[ui-mac] pantalla \(i + 1)"), "role": .string(Self.overflowRole),
+            "project": .string(Self.project), "phase": "running", "attention": .null,
+            "since": Self.stamp(t0 - 30), "ended_at": .null, "touched_at": .null,
+        ]
+        return FloorPlan.Occupant(o, project: Self.project, halfLife: FloorPlan.defaultHalfLife)
+    }
+
+    func elasticPlan(index: Int, desks n: Int, used: Int, first: Int, kind: String, t0: Double) -> FloorPlan {
+        var plan = FloorPlan(kind: .floor(project: Self.project, index: index), company: Self.company, name: nil,
+                             halfLife: FloorPlan.defaultHalfLife)
+        plan.temporary = kind == "_flex"
+        plan.outsourced = kind == "_out"
+        plan.outsourcedLabel = plan.outsourced ? "Contratista" : nil
+        let floor = plan.outsourced ? index - FloorPlan.outsourcedBase : index
+        let desks = (0..<n).map { s in
+            FloorPlan.Desk(id: "\(Self.project)/\(floor)/\(kind)/\(s)", slot: s, retired: false,
+                           occupant: s < used ? overflowAgent(first + s, t0: t0) : nil, notesPending: 0, lineage: [])
+        }
+        plan.rooms = [FloorPlan.Room(role: kind, permanent: false, desks: desks, flex: true)]
+        return plan
+    }
 
     public var frame: FloorFrame {
         var r = SeededRandom(buildingSeed, "entrance")
@@ -128,26 +187,48 @@ public struct FloorLabConfig: Equatable, Sendable {
         }
         var out = [lobby]
         let rooms = grok ? max(1, machineRooms) : max(0, machineRooms)
+        let el = elastic
+        var next = 0
         for f in 0..<floorCount {
             var plan = FloorPlan(kind: .floor(project: project, index: f), company: Self.company, name: floorTitle(f),
                                  halfLife: FloorPlan.defaultHalfLife)
             for k in 0..<max(0, roles) {
-                let role = roleName(floor: f, k)
+                let hot = overflow > 0 && f == 0 && k == 0
+                let role = hot ? Self.overflowRole : roleName(floor: f, k)
                 var desks: [FloorPlan.Desk] = []
                 for s in 0..<max(1, desksPerRole) {
                     let busy = rng.unit() >= 0.35
                     let title = "[\(role)] \(rng.pick(Self.taskWords))"
-                    let occ = busy ? Self.occupant(&rng, id: "lab:\(f):\(k):\(s)", title: title, role: role, project: project,
-                                                   guest: false, t0: t0) : nil
+                    let occ = hot ? overflowAgent(1000 + s, t0: t0)
+                        : busy ? Self.occupant(&rng, id: "lab:\(f):\(k):\(s)", title: title, role: role, project: project,
+                                               guest: false, t0: t0) : nil
                     desks.append(FloorPlan.Desk(id: "\(project)/\(f)/\(role)/\(s)", slot: s, retired: false, occupant: occ,
                                                 notesPending: 0, lineage: []))
                 }
-                plan.rooms.append(FloorPlan.Room(role: role, permanent: k == 0, desks: desks))
+                plan.rooms.append(FloorPlan.Room(role: role, permanent: k == 0 && !hot, desks: desks))
+            }
+            let fx = flexDesks(floor: f)
+            if fx > 0 && roles > 0 {
+                let used = el.flex.indices.contains(f) ? el.flex[f] : 0
+                let desks = (0..<fx).map { s in
+                    FloorPlan.Desk(id: "\(project)/\(f)/_flex/\(s)", slot: s, retired: false,
+                                   occupant: s < used ? overflowAgent(next + s, t0: t0) : nil, notesPending: 0, lineage: [])
+                }
+                next += used
+                plan.rooms.append(FloorPlan.Room(role: "_flex", permanent: false, desks: desks, flex: true))
             }
             for k in 0..<rooms where k % floorCount == f {
                 plan.machineRooms.append(machineRoom(k, floor: f, rng: &rng))
             }
             out.append(plan)
+        }
+        for (k, n) in el.extra.enumerated() {
+            out.append(elasticPlan(index: floorCount + k, desks: elasticFloorDesks, used: n, first: next, kind: "_flex", t0: t0))
+            next += n
+        }
+        for (k, n) in el.outsourced.enumerated() {
+            out.append(elasticPlan(index: FloorPlan.outsourcedBase + k, desks: elasticFloorDesks, used: n, first: next, kind: "_out", t0: t0))
+            next += n
         }
         return out
     }
@@ -155,6 +236,8 @@ public struct FloorLabConfig: Equatable, Sendable {
     public func city() -> CityModel {
         var rng = SeededRandom(setupSeed, "city")
         var entries: [(company: String, project: String, floors: [CityFloor])] = []
+        var annexes: [String: (host: String, title: String)] = [:]
+        let el = elastic
         let per = max(1, projectsPerCompany)
         for c in 0..<max(1, companies) {
             let company = Self.name(Self.companyNames, c)
@@ -176,10 +259,31 @@ public struct FloorLabConfig: Equatable, Sendable {
                                         running: threads.count, needsYou: status == .needsYou ? 1 : 0, stuck: status == .stuck ? 1 : 0,
                                         alert: alert, floorIndex: i, floorName: n > 1 ? floorTitle(i) : nil))
                 }
+                if c == 0 && p == 0 {
+                    for (k, m) in el.extra.enumerated() {
+                        var fl = CityFloor(project: project, company: project, level: 0, status: .neutral,
+                                           activeThreads: (0..<m).map { "\(project):obra:\(k):\($0)" }, running: m, needsYou: 0, stuck: 0,
+                                           floorIndex: n + k, floorName: "en obra · \(k + 1)")
+                        fl.temporary = true
+                        fs.append(fl)
+                    }
+                }
                 entries.append((company, project, fs))
+                if c == 0 && p == 0 && !el.outsourced.isEmpty {
+                    let key = CityModel.contractorKey(project)
+                    let cf = el.outsourced.enumerated().map { (k, m) -> CityFloor in
+                        var fl = CityFloor(project: project, company: project, level: 0, status: .neutral,
+                                           activeThreads: (0..<m).map { "\(project):out:\(k):\($0)" }, running: m, needsYou: 0, stuck: 0,
+                                           floorIndex: FloorPlan.outsourcedBase + k, floorName: "contratista · \(k + 1)")
+                        fl.outsourced = true
+                        return fl
+                    }
+                    entries.append((company, key, cf))
+                    annexes[key] = (host: project, title: "Contratista · \(project)")
+                }
             }
         }
-        return CityModel.place(entries, seed: setupSeed)
+        return CityModel.place(entries, seed: setupSeed, annexes: annexes)
     }
 }
 
