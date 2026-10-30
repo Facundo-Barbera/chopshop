@@ -28,8 +28,6 @@ final class ShellModelTests: XCTestCase {
         XCTAssertTrue(ShellHUD(machinesOK: 3, machinesTotal: 3, machinesHot: 1).machinesAlert, "una saturada también")
     }
 
-    // MARK: barra lateral
-
     func testSidebarHasFiveSectionsForOwner() {
         let s = ShellState()
         XCTAssertEqual(s.role, .owner)
