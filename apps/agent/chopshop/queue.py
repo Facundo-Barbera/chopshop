@@ -4,7 +4,7 @@ from .agent import db, envelope
 
 MAX_LEN = 20
 PREFIX = "q:"
-STATES = ("queued", "dequeued", "cancelled")
+STATES = ("queued", "dequeued", "cancelled", "done", "failed")
 CANCEL_REASONS = ("manual", "superseded", "retired", "expired")
 
 SCHEMA = """
@@ -146,6 +146,17 @@ class Queue:
         self._changed(employee, rows, "dequeued", head["task"], now, cause=cause)
         head.update(state="dequeued", ended=now)
         return head
+
+    def finish(self, task, state, note=None):
+        if state not in ("done", "failed"):
+            raise QueueError("estado final inválido: %r" % state)
+        now = self.clock()
+        with db.tx():
+            r = self.conn.execute("SELECT * FROM employee_queue WHERE task=?", (task,)).fetchone()
+            if not r or r["state"] != "dequeued":
+                return None
+            self.conn.execute("UPDATE employee_queue SET state=?, ended=?, note=? WHERE task=?", (state, now, note, task))
+        return dict(r, state=state, ended=now, note=note)
 
     def clear(self, employee, by, reason="retired", cause=None):
         out = []
