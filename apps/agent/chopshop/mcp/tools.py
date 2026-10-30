@@ -5,7 +5,7 @@ from .. import employees, profile
 from .. import queue as equeue
 from ..agent import client as agent_client
 from ..agent import config as agent_config
-from ..agent import db, layout, registry
+from ..agent import db, envelope, events, layout, registry
 from .fleet import ACTIVE, ToolError
 
 RUNTIME_MODES = ["approval-required", "auto-accept-edits", "auto", "full-access"]
@@ -314,9 +314,15 @@ class Tools:
                 "roles": list(out.values())}
 
     def _queue(self):
+        cfg = agent_config.load()
         if self.conn is None:
-            self.conn = db.connect(agent_config.load()["db_path"])
-        return equeue.Queue(self.conn)
+            self.conn = db.connect(cfg["db_path"])
+
+        def emit(env):
+            return events.emit_envelope(self.conn, cfg, env["type"], env.get("project"), env.get("body"), env.get("subject"),
+                                        env.get("severity"), env.get("needs"), env.get("cause"), ts=envelope.epoch(env["ts"]),
+                                        id=env.get("id"))
+        return equeue.Queue(self.conn, emit, machine=cfg["machine_id"])
 
     def _staff(self, project, role=None):
         try:
