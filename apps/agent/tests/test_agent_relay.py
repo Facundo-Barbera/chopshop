@@ -110,7 +110,8 @@ class Base(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        env = mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": os.path.join(self.tmp.name, "cfg")})
+        env = mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": os.path.join(self.tmp.name, "cfg"),
+                                       "CHOPSHOP_HOME": os.path.join(self.tmp.name, "home")})
         env.start()
         self.addCleanup(env.stop)
         self.conn = db.connect(os.path.join(self.tmp.name, "agent", "agent.db"))
