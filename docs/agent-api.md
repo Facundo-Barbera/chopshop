@@ -117,7 +117,8 @@ Todo eso → **403**.
   "events":   [ ...últimos 80, más nuevos primero... ],
   "subscriptions": {"nombre": {"project": "*", "events": []}},
   "orchestrator": { ...salida de chopshop.engine.snapshot() (lotes, grafos, reacciones) o null... },
-  "agent": {"version": "0.6.0", "uptime": 12, "t3_ok": true, "last_sample_age": 3.2, "last_poll_age": 2.0}
+  "agent": {"version": "0.6.0", "uptime": 12, "t3_ok": true, "last_sample_age": 3.2, "last_poll_age": 2.0},
+  "employees": [ ...empleados (docs/employees.md)... ], "queues": {"<empleado>": {"items": [], "updated": null}}
 }
 ```
 

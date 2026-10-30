@@ -469,6 +469,7 @@ class AgentApp:
         now = self.clock()
         latest = self.collector.latest()
         threads, with_pending = self._thread_rows()
+        st = self.projector.current()
         projects = {p["name"]: dict(p) for p in latest.get("projects", [])}
         names = {t["project"] for t in threads if t["project"]} | set((self.cfg.get("projects") or {}))
         for n in names:
@@ -498,6 +499,7 @@ class AgentApp:
                               for n, s in events.list_subscriptions(self.conn).items()},
             "orchestrator": self._orchestrator(),
             "agent": agent,
+            "employees": st.get("employees") or [], "queues": st.get("queues") or {},
         }
 
     # -- T3

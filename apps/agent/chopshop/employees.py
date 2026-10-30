@@ -108,3 +108,23 @@ def entry(r):
     return {"id": r["id"], "project": r["project"], "floor": r["floor"], "role": r["role"], "slot": r["slot"],
             "name": r["name"], "state": "idle", "thread_id": None, "task": None, "title": None, "since": None,
             "queue_len": 0}
+
+
+def roster(conn, profs, q, folded=None, seats=None):
+    folded = {e["id"]: e for e in folded or [] if e.get("id")}
+    seats = seats or {}
+    out = []
+    for prof in sorted(profs, key=lambda p: p.get("project") or ""):
+        for r in listing(conn, prof):
+            e = entry(r)
+            f = folded.get(r["id"]) or {}
+            e.update({k: f[k] for k in ("state", "thread_id", "task", "title", "since") if k in f})
+            occ = seats.get(r["id"])
+            if occ and (e["state"] != "working" or e["thread_id"] != occ.get("thread_id")):
+                e.update(state="working", thread_id=occ.get("thread_id"), task=None, title=occ.get("title"),
+                         since=occ.get("since"))
+            elif not occ and e["state"] == "working":
+                e["state"] = "idle"
+            e["queue_len"] = q.length(r["id"])
+            out.append(e)
+    return out, q.snapshot([e["id"] for e in out])
