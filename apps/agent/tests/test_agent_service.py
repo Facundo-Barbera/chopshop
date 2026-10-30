@@ -64,6 +64,9 @@ class TmpCase(unittest.TestCase):
         self.addCleanup(self._restore_env)
         os.environ["CHOPSHOP_CONFIG"] = os.path.join(self.tmp, "config.toml")
         os.environ["CHOPSHOP_HOME"] = os.path.join(self.tmp, "home")
+        xdg = mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": os.path.join(self.tmp, "xdg")})
+        xdg.start()
+        self.addCleanup(xdg.stop)
 
     def _restore_env(self):
         for k in [k for k in os.environ if k.startswith("CHOPSHOP_")]:
