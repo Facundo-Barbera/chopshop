@@ -3,8 +3,8 @@ import SwiftUI
 // Dibujo de la ciudad en un Canvas, con la misma proyección que la oficina (IsoFrame ≡ IsoCam).
 // Orden (de atrás hacia delante): suelo y calles → tráfico → edificios por profundidad (plinto, pisos de abajo arriba, azotea) →
 // brillo ámbar/rojo → etiquetas. El piso elegido para el zoom se pinta hueco: muros del fondo, la oficina (FloorRenderer, el mismo
-// dibujo que FloorOfficeView; IsoRenderer si el proyecto no trae `office`) y muros delanteros que bajan; los pisos de encima
-// suben y salen de cuadro.
+// dibujo que FloorOfficeView; IsoRenderer si el proyecto no trae `office`) y muros delanteros que bajan hasta el corte; los pisos
+// de encima suben y salen de cuadro, los de debajo se quedan.
 
 /// Color en 0…1 con mezcla lineal (para teñir de ámbar/rojo y encender ventanas sin saltos).
 @available(macOS 26.0, *)
@@ -118,6 +118,8 @@ struct CityZoom {
     let p: Double
     let transition: CityTransition
     let content: Content
+    var floorBox: FloorCameraBox? = nil
+    var hoveredSpot: String? = nil
 }
 
 @available(macOS 26.0, *)
@@ -136,8 +138,14 @@ struct CityRenderer {
 
     private var pal: CityPalette { CityPalette(dark: dark) }
     private var p: Double { zoom?.p ?? 0 }
-    private var targetBuilding: String? {
-        zoom.flatMap { z in (model.building(ofFloor: z.floorID) ?? model.building(of: z.project))?.company }
+    private var target: CityBuilding? {
+        zoom.flatMap { z in model.building(ofFloor: z.floorID) ?? model.building(of: z.project) }
+    }
+    private var targetBuilding: String? { target?.company }
+
+    private func occludes(_ x0: Double, _ y0: Double, _ x1: Double, _ y1: Double) -> Bool {
+        guard let t = target, (x0 + x1) / 2 + (y0 + y1) / 2 > t.depthKey else { return false }
+        return x0 - y1 < t.x1 - t.y0 && x1 - y0 > t.x0 - t.y1
     }
 
     private func P(_ x: Double, _ y: Double, _ z: Double = 0) -> CGPoint { cam.pt(x, y, z) }
@@ -202,46 +210,50 @@ struct CityRenderer {
     }
 
     func draw(_ ctx: inout GraphicsContext) {
-        let others = CityTransition.others(p)
+        let others = CityTransition.others(p), front = CityTransition.occluders(p)
         if others > 0.001 { drawGround(&ctx, alpha: others) }
         var glows: [(path: Path, color: CityRGB, a: Double)] = []
         for item in items() {
             switch item {
             case .building(let b):
                 let isTarget = b.company == targetBuilding
-                let a = isTarget ? 1 : others * dim(b.campus)
+                let a = isTarget ? 1 : (occludes(b.x0, b.y0, b.x1, b.y1) ? front : others) * dim(b.campus)
                 guard a > 0.001 else { continue }
                 var g = ctx; g.opacity = a
                 drawBuilding(&g, b, glows: &glows)
             case .tree(let q, let campus):
-                let a = others * dim(campus)
+                let r = 0.5 * CityGeo.tile
+                let a = (occludes(q.x - r, q.y - r, q.x + r, q.y + r) ? front : others) * dim(campus)
                 guard a > 0.001 else { continue }
                 var g = ctx; g.opacity = a
                 drawTree(&g, q)
             case .cafe(let r, let campus):
-                let a = others * dim(campus)
+                let a = (occludes(r.x0, r.y0, r.x1, r.y1 + 2 * CityGeo.tile) ? front : others) * dim(campus)
                 guard a > 0.001 else { continue }
                 var g = ctx; g.opacity = a
                 drawCafe(&g, r)
             }
         }
-        if !glows.isEmpty {
-            ctx.drawLayer { l in
-                l.addFilter(.blur(radius: 9))
-                for gl in glows where gl.a > 0.01 {
-                    l.stroke(gl.path, with: .color(gl.color.color.opacity(0.92 * gl.a)), style: StrokeStyle(lineWidth: 9, lineJoin: .round))
-                }
-            }
-            for gl in glows where gl.a > 0.01 {
-                ctx.stroke(gl.path, with: .color(gl.color.color.opacity(0.55 * gl.a)), style: StrokeStyle(lineWidth: 1.2, lineJoin: .round))
-            }
-        }
+        drawGlows(&ctx, glows)
         if let h = hovered, zoom == nil, let b = model.buildings.first(where: { $0.floors.contains { $0.id == h } }),
            let f = b.floors.first(where: { $0.id == h }) {
             let path = poly(CityHit.floorPolygon(b, level: f.level, frame: cam))
             ctx.stroke(path, with: .color((dark ? Color.white : Color.black).opacity(0.45)), style: StrokeStyle(lineWidth: 1.3, lineJoin: .round))
         }
         drawLabels(&ctx)
+    }
+
+    private func drawGlows(_ ctx: inout GraphicsContext, _ glows: [(path: Path, color: CityRGB, a: Double)]) {
+        guard !glows.isEmpty else { return }
+        ctx.drawLayer { l in
+            l.addFilter(.blur(radius: 9))
+            for gl in glows where gl.a > 0.01 {
+                l.stroke(gl.path, with: .color(gl.color.color.opacity(0.92 * gl.a)), style: StrokeStyle(lineWidth: 9, lineJoin: .round))
+            }
+        }
+        for gl in glows where gl.a > 0.01 {
+            ctx.stroke(gl.path, with: .color(gl.color.color.opacity(0.55 * gl.a)), style: StrokeStyle(lineWidth: 1.2, lineJoin: .round))
+        }
     }
 
     private func rectPath(_ r: CityRect, _ k: Double = 0, z: Double = 0) -> Path {
@@ -550,7 +562,6 @@ struct CityRenderer {
         let lift = targetLevel == nil ? 0 : CityTransition.upperLift(p) * CityTransition.liftDistance
         if !b.floors.isEmpty, rise(b, 0) > 0 {
             var g = ctx
-            if targetLevel != nil { g.opacity = CityTransition.lowerAlpha(p) }
             g.opacity *= cityClamp(rise(b, 0) / 0.3)
             if g.opacity > 0.001 { drawPlinth(&g, b) }
         }
@@ -562,17 +573,16 @@ struct CityRenderer {
             var zOff = 0.0
             if let tl = targetLevel {
                 if f.level > tl { zOff = lift; g.opacity = CityTransition.upperAlpha(p) }
-                else if f.level < tl { g.opacity = CityTransition.lowerAlpha(p) }
             }
             let fh = b.floorHeight(f.level), R = b.rect(f.level)
             guard g.opacity > 0.001 else { topZ = b.floorZ(f.level) + fh + zOff; continue }
-            let tn = lights.tint(f.id, t: t)
+            let isTarget = f.level == targetLevel
+            var tn = lights.tint(f.id, t: t)
+            if isTarget { tn = (amber: tn.amber * CityTransition.glow(p), red: tn.red * CityTransition.glow(p)) }
             let z0 = b.floorZ(f.level) + zOff
             let z1 = z0 + fh * r
-            let isTarget = f.level == targetLevel
             // losa
             var gs = g
-            if isTarget { gs.opacity = g.opacity * CityTransition.slab(p) }
             box(&gs, R.x0 - so, R.y0 - so, R.x1 + so, R.y1 + so, z0, min(z1, z0 + CityGeo.slabH), band(st, tn.amber, tn.red), edge: bandEdge(st))
             let zb = z0 + CityGeo.slabH, hh = z1 - zb
             let fade = cityClamp((r - 0.75) / 0.25)
@@ -595,9 +605,11 @@ struct CityRenderer {
             if att > 0.01 {
                 let sil = poly([P(R.x0 - so, R.y0 - so, z1), P(R.x1 + so, R.y0 - so, z1), P(R.x1 + so, R.y0 - so, z0), P(R.x1 + so, R.y1 + so, z0),
                                 P(R.x0 - so, R.y1 + so, z0), P(R.x0 - so, R.y1 + so, z1)])
-                let ga = CityLights.pulse(t) * g.opacity * (isTarget ? CityTransition.glow(p) : 1)
-                if tn.amber > 0.01 { glows.append((path: sil, color: CityPalette.amber, a: tn.amber * ga)) }
-                if tn.red > 0.01 { glows.append((path: sil, color: CityPalette.red, a: tn.red * ga)) }
+                let ga = CityLights.pulse(t) * g.opacity
+                var own: [(path: Path, color: CityRGB, a: Double)] = []
+                if tn.amber > 0.01 { own.append((path: sil, color: CityPalette.amber, a: tn.amber * ga)) }
+                if tn.red > 0.01 { own.append((path: sil, color: CityPalette.red, a: tn.red * ga)) }
+                if targetLevel == nil { glows += own } else { drawGlows(&g, own) }
             }
             topZ = z1
         }
@@ -920,44 +932,46 @@ struct CityRenderer {
         }
     }
 
-    /// Piso elegido durante el zoom: muros del fondo, la oficina dentro, muros delanteros que bajan.
+    /// Piso elegido durante el zoom: muros del fondo, la oficina dentro, muros delanteros que bajan hasta el corte.
     private func drawHollow(_ g: inout GraphicsContext, _ b: CityBuilding, _ f: CityFloor, _ R: CityRect, zb: Double, hh: Double,
                             windows: [Double], amber: Double, red: Double, zoom z: CityZoom) {
         let wt = CityGeo.wallT, st = b.style, wall = body(st.material), ground = f.level == 0
         let op = Openings(ground ? nil : st.windows)
-        let hb = hh * CityTransition.backWalls(p), hf = hh * CityTransition.frontWalls(p)
-        if hb > 0.3 {
-            box(&g, R.x0, R.y0, R.x0 + wt, R.y1, zb, zb + hb, wall, edge: pal.bodyEdge)
-            box(&g, R.x0, R.y0, R.x1, R.y0 + wt, zb, zb + hb, wall, edge: pal.bodyEdge)
-            drawWindows(&g, R, face: .backX, op, zb: zb, hh: hb, levels: [], amber: 0, red: 0, alpha: 1)
-            drawWindows(&g, R, face: .backY, op, zb: zb, hh: hb, levels: [], amber: 0, red: 0, alpha: 1)
-        }
+        let hf = hh * CityTransition.frontWalls(p)
+        box(&g, R.x0, R.y0, R.x0 + wt, R.y1, zb, zb + hh, wall, edge: pal.bodyEdge)
+        box(&g, R.x0, R.y0, R.x1, R.y0 + wt, zb, zb + hh, wall, edge: pal.bodyEdge)
+        drawWindows(&g, R, face: .backX, op, zb: zb, hh: hh, levels: [], amber: 0, red: 0, alpha: 1)
+        drawWindows(&g, R, face: .backY, op, zb: zb, hh: hh, levels: [], amber: 0, red: 0, alpha: 1)
         // la oficina, con el MISMO dibujo que la vista que se monta al final (FloorOfficeView o IsoOfficeView)
         let rr = CityTransition.roomRise(p), dp = CityTransition.deskPop(p)
         if rr > 0.001 {
-            let oc = z.transition.officeCamera(p)
-            let cam = IsoCam(s: oc.s, cu: oc.cu, cv: oc.cv, ax: oc.ax, ay: oc.ay)
+            let oc = z.transition.embedding.officeFrame(fromCity: cam)
+            let ocam = IsoCam(s: oc.s, cu: oc.cu, cv: oc.cv, ax: oc.ax, ay: oc.ay)
             var go = g
             switch z.content {
             case .floor(let plan, let lay, let now):
                 // los escritorios son fijos: el piso entero aparece con el zoom
                 go.opacity = g.opacity * rr
-                FloorRenderer(plan: plan, layout: lay, cam: cam, box: FloorCameraBox(), dark: dark, t: t, now: now,
-                              selected: nil, hovered: nil).draw(&go)
+                FloorRenderer(plan: plan, layout: lay, cam: ocam, box: z.floorBox ?? FloorCameraBox(), dark: dark, t: t, now: now,
+                              selected: nil, hovered: z.hoveredSpot).draw(&go)
             case .graph(var sc):
                 // las salas se extruyen y los escritorios brotan con el zoom
                 for i in sc.rooms.indices { sc.rooms[i].rise = rr; sc.rooms[i].wallRise = rr }
                 for i in sc.desks.indices { sc.desks[i].pop = dp; sc.desks[i].floorZ = Iso.slabH * rr }
                 for i in sc.wires.indices { sc.wires[i].draw = dp }
-                IsoRenderer(scene: sc, cam: cam, box: IsoCameraBox(), dark: dark, t: t, selected: nil, hovered: nil, size: size).draw(&go)
+                IsoRenderer(scene: sc, cam: ocam, box: IsoCameraBox(), dark: dark, t: t, selected: nil, hovered: nil, size: size).draw(&go)
             }
         }
-        if hf > 0.3 {
-            box(&g, R.x1 - wt, R.y0, R.x1, R.y1 - wt, zb, zb + hf, wall, edge: pal.bodyEdge)
-            box(&g, R.x0, R.y1 - wt, R.x1, R.y1, zb, zb + hf, wall, edge: pal.bodyEdge)
-            drawWindows(&g, R, face: .left, op, zb: zb, hh: hf, levels: windows, door: ground ? st.doorBay : nil, amber: amber, red: red, alpha: 1)
-            drawWindows(&g, R, face: .right, op, zb: zb, hh: hf, levels: windows, amber: amber, red: red, alpha: 1)
-        }
+        guard hf > 0.3 else { return }
+        let cut: Faces = (pal.slabT, wall.1, wall.2)
+        box(&g, R.x1 - wt, R.y0, R.x1, R.y1 - wt, zb, zb + hf, cut, edge: pal.bodyEdge)
+        box(&g, R.x0, R.y1 - wt, R.x1, R.y1, zb, zb + hf, cut, edge: pal.bodyEdge)
+        var gw = g
+        var faces = poly([P(R.x0, R.y1, zb + hf), P(R.x1, R.y1, zb + hf), P(R.x1, R.y1, zb), P(R.x0, R.y1, zb)])
+        faces.addPath(poly([P(R.x1, R.y1, zb + hf), P(R.x1, R.y0, zb + hf), P(R.x1, R.y0, zb), P(R.x1, R.y1, zb)]))
+        gw.clip(to: faces)
+        drawWindows(&gw, R, face: .left, op, zb: zb, hh: hh, levels: windows, door: ground ? st.doorBay : nil, amber: amber, red: red, alpha: 1)
+        drawWindows(&gw, R, face: .right, op, zb: zb, hh: hh, levels: windows, amber: amber, red: red, alpha: 1)
     }
 
     // Etiquetas -----------------------------------------------------------------
