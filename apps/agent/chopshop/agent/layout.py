@@ -22,6 +22,15 @@ MAX_BUILDING_FLOORS = 16          # pisos de proyecto por edificio (más la plan
 DEFAULT_HALF_LIFE = 30 * 60       # s
 MIN_HALF_LIFE = 60
 MAX_HALF_LIFE = 7 * 86400
+DEFAULT_FLEX_PER_FLOOR = 4
+MAX_FLEX_PER_FLOOR = 8
+DEFAULT_EXTRA_FLOORS = 2
+MAX_EXTRA_FLOORS = 4
+MAX_OUTSOURCED_FLOORS = 4
+MIN_ELASTIC_FLOOR_DESKS = 4
+FLEX_ROLE = "_flex"
+OUT_ROLE = "_out"
+OUTSOURCED_LABEL = "Contratista"
 
 OFFICE_KEYS = ("company", "half_life", "floors", "roles")
 FLOOR_KEYS = ("name", "rooms")
@@ -36,6 +45,7 @@ ACTOR_KEYS = ("kind", "label")
 ACTOR_KINDS = ("bot", "human")
 MACHINE_ROOM_KEYS = ("name", "floor", "repos", "listeners", "automations", "subscriptions")
 MACHINE_ROOM_LISTS = MACHINE_ROOM_KEYS[2:]
+CAPACITY_KEYS = ("flex_per_floor", "max_extra_floors", "outsourcing")
 WAKE_EVENT = "desk.note"          # disparador extra de `wake`: una nota nueva en el escritorio
 
 _ROLE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
@@ -59,7 +69,23 @@ def parse_duration(v):
 
 def validate(prof):
     """Problemas de los bloques `office:` y `rack:` (lista vacía si están bien o no existen)."""
-    return _office_errs(prof) + _rack_errs(prof) + _machine_errs(prof)
+    return _office_errs(prof) + _rack_errs(prof) + _machine_errs(prof) + _capacity_errs(prof)
+
+
+def _capacity_errs(prof):
+    c = prof.get("capacity")
+    if c is None:
+        return []
+    if not _mapping(c):
+        return ["capacity: se esperaba un mapa (%s)" % ", ".join(CAPACITY_KEYS)]
+    errs = ["capacity.%s desconocido (%s)" % (k, ", ".join(CAPACITY_KEYS)) for k in c if k not in CAPACITY_KEYS]
+    if "flex_per_floor" in c and not (_int(c["flex_per_floor"]) and 0 <= c["flex_per_floor"] <= MAX_FLEX_PER_FLOOR):
+        errs.append("capacity.flex_per_floor debe ser un entero 0-%d" % MAX_FLEX_PER_FLOOR)
+    if "max_extra_floors" in c and not (_int(c["max_extra_floors"]) and 0 <= c["max_extra_floors"] <= MAX_EXTRA_FLOORS):
+        errs.append("capacity.max_extra_floors debe ser un entero 0-%d" % MAX_EXTRA_FLOORS)
+    if "outsourcing" in c and not isinstance(c["outsourcing"], bool):
+        errs.append("capacity.outsourcing debe ser true o false")
+    return errs
 
 
 def _office_errs(prof):
@@ -263,14 +289,24 @@ def validate_building(profiles):
     for p in profiles:
         n = len(floors(p))
         if n:
-            per.setdefault(company(p), []).append((p.get("project"), n))
+            per.setdefault(company(p), []).append((p.get("project"), n, _explicit_extra(p)))
     errs = []
     for comp, items in sorted(per.items(), key=lambda kv: str(kv[0])):
-        total = sum(n for _, n in items)
+        total = sum(n for _, n, _ in items)
         if total > MAX_BUILDING_FLOORS:
             errs.append("edificio %s: %d pisos de proyecto (máximo %d): %s" % (
-                comp, total, MAX_BUILDING_FLOORS, ", ".join("%s=%d" % x for x in items)))
+                comp, total, MAX_BUILDING_FLOORS, ", ".join("%s=%d" % x[:2] for x in items)))
+            continue
+        errs += ["edificio %s: %s pide capacity.max_extra_floors=%d pero solo caben %d pisos temporales (%d de %d ocupados)" % (
+            comp, proj, extra, MAX_BUILDING_FLOORS - total, total, MAX_BUILDING_FLOORS)
+                 for proj, _, extra in items if extra is not None and total + extra > MAX_BUILDING_FLOORS]
     return errs
+
+
+def building_floors(profiles, prof):
+    comp = company(prof)
+    return len(floors(prof)) + sum(len(floors(p)) for p in profiles
+                                   if company(p) == comp and p.get("project") != prof.get("project"))
 
 
 # ---------------------------------------------------------------- lectura (perfil ya validado)
@@ -288,6 +324,57 @@ def company(prof):
 
 def half_life_s(prof):
     return parse_duration(_office(prof).get("half_life")) or float(DEFAULT_HALF_LIFE)
+
+
+def _capacity(prof):
+    c = prof.get("capacity")
+    return c if _mapping(c) else {}
+
+
+def _explicit_extra(prof):
+    v = _capacity(prof).get("max_extra_floors")
+    return v if _int(v) and 0 <= v <= MAX_EXTRA_FLOORS else None
+
+
+def capacity(prof, building=None):
+    c = _capacity(prof)
+    flex, extra, out = c.get("flex_per_floor"), c.get("max_extra_floors"), c.get("outsourcing")
+    flex = flex if _int(flex) and 0 <= flex <= MAX_FLEX_PER_FLOOR else DEFAULT_FLEX_PER_FLOOR
+    extra = extra if _int(extra) and 0 <= extra <= MAX_EXTRA_FLOORS else DEFAULT_EXTRA_FLOORS
+    room = MAX_BUILDING_FLOORS - (len(floors(prof)) if building is None else building)
+    return {"flex_per_floor": flex, "max_extra_floors": max(0, min(extra, room)),
+            "outsourcing": out if isinstance(out, bool) else True}
+
+
+def _room_desks(f):
+    rs = f.get("rooms") if isinstance(f.get("rooms"), list) else []
+    return sum(r.get("desks", 1) for r in rs if _mapping(r) and isinstance(r.get("role"), str) and _int(r.get("desks", 1))
+               and r.get("desks", 1) > 0)
+
+
+def flex_count(prof, f):
+    return max(0, min(capacity(prof)["flex_per_floor"], MAX_DESKS_PER_FLOOR - _room_desks(f)))
+
+
+def elastic_floor_desks(prof):
+    sizes = [_room_desks(f) + flex_count(prof, f) for f in floors(prof)]
+    return min(MAX_DESKS_PER_FLOOR, max([MIN_ELASTIC_FLOOR_DESKS] + sizes))
+
+
+def is_elastic(role):
+    return role in (FLEX_ROLE, OUT_ROLE)
+
+
+def is_temporary(floor, role, declared):
+    return role == OUT_ROLE or (role == FLEX_ROLE and floor >= declared)
+
+
+def zone(floor, role, declared):
+    if role == OUT_ROLE:
+        return "outsourced"
+    if role == FLEX_ROLE:
+        return "extra" if floor >= declared else "flex"
+    return "room"
 
 
 def floors(prof):
@@ -317,14 +404,24 @@ def desks(prof):
             n = r.get("desks", 1)
             for slot in range(n if _int(n) and n > 0 else 0):
                 out.append({"id": desk_id(project, fi, r["role"], slot), "project": project, "floor": fi,
-                            "role": r["role"], "slot": slot, "permanent": bool(r.get("permanent"))})
+                            "role": r["role"], "slot": slot, "permanent": bool(r.get("permanent")), "zone": "room"})
+        for slot in range(flex_count(prof, f)):
+            out.append({"id": desk_id(project, fi, FLEX_ROLE, slot), "project": project, "floor": fi,
+                        "role": FLEX_ROLE, "slot": slot, "permanent": False, "zone": "flex"})
     return out
 
 
-def structure(prof, retired=()):
+def _elastic_room(project, fi, role, n):
+    return {"role": role, "permanent": False, "flex": True,
+            "desks": [{"id": desk_id(project, fi, role, s), "slot": s, "retired": False} for s in range(n)]}
+
+
+def structure(prof, retired=(), extra_floors=0, outsourced_floors=0, building=None):
     """`office` del sobre `office.changed` / `GET /state` sin ocupantes. `retired` = ids de escritorios que ya no declara el
     perfil (se conservan, `retired: true`, en su piso/departamento si aún existe; si no, en un departamento al final del piso)."""
-    retired = sorted(set(retired), key=lambda d: (parse_desk_id(d) or ("", 0, "", 0))[1:])
+    project, declared = prof.get("project"), len(floors(prof))
+    retired = sorted((d for d in set(retired) if not is_temporary(*(parse_desk_id(d) or ("", 0, "", 0))[1:3], declared)),
+                     key=lambda d: (parse_desk_id(d) or ("", 0, "", 0))[1:])
     fl = []
     for fi, f in enumerate(floors(prof)):
         rooms = []
@@ -332,25 +429,43 @@ def structure(prof, retired=()):
             if not _mapping(r) or not isinstance(r.get("role"), str):
                 continue
             n = r.get("desks", 1) if _int(r.get("desks", 1)) else 0
-            rooms.append({"role": r["role"], "permanent": bool(r.get("permanent")),
-                          "desks": [{"id": desk_id(prof.get("project"), fi, r["role"], s), "slot": s, "retired": False}
+            rooms.append({"role": r["role"], "permanent": bool(r.get("permanent")), "flex": False,
+                          "desks": [{"id": desk_id(project, fi, r["role"], s), "slot": s, "retired": False}
                                     for s in range(n)]})
-        fl.append({"index": fi, "name": f.get("name") if isinstance(f.get("name"), str) else None, "rooms": rooms})
+        nf = flex_count(prof, f)
+        if nf:
+            rooms.append(_elastic_room(project, fi, FLEX_ROLE, nf))
+        fl.append({"index": fi, "name": f.get("name") if isinstance(f.get("name"), str) else None, "rooms": rooms,
+                   "temporary": False})
     for did in retired:
         p = parse_desk_id(did)
         if not p:
             continue
         _, fi, role, slot = p
         while len(fl) <= fi:
-            fl.append({"index": len(fl), "name": None, "rooms": []})
+            fl.append({"index": len(fl), "name": None, "rooms": [], "temporary": False})
         room = next((r for r in fl[fi]["rooms"] if r["role"] == role), None)
         if room is None:
-            room = {"role": role, "permanent": False, "desks": []}
+            room = {"role": role, "permanent": False, "flex": is_elastic(role), "desks": []}
             fl[fi]["rooms"].append(room)
         if not any(d["id"] == did for d in room["desks"]):
             room["desks"].append({"id": did, "slot": slot, "retired": True})
             room["desks"].sort(key=lambda d: d["slot"])
-    return {"company": company(prof), "half_life_s": half_life_s(prof), "floors": fl, "machine_rooms": machine_rooms(prof)}
+    n = elastic_floor_desks(prof)
+    for k in range(extra_floors):
+        fi = declared + k
+        floor = next((x for x in fl if x["index"] == fi), None)
+        if floor is None:
+            floor = {"index": fi, "name": None, "rooms": [], "temporary": True}
+            fl.append(floor)
+        floor["temporary"] = True
+        floor["rooms"].append(_elastic_room(project, fi, FLEX_ROLE, n))
+    fl.sort(key=lambda x: x["index"])
+    out = {"label": OUTSOURCED_LABEL,
+           "floors": [{"index": k, "name": None, "temporary": False, "rooms": [_elastic_room(project, k, OUT_ROLE, n)]}
+                      for k in range(outsourced_floors)]} if outsourced_floors else None
+    return {"company": company(prof), "half_life_s": half_life_s(prof), "floors": fl, "machine_rooms": machine_rooms(prof),
+            "capacity": capacity(prof, building), "outsourced": out}
 
 
 def machine_rooms(prof):

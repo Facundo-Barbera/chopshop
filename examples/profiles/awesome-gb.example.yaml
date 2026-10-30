@@ -23,6 +23,10 @@ office:
         - desk.note
     backend:
       match: {title: "^\\[be\\]", branch: "^be/"}
+capacity:
+  flex_per_floor: 4
+  max_extra_floors: 2
+  outsourcing: true
 rack:
   repos:
     - {provider: github, repo: "<org>/<repo-principal>", kind: main}
