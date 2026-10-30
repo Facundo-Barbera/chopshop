@@ -134,3 +134,56 @@ public final class KeychainCredentialStore: CredentialStore, @unchecked Sendable
         return items.compactMap { $0[kSecAttrAccount as String] as? String }
     }
 }
+
+/// Archivo JSON 0600 en un directorio 0700 (builds Debug: la firma ad-hoc cambia en cada build y el Keychain volvería a pedir
+/// permiso). Las credenciales nunca se imprimen.
+public final class FileCredentialStore: CredentialStore, @unchecked Sendable {
+    public static var dev: FileCredentialStore {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Chopshop Dev")
+        return FileCredentialStore(url: dir.appendingPathComponent("credentials.json"))
+    }
+
+    public let url: URL
+    private let lock = NSLock()
+    private var items: [String: String]?
+
+    public init(url: URL) { self.url = url }
+
+    private func load() -> [String: String] {
+        if let items { return items }
+        let read = (try? Data(contentsOf: url)).flatMap { try? JSONDecoder().decode([String: String].self, from: $0) } ?? [:]
+        items = read
+        return read
+    }
+
+    private func store(_ next: [String: String]) throws {
+        let fm = FileManager.default
+        let dir = url.deletingLastPathComponent()
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        try fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path)
+        let tmp = dir.appendingPathComponent(".credentials.\(UUID().uuidString)")
+        guard fm.createFile(atPath: tmp.path, contents: try JSONEncoder().encode(next), attributes: [.posixPermissions: 0o600]) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        if fm.fileExists(atPath: url.path) { _ = try fm.replaceItemAt(url, withItemAt: tmp) } else { try fm.moveItem(at: tmp, to: url) }
+        try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        items = next
+    }
+
+    public func credential(account: String) -> String? { lock.lock(); defer { lock.unlock() }; return load()[account] }
+
+    public func save(_ credential: String, account: String) throws {
+        lock.lock(); defer { lock.unlock() }
+        var next = load(); next[account] = credential
+        try store(next)
+    }
+
+    public func delete(account: String) throws {
+        lock.lock(); defer { lock.unlock() }
+        var next = load()
+        guard next.removeValue(forKey: account) != nil else { return }
+        try store(next)
+    }
+
+    public func accounts() -> [String] { lock.lock(); defer { lock.unlock() }; return Array(load().keys) }
+}

@@ -70,7 +70,13 @@ cat > "$APP/Contents/Info.plist" <<PL
 </dict></plist>
 PL
 SPARKLE_FRAMEWORK_SRC=$PRODUCTS/Sparkle.framework bash "$MAC_DIR/release/embed-sparkle.sh" "$APP"
-codesign --force --deep --sign - "$APP"
+SIGN_ID=$(security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/"Apple Development: /{print $2; exit}')
+if [ -n "$SIGN_ID" ]; then
+  codesign --force --deep --sign "$SIGN_ID" "$APP"
+else
+  echo "aviso: sin identidad «Apple Development» en el llavero; firma ad-hoc" >&2
+  codesign --force --deep --sign - "$APP"
+fi
 codesign --verify --deep --strict "$APP"
 
 cat <<TXT
