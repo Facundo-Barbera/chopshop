@@ -2,9 +2,10 @@ import SwiftUI
 import AppKit
 import os
 
-/// La oficina de un proyecto como un solo mundo (`WorldLayout`): vestíbulo, pisos con sus departamentos y sala de máquinas en
-/// un mismo lienzo. Es un visualizador puro: sin globos al pasar el ratón, sin barras ni listas encima; el detalle de un hilo vive
-/// en el panel lateral de quien la monta (`onSelect`).
+/// La oficina de un proyecto como un solo mundo (`WorldLayout`): vestíbulo y pisos con sus departamentos y sus salas de máquinas
+/// (0..N, las del perfil) en un mismo lienzo. Es un visualizador puro: sin globos al pasar el ratón, sin barras ni listas encima;
+/// el detalle vive en el panel lateral de quien la monta (`onSelect`): un hilo, o un armario (`rack:<k>:<unidad>`) o la consola
+/// (`machine:<k>`) de una sala de máquinas.
 ///
 /// Cámara: arrastrar = mover; rueda del ratón o pellizco del trackpad = zoom alrededor del cursor; dos dedos en el trackpad =
 /// mover; doble clic = encuadrar todo. Todo animado con suavizado y a la frecuencia de la pantalla; el estado de la cámara vive
@@ -12,8 +13,6 @@ import os
 @available(macOS 26.0, *)
 public struct OfficeWorldView: View {
     let floors: [FloorPlan]
-    let machines: FloorPlan?
-    let lights: [String: String]
     var frozenNow: Date?
     /// Región con la que abrir encuadrada (p. ej. `floor:0` al entrar desde la ciudad); nil = el mundo entero.
     var focusRegion: String?
@@ -24,22 +23,20 @@ public struct OfficeWorldView: View {
     @State private var aspect = 16.0 / 10.0
     @Environment(\.colorScheme) private var scheme
 
-    public init(floors: [FloorPlan], machines: FloorPlan? = nil, lights: [String: String] = [:], frozenNow: Date? = nil,
-                focusRegion: String? = nil, selected: String? = nil, onSelect: ((String?) -> Void)? = nil) {
-        self.floors = floors; self.machines = machines; self.lights = lights; self.frozenNow = frozenNow
+    public init(floors: [FloorPlan], frozenNow: Date? = nil, focusRegion: String? = nil, selected: String? = nil,
+                onSelect: ((String?) -> Void)? = nil) {
+        self.floors = floors; self.frozenNow = frozenNow
         self.focusRegion = focusRegion; self.selected = selected; self.onSelect = onSelect
     }
 
-    /// El mundo de un proyecto de la proyección viva (pisos de `ProjectOffice` y su sala de máquinas).
+    /// El mundo de un proyecto de la proyección viva (pisos de `ProjectOffice`, con sus salas de máquinas).
     public init(state: LiveState, project: String, now: Date? = nil, focusRegion: String? = nil, selected: String? = nil,
                 onSelect: ((String?) -> Void)? = nil) {
-        let m = MachineRoomPlan.plan(in: state, project: project)
-        let lights = Dictionary((m?.desks ?? []).map { ($0.id, MachineRoomPlan.light(of: $0, in: state)) }, uniquingKeysWith: { a, _ in a })
-        self.init(floors: ProjectOffice.floors(in: state, project: project, now: now ?? Date()), machines: m, lights: lights,
+        self.init(floors: ProjectOffice.floors(in: state, project: project, now: now ?? Date()),
                   frozenNow: now, focusRegion: focusRegion, selected: selected, onSelect: onSelect)
     }
 
-    private var world: WorldLayout { box.world(floors: floors, machines: machines, aspect: aspect) }
+    private var world: WorldLayout { box.world(floors: floors, aspect: aspect) }
 
     public var body: some View {
         let w = world
@@ -68,22 +65,26 @@ public struct OfficeWorldView: View {
         .simultaneousGesture(SpatialTapGesture(count: 2).onEnded { _ in box.fitAll() })
         .simultaneousGesture(SpatialTapGesture().onEnded { e in
             let id = box.hit(e.location)
-            let tid = id.flatMap { box.thread(ofSpot: $0, in: world) }
+            let tid = id.flatMap { box.selection(ofSpot: $0, in: world) }
             box.lastTapped = tid
             onSelect?(tid == selected ? nil : tid)
         })
         .onAppear { box.installScrollMonitor() }
         .onDisappear { box.removeScrollMonitor() }
         .onChange(of: selected) { _, tid in
-            // elegido desde fuera (la lista del panel): la cámara va a su escritorio
-            if let tid, tid != box.lastTapped, let hit = world.spot(ofThread: tid, now: frozenNow ?? Date()) { box.focus(hit.region, hit.spot) }
+            // elegido desde fuera (la lista del panel): la cámara va a su escritorio (o armario)
+            if let tid, tid != box.lastTapped, let hit = world.spot(ofMachine: tid) ?? world.spot(ofThread: tid, now: frozenNow ?? Date()) {
+                box.focus(hit.region, hit.spot)
+            }
             box.lastTapped = nil
         }
         .clipped()
     }
 
     private func spotID(of tid: String?, in w: WorldLayout, now: Date) -> String? {
-        guard let tid, let h = w.spot(ofThread: tid, now: now) else { return nil }
+        guard let tid else { return nil }
+        if FloorLayout.machinePart(tid) != nil { return tid }
+        guard let h = w.spot(ofThread: tid, now: now) else { return nil }
         return h.spot.id
     }
 
@@ -94,8 +95,7 @@ public struct OfficeWorldView: View {
             let sp = FrameMeter.signposter.beginInterval("office.draw")
             let t0 = ProcessInfo.processInfo.systemUptime
             let cam = box.camera(w, size: size, t: t, live: frozenNow == nil, focusRegion: focusRegion)
-            WorldRenderer(world: w, cam: cam, box: box, dark: dark, t: t, now: now, selected: sel, hovered: box.hovered,
-                          lights: lights).draw(&ctx)
+            WorldRenderer(world: w, cam: cam, box: box, dark: dark, t: t, now: now, selected: sel, hovered: box.hovered).draw(&ctx)
             FrameMeter.signposter.endInterval("office.draw", sp)
             FrameMeter.tick("oficina", cost: ProcessInfo.processInfo.systemUptime - t0)
         } symbols: {
@@ -132,7 +132,6 @@ struct WorldRenderer {
     let now: Date
     let selected: String?
     let hovered: String?
-    let lights: [String: String]
 
     private func regionCam(_ r: WorldLayout.Region) -> IsoCam {
         IsoCam(s: cam.s, cu: cam.cu - (r.ox - r.oy), cv: cam.cv - (r.ox + r.oy) / 2, ax: cam.ax, ay: cam.ay)
@@ -145,7 +144,7 @@ struct WorldRenderer {
         let regions = world.regions.sorted { ($0.x0 + $0.y0) < ($1.x0 + $1.y0) }
         let rs = regions.map { r in
             FloorRenderer(plan: r.plan, layout: r.layout, cam: regionCam(r), box: fbox, dark: dark, t: t, now: now,
-                          selected: selected, hovered: hovered, prefix: "\(r.id)|", lights: r.kind == .machines ? lights : nil)
+                          selected: selected, hovered: hovered, prefix: "\(r.id)|")
         }
         let looks = rs.map { $0.looks() }
         // losas de las regiones (suelo del piso) con su sombra: una sola capa desenfocada para todo el mundo
@@ -184,7 +183,7 @@ struct WorldRenderer {
         return p
     }
 
-    /// Losa baja bajo todas las salas de la región: agrupa un piso (o el vestíbulo, o la sala de máquinas) sin muros ni rótulos encima.
+    /// Losa baja bajo todas las salas de la región: agrupa un piso (o el vestíbulo) sin muros ni rótulos encima.
     private func plate(_ ctx: inout GraphicsContext, _ r: WorldLayout.Region) {
         let z = -1.0, h = 3.0
         let a = P(r.x0, r.y0, z + h), b = P(r.x0 + r.w, r.y0, z + h), c = P(r.x0 + r.w, r.y0 + r.d, z + h), e = P(r.x0, r.y0 + r.d, z + h)
@@ -209,13 +208,13 @@ final class WorldCameraBox {
     var frameInWindow = CGRect.zero
 
     // mundo en caché (la rejilla depende de la proporción de la vista)
-    private var cacheKey: (floors: [FloorPlan], machines: FloorPlan?, aspect: Double)?
+    private var cacheKey: (floors: [FloorPlan], aspect: Double)?
     private var cached: WorldLayout?
 
-    func world(floors: [FloorPlan], machines: FloorPlan?, aspect: Double) -> WorldLayout {
-        if let k = cacheKey, let c = cached, k.aspect == aspect, k.machines == machines, k.floors == floors { return c }
-        let w = WorldLayout(floors: floors, machines: machines, aspect: aspect)
-        cacheKey = (floors, machines, aspect); cached = w
+    func world(floors: [FloorPlan], aspect: Double) -> WorldLayout {
+        if let k = cacheKey, let c = cached, k.aspect == aspect, k.floors == floors { return c }
+        let w = WorldLayout(floors: floors, aspect: aspect)
+        cacheKey = (floors, aspect); cached = w
         return w
     }
 
@@ -324,8 +323,9 @@ final class WorldCameraBox {
 
     func hit(_ p: CGPoint) -> String? { hits.filter { $0.rect.contains(p) }.max { $0.key < $1.key }?.id }
 
-    /// Hilo del hueco (un armario de la sala de máquinas no es un hilo).
-    func thread(ofSpot id: String, in w: WorldLayout) -> String? {
+    /// Lo que se elige al pulsar un hueco: su hilo, o el propio id si es un armario o la consola de una sala de máquinas.
+    func selection(ofSpot id: String, in w: WorldLayout) -> String? {
+        if FloorLayout.machinePart(id) != nil { return id }
         if id.hasPrefix("lobby:") { return String(id.dropFirst(6)) }
         for r in w.regions where r.kind == .floor {
             if let d = r.plan.desk(id) { return d.occupant?.threadID }

@@ -7,7 +7,7 @@ from . import home, miniyaml, settings
 KNOWN = {"project", "company", "repo", "host", "overflow_host", "remote_repos", "t3_project", "scratch",
          "provider", "model", "runtime_mode", "workspace", "base_ref", "tracker", "ready", "branches",
          "decider", "approvers", "can_run", "cannot_run", "autonomy", "reactions", "max_parallel", "graph", "integration",
-         "automations", "office", "rack"}
+         "automations", "office", "rack", "machine_rooms"}
 
 
 class ProfileError(Exception):

@@ -115,6 +115,22 @@ class TestStructure(Base):
         self.assertEqual(self.envs(types=("office.changed",))[-1]["body"]["diff"]["reactivated"], ["awesome-gb/0/backend/1"])
 
 
+    def test_machine_rooms_from_profile(self):
+        """Las salas de máquinas del perfil viajan en `office.changed`; cambiarlas (sin tocar escritorios) lo reemite."""
+        self.step()
+        p = self.state()["projects"][0]
+        self.assertEqual((p["office"]["machine_rooms"], p["machine_rooms"], p["machine_room"]), ([], [], None))
+        self.prof = dict(self.prof, machine_rooms=[{"name": "Rack", "floor": 1, "repos": ["*"]}, {"name": "Consola"}])
+        self.office.reload()
+        ch = self.envs(types=("office.changed",))
+        self.assertEqual(len(ch), 2)
+        self.assertEqual([(r["name"], r["floor"]) for r in ch[-1]["body"]["machine_rooms"]], [("Rack", 1), ("Consola", 0)])
+        self.assertEqual(ch[-1]["body"]["diff"], {"added": [], "retired": [], "reactivated": []})
+        p = self.state()["projects"][0]
+        self.assertEqual([(r["name"], r["floor"]) for r in p["machine_rooms"]], [("Rack", 1), ("Consola", 0)])
+        self.assertEqual(p["machine_room"]["name"], "Rack")
+
+
 class TestDesks(Base):
     def test_assign_inherit_and_lineage(self):
         self.step()
