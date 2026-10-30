@@ -2,7 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { AgentSockets, LiveDb, loadMachine } from "./agentws";
 import type { HubRpc } from "./auth";
 import type { MachineChange, MachineCtx, MachineHubRpc, MachinesEnv } from "./machines";
-import { structureRev } from "./structure";
+import { type MachineIds, type StructureHub, structureRev } from "./structure";
 import { type LiveState, type ViewCtx, ViewerHub } from "./viewer";
 
 export interface HubEnv {
@@ -14,13 +14,14 @@ export interface LiveHubRpc {
   state(view: ViewCtx): Promise<LiveState>;
   stream(request: Request, view: ViewCtx): Promise<Response>;
   viewerChanged(userId: string): Promise<void>;
+  structureChanged(rev: number, machineIds: MachineIds): Promise<void>;
 }
 
 export interface LiveEnv extends MachinesEnv {
   HUB?: { idFromName(name: string): DurableObjectId; get(id: DurableObjectId): HubRpc & MachineHubRpc & LiveHubRpc };
 }
 
-export class Hub extends DurableObject<HubEnv> implements HubRpc, MachineHubRpc, LiveHubRpc {
+export class Hub extends DurableObject<HubEnv> implements HubRpc, MachineHubRpc, LiveHubRpc, StructureHub {
   readonly live: LiveDb;
   readonly agents: AgentSockets;
   readonly viewers: ViewerHub;
@@ -71,12 +72,19 @@ export class Hub extends DurableObject<HubEnv> implements HubRpc, MachineHubRpc,
     if (m.revoked) {
       this.agents.disconnect(machineId, "unauthorized", "credencial revocada");
       this.live.deleteSnapshots(machineId);
+      this.live.deleteSyncStatus(machineId);
     } else if (m.paused) {
       this.agents.disconnect(machineId, "forbidden", "máquina desconectada por el dueño");
     } else {
       this.live.deleteSnapshots(machineId, m.workspaceIds);
     }
     this.presence(machineId);
+  }
+
+  async structureChanged(rev: number, machineIds: MachineIds): Promise<void> {
+    const current = this.env.DB ? Math.max(rev, await structureRev(this.env.DB)) : rev;
+    await this.agents.structureChanged(machineIds);
+    this.viewers.publish("structure", JSON.stringify({ rev: current }), "everyone");
   }
 
   async viewerChanged(userId: string): Promise<void> {
