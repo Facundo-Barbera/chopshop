@@ -155,8 +155,8 @@ extension FloorPlan {
         switch kind {
         case .lobby: return name.map { "Vestíbulo \($0)" } ?? "Vestíbulo"
         case .floor(_, let i):
-            if outsourced { return "\(outsourcedLabel ?? "Contratista") · \(i - FloorPlan.outsourcedBase + 1)" }
-            if temporary { return "Piso \(i + 1) · en obra" }
+            if outsourced { return "\(outsourcedLabel ?? "Contratista") · \(elasticOrdinal)" }
+            if temporary { return "En obra · \(elasticOrdinal)" }
             return name ?? "Piso \(i + 1)"
         }
     }
