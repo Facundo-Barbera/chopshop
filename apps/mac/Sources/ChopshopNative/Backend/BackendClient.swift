@@ -6,6 +6,7 @@ public enum BackendError: Error, Equatable {
     case http(Int)
     case network(String)
     case badResponse
+    case missingToken
 
     public var code: BackendErrorBody.Code? {
         switch self {
@@ -22,6 +23,7 @@ public enum BackendError: Error, Equatable {
         case .http(let status): return "El servidor respondió HTTP \(status)."
         case .network(let m): return "No pude hablar con el servidor (\(m))."
         case .badResponse: return "La respuesta del servidor no es válida."
+        case .missingToken: return "El servidor no devolvió el token de la sesión."
         }
     }
 }
@@ -68,7 +70,8 @@ public struct BackendClient {
     public func me() async throws -> BackendMeResponse { try await call("GET", "v1/auth/me") }
 
     public func changePassword(current: String, new: String) async throws {
-        try await none("POST", "v1/auth/password", body: ["current_password": .string(current), "new_password": .string(new)])
+        try await none("POST", "v1/auth/password", body: ["current_password": .string(current), "new_password": .string(new)],
+                       verifiesPassword: true)
     }
 
     public func recover(email: String, recoveryCode: String, newPassword: String) async throws -> BackendRecoveryCodeResponse {
@@ -77,7 +80,7 @@ public struct BackendClient {
     }
 
     public func regenerateRecoveryCode(password: String) async throws -> BackendRecoveryCodeResponse {
-        try await call("POST", "v1/auth/recovery-code", body: ["password": .string(password)])
+        try await call("POST", "v1/auth/recovery-code", body: ["password": .string(password)], verifiesPassword: true)
     }
 
     public func invitations() async throws -> [BackendInvitation] {
@@ -275,7 +278,7 @@ public struct BackendClient {
     static func object(_ fields: [String: JSONValue?]) -> JSONValue { .object(fields.compactMapValues { $0 }) }
 
     private func store(_ r: BackendLoginResponse) throws {
-        guard let token = r.token, !token.isEmpty else { throw BackendError.badResponse }
+        guard let token = r.token, !token.isEmpty else { throw BackendError.missingToken }
         try session.save(token, apiURL: apiURL)
     }
 
@@ -321,8 +324,8 @@ public struct BackendClient {
     }
 
     private func call<T: Decodable>(_ method: String, _ path: String, query: [String: String?] = [:], body: [String: JSONValue?]? = nil,
-                                    auth: Bool = true, key: String? = nil) async throws -> T {
-        let data = try await send(try request(method, path, query: query, body: body, auth: auth))
+                                    auth: Bool = true, key: String? = nil, verifiesPassword: Bool = false) async throws -> T {
+        let data = try await send(try request(method, path, query: query, body: body, auth: auth), verifiesPassword: verifiesPassword)
         do {
             let decoder = JSONDecoder()
             if let key { decoder.userInfo[wrapKey] = key }
@@ -332,11 +335,11 @@ public struct BackendClient {
         }
     }
 
-    private func none(_ method: String, _ path: String, body: [String: JSONValue?]? = nil) async throws {
-        _ = try await send(try request(method, path, body: body))
+    private func none(_ method: String, _ path: String, body: [String: JSONValue?]? = nil, verifiesPassword: Bool = false) async throws {
+        _ = try await send(try request(method, path, body: body), verifiesPassword: verifiesPassword)
     }
 
-    private func send(_ req: URLRequest) async throws -> Data {
+    private func send(_ req: URLRequest, verifiesPassword: Bool = false) async throws -> Data {
         let data: Data
         let http: HTTPURLResponse
         do {
@@ -349,6 +352,10 @@ public struct BackendClient {
             throw BackendError.network(String(describing: type(of: error)))
         }
         if (200..<300).contains(http.statusCode) { return data }
+        if http.statusCode == 401, verifiesPassword, req.value(forHTTPHeaderField: "Authorization") != nil {
+            _ = try await me()
+            throw BackendError.api(status: 401, body: BackendErrorBody(code: .unauthorized, message: "La contraseña no es correcta."))
+        }
         if http.statusCode == 401 {
             if req.value(forHTTPHeaderField: "Authorization") != nil {
                 try? session.delete(apiURL: apiURL)
