@@ -16,7 +16,7 @@ struct ShellInspectorView: View {
             switch shell.state.inspector {
             case .panel(.machineRoom)?:
                 // la sala es ancha: el inspector se abre a 640 con ella
-                ShellPanelFrame(title: ShellPanel.machineRoom.title, flat: flat, close: close) {
+                ShellPanelFrame(title: ShellPanel.machineRoom.title, symbol: ShellPanel.machineRoom.symbol, flat: flat, close: close) {
                     if machineRoom.isEmpty {
                         ShellEmpty("La sala de máquinas está vacía", "Aparece cuando el agente (api_version 3) publique listeners, automatizaciones o el rack.")
                     } else {
@@ -24,11 +24,11 @@ struct ShellInspectorView: View {
                     }
                 }
             case .panel(let p)?:
-                ShellPanelFrame(title: p.title, flat: flat, close: close) { panel(p, s) }
+                ShellPanelFrame(title: p.title, symbol: p.symbol, flat: flat, close: close) { panel(p, s) }
             case .target(.project(let pr))?:
-                ShellPanelFrame(title: pr, flat: flat, close: close) { ShellProjectPanel(shell: shell, snapshot: s, project: pr) }
+                ShellPanelFrame(title: pr, symbol: "square.stack", flat: flat, close: close) { ShellProjectPanel(shell: shell, snapshot: s, project: pr) }
             case .target(.thread(let id, let pr))?:
-                ShellPanelFrame(title: "Hilo", flat: flat, close: close) { ShellThreadPanel(shell: shell, snapshot: s, threadID: id, project: pr) }
+                ShellPanelFrame(title: "Hilo", symbol: "person.crop.square", flat: flat, close: close) { ShellThreadPanel(shell: shell, snapshot: s, threadID: id, project: pr) }
             case .target(.city)?, nil:
                 EmptyView()
             }
@@ -54,25 +54,25 @@ struct ShellInspectorView: View {
 @available(macOS 26.0, *)
 struct ShellPanelFrame<Content: View>: View {
     let title: String
+    var symbol: String? = nil
     let flat: Bool
     let close: () -> Void
     @ViewBuilder let content: Content
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text(title).font(.headline).lineLimit(1)
+            HStack(spacing: 8) {
+                if let symbol { Image(systemName: symbol).font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary) }
+                Text(title).font(.system(size: 14, weight: .semibold)).lineLimit(1)
                 Spacer()
-                Button(action: close) { Image(systemName: "xmark").font(.callout.weight(.medium)) }
-                    .buttonStyle(.plain).foregroundStyle(.secondary)
-                    .accessibilityLabel("Cerrar el panel")
+                ShellIconButton(symbol: "xmark", label: "Cerrar el panel", action: close)
             }
-            .padding(.horizontal, 16).padding(.vertical, 12)
-            Divider()
+            .padding(.leading, 18).padding(.trailing, 12).frame(height: 48)
+            Rectangle().fill(Chrome.hairline).frame(height: 1)
             if flat {
-                VStack(alignment: .leading, spacing: 14) { content }.padding(16)
+                VStack(alignment: .leading, spacing: 22) { content }.padding(.horizontal, 18).padding(.vertical, 16)
             } else {
-                ScrollView { VStack(alignment: .leading, spacing: 14) { content }.padding(16) }
+                ScrollView { VStack(alignment: .leading, spacing: 22) { content }.padding(.horizontal, 18).padding(.vertical, 16) }
             }
         }
     }
@@ -84,11 +84,62 @@ struct ShellEmpty: View {
     let detail: String?
     init(_ title: String, _ detail: String? = nil) { self.title = title; self.detail = detail }
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Label(title, systemImage: "checkmark.circle").font(.callout).foregroundStyle(.secondary)
-            if let detail { Text(detail).font(.caption).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true) }
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "checkmark.circle").font(.system(size: 15)).foregroundStyle(.tertiary)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary)
+                if let detail { Text(detail).font(.system(size: 12)).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true) }
+            }
+            Spacer(minLength: 0)
         }
-        .padding(.vertical, 6)
+        .padding(.horizontal, 12).padding(.vertical, 11)
+        .background(RoundedRectangle(cornerRadius: Chrome.rowRadius + 3, style: .continuous).fill(Chrome.wash))
+    }
+}
+
+@available(macOS 26.0, *)
+struct ShellIconButton: View {
+    let symbol: String
+    let label: String
+    let action: () -> Void
+    @State private var hover = false
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 11, weight: .semibold)).foregroundStyle(hover ? .primary : .secondary)
+                .frame(width: 24, height: 24)
+                .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(hover ? Chrome.wash : .clear))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .accessibilityLabel(label)
+    }
+}
+
+@available(macOS 26.0, *)
+struct ShellTaskRow: View {
+    let task: MockTask
+    var host: String?
+    let action: () -> Void
+    @State private var hover = false
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 9) {
+                Image(systemName: task.state.plainSymbol).font(.system(size: 12))
+                    .foregroundStyle(task.state.attentionTint ?? Color.secondary).frame(width: 16)
+                Text(task.title).font(.system(size: 13)).foregroundStyle(task.state == .done || task.state == .skipped ? .secondary : .primary)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                if task.state == .waitingBot, let b = task.botWait { Text(b).font(.system(size: 11.5)).foregroundStyle(.tertiary).lineLimit(1) }
+                else if let h = host { Text(h).font(.system(size: 11.5).monospaced()).foregroundStyle(.tertiary).lineLimit(1) }
+            }
+            .padding(.horizontal, 8).frame(height: 30)
+            .background(RoundedRectangle(cornerRadius: Chrome.rowRadius, style: .continuous).fill(hover ? Chrome.wash : .clear))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .padding(.horizontal, -8)
     }
 }
 
@@ -100,8 +151,12 @@ private func hostOf(_ s: MockSnapshot) -> [String: String] {
 }
 
 @available(macOS 26.0, *)
-private func sectionTitle(_ t: String) -> some View {
-    Text(t).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+private func sectionTitle(_ t: String, count: Int? = nil) -> some View {
+    HStack(spacing: 6) {
+        Text(t).font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
+        if let count { Text("\(count)").font(.system(size: 12).monospacedDigit()).foregroundStyle(.tertiary) }
+    }
+    .padding(.bottom, 4)
 }
 
 // MARK: - Atención (antes: Preguntas)
@@ -116,20 +171,24 @@ struct ShellAttentionPanel: View {
         let tasks = Dictionary(snapshot.batches.flatMap(\.tasks).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let host = hostOf(snapshot)
         if items.isEmpty {
-            ShellEmpty("Nada te necesita ahora.")
+            ShellEmpty("Nada te necesita ahora.", "Cuando un hilo pregunte o se trabe, aparece aquí y el panel se abre solo.")
         } else {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(items) { it in
                     if let t = tasks[it.threadID] {
                         VStack(alignment: .leading, spacing: 0) {
                             Button { shell.state.go(.thread(id: it.threadID, project: it.project)) } label: {
-                                Text(it.project).font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                                HStack(spacing: 5) {
+                                    Image(systemName: "square.stack").font(.system(size: 10, weight: .medium))
+                                    Text(it.project).font(.system(size: 11.5, weight: .medium))
+                                }
+                                .foregroundStyle(.tertiary)
                             }
                             .buttonStyle(.plain)
-                            .padding(.top, 8)
+                            .padding(.top, 12)
                             AttentionRow(task: t, host: host[t.id])
                         }
-                        if it.id != items.last?.id { Divider() }
+                        if it.id != items.last?.id { Rectangle().fill(Chrome.hairline).frame(height: 1) }
                     }
                 }
             }
@@ -178,7 +237,7 @@ struct ShellBatchesPanel: View {
                 let bs = snapshot.batches(of: pr)
                 if !bs.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
-                        sectionTitle(pr)
+                        sectionTitle(pr, count: bs.count)
                         ForEach(bs) { b in ShellBatchCard(shell: shell, batch: b, graph: b.graph.flatMap { g in snapshot.graphs.first { $0.id == g } }) }
                     }
                 }
@@ -207,13 +266,12 @@ struct ShellBatchCard: View {
                     .font(.caption).foregroundStyle(failed > 0 ? Attention.stuck : Color.secondary)
             }
             ForEach(batch.tasks) { t in
-                CompactTaskRow(task: t)
-                    .contentShape(Rectangle())
-                    .onTapGesture { shell.state.go(.thread(id: t.id, project: batch.project)) }
+                ShellTaskRow(task: t) { shell.state.go(.thread(id: t.id, project: batch.project)) }
             }
         }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.primary.opacity(0.04)))
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: Chrome.rowRadius + 3, style: .continuous).fill(Chrome.wash))
+        .overlay(RoundedRectangle(cornerRadius: Chrome.rowRadius + 3, style: .continuous).strokeBorder(Chrome.hairline, lineWidth: 0.5))
     }
 }
 
@@ -313,15 +371,15 @@ struct ShellProjectPanel: View {
         let ts = snapshot.tasks(of: project)
         let host = hostOf(snapshot)
         let attention = ts.filter { $0.state == .needsYou || $0.state == .stuck }.sorted { $0.state < $1.state }
-        Text(ProjectSummaryText.line(snapshot.summary(of: project))).font(.callout).foregroundStyle(.secondary)
+        Text(ProjectSummaryText.line(snapshot.summary(of: project))).font(.system(size: 13)).foregroundStyle(.secondary)
         VStack(alignment: .leading, spacing: 0) {
-            sectionTitle("Necesita tu atención")
+            sectionTitle("Necesita tu atención", count: attention.isEmpty ? nil : attention.count)
             if attention.isEmpty {
                 ShellEmpty("Nada te necesita en este piso.")
             } else {
                 ForEach(attention) { t in
                     AttentionRow(task: t, host: host[t.id])
-                    if t.id != attention.last?.id { Divider() }
+                    if t.id != attention.last?.id { Rectangle().fill(Chrome.hairline).frame(height: 1) }
                 }
             }
         }
@@ -332,12 +390,10 @@ struct ShellProjectPanel: View {
 
     @ViewBuilder private func group(_ title: String, _ ts: [MockTask], _ host: [String: String]) -> some View {
         if !ts.isEmpty {
-            VStack(alignment: .leading, spacing: 2) {
-                sectionTitle("\(title) · \(ts.count)")
+            VStack(alignment: .leading, spacing: 0) {
+                sectionTitle(title, count: ts.count)
                 ForEach(ts) { t in
-                    CompactTaskRow(task: t, host: host[t.id])
-                        .contentShape(Rectangle())
-                        .onTapGesture { shell.state.go(.thread(id: t.id, project: project)) }
+                    ShellTaskRow(task: t, host: host[t.id]) { shell.state.go(.thread(id: t.id, project: project)) }
                 }
             }
         }
@@ -357,31 +413,39 @@ struct ShellThreadPanel: View {
         let found = snapshot.shellTask(threadID)
         let batch = found?.batch
         if let t = found?.task {
-            Text(t.title).font(.title3.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 6) {
-                Image(systemName: t.state.plainSymbol).foregroundStyle(t.state.attentionTint ?? .secondary)
-                Text(t.state.title).font(.callout).foregroundStyle(t.state.attentionTint ?? .secondary)
+            VStack(alignment: .leading, spacing: 8) {
+                Text(t.title).font(.system(size: 17, weight: .semibold)).fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 5) {
+                    Image(systemName: t.state.plainSymbol).font(.system(size: 11, weight: .semibold))
+                    Text(t.state.title).font(.system(size: 12, weight: .medium))
+                }
+                .foregroundStyle(t.state.attentionTint ?? .secondary)
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(Capsule().fill((t.state.attentionTint ?? .primary).opacity(t.state.attentionTint == nil ? 0.06 : 0.14)))
             }
             if t.state == .needsYou || t.state == .stuck { AttentionRow(task: t, host: batch?.host) }
-            Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 6) {
-                GridRow { Text("Proyecto").foregroundStyle(.secondary); Text(project) }
-                GridRow { Text("Hilo").foregroundStyle(.secondary); Text(t.id).monospaced().lineLimit(1).textSelection(.enabled) }
-                if let b = batch { GridRow { Text("Lote").foregroundStyle(.secondary); Text("\(b.id) · \(b.host)") } }
-                if let w = t.botWait { GridRow { Text("Espera").foregroundStyle(.secondary); Text(w) } }
+            Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 8) {
+                GridRow { Text("Proyecto").foregroundStyle(.tertiary); Text(project) }
+                GridRow { Text("Hilo").foregroundStyle(.tertiary); Text(t.id).monospaced().lineLimit(1).textSelection(.enabled) }
+                if let b = batch { GridRow { Text("Lote").foregroundStyle(.tertiary); Text("\(b.id) · \(b.host)") } }
+                if let w = t.botWait { GridRow { Text("Espera").foregroundStyle(.tertiary); Text(w) } }
             }
-            .font(.callout)
-            if let r = t.result { Text(r).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
-            if let e = t.lastError, t.state != .stuck { Text(e).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+            .font(.system(size: 12.5))
+            if let r = t.result { Text(r).font(.system(size: 13)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+            if let e = t.lastError, t.state != .stuck { Text(e).font(.system(size: 13)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
             if !t.answered.isEmpty {
                 VStack(alignment: .leading, spacing: 3) {
-                    sectionTitle("Respondido")
+                    sectionTitle("Respondido", count: t.answered.count)
                     ForEach(Array(t.answered.enumerated()), id: \.offset) { _, a in
-                        Text("\(a.summary) → \(a.choice) · \(a.by)").font(.caption).foregroundStyle(.secondary)
+                        Text("\(a.summary) → \(a.choice) · \(a.by)").font(.system(size: 12)).foregroundStyle(.secondary)
                     }
                 }
             }
             HStack(spacing: 8) {
-                if let u = t.link { Button("Abrir en T3") { shell.actions?.open(u) }.controlSize(.small) }
+                if let u = t.link {
+                    Button { shell.actions?.open(u) } label: { Label("Abrir en T3", systemImage: "arrow.up.forward.square") }
+                        .controlSize(.small)
+                }
                 if (t.state == .done || t.state == .stuck), shell.actions?.settle != nil {
                     Button("Cerrar hilo (settle)") {
                         shell.run(ShellCommand(id: "settle:\(t.id)", title: "", kind: .settle(threadID: t.id, project: project)))

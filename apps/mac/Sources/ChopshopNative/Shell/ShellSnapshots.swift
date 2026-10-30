@@ -11,11 +11,11 @@ public extension Snapshots {
         guard let state = CityOfficeFixture.state else { print("sin CityOfficeFixture"); return }
         let snap = SnapshotMapper.snapshot(state, now: FloorFixture.now)
         let size = CGSize(width: 1440, height: 900)
-        func shot(_ name: String, dark: Bool = true, _ edit: (inout ShellState) -> Void) {
+        func shot(_ name: String, dark: Bool = true, notice: ShellNotice? = nil, _ edit: (inout ShellState) -> Void) {
             let shell = ShellController()
             shell.snapshot = snap
             edit(&shell.state)
-            let v = ShellSnapshotFrame(state: state, snapshot: snap, shell: shell)
+            let v = ShellSnapshotFrame(state: state, snapshot: snap, shell: shell, notice: notice)
             NSApp?.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
             let r = ImageRenderer(content: v.frame(width: size.width, height: size.height).environment(\.colorScheme, dark ? .dark : .light))
             r.scale = 1
@@ -26,10 +26,12 @@ public extension Snapshots {
             try? data.write(to: URL(fileURLWithPath: path)); print("ok \(path)")
         }
         shot("shell-ciudad-dark") { _ in }
-        shot("shell-ciudad-light", dark: false) { _ in }
+        shot("shell-ciudad-light", dark: false, notice: ShellNotice(text: "Respuesta enviada a «t b»", error: false)) { _ in }
         shot("shell-atencion") { $0.toggle(.attention) }
         shot("shell-hilo") { $0.select(.thread(id: "b", project: "awesome-gb")) }
         shot("shell-lotes") { $0.toggle(.batches) }
+        shot("shell-piso") { $0.inspector = .target(.project("awesome-gb")) }
+        shot("shell-atencion-light", dark: false) { $0.toggle(.attention) }
         shot("shell-paleta") { $0.openPalette() }
         shot("shell-paleta-busqueda") { $0.openPalette(); $0.query = "resp" }
     }
@@ -42,6 +44,7 @@ struct ShellSnapshotFrame: View {
     let state: LiveState
     let snapshot: MockSnapshot
     @ObservedObject var shell: ShellController
+    var notice: ShellNotice? = nil
 
     var body: some View {
         let model = CityModel.build(state, perProject: true)
@@ -53,14 +56,15 @@ struct ShellSnapshotFrame: View {
                 Spacer()
                 ShellHUDView(hud: ShellHUD.from(snapshot), open: { _ in })
                 Spacer()
-                Image(systemName: "command").foregroundStyle(.secondary)
+                Image(systemName: "building.2").foregroundStyle(.secondary)
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary).padding(.leading, 10)
                 Image(systemName: "sidebar.trailing").foregroundStyle(.secondary)
             }
             .padding(.leading, 84).padding(.trailing, 18).frame(height: 44)
             .background(Color(nsColor: .windowBackgroundColor))
             Divider()
             HStack(spacing: 0) {
-                ZStack(alignment: .bottomLeading) {
+                ZStack(alignment: .bottomTrailing) {
                     CityView(model: model, lights: lights, snapshot: snapshot, state: state, frozenTime: 10, frozenNow: FloorFixture.now,
                              flatChrome: true)
                         .padding(.horizontal, 18).padding(.vertical, 14)
@@ -69,10 +73,13 @@ struct ShellSnapshotFrame: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay(alignment: .bottom) {
+                    if let n = notice { ShellNoticeView(notice: n, flat: true).padding(.bottom, 20) }
+                }
                 .overlay(alignment: .top) {
                     if shell.state.paletteOpen {
                         ShellPalette(shell: shell, commands: ShellCommands.all(snapshot, selected: shell.state.selectedThread), flat: true)
-                            .padding(.top, 40)
+                            .padding(.top, 56)
                     }
                 }
                 if shell.state.inspector != nil {
