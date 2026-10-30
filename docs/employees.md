@@ -10,7 +10,7 @@ escritorio ocupado ya no se fusiona en el despertar pendiente: entra en la cola 
 primera tarea sale de la cola y el empleado la toma (`employee.assigned reason: queue`).
 
 Este documento fija la forma de los datos; los schemas y ejemplos están en `packages/api/fixtures/` y los consumen el agente
-(Python), la app Mac (Swift) y `@chopshop/api`.
+(Python) y la app Mac (Swift); `@chopshop/api` aún no decodifica `employees`/`queues` (ver `docs/plans/contract-audit.md`).
 
 ## Ids
 
@@ -45,6 +45,7 @@ Cuando la tarea arranca, su hilo de T3 sigue con su propio id (`thread_id`) y el
 | `employees[]` | un elemento por escritorio permanente no retirado, en el orden de `layout.desks` (piso, departamento, `n`). |
 | `employees[].name` | nombre visible; `null` = sin nombre (la UI muestra el rol). Lo cambia `employee.renamed`. |
 | `employees[].state` | `idle` (escritorio libre) · `working` (hay un hilo sentado). |
+| `employees[].location` | dónde se dibuja: `desk` si está `working`, `common` (área común) si está `idle`. Derivado de `state`; opcional para los clientes (si falta, se deriva igual). |
 | `employees[].thread_id`, `task`, `title`, `since` | hilo actual (o el último si está `idle`), tarea de cola que lo originó (`null` si vino de un despertar directo o manual), su título y desde cuándo está en el estado actual. |
 | `employees[].queue_len` | largo de su cola (`= len(queues[id].items)`). |
 | `queues` | `{id de empleado: {items, updated}}`; todo empleado tiene clave (cola vacía = `items: []`, `updated: null` si nunca cambió). `items` va en orden de ejecución, con la forma de `queue.changed`. |
@@ -89,5 +90,5 @@ packages/api/fixtures/
   snapshot.employees.json        employees[] y queues{} de ejemplo
 ```
 
-Los ejemplos además pasan `envelope.errors` del agente (los tipos nuevos aún no tienen entrada en `envelope.SCHEMAS`, así que
-ahí solo se valida el sobre).
+Los ejemplos además pasan `envelope.errors` del agente, que valida el sobre y, con la entrada de cada tipo en
+`envelope.SCHEMAS`, los campos obligatorios del cuerpo.

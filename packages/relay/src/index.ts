@@ -78,6 +78,13 @@ export class Hub extends DurableObject<Env> {
         return this.viewers.state(caller.record!.account);
       case "stream":
         return this.viewers.stream(request, caller.record!.account);
+      case "revoke": {
+        const res = (await this.pairing.handle(request, url.pathname)) ?? new Response("Not Found", { status: 404 });
+        if (res.status === 204 && url.pathname.startsWith("/v1/tokens/")) {
+          this.agents.revoke(decodeURIComponent(url.pathname.slice("/v1/tokens/".length)));
+        }
+        return res;
+      }
       default:
         return (await this.pairing.handle(request, url.pathname)) ?? new Response("Not Found", { status: 404 });
     }

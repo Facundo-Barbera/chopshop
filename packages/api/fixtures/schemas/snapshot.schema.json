@@ -58,6 +58,12 @@
               "working"
             ]
           },
+          "location": {
+            "enum": [
+              "desk",
+              "common"
+            ]
+          },
           "thread_id": {
             "type": [
               "string",
