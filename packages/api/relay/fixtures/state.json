@@ -1,0 +1,94 @@
+{
+  "v": 1,
+  "type": "state",
+  "id": "01M6A2QE5G8J0M2P4S6V8X0Z2B",
+  "ts": "2026-10-30T14:03:01.000Z",
+  "head": "Q8XZ4M2B-57",
+  "machines": [
+    {
+      "machine_id": "contabo-dev",
+      "seq": 1842,
+      "snapshot_age_s": 48,
+      "expires_at": "2026-10-30T14:04:12.004Z"
+    }
+  ],
+  "snapshots": [
+    {
+      "v": 1,
+      "type": "snapshot",
+      "id": "01M6A2QA1B3D5F7H9K1M3P5R7T",
+      "ts": "2026-10-30T14:02:12.004Z",
+      "machine_id": "contabo-dev",
+      "seq": 1842,
+      "ttl_s": 120,
+      "agent_version": "0.9.0",
+      "health": {
+        "state": "ok",
+        "t3_ok": true,
+        "cpu_pct": 23.5,
+        "ram_pct": 41.0,
+        "disk_pct": 37.2,
+        "load1": 1.42
+      },
+      "counts": {
+        "running": 2,
+        "queued": 1,
+        "waiting": 0,
+        "stuck": 0,
+        "needs_human": 1,
+        "waiting_bot": 0,
+        "done": 9,
+        "failed": 0
+      },
+      "projects": [
+        {
+          "name": "nuskills",
+          "roles": [
+            "backend",
+            "frontend",
+            "qa"
+          ],
+          "threads_running": 2,
+          "threads_pending": 1,
+          "attention": 1
+        },
+        {
+          "name": "chopshop",
+          "roles": [
+            "relay",
+            "mac"
+          ],
+          "threads_running": 0,
+          "threads_pending": 0,
+          "attention": 0
+        }
+      ],
+      "parts": [
+        {
+          "name": "state",
+          "media_type": "application/json",
+          "enc": "none",
+          "bytes": 320,
+          "sha256": "50b33e3825911f3f6b47280318dad666045b1f523dff98ffb382a48325713719",
+          "data": "eyJ0aHJlYWRzIjpbeyJrZXkiOiJ0LTAxIiwicHJvamVjdCI6Im51c2tpbGxzIiwidGl0bGUiOiJCVUctMyDCtyBSYWNoYSBzZSByZWluaWNpYSIsInBoYXNlIjoicnVubmluZyIsImF0dGVudGlvbiI6bnVsbCwicm9sZSI6ImJhY2tlbmQiLCJkZXNrIjoibnVza2lsbHMvYmFja2VuZC0xIiwidXBkYXRlZCI6IjIwMjYtMTAtMzBUMTQ6MDE6NTguMDAwWiJ9XSwiYXR0ZW50aW9uIjpbeyJrZXkiOiJ0YXNrOm1jcDphMDM2OTRlNSIsInByb2plY3QiOiJudXNraWxscyIsIm5lZWRzIjoiaHVtYW4iLCJzdW1tYXJ5Ijoiwr9NaWdybyBsYSB0YWJsYSBzdHJlYWtzPyJ9XX0="
+        },
+        {
+          "name": "queue",
+          "media_type": "application/json",
+          "enc": "none",
+          "bytes": 124,
+          "sha256": "37b4a9847394db94ffb520760844b085d3b8736c049e445a31bf1a4d27eb2173",
+          "data": "eyJpdGVtcyI6W3sia2V5IjoicS03IiwicHJvamVjdCI6ImNob3BzaG9wIiwicm9sZSI6InJlbGF5IiwidGl0bGUiOiJLMiDCtyBXb3JrZXIgZGVsIHJlbGF5IiwicGhhc2UiOiJxdWV1ZWQiLCJwb3NpdGlvbiI6MX1dfQ=="
+        },
+        {
+          "name": "employees",
+          "media_type": "application/json",
+          "enc": "none",
+          "bytes": 567,
+          "sha256": "1212679e0eebaae2f1bcd1b2290ce41829d08d36b3b1877e07ad6d1d666ee55f",
+          "data": "eyJlbXBsb3llZXMiOlt7ImZsb29yIjowLCJpZCI6ImF3ZXNvbWUtZ2IvMC90cmlhZ2UvMCIsImxvY2F0aW9uIjoiZGVzayIsIm5hbWUiOiJUcsOtYSIsInByb2plY3QiOiJhd2Vzb21lLWdiIiwicXVldWVfbGVuIjoxLCJyb2xlIjoidHJpYWdlIiwic2luY2UiOiIyMDI3LTAxLTE1VDA5OjEyOjAwLjAwMFoiLCJzbG90IjowLCJzdGF0ZSI6IndvcmtpbmciLCJ0YXNrIjoicTowMU1DQzVZM1MwRjhZSDZQVjhURU43QkQwMCIsInRocmVhZF9pZCI6ImstZTkyNDY2YTk1ZjQzOTBkNyIsInRpdGxlIjoiVHJpYWdlICMyMTIgwrcgbG9naW4gZmFsbGEgZW4gU2FmYXJpIn1dLCJxdWV1ZXMiOnsiYXdlc29tZS1nYi8wL3RyaWFnZS8wIjp7Iml0ZW1zIjpbeyJieSI6InRyaWFnZS1ib3QiLCJlbnF1ZXVlZF9hdCI6IjIwMjctMDEtMTVUMDk6MDE6MDAuMDAwWiIsInRhc2siOiJxOjAxTUNDNVkzUzBGOFlINlBWOFRFTjdCRDEwIiwidGl0bGUiOiJUcmlhZ2UgIzIxMyDCtyB0eXBvIGVuIFJFQURNRSIsInRyaWdnZXIiOiJkZXNrLm5vdGUifV0sInVwZGF0ZWQiOiIyMDI3LTAxLTE1VDA5OjEyOjAwLjAwMFoifX19"
+        }
+      ]
+    }
+  ]
+}

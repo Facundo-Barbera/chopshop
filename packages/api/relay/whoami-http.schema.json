@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/relay/v1/whoami-http.schema.json",
+  "title": "GET /whoami: rol del token y máquina atada (relay -> visor o agente, HTTP JSON)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "role",
+    "machine_id"
+  ],
+  "properties": {
+    "role": {
+      "enum": [
+        "viewer",
+        "machine"
+      ]
+    },
+    "machine_id": {
+      "oneOf": [
+        {
+          "$ref": "common.schema.json#/$defs/machine_id"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  }
+}
