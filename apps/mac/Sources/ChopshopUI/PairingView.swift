@@ -7,6 +7,8 @@ import ChopshopNative
 struct PairingView: View {
     @EnvironmentObject var model: AppModel
     let agent: AgentSpec
+    /// Sin nombre ni URL (la fila de ajustes ya los muestra).
+    var compact = false
 
     enum Phase: Equatable { case idle, pairing, paired, failed(String) }
     @State private var code = ""
@@ -20,8 +22,10 @@ struct PairingView: View {
             HStack(spacing: 8) {
                 Image(systemName: paired ? "checkmark.seal.fill" : "link.badge.plus")
                     .foregroundStyle(paired ? Color.green : Color.secondary)
-                Text(agent.name).font(.callout.weight(.semibold))
-                Text(agent.url).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                if !compact {
+                    Text(agent.name).font(.callout.weight(.semibold))
+                    Text(agent.url).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                }
                 Spacer(minLength: 6)
                 if paired {
                     Text("Emparejado").font(.caption).foregroundStyle(.secondary)
