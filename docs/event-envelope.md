@@ -65,6 +65,16 @@ Mientras dure la compatibilidad (un ciclo), `GET /events`, `/snapshot.events` y 
 | `forge.dispatch` | run (`<proveedor>:<repo>#<nonce>`) | null / info | **provider**, **repo**, **workflow**, **ref**, nonce, inputs (lo emite una automatización: es el único tipo reservado que un script puede emitir) |
 | `listener.state` | listener | null / info (degraded → warn, down → error) | **name** (`t3watch`, `forge` (eventos de GitHub), `rack`, `actions`, `webhooks`, `automations`, `collector`, `engine`, `office`, `halflife`, `roles`), **state** (`ok, degraded, down`), last_ok, last_cycle, backoff_s, error |
 | `agent.started` | agent | null / info | **version** |
+| `employee.assigned` | desk (empleado) | null / info | **employee**, **role**, **thread_id**, **task**, **reason** (`wake, queue, manual, inherited`), name, title, since, queue_len |
+| `employee.idle` | desk (empleado) | null / info (failed → warn) | **employee**, **role**, **reason** (`done, failed, cancelled, released, retired`), **thread_id**, **since**, name, summary, queue_len |
+| `employee.renamed` | desk (empleado) | null / info | **employee**, **role**, **name**, **previous**, **by** |
+| `queue.changed` | desk (empleado) | null / info | **employee**, **items** `[{task, title, enqueued_at, by, trigger}]`, **reason** (`enqueued, dequeued, cancelled, reordered, cleared`), task |
+| `task.enqueued` | task (`q:<ULID>`) | null / info | **task**, **employee**, **title**, **position**, **by**, trigger, enqueued_at |
+| `task.cancelled` | task (`q:<ULID>`) | null / info | **task**, **employee**, **phase** (`queued, running`), **by**, **reason** (`manual, superseded, retired, expired`), thread_id, note |
+
+Los `employee.*`, `queue.changed` y `task.enqueued|cancelled` son el contrato de empleados y colas (`docs/employees.md`):
+un empleado es un escritorio permanente y su id es el del escritorio (`<proyecto>/<piso>/<rol>/<n>`). Schemas JSON y
+ejemplos en `packages/api/fixtures/`; todavía no están en `envelope.SCHEMAS`.
 
 `task.state` gana (aditivo) `role` (rol de la oficina o `null` = vestíbulo), `ended_at` y `touched_at` (ISO, para la
 semivida) y `summary` (resumen final). Los `github.*` se mantienen un ciclo junto a los `forge.*` genéricos.

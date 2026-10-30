@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://chopshop.local/schemas/snapshot.schema.json",
+  "title": "snapshot (employees, queues)",
+  "type": "object",
+  "required": [
+    "employees",
+    "queues"
+  ],
+  "properties": {
+    "employees": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "project",
+          "floor",
+          "role",
+          "slot",
+          "name",
+          "state",
+          "thread_id",
+          "task",
+          "since",
+          "queue_len"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[^/\\s]+/[0-9]+/[a-z0-9][a-z0-9_-]{0,31}/[0-9]+$"
+          },
+          "project": {
+            "type": "string",
+            "minLength": 1
+          },
+          "floor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "role": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,31}$"
+          },
+          "slot": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "enum": [
+              "idle",
+              "working"
+            ]
+          },
+          "thread_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "task": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^q:[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(\\.\\d{1,6})?Z$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "queue_len": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "queues": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[^/\\s]+/[0-9]+/[a-z0-9][a-z0-9_-]{0,31}/[0-9]+$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "items",
+          "updated"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "task",
+                "title",
+                "enqueued_at",
+                "by"
+              ],
+              "properties": {
+                "task": {
+                  "type": "string",
+                  "pattern": "^q:[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+                },
+                "title": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "enqueued_at": {
+                  "type": "string",
+                  "pattern": "^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(\\.\\d{1,6})?Z$"
+                },
+                "by": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "trigger": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            }
+          },
+          "updated": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(\\.\\d{1,6})?Z$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}
