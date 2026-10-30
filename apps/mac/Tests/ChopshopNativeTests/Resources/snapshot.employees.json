@@ -1,0 +1,32 @@
+{
+  "employees": [
+    {
+      "id": "awesome-gb/0/triage/0",
+      "project": "awesome-gb",
+      "floor": 0,
+      "role": "triage",
+      "slot": 0,
+      "name": "Tría",
+      "state": "working",
+      "thread_id": "mcp:c41f",
+      "task": "q:01MCC5Y3S0F8YH6PV8TEN7BD00",
+      "title": "Triage #212 · login falla en Safari",
+      "since": "2027-01-15T09:12:00.000Z",
+      "queue_len": 1
+    }
+  ],
+  "queues": {
+    "awesome-gb/0/triage/0": {
+      "items": [
+        {
+          "task": "q:01MCC5Y3S0F8YH6PV8TEN7BD10",
+          "title": "Triage #213 · typo en README",
+          "enqueued_at": "2027-01-15T09:01:00.000Z",
+          "by": "triage-bot",
+          "trigger": "desk.note"
+        }
+      ],
+      "updated": "2027-01-15T09:12:00.000Z"
+    }
+  }
+}
