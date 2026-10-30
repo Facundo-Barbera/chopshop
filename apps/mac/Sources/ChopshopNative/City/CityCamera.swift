@@ -89,13 +89,14 @@ public struct OfficeEmbedding: Equatable, Sendable {
     public static let inset = 0.32 * CityGeo.tile
 
     /// `rooms` = rectángulo (x0, y0, x1, y1) que ocupan las salas de la oficina (mundo de la oficina).
-    /// Las salas quedan centradas sobre la losa del piso `level` del edificio, lo más grandes que quepan.
+    /// Las salas quedan centradas sobre la losa del piso `level` del edificio (con su retranqueo), lo más grandes que quepan.
     public init(rooms: CGRect, building b: CityBuilding, level: Int) {
         let rw = max(1, Double(rooms.width)), rd = max(1, Double(rooms.height))
-        let k = min((b.w - 2 * Self.inset) / rw, (b.d - 2 * Self.inset) / rd)
-        let cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2
+        let r = b.rect(level)
+        let k = min((r.w - 2 * Self.inset) / rw, (r.d - 2 * Self.inset) / rd)
+        let cx = (r.x0 + r.x1) / 2, cy = (r.y0 + r.y1) / 2
         self.init(k: k, ex: cx - k * Double(rooms.midX), ey: cy - k * Double(rooms.midY),
-                  ez: Double(level) * CityGeo.floorH + CityGeo.slabH)
+                  ez: b.floorZ(level) + CityGeo.slabH)
     }
 
     private var eu: Double { ex - ey }
@@ -179,11 +180,11 @@ public struct CityTransition: Equatable, Sendable {
 
 /// Clic en la ciudad: qué piso hay bajo un punto de pantalla.
 public enum CityHit {
-    /// Silueta en pantalla de un piso (losa con vuelo incluida).
+    /// Silueta en pantalla de un piso (losa con vuelo incluida; la planta baja baja hasta el suelo, con el plinto).
     public static func floorPolygon(_ b: CityBuilding, level: Int, frame f: IsoFrame) -> [CGPoint] {
-        let o = CityGeo.overhang
-        let z0 = Double(level) * CityGeo.floorH, z1 = z0 + CityGeo.floorH
-        let x0 = b.x0 - o, x1 = b.x1 + o, y0 = b.y0 - o, y1 = b.y1 + o
+        let o = CityGeo.overhang, r = b.rect(level)
+        let z0 = level == 0 ? 0 : b.floorZ(level), z1 = b.floorZ(level) + b.floorHeight(level)
+        let x0 = r.x0 - o, x1 = r.x1 + o, y0 = r.y0 - o, y1 = r.y1 + o
         return [f.pt(x0, y0, z1), f.pt(x1, y0, z1), f.pt(x1, y0, z0), f.pt(x1, y1, z0), f.pt(x0, y1, z0), f.pt(x0, y1, z1)]
     }
 
