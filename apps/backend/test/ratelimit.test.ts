@@ -41,12 +41,12 @@ describe("límites de login", () => {
   });
 
   it("claves con prefijo y sha256, sin correo ni IP en claro", async () => {
-    const keys = await loginKeys("  Ana@Example.COM ", "203.0.113.7");
+    const keys = await loginKeys("  Ana@Ejemplo.TEST ", "203.0.113.7");
     assert.deepEqual(
       keys.map((k) => k.hash),
       [
-        "ei:" + createHash("sha256").update("ana@example.com|203.0.113.7").digest("hex"),
-        "e:" + createHash("sha256").update("ana@example.com").digest("hex"),
+        "ei:" + createHash("sha256").update("ana@ejemplo.test|203.0.113.7").digest("hex"),
+        "e:" + createHash("sha256").update("ana@ejemplo.test").digest("hex"),
         "ip:" + createHash("sha256").update("203.0.113.7").digest("hex"),
       ],
     );
@@ -57,7 +57,7 @@ describe("límites de login", () => {
   });
 
   it("bloquea correo+IP al quinto fallo y el bloqueo crece de forma progresiva hasta 60 min", async () => {
-    const keys = await loginKeys("ana@example.com", "203.0.113.7");
+    const keys = await loginKeys("ana@ejemplo.test", "203.0.113.7");
     assert.equal(await fail(keys, 4, T0), 0);
     assert.equal(await retryAfter(db, keys, T0), 0);
     assert.equal(await recordFailure(db, keys, T0), 60);
@@ -72,7 +72,7 @@ describe("límites de login", () => {
   });
 
   it("la ventana caduca 15 min después del último fallo o del fin del bloqueo", async () => {
-    const keys = await loginKeys("ana@example.com", "203.0.113.7");
+    const keys = await loginKeys("ana@ejemplo.test", "203.0.113.7");
     await fail(keys, 4, T0);
     assert.equal(await recordFailure(db, keys, T0 + 15 * MIN), 0);
     await fail(keys, 3, T0 + 15 * MIN);
@@ -82,21 +82,21 @@ describe("límites de login", () => {
 
   it("el bloqueo por correo alcanza a todas las IPs y no depende de que el correo exista", async () => {
     let retry = 0;
-    for (let i = 0; i < 20; i++) retry = await recordFailure(db, await loginKeys("nadie@example.com", `198.51.100.${i}`), T0);
+    for (let i = 0; i < 20; i++) retry = await recordFailure(db, await loginKeys("nadie@ejemplo.test", `198.51.100.${i}`), T0);
     assert.equal(retry, 15 * 60);
-    assert.equal(await retryAfter(db, await loginKeys("NADIE@example.com", "192.0.2.1"), T0), 15 * 60);
-    assert.equal(await retryAfter(db, await loginKeys("otra@example.com", "192.0.2.1"), T0), 0);
+    assert.equal(await retryAfter(db, await loginKeys("NADIE@ejemplo.test", "192.0.2.1"), T0), 15 * 60);
+    assert.equal(await retryAfter(db, await loginKeys("otra@ejemplo.test", "192.0.2.1"), T0), 0);
   });
 
   it("el bloqueo por IP llega a los 100 fallos en 1 h con correos distintos", async () => {
     let retry = 0;
-    for (let i = 0; i < 100; i++) retry = await recordFailure(db, await loginKeys(`u${i}@example.com`, "192.0.2.9"), T0);
+    for (let i = 0; i < 100; i++) retry = await recordFailure(db, await loginKeys(`u${i}@ejemplo.test`, "192.0.2.9"), T0);
     assert.equal(retry, 60 * 60);
-    assert.equal(await retryAfter(db, await loginKeys("nueva@example.com", "192.0.2.9"), T0), 60 * 60);
+    assert.equal(await retryAfter(db, await loginKeys("nueva@ejemplo.test", "192.0.2.9"), T0), 60 * 60);
   });
 
   it("un login correcto borra solo la clave correo+IP", async () => {
-    const keys = await loginKeys("ana@example.com", "203.0.113.7");
+    const keys = await loginKeys("ana@ejemplo.test", "203.0.113.7");
     await fail(keys, 5, T0);
     await clearLimit(db, keys[0]!);
     const rows = fake.db.prepare("SELECT key_hash, failures FROM auth_attempts ORDER BY key_hash").all() as { key_hash: string; failures: number }[];
