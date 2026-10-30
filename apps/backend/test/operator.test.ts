@@ -108,7 +108,7 @@ describe("límite op:", () => {
     const env = await freshEnv();
     for (let i = 0; i < 4; i++) await call(env, "POST", "/v1/operator/recover", { auth: "Bearer malo", body: {} });
     const old = new Date(Date.now() - 11 * 60_000).toISOString();
-    await env.DB.prepare("UPDATE auth_attempts SET window_start = ?").bind(old).run();
+    await env.DB.prepare("UPDATE auth_attempts SET window_start = ?1, updated_at = ?1").bind(old).run();
     await call(env, "POST", "/v1/operator/recover", { auth: "Bearer malo", body: {} });
     assert.equal((await call(env, "POST", "/v1/operator/recover", { auth: OP, body: {} })).status, 409);
   });
