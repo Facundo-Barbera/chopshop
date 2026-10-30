@@ -127,6 +127,9 @@ def visible(st):
     out["projects"] = [p for p in st.get("projects") or [] if p.get("name") in allowed]
     out["lobby"] = [x for x in st.get("lobby") or [] if x.get("project") in allowed]
     out["recent"] = [e for e in st.get("recent") or [] if e.get("project") is None or e.get("project") in allowed]
+    if "employees" in st:
+        out["employees"] = [e for e in st["employees"] or [] if e.get("project") in allowed]
+        out["queues"] = {k: v for k, v in (st.get("queues") or {}).items() if k.split("/", 1)[0] in allowed}
     return out
 
 

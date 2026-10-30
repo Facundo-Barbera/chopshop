@@ -1,5 +1,6 @@
 {
   "api_version": 3,
+  "employees": [],
   "head_seq": 17,
   "lobby": [
     {
@@ -312,6 +313,7 @@
       ]
     }
   ],
+  "queues": {},
   "recent": [
     {
       "body": {
