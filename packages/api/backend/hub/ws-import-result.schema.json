@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/backend/v2/hub/ws-import-result.schema.json",
+  "title": "WS v2 import.result (relay → agente)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "v",
+    "type",
+    "id",
+    "ts",
+    "re",
+    "import_id",
+    "status"
+  ],
+  "properties": {
+    "v": {
+      "$ref": "../common.schema.json#/$defs/v"
+    },
+    "id": {
+      "$ref": "../common.schema.json#/$defs/msg_id"
+    },
+    "ts": {
+      "$ref": "../common.schema.json#/$defs/ts"
+    },
+    "type": {
+      "const": "import.result"
+    },
+    "re": {
+      "$ref": "../common.schema.json#/$defs/msg_id"
+    },
+    "import_id": {
+      "$ref": "../common.schema.json#/$defs/uuid"
+    },
+    "status": {
+      "enum": [
+        "stored",
+        "duplicate"
+      ]
+    }
+  }
+}

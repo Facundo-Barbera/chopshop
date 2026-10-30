@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/backend/v2/hub/ws-hello.schema.json",
+  "title": "WS v2 hello (agente → relay)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "v",
+    "type",
+    "id",
+    "ts",
+    "machine_id",
+    "agent_version",
+    "protocol",
+    "projects"
+  ],
+  "properties": {
+    "v": {
+      "$ref": "../common.schema.json#/$defs/v"
+    },
+    "id": {
+      "$ref": "../common.schema.json#/$defs/msg_id"
+    },
+    "ts": {
+      "$ref": "../common.schema.json#/$defs/ts"
+    },
+    "type": {
+      "const": "hello"
+    },
+    "machine_id": {
+      "$ref": "../common.schema.json#/$defs/local_machine_id"
+    },
+    "agent_version": {
+      "$ref": "../common.schema.json#/$defs/version"
+    },
+    "protocol": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "last_seq": {
+      "$ref": "../common.schema.json#/$defs/count"
+    },
+    "projects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "roles"
+        ],
+        "properties": {
+          "name": {
+            "$ref": "../common.schema.json#/$defs/name"
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "$ref": "../common.schema.json#/$defs/name"
+            },
+            "maxItems": 64,
+            "uniqueItems": true
+          }
+        }
+      },
+      "maxItems": 256
+    }
+  }
+}

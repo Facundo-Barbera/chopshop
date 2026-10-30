@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/backend/v2/error.schema.json",
+  "title": "Error de la API HTTP, del stream SSE y del WebSocket (§5.1)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "v",
+    "type",
+    "id",
+    "ts",
+    "re",
+    "code",
+    "message"
+  ],
+  "properties": {
+    "v": {
+      "$ref": "common.schema.json#/$defs/v"
+    },
+    "type": {
+      "const": "error"
+    },
+    "id": {
+      "$ref": "common.schema.json#/$defs/msg_id"
+    },
+    "ts": {
+      "$ref": "common.schema.json#/$defs/ts"
+    },
+    "re": {
+      "oneOf": [
+        {
+          "$ref": "common.schema.json#/$defs/msg_id"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "code": {
+      "enum": [
+        "bad_request",
+        "unauthorized",
+        "forbidden",
+        "not_found",
+        "conflict",
+        "gone",
+        "too_large",
+        "rate_limited",
+        "unsupported_version",
+        "internal",
+        "timeout"
+      ]
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "field": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "retry_after_s": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3600
+    },
+    "current": {
+      "$ref": "common.schema.json#/$defs/json_object"
+    },
+    "close": {
+      "type": "boolean"
+    }
+  }
+}
