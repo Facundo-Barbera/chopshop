@@ -2,6 +2,7 @@ import { csrfHash, resolvePrincipal } from "./auth";
 import { json } from "./http";
 import type { LiveEnv } from "./hub";
 import { authHandlers } from "./routes/auth";
+import { importHandlers } from "./routes/imports";
 import { invitationHandlers } from "./routes/invitations";
 import { liveHandlers } from "./routes/live";
 import { machineHandlers } from "./routes/machines";
@@ -27,6 +28,7 @@ const api = createApi<Env>(
     ...machineHandlers,
     ...workspaceHandlers,
     ...projectHandlers,
+    ...importHandlers,
     ...liveHandlers,
   },
   { resolvePrincipal, csrfHash },
