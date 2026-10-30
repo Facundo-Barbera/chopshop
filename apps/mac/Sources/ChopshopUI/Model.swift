@@ -322,6 +322,25 @@ final class AppModel: ObservableObject {
         return nil
     }
 
+    func loginRelay(url raw: String, token: String) async -> RelayLoginOutcome {
+        let url = AppConfig.normalizeURL(raw)
+        let outcome = await RelayLogin.whoami(url: url, token: token)
+        guard outcome.isOK else { return outcome }
+        let text = FileManager.default.contents(atPath: AppConfig.configPath()).map { String(decoding: $0, as: UTF8.self) } ?? ""
+        let previous = AppConfig.parse(text).agents
+        var next = previous
+        let name: String
+        if let i = next.firstIndex(where: { $0.url.caseInsensitiveCompare(url) == .orderedSame }) {
+            next[i].destination = .relay
+            name = next[i].name
+        } else {
+            name = (["relay"] + (2...99).map { "relay-\($0)" }).first { n in !next.contains { $0.name.caseInsensitiveCompare(n) == .orderedSame } } ?? "relay-\(next.count)"
+            next.append(AgentSpec(name: name, url: url, destination: .relay))
+        }
+        if next != previous, let err = saveMachines(next, previous: previous) { return .failed(err) }
+        return saveRelayToken(agent: name, token: token).map { .failed($0) } ?? outcome
+    }
+
     /// Nombre de este Mac (lo que verá `chopshop pair list`).
     var deviceName: String { Host.current().localizedName ?? "Mac" }
 
