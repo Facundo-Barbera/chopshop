@@ -294,7 +294,7 @@ public struct ShellCommand: Identifiable, Hashable, Sendable {
 
 public enum ShellCommands {
     /// Todas las órdenes posibles con este snapshot. `selected` (el hilo elegido) va primero en settle / abrir en T3.
-    public static func all(_ s: MockSnapshot, selected: String? = nil) -> [ShellCommand] {
+    public static func all(_ s: MockSnapshot, selected: String? = nil, canAct: Bool = true) -> [ShellCommand] {
         var out: [ShellCommand] = []
         let attention = ShellAttention.items(s)
         if !attention.isEmpty {
@@ -305,7 +305,7 @@ public enum ShellCommands {
         for p in s.projects.sorted() { for t in s.tasks(of: p) { threads.append((t, p)) } }
         if let sel = selected, let i = threads.firstIndex(where: { $0.0.id == sel }) { threads.insert(threads.remove(at: i), at: 0) }
 
-        for (t, p) in threads where t.state == .needsYou {
+        for (t, p) in threads where canAct && t.state == .needsYou {
             if let q = t.question {
                 for o in q.options {
                     out.append(ShellCommand(id: "answer:\(t.id):\(o)", title: "Responder «\(oneLine(q.summary, 60))» → \(o)",
@@ -315,7 +315,7 @@ public enum ShellCommands {
             }
         }
         for (t, p) in threads {
-            if t.state == .done || t.state == .stuck {
+            if canAct, t.state == .done || t.state == .stuck {
                 out.append(ShellCommand(id: "settle:\(t.id)", title: "Settle «\(oneLine(t.title, 60))»", subtitle: "\(p) · cierra el hilo en T3 (no archiva)",
                                         kind: .settle(threadID: t.id, project: p), keywords: ["settle", "cerrar", p, t.id]))
             }
