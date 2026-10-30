@@ -1,22 +1,30 @@
 {
   "$schema": "https://turborepo.com/schema.json",
+  "globalDependencies": [
+    "pnpm-workspace.yaml",
+    ".gitignore"
+  ],
   "tasks": {
     "build": {
       "dependsOn": [
         "^build"
       ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!test/**",
+        "!tests/**"
+      ],
       "outputs": [
-        "dist/**",
-        "Resources/web/**"
+        "dist/**"
       ]
     },
-    "test": {
-      "dependsOn": [
-        "^build"
-      ],
-      "cache": false
-    },
     "check": {
+      "inputs": [
+        "$TURBO_DEFAULT$"
+      ],
+      "outputs": []
+    },
+    "test": {
       "dependsOn": [
         "^build"
       ],
