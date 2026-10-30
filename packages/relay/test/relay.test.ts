@@ -362,7 +362,11 @@ describe("lista blanca", () => {
       snapshots: unknown[];
     };
     assert.deepEqual(Object.keys(state).sort(), ["head", "id", "machines", "snapshots", "ts", "type", "v"]);
-    assert.deepEqual(Object.keys(state.machines[0]!).sort(), ["expires_at", "machine_id", "seq", "snapshot_age_s"]);
+    assert.deepEqual(Object.keys(state.machines[0]!).sort(), ["expires_at", "machine_id", "online", "seq", "snapshot_age_s", "stale"]);
+    assert.deepEqual(
+      { machine_id: state.machines[0]!.machine_id, online: state.machines[0]!.online, stale: state.machines[0]!.stale, seq: state.machines[0]!.seq },
+      { machine_id: MACHINE, online: true, stale: false, seq: 7 },
+    );
     assert.deepEqual(state.snapshots, [snap]);
   });
 
