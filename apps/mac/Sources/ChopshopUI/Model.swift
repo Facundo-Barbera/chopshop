@@ -174,6 +174,7 @@ final class AppModel: ObservableObject {
         guard gen == generation else { return }     // la config cambió mientras tanto: este resultado ya no vale
         for r in fetched { if let m = r.machineId { labels[r.name] = m } }
         results = fetched
+        live.ingest(relaySnapshots: fetched.flatMap(\.relaySnapshots).compactMap { (try? JSONSerialization.data(withJSONObject: $0)).flatMap { try? JSONValue(data: $0) } })
         canAct = hub.canAct
         let s = Summarizer.summarize(fetched, labels: labels, previous: machines)
         machines = s.machines
