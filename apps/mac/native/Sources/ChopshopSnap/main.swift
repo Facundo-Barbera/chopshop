@@ -75,6 +75,10 @@ if let mode = args.dropFirst().first, mode == "machines" {
     MainActor.assumeIsolated { Snapshots.renderMachines(to: out) }
     exit(0)
 }
+if let mode = args.dropFirst().first, mode == "watchers" {
+    MainActor.assumeIsolated { Snapshots.renderWatchers(to: out) }
+    exit(0)
+}
 if let mode = args.dropFirst().first, mode == "real-office" {
     MainActor.assumeIsolated { Snapshots.renderRealOffice(to: out) }
     exit(0)

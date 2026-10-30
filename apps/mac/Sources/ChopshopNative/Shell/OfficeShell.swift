@@ -72,6 +72,8 @@ public struct OfficeShell<World: View, Unpaired: View>: View {
                 }
             } else if shell.state.section == .machines, let m = shell.machines {
                 MachinesView(model: m)
+            } else if shell.state.section == .watchers, let backend = shell.backend {
+                WatchersSection(client: backend)
             } else {
                 ShellSectionPlaceholder(section: shell.state.section)
             }
