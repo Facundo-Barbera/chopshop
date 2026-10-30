@@ -4,8 +4,7 @@
   hilos: muestreo (+ compactación) · sondeo de T3 · motor (`engine.tick` con el bus inyectado, solo si hay lotes en
   state.json) · importación periódica de events.jsonl (CLI externa) · automatizaciones (sobres del bus + horarios) ·
   GitHub (si `[agent.github] enabled`) · roles permanentes (si `[agent.roles] enabled`: despertar por horario/eventos y
-  seguimiento del hilo en su escritorio) · despachador de colas de empleados (si `[agent.dispatcher] enabled`) · rack de
-  repos (`forge/rack.py`) · mantenimiento (retención de eventos, checkpoint WAL).
+  seguimiento del hilo en su escritorio) · rack de repos (`forge/rack.py`) · mantenimiento (retención de eventos, checkpoint WAL).
   Un fallo en un hilo se registra (sin repetirlo cada ciclo) y el hilo sigue; `stop()` los para a todos de forma ordenada.
 `run` instala SIGTERM/SIGINT para la parada limpia. Nada aquí habla con systemd salvo `status` (solo lectura, inyectable) y
 `print-unit` solo IMPRIME la unidad: no escribe, no habilita y no arranca nada.
@@ -44,7 +43,7 @@ STOP_TIMEOUT = 10.0               # s totales para esperar a los hilos al parar
 AUTOMATIONS_RELOAD = 60.0         # s entre relecturas de los perfiles por el hilo de automatizaciones
 AUTOMATIONS_CURSOR = "automations_cursor"
 AUTOMATIONS_BATCH = 500           # sobres por pasada
-QUEUE_ANNOUNCE_WINDOW = 3600.0    # s hacia atrás en que se buscan cancelaciones de otro proceso sin su sobre
+QUEUE_ANNOUNCE_WINDOW = 3600.0
 
 
 class ServiceError(Exception):
@@ -263,8 +262,8 @@ class AgentService:
         dcfg = cfg.get("dispatcher") or {}
         self.dispatch_enabled = bool(dcfg.get("enabled", False))
         self.max_threads = int(dcfg.get("max_threads") or dispatcher_mod.DEFAULT_MAX_THREADS)
-        self._queue_threads = {}                    # hilo lanzado desde la cola -> (tarea de cola, escritorio)
-        self._queue_idle = {}                       # hilo cerrado por el despachador -> done/failed (para employee.idle)
+        self._queue_threads = {}
+        self._queue_idle = {}
         self._emp_loaded = None
         self.maint_interval, self.maint_first = maint_interval, maint_first
         self.compact_every = compact_every
@@ -580,10 +579,6 @@ class AgentService:
         return fired
 
     def dispatcher_once(self):
-        """Una pasada del despachador de colas (`[agent.dispatcher] enabled`; nada si ningún perfil declara empleados):
-        anuncia lo que otro proceso (el MCP) cambió en las colas, cierra los hilos de empleado terminados (settle +
-        `employee.idle`), saca tareas de las colas mientras haya menos de `max_threads` hilos vivos y sienta cada hilo
-        lanzado en su escritorio (`desk.assigned` + `employee.assigned reason: queue`)."""
         profs = [p for _k, p in sorted(self.office.profs.items()) if employees_mod.declared(p)]
         if not profs:
             return None
@@ -607,8 +602,6 @@ class AgentService:
         return self.engine_tick(batch_id, None, lambda m: log.info("despachador: %s", m), emit_fn=self.engine_emit)
 
     def _employee_closed(self, c):
-        """Hilo de empleado cerrado por el despachador: libera su escritorio (`desk.released` → `employee.idle`
-        done/failed) o, si nunca llegó a sentarse, emite `employee.idle` directamente."""
         tid, desk = c.get("thread_id"), c["employee"]
         self._wake_seats.pop(tid, None)
         try:

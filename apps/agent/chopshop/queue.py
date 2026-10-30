@@ -144,9 +144,6 @@ class Queue:
         return dict(r, state="cancelled", ended=now, cancel_by=str(by), cancel_reason=reason, note=note)
 
     def announce(self, since):
-        """Sobres de lo que otro proceso (el MCP, sin `emit_fn`) cambió en la tabla: `task.enqueued` de cada tarea en cola sin
-        su sobre (mismo id que la tarea) y `task.cancelled` de cada cancelada desde `since` sin el suyo, cada uno seguido de
-        su `queue.changed`. Idempotente: mira el bus. -> [(tipo, tarea)]"""
         if not self.emit_fn:
             return []
         out = []

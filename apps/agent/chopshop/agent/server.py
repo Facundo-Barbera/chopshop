@@ -333,7 +333,7 @@ class AgentApp:
                  clock=time.time, pairing=None, stream_opts=None, office=None):
         self.cfg, self.conn = cfg, conn
         self.office = office              # agent/office.py (None = sin oficina: las rutas /desks dan 503)
-        self.queue = None                 # chopshop/queue.py (la pone el servicio; None = /queue/cancel da 503)
+        self.queue = None
         self.collector, self.t3, self.auth = collector, t3, auth
         self.runtime = runtime or Runtime(clock)
         self.clock = clock
@@ -647,9 +647,7 @@ class AgentApp:
         log.info("hilo %s asignado a %s por %s", thread, desk_id, ident.login or ident.via)
         return {"ok": True, "desk": desk_id, "thread_id": thread}
 
-    # -- colas de empleados
     def r_queue_cancel(self, ident, q, body):
-        """Cancela una tarea en la cola de un empleado -> `task.cancelled` + `queue.changed`."""
         if self.queue is None:
             raise ApiError(503, "cola no disponible en este agente")
         emp, task = _text(body, "employee", True, 128), _ident(body, "task", True)

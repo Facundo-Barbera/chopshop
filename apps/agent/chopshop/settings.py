@@ -47,7 +47,6 @@ DEFAULTS = {
         "legacy_interval": 5,
         "engine_enabled": True,        # correr engine.tick en el agente cuando hay lotes en <home>/state.json
         "engine_interval": 5,
-        # despachador de las colas de empleados (dispatcher.py): lanza hilos de T3, por eso es opt-in
         "dispatcher": {"enabled": False, "max_threads": 2, "interval": 5},
         "service": {"read_write_paths": []},   # rutas extra de escritura para la unidad systemd (ProtectSystem=strict)
         "token_file": "~/.chopshop/agent/token",
