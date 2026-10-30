@@ -77,6 +77,7 @@ sample_interval = 10                      # segundos entre muestras de métricas
 t3_poll_interval = 5                      # segundos entre sondeos de T3
 projects_root = "~/projects"              # <projects_root>/<proyecto>
 worktrees_root = "~/.t3/worktrees"        # <worktrees_root>/<proyecto>/<worktree>
+projects_file = ""                        # registro de proyectos; vacío = projects.toml junto a config.toml
 
 # Cómo hablar con el servidor T3 de ESTA máquina.
 [agent.t3]
