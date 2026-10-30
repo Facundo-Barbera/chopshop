@@ -52,6 +52,15 @@ struct AgentAction {
         case "settle":
             guard str("thread_id") != nil else { return nil }
             return AgentAction(method: "POST", path: "/settle", body: copy(["thread_id"]))
+        case "fanout":
+            guard str("project") != nil, let ts = payload["tasks"] as? [String], !ts.isEmpty else { return nil }
+            return AgentAction(method: "POST", path: "/fanout", body: copy(["project", "tasks"]))
+        case "stop":
+            guard str("batch_id") != nil else { return nil }
+            return AgentAction(method: "POST", path: "/stop", body: copy(["batch_id", "task_id"]))
+        case "graph_run":
+            guard str("graph_id") != nil else { return nil }
+            return AgentAction(method: "POST", path: "/graph/run", body: copy(["graph_id"]))
         default:
             return nil
         }
@@ -62,6 +71,7 @@ struct ActionResult {
     var ok: Bool
     var message: String
     var data: [String: Any]? = nil
+    var unsupported = false
 
     var bridgeObject: [String: Any] {
         var o: [String: Any] = ["ok": ok, "message": String(message.prefix(300))]
@@ -195,7 +205,9 @@ final class AgentClient {
                 let hint = isPaired ? "" : " Este Mac no está emparejado con el agente."
                 return ActionResult(ok: false, message: "acceso denegado (403): hace falta identidad Tailscale autorizada y un dispositivo emparejado; "
                                     + "si el agente es anterior a api_version 2 (sin emparejamiento), actualízalo." + hint)
-            default: return ActionResult(ok: false, message: Self.agentError(json, code))
+            default:
+                let unsupported = code == 405 || (code == 404 && json?["error"] as? String == "ruta desconocida")
+                return ActionResult(ok: false, message: Self.agentError(json, code), unsupported: unsupported)
             }
         }
     }

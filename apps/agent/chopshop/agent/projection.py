@@ -3,7 +3,7 @@ import threading
 
 from . import db, events, lobby, machine_room
 
-API_VERSION = 3
+API_VERSION = 4
 RECENT = 50
 PAGE = 1000
 _RUNNING = ("running", "preparing")

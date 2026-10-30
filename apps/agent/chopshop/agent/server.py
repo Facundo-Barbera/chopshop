@@ -31,6 +31,8 @@ SNAPSHOT_EVENTS = 80
 SNAPSHOT_THREADS = 200
 ORCHESTRATOR_TTL = 5.0
 _ID = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
+MAX_FANOUT = 20
+MAX_PROMPT = 8000
 PUBLIC = {("GET", "/health"), ("POST", "/pair")}
 
 
@@ -271,6 +273,10 @@ def _ident(body, key, required=False):
     return v
 
 
+def _prompt_ok(v):
+    return isinstance(v, str) and 0 < len(v.strip()) and len(v) <= MAX_PROMPT and not any(ord(c) < 32 and c not in "\n\t" for c in v)
+
+
 class AgentApp:
     ROUTES = {
         ("GET", "/health"): "health", ("GET", "/snapshot"): "snapshot", ("GET", "/metrics"): "metrics",
@@ -278,6 +284,7 @@ class AgentApp:
         ("GET", "/subscriptions"): "subscriptions", ("POST", "/answer"): "answer", ("POST", "/settle"): "settle",
         ("POST", "/subscriptions"): "subscribe", ("POST", "/touch"): "touch",
         ("GET", "/state"): "state", ("GET", "/stream"): "stream", ("POST", "/pair"): "pair",
+        ("POST", "/fanout"): "fanout", ("POST", "/stop"): "stop", ("POST", "/graph/run"): "graph_run",
     }
 
     def __init__(self, cfg, conn, collector, t3, auth, runtime=None, emit_fn=None, orchestrator_fn=None,
@@ -493,6 +500,58 @@ class AgentApp:
         self._t3(t3watch.settle, thread)
         log.info("hilo %s settled por %s", thread, ident.login or ident.via)
         return {"ok": True, "thread_id": thread}
+
+    def _engine_on(self):
+        if not self.cfg.get("engine_enabled", True):
+            raise ApiError(503, "motor desactivado en este agente (agent.engine_enabled = false)")
+
+    def r_fanout(self, ident, q, body):
+        from .. import engine, profile
+        project = _ident(body, "project", True)
+        tasks = body.get("tasks")
+        if not isinstance(tasks, list) or not 1 <= len(tasks) <= MAX_FANOUT or not all(_prompt_ok(t) for t in tasks):
+            raise ApiError(400, "tasks debe ser una lista de 1 a %d textos (máx. %d caracteres)" % (MAX_FANOUT, MAX_PROMPT))
+        host = _ident(body, "host")
+        mp = body.get("max_parallel")
+        if mp is not None and (not isinstance(mp, int) or isinstance(mp, bool) or mp < 1):
+            raise ApiError(400, "max_parallel debe ser un entero >= 1")
+        self._engine_on()
+        try:
+            prof = profile.load(project)
+            errs = profile.validate(prof)
+            if errs:
+                raise profile.ProfileError("; ".join(errs))
+            host, cap, notes = engine.route(prof, len(tasks), host, mp)
+            bid = engine.create_batch(prof, [t.strip() for t in tasks], host, cap, notes)
+        except profile.ProfileError as e:
+            raise ApiError(400, str(e))
+        log.info("lote %s (%s, %d tareas) creado por %s", bid, project, len(tasks), ident.login or ident.via)
+        return {"ok": True, "batch_id": bid, "project": project, "host": host, "max_parallel": cap, "tasks": len(tasks), "notes": notes}
+
+    def r_stop(self, ident, q, body):
+        from .. import engine, state
+        bid = _ident(body, "batch_id", True)
+        task = _ident(body, "task_id")
+        b = state.read().get("batches", {}).get(bid)
+        if b is None:
+            raise ApiError(404, "lote desconocido")
+        if task and not any(t["id"] == task for t in b["tasks"]):
+            raise ApiError(404, "tarea desconocida en el lote")
+        n = engine.stop(bid, task, log=lambda m: log.info("stop: %s", m))
+        log.info("lote %s parado por %s (%d hilos)", bid, ident.login or ident.via, n)
+        return {"ok": True, "batch_id": bid, "task_id": task, "interrupted": n}
+
+    def r_graph_run(self, ident, q, body):
+        from .. import state
+        gid = _ident(body, "graph_id", True)
+        g = state.read().get("graphs", {}).get(gid)
+        if g is None:
+            raise ApiError(404, "grafo desconocido")
+        if g["status"] != "running":
+            raise ApiError(409, "el grafo ya terminó (%s)" % g["status"], {"graph_id": gid, "status": g["status"]})
+        self._engine_on()
+        log.info("grafo %s en marcha por %s", gid, ident.login or ident.via)
+        return {"ok": True, "graph_id": gid, "batch_id": g["batch"], "status": g["status"]}
 
     def _office(self):
         if self.office is None:

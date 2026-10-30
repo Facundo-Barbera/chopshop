@@ -68,6 +68,7 @@ public struct ShellState: Equatable, Sendable {
     public var lastInspector: ShellInspector = .panel(.attention)
     public var paletteOpen = false
     public var query = ""
+    public var fanoutProject: String?
     public var minimap = true
     public var focus: ShellFocus?
     public var selectedThread: String?
@@ -95,8 +96,9 @@ public struct ShellState: Equatable, Sendable {
         if inspector == nil { inspector = lastInspector } else { inspector = nil }
     }
 
-    public mutating func openPalette() { paletteOpen = true; query = "" }
-    public mutating func closePalette() { paletteOpen = false; query = "" }
+    public mutating func openPalette() { paletteOpen = true; query = ""; fanoutProject = nil }
+    public mutating func closePalette() { paletteOpen = false; query = ""; fanoutProject = nil }
+    public mutating func beginFanout(_ project: String) { paletteOpen = true; query = ""; fanoutProject = project }
 
     @discardableResult
     public mutating func escape() -> Bool {
@@ -201,7 +203,9 @@ public struct ShellCommand: Identifiable, Hashable, Sendable {
         case go(ShellTarget)
         case panel(ShellPanel)
         case nextAttention
-        case cliOnly(String)
+        case fanout(project: String)
+        case stopBatch(batchID: String, project: String)
+        case runGraph(graphID: String, project: String)
     }
 
     public var id: String
@@ -221,7 +225,7 @@ public struct ShellCommand: Identifiable, Hashable, Sendable {
         case .settle, .openT3: return "Hilos"
         case .go: return "Ir a"
         case .panel: return "Paneles"
-        case .cliOnly: return "Solo CLI"
+        case .fanout, .stopBatch, .runGraph: return "Lotes y grafos"
         }
     }
 }
@@ -272,17 +276,17 @@ public enum ShellCommands {
             out.append(ShellCommand(id: "panel:\(panel.rawValue)", title: "Panel \(panel.title)", kind: .panel(panel), keywords: ["panel", "ver"]))
         }
         for p in s.projects.sorted() {
-            out.append(ShellCommand(id: "cli-fanout:\(p)", title: "Lanzar hilos en \(p) (fanout)", subtitle: "solo CLI: copia el comando",
-                                    kind: .cliOnly("chopshop fanout \(p) --task \"…\""), keywords: ["lanzar", "launch", "fanout", "nuevo", p]))
+            out.append(ShellCommand(id: "fanout:\(p)", title: "Lanzar hilos en \(p) (fanout)", subtitle: "escribe la tarea y ⏎",
+                                    kind: .fanout(project: p), keywords: ["lanzar", "launch", "fanout", "nuevo", p]))
         }
         for b in s.batches where b.id != SnapshotMapper.looseBatch
             && b.tasks.contains(where: { $0.state == .running || $0.state == .queued || $0.state == .waitingBot }) {
-            out.append(ShellCommand(id: "cli-stop:\(b.id)", title: "Parar el lote \(b.id)", subtitle: "\(b.project) · solo CLI: copia el comando",
-                                    kind: .cliOnly("chopshop stop \(b.id)"), keywords: ["parar", "stop", "detener", b.project, b.id]))
+            out.append(ShellCommand(id: "stop:\(b.id)", title: "Parar el lote \(b.id)", subtitle: "\(b.project) · interrumpe sus hilos en curso",
+                                    kind: .stopBatch(batchID: b.id, project: b.project), keywords: ["parar", "stop", "detener", b.project, b.id]))
         }
         for g in s.graphs where !g.id.hasPrefix(SnapshotMapper.autoGraphPrefix) {
-            out.append(ShellCommand(id: "cli-graph:\(g.id)", title: "Correr el grafo \(g.id)", subtitle: "\(g.project) · solo CLI: copia el comando",
-                                    kind: .cliOnly("chopshop graph run \(g.id)"), keywords: ["grafo", "graph", "run", "correr", g.project, g.id]))
+            out.append(ShellCommand(id: "graph:\(g.id)", title: "Correr el grafo \(g.id)", subtitle: "\(g.project) · lo conduce el agente",
+                                    kind: .runGraph(graphID: g.id, project: g.project), keywords: ["grafo", "graph", "run", "correr", g.project, g.id]))
         }
         return out
     }

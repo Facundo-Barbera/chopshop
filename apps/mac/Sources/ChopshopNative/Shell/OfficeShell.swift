@@ -153,22 +153,25 @@ struct ShellPalette: View {
     @State private var cursor = 0
     @FocusState private var focused: Bool
 
-    private var results: [ShellCommand] { ShellCommands.search(shell.state.query, in: commands) }
+    private var results: [ShellCommand] { shell.state.fanoutProject == nil ? ShellCommands.search(shell.state.query, in: commands) : [] }
 
     var body: some View {
         let rs = results
         let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
         VStack(spacing: 0) {
             HStack(spacing: 10) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Responder, settle, ir a un proyecto…", text: $shell.state.query)
+                Image(systemName: shell.state.fanoutProject == nil ? "magnifyingglass" : "paperplane").foregroundStyle(.secondary)
+                TextField(shell.state.fanoutProject.map { "Tarea para \($0)…" } ?? "Responder, settle, ir a un proyecto…", text: $shell.state.query)
                     .textFieldStyle(.plain).font(.title3)
                     .focused($focused)
-                    .onSubmit { run(rs, cursor) }
+                    .onSubmit { if shell.state.fanoutProject != nil { shell.submitFanout() } else { run(rs, cursor) } }
             }
             .padding(.horizontal, 16).padding(.vertical, 13)
             Divider()
-            if rs.isEmpty {
+            if let p = shell.state.fanoutProject {
+                Text("⏎ lanza un lote de una tarea en \(p) · Esc cancela").font(.callout).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(16)
+            } else if rs.isEmpty {
                 Text("Nada con «\(shell.state.query)»").font(.callout).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(16)
             } else if flat {
@@ -235,7 +238,9 @@ struct ShellPalette: View {
         case .go(.thread): return "person.crop.square"
         case .panel(let p): return p.symbol
         case .nextAttention: return "arrow.down.circle"
-        case .cliOnly: return "terminal"
+        case .fanout: return "paperplane"
+        case .stopBatch: return "stop.circle"
+        case .runGraph: return "play.circle"
         }
     }
 

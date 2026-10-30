@@ -87,12 +87,11 @@ Lo que la paleta puede hacer depende de lo que expone la API del agente (`docs/a
 | Ir a proyecto / siguiente que te necesita / abrir un panel | (local) | 1 |
 | Tocar un hilo (reinicia la semivida) | `POST /touch` | 2 |
 | Asignar un hilo del vestíbulo a un escritorio · dejar una nota | `POST /desks/<id>/assign` · `/notes` | 2 |
-| **Lanzar** un hilo, **parar** hilos/lote, **fanout**, **correr un grafo** | no hay ruta: hoy solo CLI (`chopshop fanout`, `stop`, `graph run`) | 3 |
+| **Lanzar** un hilo, **parar** hilos/lote, **fanout**, **correr un grafo** | `POST /fanout` · `/stop` · `/graph/run` (api_version 4) | 3 |
 
-En la fase 1 las órdenes de la última fila **aparecen** en la paleta, marcadas «solo CLI», y lo que hacen es copiar el
-comando exacto al portapapeles (`chopshop fanout <proyecto> --task "…"`): no se finge una acción que el agente no tiene. La
-fase 3 añade las rutas al agente; es una decisión de diseño (hoy el agente «no ejecuta comandos de clientes») y se discute
-antes de tocarla.
+En la fase 1 esas órdenes copiaban el comando de la CLI al portapapeles. La fase 3 añadió las rutas al agente (mismo modelo
+de auth que `/settle`): la paleta las llama directamente; fanout pide la tarea en el propio campo de la paleta. Con un agente
+anterior a api_version 4 (404/405) la paleta vuelve a copiar el comando exacto.
 
 ## Atajos
 
