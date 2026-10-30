@@ -103,12 +103,12 @@ extension CityBuilding {
     /// Alto del piso `level` (la planta baja, más alta; los demás varían un poco por id). Fuera de rango: `CityGeo.floorH`.
     public func floorHeight(_ level: Int) -> Double {
         guard floors.indices.contains(level) else { return CityGeo.floorH }
-        return CityGeo.floorH * (level == 0 ? style.groundScale : style.floorScale(floors[level].id))
+        return heightScale * CityGeo.floorH * (level == 0 ? style.groundScale : style.floorScale(floors[level].id))
     }
 
     /// z de la base del piso `level` (sobre el plinto).
     public func floorZ(_ level: Int) -> Double {
-        var z = style.plinthH
+        var z = style.plinthH * heightScale
         for k in 0..<max(0, level) { z += floorHeight(k) }
         return z
     }
