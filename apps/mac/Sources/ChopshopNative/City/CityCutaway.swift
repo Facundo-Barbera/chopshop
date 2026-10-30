@@ -139,7 +139,6 @@ struct FloorPicker: View {
     struct Item: Identifiable {
         let id: String
         let label: String
-        let help: String
     }
     let items: [Item]
     let current: String?
@@ -161,7 +160,6 @@ struct FloorPicker: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help(r.help)
             }
             FloorStepButton(symbol: "chevron.down", enabled: i > 0) { onGo(items[max(0, i - 1)].id) }
         }
