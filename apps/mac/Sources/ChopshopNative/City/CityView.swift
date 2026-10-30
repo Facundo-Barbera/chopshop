@@ -387,7 +387,7 @@ public struct CityView: View {
             }
         }
         .onChange(of: backRequest) { _, _ in stepOut() }
-        .task(id: model.floors.count) { if Self.demoTour, frozenTime == nil, frozenZoom == nil { await tour() } }
+        .task(id: Self.demoTour ? tourStart()?.project : nil) { if Self.demoTour, frozenTime == nil, frozenZoom == nil { await tour() } }
         .hotReload()
     }
 
