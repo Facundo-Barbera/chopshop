@@ -117,6 +117,11 @@ final class BackendAuthTests: XCTestCase {
         XCTAssertNil(InvitationLink.token(from: "https://chopshop.novarix.online/invite#t=\(invite.dropLast())"))
         XCTAssertNil(InvitationLink.token(from: "https://chopshop.novarix.online/invite#t=ss1_" + String(repeating: "b", count: 43)))
         XCTAssertNil(InvitationLink.token(from: ""))
+        let dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../../../packages/api/backend/idn/fixtures")
+        for name in ["invitations.post.response.json", "operator-bootstrap.post.response.json", "invitations-id-reissue.post.response.json"] {
+            let link = try? JSONValue(data: Data(contentsOf: dir.appendingPathComponent(name)))["link"]?.string
+            XCTAssertNotNil(InvitationLink.token(from: link ?? ""), name)
+        }
     }
 
     func testInspectAndAcceptOwnerInvitation() async throws {
