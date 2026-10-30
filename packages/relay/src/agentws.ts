@@ -142,6 +142,7 @@ export class AgentSockets {
   constructor(
     private readonly ctx: DurableObjectState,
     private readonly db: RelayDb,
+    private readonly sink: ((account: string, type: "snapshot" | "event", raw: string) => void) | null = null,
   ) {
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
   }
@@ -343,7 +344,7 @@ export class AgentSockets {
     const stored = this.db.putSnapshot(att.account, att.machineId, frame.seq as number, ttl, raw, now);
     this.db.touchMachine(att.account, att.machineId, {}, now);
     await this.scheduleAlarm(stored.expiresAt);
-    this.broadcast(att.account, raw);
+    this.broadcast(att.account, raw, "snapshot");
   }
 
   private event(ws: WebSocket, att: AgentAttachment, frame: Frame, raw: string, now: number): void {
@@ -357,7 +358,7 @@ export class AgentSockets {
       return;
     }
     att.eventCount++;
-    this.broadcast(att.account, raw);
+    this.broadcast(att.account, raw, "event");
   }
 
   private whoami(ws: WebSocket, att: AgentAttachment, frame: Frame, now: number): void {
@@ -380,7 +381,8 @@ export class AgentSockets {
     });
   }
 
-  private broadcast(account: string, raw: string): void {
+  private broadcast(account: string, raw: string, type: "snapshot" | "event"): void {
+    this.sink?.(account, type, raw);
     for (const viewer of this.ctx.getWebSockets(viewerTag(account))) {
       try {
         viewer.send(raw);
