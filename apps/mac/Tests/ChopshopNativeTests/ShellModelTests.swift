@@ -116,7 +116,7 @@ final class ShellModelTests: XCTestCase {
 
     // MARK: paleta
 
-    func testCommandsCoverAnswerSettleGoPanelsAndCLIOnly() {
+    func testCommandsCoverAnswerSettleGoPanelsAndEngine() {
         let cmds = ShellCommands.all(snap)
         let kinds = cmds.map(\.kind)
         XCTAssertTrue(kinds.contains { if case .answer(let id, _, "Bloquear") = $0 { return id == "t-0056" }; return false })
@@ -125,8 +125,8 @@ final class ShellModelTests: XCTestCase {
         XCTAssertTrue(kinds.contains(.go(.project("nuskills"))))
         XCTAssertTrue(kinds.contains(.go(.city)))
         for p in ShellPanel.allCases { XCTAssertTrue(kinds.contains(.panel(p)), "panel \(p)") }
-        XCTAssertTrue(kinds.contains { if case .cliOnly(let c) = $0 { return c.hasPrefix("chopshop fanout nuskills") }; return false })
-        XCTAssertTrue(kinds.contains { if case .cliOnly(let c) = $0 { return c.hasPrefix("chopshop graph run") }; return false })
+        XCTAssertTrue(kinds.contains(.fanout(project: "nuskills")))
+        XCTAssertTrue(kinds.contains { if case .runGraph = $0 { return true }; return false })
         XCTAssertEqual(Set(cmds.map(\.id)).count, cmds.count, "ids únicos (la lista de SwiftUI los usa)")
         XCTAssertEqual(cmds.first?.kind, .nextAttention, "sin búsqueda, lo primero es lo que te necesita")
     }

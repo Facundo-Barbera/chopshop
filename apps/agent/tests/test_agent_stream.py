@@ -132,7 +132,7 @@ class TestProjection(unittest.TestCase):
 
     def test_fold_of_fixture(self):
         st = projection.fold(self.envs, "contabo-dev")
-        self.assertEqual(st["api_version"], 3)
+        self.assertEqual(st["api_version"], 4)
         self.assertEqual(st["head_seq"], self.envs[-1]["seq"])
         self.assertEqual(st["machine_health"]["state"], "ok")
         self.assertEqual([p["name"] for p in st["projects"]], ["bixku-utilities", "chopshop", "nuskills"])
@@ -301,7 +301,7 @@ class TestStream(StreamBase):
         head = events.last_seq(self.conn)
         c = self.open_stream()
         hello = c.frame()
-        self.assertEqual((hello["event"], hello["data"]), ("hello", {"api_version": 3, "machine": "host-a", "head_seq": head,
+        self.assertEqual((hello["event"], hello["data"]), ("hello", {"api_version": 4, "machine": "host-a", "head_seq": head,
                                                                       "resume": "snapshot"}))
         st = c.frame()
         self.assertEqual((st["event"], st["id"], st["data"]["head_seq"]), ("state", head, head))
@@ -613,7 +613,7 @@ class TestPairingHttp(StreamBase):
     def test_pair_then_credential_required_everywhere(self):
         code, body = self.pair()
         self.assertEqual(set(body), {"device_id", "credential", "api_version"})
-        self.assertEqual((body["device_id"], body["api_version"]), ("dev-mac", 3))
+        self.assertEqual((body["device_id"], body["api_version"]), ("dev-mac", 4))
         cred = body["credential"]
         self.assertEqual(self.post("/pair", {"code": code, "device_id": "otro"})[0], 410)        # un solo uso
         self.assertEqual(self.post("/pair", {"code": "ZZZZ-ZZZZ"})[0], 401)

@@ -44,10 +44,9 @@ public final class ShellController: ObservableObject {
         case .panel(let p): if state.inspector != .panel(p) { state.toggle(p) }
         case .nextAttention: perform(.nextAttention)
         case .openT3(let u): actions?.open(u)
-        case .cliOnly(let cmd):
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(cmd, forType: .string)
-            say("Copiado: \(cmd)")
+        case .fanout(let p): state.beginFanout(p)
+        case .stopBatch(let id, _): engine(.stop(batchID: id), pending: "Parando el lote \(id)…")
+        case .runGraph(let id, _): engine(.runGraph(graphID: id), pending: "Poniendo en marcha el grafo \(id)…")
         case .answer(let id, let project, let option):
             guard let actions, let t = task(id) else { say("No hay agente para responder."); return }
             state.select(.thread(id: id, project: project))
@@ -64,6 +63,32 @@ public final class ShellController: ObservableObject {
                 say(err.map { "No se pudo cerrar: \($0)" } ?? "Hilo cerrado en T3 (settle)", error: err != nil)
             }
         }
+    }
+
+    public func submitFanout() {
+        guard let p = state.fanoutProject else { return }
+        let task = state.query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !task.isEmpty else { say("Escribe la tarea para \(p).", error: true); return }
+        state.closePalette()
+        engine(.fanout(project: p, task: task), pending: "Lanzando en \(p)…")
+    }
+
+    private func engine(_ c: EngineCommand, pending: String) {
+        guard let run = actions?.engine else { copy(c.cli, "Sin agente: "); return }
+        say(pending)
+        Task { @MainActor in
+            switch await run(c) {
+            case .done(let m): say(m)
+            case .failed(let e): say("No se pudo: \(e)", error: true)
+            case .unsupported: copy(c.cli, "El agente no tiene esta orden (anterior a api_version 4). ")
+            }
+        }
+    }
+
+    private func copy(_ cmd: String, _ why: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(cmd, forType: .string)
+        say(why + "Copiado: \(cmd)")
     }
 
     public func say(_ text: String, error: Bool = false) {

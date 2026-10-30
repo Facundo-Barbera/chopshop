@@ -28,7 +28,7 @@ public struct LiveState: Equatable, Sendable {
         public var office: Office?
     }
 
-    public static let apiVersion = 3
+    public static let apiVersion = 4
     public static let recentLimit = 50
 
     public var machine: String?

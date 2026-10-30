@@ -166,7 +166,7 @@ class TestService(unittest.TestCase):
         self.assertEqual([(l["name"], l["state"], l["backoff_s"]) for l in st["machine_room"]["listeners"]],
                          [("engine", "degraded", 0), ("t3watch", "down", 30)])
         self.assertEqual(st["machine_room"]["listeners"][0]["error"], "RuntimeError: boom")
-        self.assertEqual(st["api_version"], 3)
+        self.assertEqual(st["api_version"], 4)
 
 
 if __name__ == "__main__":

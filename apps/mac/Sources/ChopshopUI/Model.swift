@@ -350,7 +350,30 @@ final class AppModel: ObservableObject {
         }, open: { [weak self] url in self?.open(url) }, settle: { [weak self] id in
             guard let self else { return "la app se está cerrando" }
             return await self.settle(id)
+        }, engine: { [weak self] command in
+            guard let self else { return .failed("la app se está cerrando") }
+            return await self.engine(command)
         })
+    }
+
+    func engine(_ command: EngineCommand) async -> EngineResult {
+        guard let c = primary else { return .failed("no hay agente configurado") }
+        let action: AgentAction?
+        switch command {
+        case .fanout(let p, let t): action = AgentAction.route(type: "fanout", payload: ["project": p, "tasks": [t]])
+        case .stop(let b): action = AgentAction.route(type: "stop", payload: ["batch_id": b])
+        case .runGraph(let g): action = AgentAction.route(type: "graph_run", payload: ["graph_id": g])
+        }
+        guard let action else { return .failed("orden no válida") }
+        let r = await c.perform(action)
+        if r.unsupported { return .unsupported }
+        guard r.ok else { return .failed(r.message) }
+        Task { await refresh() }
+        switch command {
+        case .fanout(let p, _): return .done("Lote \(r.data?["batch_id"] as? String ?? "") creado en \(p)")
+        case .stop(let b): return .done("Lote \(b): \(r.data?["interrupted"] as? Int ?? 0) hilos interrumpidos")
+        case .runGraph(let g): return .done("Grafo \(g) en marcha (lo conduce el agente)")
+        }
     }
 
     /// `POST /settle {thread_id}` al agente principal (cierra el hilo en T3, nunca archiva). nil = hecho.

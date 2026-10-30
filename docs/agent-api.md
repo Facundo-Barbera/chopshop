@@ -1,16 +1,17 @@
-# chopshop-agent: contrato de módulos y API (v0.7, api_version 1 + 2 + 3)
+# chopshop-agent: contrato de módulos y API (v0.7, api_version 1 + 2 + 3 + 4)
 
 `api_version 2` es **aditiva**: añade `GET /stream` (SSE), `GET /state` y el emparejamiento por dispositivo (`POST /pair`).
 `GET /snapshot`, `GET /events` y `GET /health` conservan su forma v1 (`api_version: 1`); la v2 se anuncia en el `hello` del stream,
 en `GET /state` y en la respuesta de `POST /pair`. `api_version 3` (también aditiva) añade la oficina por escritorios, el
-vestíbulo y la sala de máquinas (ver «`api_version 3`»).
+vestíbulo y la sala de máquinas (ver «`api_version 3`»). `api_version 4` (aditiva, sin cambios de forma en `/state` ni en el stream)
+añade las órdenes del motor `POST /fanout`, `POST /stop` y `POST /graph/run` (ver la tabla de rutas).
 
 Contexto: el agente corre en cada máquina como servicio de usuario (`systemd --user` en Linux, launchd en macOS). Escucha en
 `agent.bind`:`agent.port` (`~/.config/chopshop/config.toml`, ver `config.example.toml`): por defecto `127.0.0.1`; para otras máquinas,
 `"auto"` (IP de Tailscale) o la IP concreta (p. ej. `100.64.0.10`). **Nunca** `0.0.0.0` ni `::` (se niega a arrancar). Si `bind` no es
 loopback abre además `127.0.0.1:<port>` (`agent.local_listener`) para el CLI local. Instalación y operación: `docs/agent-service.md`.
 La app es un cliente puro. Stdlib de Python solamente (>=3.9 compatible).
-El agente es una capa delgada sobre T3: observa (métricas, hilos, eventos) y solo escribe en T3 por `answer`/`settle` (y, desde la
+El agente es una capa delgada sobre T3: observa (métricas, hilos, eventos) y solo escribe en T3 por `answer`/`settle`/`stop` (los lotes de `fanout` los lanza el motor, como con la CLI; y, desde la
 v3, el despertar de un rol permanente lanza su hilo como un lote de una tarea por el motor, igual que `fanout`). **No** lanza ni
 mata procesos, no reparte puertos ni crea worktrees: los servers de prueba, puertos y comandos de cada hilo son cosa de T3. Las URLs de webhook nunca se imprimen ni se guardan en DB/logs (solo rutas de archivo).
 
@@ -101,6 +102,9 @@ Todo eso → **403**.
 | `GET /subscriptions` | `{subscriptions:{nombre:{project,events,created,projects,types,exclude_types,min_severity,needs,only_changes,context,debounce_s,signed,headers}}}` (filtros; sin URL ni rutas; `signed` = tiene `secret_file`; `headers` = tiene `headers_file`). Ver «Suscripciones (webhooks v2)» |
 | `POST /answer` | `{thread_id, choice, request?}` → responde en T3 (`{ok, request_id, answers, question}`). `AnswerError` (sin pendientes, ambigua, opción no válida) → 400; T3 caído → 502 |
 | `POST /settle` | `{thread_id}` → `t3_thread_organize settle` (nunca archivar) → `{ok, thread_id}` |
+| `POST /fanout` (v4) | `{project, tasks: [texto…], host?, max_parallel?}` (1–20 tareas, ≤ 8000 caracteres cada una) → crea un lote en el motor como `chopshop fanout` (perfil local validado, mismo ruteo) → `{ok, batch_id, project, host, max_parallel, tasks, notes}`. Lo lanza en T3 el hilo `engine` en su próxima pasada. Perfil inválido o desconocido → 400; `engine_enabled = false` → 503 |
+| `POST /stop` (v4) | `{batch_id, task_id?}` → como `chopshop stop`: `t3_thread_interrupt` de los hilos lanzados y sin terminar (no archiva ni borra; las tareas en cola siguen) → `{ok, batch_id, task_id, interrupted}`. Lote o tarea desconocidos → 404 |
+| `POST /graph/run` (v4) | `{graph_id}` → como `chopshop graph run`, pero lo conduce el hilo `engine` del agente (no hay bucle en la petición) → `{ok, graph_id, batch_id, status}`. Desconocido → 404; ya terminado → 409 `{error, graph_id, status}`; `engine_enabled = false` → 503 |
 | `POST /subscriptions` / `DELETE /subscriptions/<name>` | `{name, webhook_file, project?, events?, projects?, types?, exclude_types?, min_severity?, needs?, only_changes?, context?, debounce_s?, secret_file?, headers_file?}` (`webhook_file`/`secret_file`/`headers_file` = rutas de archivos existentes en la máquina del agente, nunca una URL; `secret_file` y `headers_file` con permisos 0600). Reemplaza la suscripción entera. Valores inválidos → 400 |
 
 ### Forma de `GET /snapshot`

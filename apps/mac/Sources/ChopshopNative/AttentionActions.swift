@@ -9,12 +9,34 @@ public struct AttentionActions: @unchecked Sendable {
     public var answer: @MainActor (_ task: MockTask, _ option: String) async -> String?
     public var open: @MainActor (_ url: URL) -> Void
     public var settle: (@MainActor (_ threadID: String) async -> String?)?
+    public var engine: (@MainActor (_ command: EngineCommand) async -> EngineResult)?
 
     public init(answer: @escaping @MainActor (_ task: MockTask, _ option: String) async -> String?,
                 open: @escaping @MainActor (_ url: URL) -> Void,
-                settle: (@MainActor (_ threadID: String) async -> String?)? = nil) {
-        self.answer = answer; self.open = open; self.settle = settle
+                settle: (@MainActor (_ threadID: String) async -> String?)? = nil,
+                engine: (@MainActor (_ command: EngineCommand) async -> EngineResult)? = nil) {
+        self.answer = answer; self.open = open; self.settle = settle; self.engine = engine
     }
+}
+
+public enum EngineCommand: Hashable, Sendable {
+    case fanout(project: String, task: String)
+    case stop(batchID: String)
+    case runGraph(graphID: String)
+
+    public var cli: String {
+        switch self {
+        case .fanout(let p, let t): return "chopshop fanout \(p) --task '\(t.replacingOccurrences(of: "'", with: "'\\''"))'"
+        case .stop(let b): return "chopshop stop \(b)"
+        case .runGraph(let g): return "chopshop graph run \(g)"
+        }
+    }
+}
+
+public enum EngineResult: Equatable, Sendable {
+    case done(String)
+    case failed(String)
+    case unsupported
 }
 
 private struct AttentionActionsKey: EnvironmentKey {
