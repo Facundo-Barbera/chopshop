@@ -144,8 +144,6 @@ class Queue:
         return dict(r, state="cancelled", ended=now, cancel_by=str(by), cancel_reason=reason, note=note)
 
     def cancel_running(self, task, by, reason="manual", note=None, thread_id=None, cause=None):
-        """Corta una tarea que ya salió de la cola (`dequeued`): pasa a `cancelled` y emite `task.cancelled phase: running`
-        con su `thread_id` (sin `queue.changed`: la cola no cambia). Interrumpir el hilo es cosa del llamador. -> fila o None."""
         if reason not in CANCEL_REASONS:
             raise QueueError("reason inválido: %r (%s)" % (reason, ", ".join(CANCEL_REASONS)))
         with self._lock:
@@ -196,7 +194,7 @@ class Queue:
                     out.append(("task.enqueued", task))
                     continue
                 ex = db.jload(r["extra"], {}) or {}
-                running = "thread_id" in ex           # cortada en marcha (`cancel_running`): la cola no cambió
+                running = "thread_id" in ex
                 body = {"task": task, "employee": employee, "phase": "running" if running else "queued",
                         "by": r["cancel_by"] or "human",
                         "reason": r["cancel_reason"] if r["cancel_reason"] in CANCEL_REASONS else "manual",

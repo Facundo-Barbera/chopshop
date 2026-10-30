@@ -383,9 +383,6 @@ class Tools:
                 "phase": "queued", "thread_id": None, "queue_len": q.length(r["employee"])}
 
     def _cancel_running(self, q, cur, by, reason, note):
-        """Tarea ya despachada: interrumpe su hilo (t3_thread_interrupt, como `engine.stop`; nunca archiva) y marca la tarea
-        del motor `done` + `cancelled`, así el empleado queda libre para el despachador, que en su próxima pasada la cierra
-        (settle) y libera el escritorio (`employee.idle reason: cancelled`)."""
         task = cur["task"]
         if reason not in equeue.CANCEL_REASONS:
             raise ToolError(f"reason inválido: {reason}")
