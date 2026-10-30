@@ -31,7 +31,7 @@ public final class ShellController: ObservableObject {
         case .openInT3:
             if let id = state.selectedThread, let u = task(id)?.link { actions?.open(u) } else { say("Elige un hilo con enlace a T3.") }
         case .refresh: refresh?()
-        case .escape: state.escape()
+        case .escape: state.escapeOrBack()
         default: break
         }
     }

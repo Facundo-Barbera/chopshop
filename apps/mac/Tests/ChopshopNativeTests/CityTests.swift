@@ -59,11 +59,12 @@ final class CityTests: XCTestCase {
         s.apply(Envelope(seq: 9002, ts: "2026-10-29T18:01:00.000Z", project: "alfa-lab", type: "batch.created",
                          subject: .init(kind: "batch", id: "b-a"), body: ["batch": "b-a"]))
         let m = CityModel.build(s)
-        XCTAssertEqual(m.buildings.map(\.company), ["Personal", "iAware", "ozom", "Bixku", "Otros"])
-        XCTAssertEqual(m.buildings[0].floors.map(\.project), ["chopshop", "life", "orchestrator"])
-        XCTAssertEqual(m.buildings[0].floors.map(\.level), [0, 1, 2])
-        XCTAssertEqual(m.buildings[2].floors.map(\.project), ["ozom-gv", "ozom-trade"])
-        XCTAssertEqual(m.buildings[4].floors.map(\.project), ["alfa-lab", "zeta"])
+        XCTAssertEqual(m.buildings.map(\.company), ["chopshop", "life", "orchestrator", "nuskills", "ozom-gv", "ozom-trade",
+                                                    "bixku-utilities", "alfa-lab", "zeta"])
+        XCTAssertEqual(m.buildings.map(\.campus), ["Personal", "Personal", "Personal", "iAware", "ozom", "ozom", "Bixku", "Otros", "Otros"])
+        XCTAssertEqual(Set(m.campuses.map(\.name)), ["Personal", "iAware", "ozom", "Bixku", "Otros"])
+        XCTAssertEqual(m.buildings[0].floors.map(\.project), ["chopshop"])
+        XCTAssertEqual(m.buildings[0].floors.map(\.level), [0])
         XCTAssertEqual(m, CityModel.build(s), "determinista")
         // edificios sin solaparse
         for a in m.buildings { for b in m.buildings where a.index < b.index {
@@ -105,7 +106,7 @@ final class CityTests: XCTestCase {
         // BUG-8 falló: nuskills queda trabada
         XCTAssertEqual(status(1843), ["nuskills": .stuck, "chopshop": .neutral, "bixku-utilities": .neutral])
         let m = CityModel.build(LiveState.fold(envs))
-        XCTAssertEqual(m.buildings.map(\.company), ["Personal", "iAware", "Bixku"])
+        XCTAssertEqual(m.buildings.map(\.campus), ["Personal", "iAware", "Bixku"])
         XCTAssertEqual(m.floor("chopshop")?.activeThreads, ["mcp:c41"])
     }
 
@@ -242,7 +243,7 @@ final class CityTests: XCTestCase {
     }
 
     func testEmbeddingMatchesOfficeProjection() throws {
-        let (tr, _, _) = try transition()
+        let (tr, m, _) = try transition()
         let e = tr.embedding
         let c = e.cityFrame(fromOffice: tr.office)
         for (x, y, z) in [(0.0, 0.0, 0.0), (716, -114, 8), (300, 114, 52), (-20, 5, 15)] {
@@ -255,8 +256,9 @@ final class CityTests: XCTestCase {
         XCTAssertEqual(back.cu, tr.office.cu, accuracy: 1e-6)
         XCTAssertEqual(back.cv, tr.office.cv, accuracy: 1e-6)
         // las salas caben dentro de la losa del piso
-        XCTAssertLessThanOrEqual(e.k * 716, CityGeo.footprintW)
-        XCTAssertLessThanOrEqual(e.k * 228, CityGeo.footprintD)
+        let b = try XCTUnwrap(m.building(of: "nuskills"))
+        XCTAssertLessThanOrEqual(e.k * 716, b.w)
+        XCTAssertLessThanOrEqual(e.k * 228, b.d)
     }
 
     func testTransitionEndpointsMonotonyAndContinuity() throws {
@@ -341,6 +343,10 @@ final class CityTests: XCTestCase {
                 // centro de la cara izquierda del piso
                 let z = b.floorZ(fl.level) + b.floorHeight(fl.level) / 2, r = b.rect(fl.level)
                 let p = f.pt((r.x0 + r.x1) / 2, r.y1 + CityGeo.overhang, z)
+                let hidden = m.buildings.contains { o in
+                    o.depthKey > b.depthKey && o.floors.contains { CityHit.contains(CityHit.floorPolygon(o, level: $0.level, frame: f), p) }
+                }
+                if hidden { continue }
                 XCTAssertEqual(CityHit.floor(at: p, in: m, frame: f), fl.project, fl.project)
             }
         }

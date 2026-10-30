@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Zoom fijo (capturas y vídeo): piso y progreso.
 @available(macOS 26.0, *)
@@ -17,6 +18,18 @@ final class CityViewBox {
     var sceneKey: LiveSceneKey?
     var cachedScene: IsoScene?
     var zoomGen = 0
+    let ease = CityCameraEase()
+    var frameInWindow = CGRect.zero
+    var scrollActive = false
+    var onPull: ((Double, CGPoint) -> Void)?
+    private var monitor: Any?
+    private var pull = 0.0
+    private var pullAt = 0.0
+    private var blockedUntil = 0.0
+
+    static let pullThreshold = 0.5
+    static let pullWindow = 0.7
+    static let pullCooldown = 0.9
 
     func scene(graph: MockGraph, tasks: [String: MockTask]) -> IsoScene {
         let k = LiveSceneKey(graph: graph, tasks: tasks)
@@ -24,6 +37,39 @@ final class CityViewBox {
         let s = IsoScene(graph: graph, tasks: tasks)
         cachedScene = s; sceneKey = k
         return s
+    }
+
+    func installScrollMonitor() {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] e in
+            guard let self, self.scrollActive, let win = e.window, let content = win.contentView else { return e }
+            let loc = e.locationInWindow
+            let p = CGPoint(x: loc.x, y: content.bounds.height - loc.y)
+            guard self.frameInWindow.contains(p) else { return e }
+            guard !e.hasPreciseScrollingDeltas || e.modifierFlags.contains(.command) else { return e }
+            let dy = e.hasPreciseScrollingDeltas ? Double(e.scrollingDeltaY) * 0.01 : Double(e.scrollingDeltaY) * 0.12
+            self.feed(dy, at: CGPoint(x: p.x - self.frameInWindow.minX, y: p.y - self.frameInWindow.minY))
+            return nil
+        }
+    }
+
+    func removeScrollMonitor() {
+        if let m = monitor { NSEvent.removeMonitor(m) }
+        monitor = nil
+    }
+
+    func feed(_ d: Double, at p: CGPoint) {
+        guard d != 0 else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now >= blockedUntil else { return }
+        if now - pullAt > Self.pullWindow || (pull > 0) != (d > 0) { pull = 0 }
+        pullAt = now
+        pull += d
+        guard abs(pull) >= Self.pullThreshold, let f = onPull else { return }
+        let dir = pull
+        pull = 0
+        blockedUntil = now + Self.pullCooldown
+        f(dir, p)
     }
 }
 
@@ -50,6 +96,7 @@ public struct CityView: View {
     var onInspect: ((String) -> Void)?
     /// Petición del armazón (paleta, minimapa, ⌘J): ir al piso de ese proyecto. Cada petición nueva trae otro `token`.
     var focusRequest: ShellFocus?
+    var backRequest: Int
     /// Esc sale del piso (false mientras el armazón tiene la paleta o un panel abiertos: el Esc es suyo).
     var escapeZoomsOut = true
 
@@ -62,6 +109,10 @@ public struct CityView: View {
     @State private var zoomAt = -Double.infinity
     @State private var mounted = false
     @State private var hovered: String?
+    @State private var campus: String?
+    @State private var zoomOrigin: String?
+    @State private var officeAll = false
+    @State private var fitToken = 0
     @Environment(\.colorScheme) private var scheme
 
     /// Duración del zoom completo en la app (la cronología grabada usa 5.6 s).
@@ -69,19 +120,20 @@ public struct CityView: View {
 
     /// Ciudad desde una proyección viva y sus ventanas (`CityLights`, que el llamador va alimentando con `observe`).
     public init(state: LiveState, lights: CityLights, directory: CompanyDirectory = .standard, onSelectFloor: ((String) -> Void)? = nil,
-                onInspect: ((String) -> Void)? = nil, focusRequest: ShellFocus? = nil, escapeZoomsOut: Bool = true) {
+                onInspect: ((String) -> Void)? = nil, focusRequest: ShellFocus? = nil, backRequest: Int = 0, escapeZoomsOut: Bool = true) {
         self.init(model: CityModel.build(state, directory: directory), lights: lights, snapshot: SnapshotMapper.snapshot(state),
-                  state: state, onSelectFloor: onSelectFloor, onInspect: onInspect, focusRequest: focusRequest, escapeZoomsOut: escapeZoomsOut)
+                  state: state, onSelectFloor: onSelectFloor, onInspect: onInspect, focusRequest: focusRequest,
+                  backRequest: backRequest, escapeZoomsOut: escapeZoomsOut)
     }
 
     init(model: CityModel, lights: CityLights, snapshot: MockSnapshot, state: LiveState? = nil, frozenTime: Double? = nil,
          frozenNow: Date? = nil, growth: Double? = nil, frozenZoom: CityFocus? = nil, flatChrome: Bool = false,
          onSelectFloor: ((String) -> Void)? = nil, onInspect: ((String) -> Void)? = nil, focusRequest: ShellFocus? = nil,
-         escapeZoomsOut: Bool = true) {
+         backRequest: Int = 0, escapeZoomsOut: Bool = true) {
         self.model = model; self.lights = lights; self.snapshot = snapshot; self.state = state; self.frozenTime = frozenTime
         self.frozenNow = frozenNow; self.growth = growth; self.frozenZoom = frozenZoom; self.flatChrome = flatChrome
         self.onSelectFloor = onSelectFloor; self.onInspect = onInspect; self.focusRequest = focusRequest
-        self.escapeZoomsOut = escapeZoomsOut
+        self.backRequest = backRequest; self.escapeZoomsOut = escapeZoomsOut
     }
 
     // MARK: zoom
@@ -123,6 +175,10 @@ public struct CityView: View {
         return floorIndex(project, floor: id, in: all).map { all[$0] }
     }
 
+    private static func regionID(_ plan: FloorPlan) -> String {
+        plan.kind == .lobby ? "lobby:\(plan.name ?? "")" : "floor:\(plan.floorIndex)"
+    }
+
     /// Hay algo que abrir: el piso v3 o, sin `office`, el grafo.
     private func canZoom(_ project: String) -> Bool { plan(project, floor: nil) != nil || graph(project) != nil }
 
@@ -162,7 +218,11 @@ public struct CityView: View {
 
     private func zoomIn(_ project: String, floor: String?) {
         let t = now()
-        let cur = focus == project && focusFloor == floor ? progress(t) : 0
+        let same = focus == project && focusFloor == floor
+        let cur = same ? progress(t) : 0
+        if !(same && cur > 0) { zoomOrigin = campusFocus }
+        campus = model.campus(of: project) ?? campus
+        officeAll = false
         focus = project; focusFloor = floor; zoomFrom = cur; zoomTo = 1; zoomAt = t; mounted = false
         box.zoomGen += 1
         let gen = box.zoomGen
@@ -176,7 +236,9 @@ public struct CityView: View {
     private func zoomOut() {
         let t = now()
         let cur = mounted ? 1 : progress(t)
+        if cur >= 0.98 { zoomOrigin = campusFocus } else { campus = zoomOrigin }
         mounted = false
+        officeAll = false
         zoomFrom = cur; zoomTo = 0; zoomAt = t
         box.zoomGen += 1
         let gen = box.zoomGen
@@ -187,6 +249,57 @@ public struct CityView: View {
     }
 
     private var zoomed: Bool { frozenZoom.map { $0.p > 0 } ?? (focus != nil && zoomTo > 0) }
+
+    private var campusFocus: String? { campus.flatMap { model.campus($0) == nil ? nil : $0 } }
+
+    private var inOffice: Bool { frozenZoom == nil && (zoomed || mounted) }
+
+    private var officeIsWorld: Bool { officeMounted && state != nil && targetPlan != nil }
+
+    private var canStepOut: Bool { inOffice || campusFocus != nil }
+
+    private func stepOut() {
+        guard frozenZoom == nil else { return }
+        if officeIsWorld && !officeAll {
+            officeAll = true
+            fitToken += 1
+        } else if zoomed || mounted {
+            zoomOut()
+        } else if campusFocus != nil {
+            campus = nil
+        }
+    }
+
+    private func goCity() {
+        guard frozenZoom == nil else { return }
+        if zoomed || mounted { zoomOut() }
+        campus = nil
+    }
+
+    private func goCampus(_ name: String) {
+        guard frozenZoom == nil else { return }
+        if zoomed || mounted { zoomOut() }
+        campus = name
+    }
+
+    private func goBuilding() {
+        guard officeIsWorld else { return }
+        officeAll = true
+        fitToken += 1
+    }
+
+    private func levelFrame(_ size: CGSize, campus c: String?) -> IsoFrame {
+        CityFraming.frame(c.flatMap { model.bounds(campus: $0) } ?? model.bounds, size: size)
+    }
+
+    private func pulled(_ dir: Double, at p: CGPoint) {
+        guard frozenZoom == nil, !zoomed, !mounted else { return }
+        if dir < 0 {
+            if campusFocus != nil { campus = nil }
+        } else if campusFocus == nil, let f = box.cityFrame, let c = CityHit.campus(at: p, in: model, frame: f) {
+            campus = c
+        }
+    }
 
     // MARK: cuerpo
 
@@ -201,19 +314,24 @@ public struct CityView: View {
                 }
             }
         }
+        .onAppear { if frozenTime == nil { box.installScrollMonitor() } }
+        .onDisappear { box.removeScrollMonitor() }
         .onChange(of: focusRequest) { _, r in
             // `nil` (volver a la ciudad) o un proyecto: el zoom de siempre; un hilo cae en el piso de su proyecto
             guard let r else { return }
             if let pr = r.target.project {
                 if pr != focus || !(zoomed || mounted) { select(pr, notify: false) }
-            } else if zoomed || mounted {
-                zoomOut()
+            } else {
+                goCity()
             }
         }
+        .onChange(of: backRequest) { _, _ in stepOut() }
     }
 
     private func content(p: Double, t: Double, office: Bool) -> some View {
         let ch = target == nil ? 0 : CityTransition.chrome(p)
+        box.scrollActive = frozenTime == nil && !office && !zoomed && p == 0
+        box.onPull = { dir, pt in pulled(dir, at: pt) }
         return VStack(alignment: .leading, spacing: 18) {
             ZStack(alignment: .leading) {
                 CityStatusLine(needsYou: model.needsYouCount, stuck: model.stuckCount, running: model.runningCount).opacity(CityTransition.chromeOut(ch))
@@ -229,11 +347,13 @@ public struct CityView: View {
             header(t: t, chrome: ch)
                 .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 4)
             ZStack(alignment: .top) {
-                if office, let pr = target, let state, let plan = targetPlan {
+                if office, let pr = target, state != nil, let plan = targetPlan {
                     // el mundo entero del proyecto, encuadrado al principio igual que el final del zoom (el piso pulsado)
-                    OfficeWorldView(state: state, project: pr, now: officeNow,
-                                    focusRegion: plan.kind == .lobby ? "lobby:\(plan.name ?? "")" : "floor:\(plan.floorIndex)",
-                                    onSelect: { tid in if let tid, FloorLayout.machinePart(tid) == nil { onInspect?(tid) } })
+                    let all = floors(pr)
+                    OfficeWorldView(floors: all, frozenNow: officeNow, focusRegion: officeAll ? nil : Self.regionID(plan),
+                                    frame: FloorFrame.building(all), fitRequest: fitToken,
+                                    onSelect: { tid in if let tid, FloorLayout.machinePart(tid) == nil { onInspect?(tid) } },
+                                    onExit: { zoomOut() })
                 } else if office, let pr = target, let g = graph(pr) {
                     IsoOfficeView(graph: g, tasks: tasks(pr), hostOf: hosts(pr), frozenTime: frozenTime, flatChrome: flatChrome)
                 } else {
@@ -242,6 +362,7 @@ public struct CityView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { box.frameInWindow = $0 }
         }
         .background(IsoBackdrop())
         .clipShape(shape)
@@ -263,22 +384,38 @@ public struct CityView: View {
         return graph(pr).map { ($0.goal, "\($0.threads) de \($0.threadBudget) hilos") }
     }
 
+    private func act(_ on: Bool, _ f: @escaping () -> Void) -> (() -> Void)? { on ? f : nil }
+
+    private func crumbs() -> [CityCrumb] {
+        var out = [CityCrumb(id: "city", title: "Ciudad", action: act(canStepOut) { goCity() })]
+        let inside = inOffice || (frozenZoom.map { $0.p > 0 } ?? false)
+        let c = inside ? (target.flatMap { model.campus(of: $0) } ?? campusFocus) : campusFocus
+        if let c {
+            out.append(CityCrumb(id: "campus", title: c, action: act(inside) { goCampus(c) }))
+        }
+        if inside, let pr = target {
+            let atFloor = !(officeIsWorld && officeAll)
+            out.append(CityCrumb(id: "project", title: pr, action: act(officeIsWorld && atFloor) { goBuilding() }))
+            if atFloor, let plan = targetPlan {
+                out.append(CityCrumb(id: "floor", title: plan.shortTitle, action: nil))
+            }
+        }
+        if frozenZoom != nil { return out.map { CityCrumb(id: $0.id, title: $0.title, action: nil) } }
+        return out
+    }
+
     private func header(t: Double, chrome ch: Double) -> some View {
         let o = ch > 0 ? officeHeader(now: officeNow ?? Date()) : nil
-        return HStack(alignment: .firstTextBaseline) {
-            ZStack(alignment: .leading) {
-                Text("Todas las empresas").opacity(CityTransition.chromeOut(ch))
-                if let o { Text(o.title).opacity(CityTransition.chromeIn(ch)) }
-            }
-            .font(.callout.weight(.medium))
+        let back = frozenZoom == nil && canStepOut
+        return HStack(alignment: .firstTextBaseline, spacing: 12) {
+            CityBreadcrumb(crumbs: crumbs())
             Spacer()
             ZStack(alignment: .trailing) {
                 Text("\(litCount(t)) de \(model.threadCount) hilos").opacity(CityTransition.chromeOut(ch))
                 if let o { Text(o.count).opacity(CityTransition.chromeIn(ch)) }
             }
             .font(.caption).foregroundStyle(.secondary).padding(.trailing, 6)
-            CitySwitch(first: ch > 0.5 ? "Oficina" : "Ciudad", zoomed: (zoomed || mounted) && escapeZoomsOut,
-                       pickFirst: { if zoomed || mounted { zoomOut() } })
+            CityBackButton(enabled: back, shortcut: back && escapeZoomsOut, action: { stepOut() })
         }
     }
 
@@ -287,18 +424,23 @@ public struct CityView: View {
     /// Lo que hay dentro del piso durante el zoom (el mismo contenido que se monta al llegar).
     private func zoomContent(now: Date) -> CityZoom.Content? {
         guard let pr = target else { return nil }
-        if let plan = targetPlan { return .floor(plan, FloorLayout(plan: plan), now: now) }
+        let all = floors(pr)
+        if let i = floorIndex(pr, floor: targetFloor, in: all) {
+            let plan = all[i]
+            return .floor(plan, FloorLayout(plan: plan, frame: FloorFrame.building(all)), now: now)
+        }
         return graph(pr).map { .graph(box.scene(graph: $0, tasks: tasks(pr))) }
     }
 
-    private func zoomData(p: Double, size: CGSize, content: CityZoom.Content?) -> (CityZoom, IsoFrame)? {
+    private func zoomData(p: Double, size: CGSize, content: CityZoom.Content?, city: IsoFrame) -> (CityZoom, IsoFrame)? {
         guard p > 0, let pr = target, let fid = targetFloor, let content, let b = model.building(of: pr),
               let f = model.floor(id: fid) else { return nil }
         var minX = Double.infinity, minY = Double.infinity, maxX = -Double.infinity, maxY = -Double.infinity
         let bounds: IsoBounds
         switch content {
         case .floor(_, let lay, _):
-            for r in lay.rooms { minX = min(minX, r.x0); minY = min(minY, r.y0); maxX = max(maxX, r.x0 + r.w); maxY = max(maxY, r.y0 + r.d) }
+            let s = lay.shell
+            minX = s.x0; minY = s.y0; maxX = s.x1; maxY = s.y1
             bounds = IsoBounds(minU: lay.minU, maxU: lay.maxU, minV: lay.minV, maxV: lay.maxV)
         case .graph(let sc):
             for r in sc.rooms { minX = min(minX, r.x0); minY = min(minY, r.y0); maxX = max(maxX, r.x0 + r.w); maxY = max(maxY, r.y0 + r.d) }
@@ -307,7 +449,7 @@ public struct CityView: View {
         guard minX < maxX, minY < maxY else { return nil }  // piso sin salas: no hay a dónde acercarse
         let emb = OfficeEmbedding(rooms: CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY), building: b, level: f.level)
         let office = OfficeFraming.frame(bounds, size: size)
-        let tr = CityTransition(city: CityFraming.frame(model.bounds, size: size), office: office, embedding: emb)
+        let tr = CityTransition(city: city, office: office, embedding: emb)
         return (CityZoom(project: pr, floorID: fid, p: p, transition: tr, content: content), tr.camera(p))
     }
 
@@ -315,20 +457,24 @@ public struct CityView: View {
         let dark = scheme == .dark
         let floorNow = officeNow ?? Date()
         let inside = p > 0 ? zoomContent(now: floorNow) : nil
+        let origin = frozenZoom != nil ? nil : zoomOrigin
+        let goalCampus = frozenZoom != nil ? nil : campusFocus
+        let animate = frozenTime == nil
         return Canvas { ctx, size in
             guard !model.buildings.isEmpty else { return }
-            let cityF = CityFraming.frame(model.bounds, size: size)
-            box.cityFrame = cityF
-            let z = zoomData(p: p, size: size, content: inside)
-            CityRenderer(model: model, lights: lights, cam: z?.1 ?? cityF, dark: dark, t: t, growth: growth,
-                         hovered: hovered, zoom: z?.0, size: size).draw(&ctx)
+            let z = zoomData(p: p, size: size, content: inside, city: levelFrame(size, campus: origin))
+            let cam: IsoFrame
+            if let z {
+                cam = z.1
+                box.ease.snap(cam)
+            } else {
+                cam = box.ease.frame(levelFrame(size, campus: goalCampus), t: t, animate: animate)
+            }
+            box.cityFrame = cam
+            CityRenderer(model: model, lights: lights, cam: cam, dark: dark, t: t, growth: growth,
+                         hovered: hovered, zoom: z?.0, size: size, focusCampus: z == nil ? goalCampus : origin).draw(&ctx)
         } symbols: {
-            ForEach(model.floors) { f in
-                CityFloorPill(name: f.label, tint: lights.tint(f.id, t: t)).tag("cf:\(f.id)")
-            }
-            ForEach(model.buildings, id: \.index) { b in
-                CityCompanyTag(name: b.company, threads: b.floors.reduce(0) { $0 + $1.activeThreads.count }).tag("cb:\(b.company)")
-            }
+            CitySymbols(model: model, lights: lights, t: t)
             // mismas etiquetas que la oficina que se monta al final (el piso acaba siendo esa vista)
             switch inside {
             case .floor(let plan, let lay, let now)?:
@@ -355,9 +501,22 @@ public struct CityView: View {
             }
         }
         .gesture(SpatialTapGesture().onEnded { e in
-            guard !zoomed, p == 0, let f = box.cityFrame, let id = CityHit.floorID(at: e.location, in: model, frame: f),
-                  let fl = model.floor(id: id), let pr = project(of: fl) else { return }  // el vestíbulo compartido no entra
-            select(pr, floor: fl.isLobby ? nil : fl.id)
+            guard !zoomed, p == 0, let f = box.cityFrame else { return }
+            if let id = CityHit.floorID(at: e.location, in: model, frame: f), let fl = model.floor(id: id) {
+                guard let pr = project(of: fl) else { return }  // el vestíbulo compartido no entra
+                select(pr, floor: fl.isLobby ? nil : fl.id)
+            } else if frozenZoom == nil, let c = CityHit.campus(at: e.location, in: model, frame: f), c != campusFocus {
+                campus = c
+            }
+        })
+        .simultaneousGesture(MagnifyGesture().onEnded { v in
+            guard frozenZoom == nil, frozenTime == nil, !zoomed, p == 0 else { return }
+            if v.magnification < 0.85 {
+                if campusFocus != nil { campus = nil }
+            } else if v.magnification > 1.18, campusFocus == nil, let f = box.cityFrame,
+                      let c = CityHit.campus(at: v.startLocation, in: model, frame: f) {
+                campus = c
+            }
         })
     }
 
@@ -425,39 +584,54 @@ struct CityStatusLine: View {
     }
 }
 
-/// Ciudad (u Oficina, con el zoom dentro): con el zoom puesto, clic o Esc vuelve a la ciudad. Dibujado a mano: se ve igual en
-/// la app y en capturas.
+struct CityCrumb: Identifiable {
+    let id: String
+    let title: String
+    let action: (() -> Void)?
+}
+
 @available(macOS 26.0, *)
-struct CitySwitch: View {
-    let first: String
-    let zoomed: Bool
-    let pickFirst: () -> Void
-    @Environment(\.colorScheme) private var scheme
+struct CityBreadcrumb: View {
+    let crumbs: [CityCrumb]
 
     var body: some View {
-        HStack(spacing: 0) {
-            segment(first, on: true, action: pickFirst)
-                .keyboardShortcut(zoomed ? KeyboardShortcut(.escape, modifiers: []) : nil)
-        }
-        .padding(2)
-        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.primary.opacity(0.08)))
-    }
-
-    private func segment(_ title: String, on: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title).font(.system(size: 11.5, weight: on ? .semibold : .regular))
-                .padding(.horizontal, 11).padding(.vertical, 3)
-                .background {
-                    if on {
-                        RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            .fill(scheme == .dark ? Color.white.opacity(0.16) : Color.white.opacity(0.95))
-                            .shadow(color: .black.opacity(0.15), radius: 1, y: 0.5)
-                    }
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            ForEach(Array(crumbs.enumerated()), id: \.element.id) { i, c in
+                if i > 0 {
+                    Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold)).foregroundStyle(.tertiary)
                 }
-                .foregroundStyle(on ? Color.primary : Color.secondary)
+                if let a = c.action {
+                    Button(action: a) { Text(c.title).contentShape(Rectangle()) }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Color.secondary)
+                } else {
+                    Text(c.title).foregroundStyle(i == crumbs.count - 1 ? Color.primary : Color.secondary)
+                }
+            }
+        }
+        .font(.callout.weight(.medium))
+        .lineLimit(1)
+    }
+}
+
+@available(macOS 26.0, *)
+struct CityBackButton: View {
+    let enabled: Bool
+    let shortcut: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text("← Volver")
+                .font(.system(size: 11.5, weight: .semibold))
+                .padding(.horizontal, 11).padding(.vertical, 3)
+                .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.primary.opacity(enabled ? 0.12 : 0.05)))
+                .foregroundStyle(enabled ? Color.primary : Color.secondary.opacity(0.6))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(!enabled)
+        .keyboardShortcut(shortcut ? KeyboardShortcut.cancelAction : nil)
     }
 }
 
@@ -630,7 +804,7 @@ public struct LiveCityScreen: View {
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .navigationTitle("Ciudad")
-        .navigationSubtitle(perProject ? "\(model.projectCount) proyectos" : "\(model.buildings.count) empresas · \(model.projectCount) proyectos")
+        .navigationSubtitle(perProject ? "\(model.projectCount) proyectos" : "\(model.campuses.count) empresas · \(model.projectCount) proyectos")
         .toolbar { ToolbarItem(placement: .primaryAction) { MachineStatusButton(machines: store.snapshot.machines) } }
         .onAppear { refresh() }
         .onReceive(store.$snapshot) { _ in refresh() }

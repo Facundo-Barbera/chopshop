@@ -47,6 +47,7 @@ extension FloorPlan {
             guard let g = guest(String(id.dropFirst(6))), !g.gone(at: now) else { return nil }
             return .occupied(g.visual, g.opacity(at: now))
         }
+        if id.hasPrefix("bot:") { return botActive(String(id.dropFirst(4))) ? .occupied(.running, 1) : .sleeping }
         guard let d = desk(id) else { return nil }
         if d.retired && d.occupant == nil { return .retired }
         if let o = d.occupant, !o.gone(at: now) { return .occupied(o.visual, o.opacity(at: now)) }
@@ -178,18 +179,36 @@ struct FloorRenderer {
 
     private var isLobby: Bool { plan.kind == .lobby }
     private var floorZ: Double { Iso.slabH }
+    private var coreH: Double { FloorLayout.topH - Iso.slabH }
+    private var curbH: Double { 4.0 }
+    private var glassH: Double { 9.0 }
 
-    // MARK: escena
+    private typealias Side = FloorPlanGenerator.Side
+
+    private struct Box {
+        var x0: Double, y0: Double, x1: Double, y1: Double
+        init(x0: Double, y0: Double, x1: Double, y1: Double) { self.x0 = x0; self.y0 = y0; self.x1 = x1; self.y1 = y1 }
+        init(_ r: FloorLayout.RoomBox) { x0 = r.x0; y0 = r.y0; x1 = r.x1; y1 = r.y1 }
+        init(_ r: FloorPlanGenerator.Rect) { x0 = r.x0; y0 = r.y0; x1 = r.x1; y1 = r.y1 }
+        var w: Double { x1 - x0 }
+        var d: Double { y1 - y0 }
+    }
+
+    private struct Wall {
+        var side: FloorPlanGenerator.Side
+        var x: Double, y: Double, w: Double, d: Double, h: Double
+        var facade: Bool
+        var glass: [(Double, Double)]
+        var key: Double { x + w / 2 + y + d / 2 }
+    }
 
     func draw(_ ctx: inout GraphicsContext) {
         box.hits.removeAll(keepingCapacity: true); box.heads.removeAll(keepingCapacity: true)
         let looks = self.looks()
-        // 1· sombras de las losas
         ctx.drawLayer { l in
             l.addFilter(.blur(radius: 9 * cam.s))
             slabShadows(&l)
         }
-        // 2· salas · 3· suelo · 4· escritorios y muñecos · 5· etiquetas
         drawRooms(&ctx, looks: looks)
         ctx.drawLayer { l in
             l.addFilter(.blur(radius: 2.4 * cam.s))
@@ -199,44 +218,79 @@ struct FloorRenderer {
         drawLabels(&ctx, looks: looks)
     }
 
-    /// Aspecto de cada hueco en `now` (lo comparten las fases).
     func looks() -> [String: FloorLook?] {
         Dictionary(layout.spots.map { ($0.id, plan.look($0.id, now: now)) }, uniquingKeysWith: { a, _ in a })
     }
 
-    /// Fase 1 (en una capa con desenfoque que puede compartir varios pisos): sombras de las losas de las salas.
     func slabShadows(_ l: inout GraphicsContext) {
-        for r in layout.rooms + machineBoxes {
-            l.fill(castShadow(r.x0 - 2, r.y0 - 2, r.w + 4, r.d + 4, Iso.slabH + 14, z: 0), with: .color(.black.opacity(dark ? 0.55 : 0.20)))
-        }
+        let s = layout.shell
+        l.fill(castShadow(s.x0 - 2, s.y0 - 2, s.w + 4, s.d + 4, Iso.slabH + 14, z: 0), with: .color(.black.opacity(dark ? 0.55 : 0.20)))
     }
 
-    /// Fase 2: salas, de atrás hacia delante; las de máquinas son una más.
     func drawRooms(_ ctx: inout GraphicsContext, looks: [String: FloorLook?]) {
-        for r in (layout.rooms + machineBoxes).sorted(by: { ($0.x0 + $0.y0) < ($1.x0 + $1.y0) }) {
-            if let k = FloorLayout.machineSlot(r.index) { drawMachineRoom(&ctx, r, k); continue }
-            let ids = layout.spots.filter { $0.room == r.index }.map(\.id)
-            let vs = ids.compactMap { looks[$0]??.visual }
-            drawRoom(&ctx, r, needs: vs.contains(.needsYou), stuck: vs.contains(.stuck))
+        let s = layout.shell
+        _ = prism(&ctx, s.x0, s.y0, 0, s.w, s.d, floorZ, top: slabTop, topEnd: slabTopEnd, left: slabL, right: slabR, edge: dark ? 0.16 : 0.9)
+        for r in layout.extras where r.index == FloorLayout.corridorIndex { drawCorridor(&ctx, r) }
+        for r in layout.rooms { drawRoomFloor(&ctx, r) }
+        for r in layout.extras where r.index != FloorLayout.corridorIndex && r.index != FloorLayout.coreIndex { drawRoomFloor(&ctx, r) }
+        for m in layout.machines { drawMachineFloor(&ctx, m) }
+        for r in layout.rooms {
+            let vs = layout.spots.filter { $0.room == r.index }.compactMap { looks[$0.id]??.visual }
+            rims(&ctx, r, needs: vs.contains(.needsYou), stuck: vs.contains(.stuck))
+        }
+        for m in layout.machines where plan.machineRooms.indices.contains(m.index) {
+            let mr = plan.machineRooms[m.index]
+            let stuck = mr.worstLight == .red || mr.listeners.contains { $0.state == .down }
+            let needs = !mr.failingAutomations.isEmpty || mr.subscriptions.contains(where: \.failing) || mr.listeners.contains { $0.state == .degraded }
+            rims(&ctx, machineBox(m), needs: needs && !stuck, stuck: stuck)
+        }
+        drawEntrance(&ctx)
+        let all = layout.rooms + layout.extras + machineBoxes
+        let solids = all.filter { !isOpen($0) }
+        var ws: [Wall] = []
+        for r in all where r.index != FloorLayout.coreIndex { ws += walls(r, solids: solids) }
+        for w in ws.sorted(by: { $0.key < $1.key }) { drawWall(&ctx, w) }
+        for m in layout.machines where m.cabinets.isEmpty {
+            var g = ctx; g.opacity = 0.4
+            let x = m.x0 + m.w / 2 - FloorLayout.cabW / 2
+            let y = m.cabinetsAtBack ? m.y0 + FloorLayout.pad + 6 : m.y1 - FloorLayout.pad - 6 - FloorLayout.cabD
+            _ = prism(&g, x, y, floorZ, FloorLayout.cabW, FloorLayout.cabD, FloorLayout.cabH, top: cabTop, left: cabL, right: cabR, edge: dark ? 0.16 : 0.5)
         }
     }
 
-    /// Fases 3 y 4: marcas del suelo, escritorios (o armarios) y muñecos por profundidad.
     func drawContents(_ ctx: inout GraphicsContext, looks: [String: FloorLook?]) {
         drawFloorMarks(&ctx, looks: looks)
-        for sp in layout.spots.sorted(by: { ($0.cx + $0.cy) < ($1.cx + $1.cy) }) {
-            if sp.isMachine { drawMachineSpot(&ctx, sp); continue }
-            guard let lk = looks[sp.id] ?? nil else { continue }
-            if isLobby { drawGuest(&ctx, sp, lk) } else { drawDesk(&ctx, sp, lk) }
+        let core = layout.core
+        func behind(_ x: Double, _ y: Double) -> Bool {
+            guard let c = core else { return false }
+            return (x < c.x0 && y < c.y1) || (y < c.y0 && x < c.x1)
+        }
+        let furniture = layout.extras.filter { $0.commons != nil }.sorted { ($0.x0 + $0.y0) < ($1.x0 + $1.y0) }
+        let spots = layout.spots.sorted { ($0.cx + $0.cy) < ($1.cx + $1.cy) }
+        for pass in [true, false] {
+            for r in furniture where behind(r.x0 + r.w / 2, r.y0 + r.d / 2) == pass { drawFurniture(&ctx, r) }
+            for sp in spots where behind(sp.cx, sp.cy) == pass { drawSpot(&ctx, sp, looks: looks) }
+            if pass, let c = core { drawCore(&ctx, c) }
         }
     }
 
-    /// Fase 5: etiquetas de salas y huecos (símbolos `<prefijo>r:<i>`, `<prefijo>m:<armario>` y `<prefijo>d:<id>`).
+    private func drawSpot(_ ctx: inout GraphicsContext, _ sp: FloorLayout.Spot, looks: [String: FloorLook?]) {
+        if sp.isMachine { drawMachineSpot(&ctx, sp); return }
+        guard let lk = looks[sp.id] ?? nil else { return }
+        if isLobby { drawGuest(&ctx, sp, lk) } else { drawDesk(&ctx, sp, lk) }
+    }
+
     func drawLabels(_ ctx: inout GraphicsContext, looks: [String: FloorLook?]) {
-        for r in layout.rooms + machineBoxes {
+        let labeled = layout.rooms + layout.extras.filter { $0.index != FloorLayout.corridorIndex } + machineBoxes
+        for r in labeled {
+            if r.commons != nil && min(r.w, r.d) < 90 { continue }
             guard let s = ctx.resolveSymbol(id: "\(prefix)r:\(r.index)") else { continue }
             var g = ctx; g.opacity = 0.9
-            g.draw(s, at: P(r.x0 + r.w * 0.5, r.y0, Iso.slabH + Iso.wallH + 16), anchor: .center)
+            if r.index == FloorLayout.coreIndex {
+                g.draw(s, at: P(r.x0 + r.w * 0.5, r.y0 + r.d * 0.5, floorZ + coreH + 14), anchor: .center)
+            } else {
+                g.draw(s, at: P(r.x0 + r.w * 0.5, r.y0, floorZ + Iso.wallH + 16), anchor: .center)
+            }
         }
         for sp in layout.machines.flatMap(\.cabinets) {
             guard let s = ctx.resolveSymbol(id: "\(prefix)m:\(sp.id)") else { continue }
@@ -244,8 +298,6 @@ struct FloorRenderer {
             let p = P(sp.cx, sp.cy + FloorLayout.cabD / 2, floorZ)
             g.draw(s, at: CGPoint(x: p.x, y: p.y + 6), anchor: .top)
         }
-        // Con el piso muy alejado solo se rotula lo que importa (trabajando, te necesita, trabado) y lo señalado: el resto, al pasar
-        // el ratón. Así las etiquetas no se pisan.
         let crowded = cam.s < 0.62
         for sp in layout.spots {
             guard let lk = looks[sp.id] ?? nil, let s = ctx.resolveSymbol(id: "\(prefix)d:\(sp.id)") else { continue }
@@ -270,52 +322,419 @@ struct FloorRenderer {
         }
     }
 
-    /// Las salas de máquinas como salas más (para sombras, orden y etiqueta `r:<machineRoomIndex(k)>`).
-    private var machineBoxes: [FloorLayout.RoomBox] {
-        layout.machines.map { FloorLayout.RoomBox(index: FloorLayout.machineRoomIndex($0.index), role: "machine", x0: $0.x0, y0: $0.y0, w: $0.w, d: $0.d) }
+    private var machineBoxes: [FloorLayout.RoomBox] { layout.machines.map { machineBox($0) } }
+
+    private func machineBox(_ m: FloorLayout.MachineBox) -> FloorLayout.RoomBox {
+        FloorLayout.RoomBox(index: FloorLayout.machineRoomIndex(m.index), role: "machine", x0: m.x0, y0: m.y0, w: m.w, d: m.d,
+                            door: m.door, windows: m.windows)
     }
 
-    // Salas ----------------------------------------------------------------
+    private func isOpen(_ r: FloorLayout.RoomBox) -> Bool {
+        r.index == FloorLayout.corridorIndex || (isLobby && r.index == 0 && r.role == "lobby")
+    }
 
-    private func drawRoom(_ ctx: inout GraphicsContext, _ r: FloorLayout.RoomBox, needs: Bool, stuck: Bool) {
-        var g = ctx
-        let z = Iso.slabH
-        _ = prism(&g, r.x0, r.y0, 0, r.w, r.d, z, top: slabTop, topEnd: slabTopEnd, left: slabL, right: slabR, edge: dark ? 0.16 : 0.9)
+    private func quad(_ x0: Double, _ y0: Double, _ x1: Double, _ y1: Double, _ z: Double) -> Path {
+        poly([P(x0, y0, z), P(x1, y0, z), P(x1, y1, z), P(x0, y1, z)])
+    }
+
+    private func sidePt(_ b: Box, _ side: Side, _ s: Double, _ inset: Double, _ z: Double) -> CGPoint {
+        switch side {
+        case .north: return P(s, b.y0 + inset, z)
+        case .south: return P(s, b.y1 - inset, z)
+        case .west: return P(b.x0 + inset, s, z)
+        case .east: return P(b.x1 - inset, s, z)
+        }
+    }
+
+    private var glass: Color { dark ? Color(red: 0.36, green: 0.50, blue: 0.62) : Color(red: 0.60, green: 0.77, blue: 0.88) }
+    private var metal: Color { c(0.30, (0.74, 0.76, 0.78)) }
+    private var coreTop: Color { c(0.235, (0.905, 0.895, 0.875)) }
+    private var coreL: Color { c(0.165, (0.805, 0.792, 0.770)) }
+    private var coreR: Color { c(0.115, (0.715, 0.702, 0.680)) }
+    private var grokTint: Color { Color(red: 0.36, green: 0.48, blue: 0.90).opacity(dark ? 0.14 : 0.08) }
+
+    private func commonsTint(_ k: FloorPlanGenerator.Commons) -> Color {
+        let a = dark ? 0.10 : 0.07
+        switch k {
+        case .kitchenette, .cafe: return Color(red: 0.88, green: 0.62, blue: 0.34).opacity(a)
+        case .meeting: return Color(red: 0.46, green: 0.54, blue: 0.66).opacity(a)
+        case .lounge: return Color(red: 0.64, green: 0.50, blue: 0.72).opacity(a)
+        case .open, .reception: return Color(red: 0.40, green: 0.64, blue: 0.44).opacity(a)
+        }
+    }
+
+    private func drawCorridor(_ ctx: inout GraphicsContext, _ r: FloorLayout.RoomBox) {
+        let z = floorZ + 0.05
+        ctx.fill(quad(r.x0, r.y0, r.x1, r.y1, z),
+                 with: .color((dark ? Color.black : Color(red: 0.55, green: 0.52, blue: 0.46)).opacity(dark ? 0.22 : 0.10)))
+        var l = Path()
+        if r.w >= r.d {
+            l.move(to: P(r.x0 + 14, r.y0 + r.d / 2, z)); l.addLine(to: P(r.x1 - 14, r.y0 + r.d / 2, z))
+        } else {
+            l.move(to: P(r.x0 + r.w / 2, r.y0 + 14, z)); l.addLine(to: P(r.x0 + r.w / 2, r.y1 - 14, z))
+        }
+        ctx.stroke(l, with: .color(ink.opacity(dark ? 0.16 : 0.18)), style: StrokeStyle(lineWidth: 1, lineCap: .round, dash: [7, 6]))
+    }
+
+    private func drawRoomFloor(_ ctx: inout GraphicsContext, _ r: FloorLayout.RoomBox) {
+        let z = floorZ + 0.05
+        var tint: Color?
+        if r.index == FloorLayout.grokIndex { tint = grokTint } else if let k = r.commons { tint = commonsTint(k) }
+        if let tint { ctx.fill(quad(r.x0, r.y0, r.x1, r.y1, z), with: .color(tint)) }
+        guard r.commons == nil else { return }
         var grid = Path()
-        let step = isLobby ? 33.0 : 22.0
+        let step = isOpen(r) ? 33.0 : 22.0
         var gx = r.x0 + step
-        while gx < r.x0 + r.w - 1 { grid.move(to: P(gx, r.y0, z)); grid.addLine(to: P(gx, r.y0 + r.d, z)); gx += step }
+        while gx < r.x1 - 1 { grid.move(to: P(gx, r.y0, z)); grid.addLine(to: P(gx, r.y1, z)); gx += step }
         var gy = r.y0 + step
-        while gy < r.y0 + r.d - 1 { grid.move(to: P(r.x0, gy, z)); grid.addLine(to: P(r.x0 + r.w, gy, z)); gy += step }
-        g.stroke(grid, with: .color((dark ? Color.white : Color.black).opacity(dark ? 0.028 : 0.04)), lineWidth: 0.6)
+        while gy < r.y1 - 1 { grid.move(to: P(r.x0, gy, z)); grid.addLine(to: P(r.x1, gy, z)); gy += step }
+        ctx.stroke(grid, with: .color((dark ? Color.white : Color.black).opacity(dark ? 0.028 : 0.04)), lineWidth: 0.6)
+    }
 
-        // canto de color en el frente: solo el departamento que necesita algo
+    private func drawMachineFloor(_ ctx: inout GraphicsContext, _ m: FloorLayout.MachineBox) {
+        let z = floorZ + 0.1, e = 6.0
+        ctx.fill(quad(m.x0 + e, m.y0 + e, m.x1 - e, m.y1 - e, z),
+                 with: .color((dark ? Color.black : Color(red: 0.30, green: 0.32, blue: 0.36)).opacity(dark ? 0.24 : 0.07)))
+        var grid = Path()
+        var gx = m.x0 + 26.0
+        while gx < m.x1 - e { grid.move(to: P(gx, m.y0 + e, z)); grid.addLine(to: P(gx, m.y1 - e, z)); gx += 26 }
+        var gy = m.y0 + 26.0
+        while gy < m.y1 - e { grid.move(to: P(m.x0 + e, gy, z)); grid.addLine(to: P(m.x1 - e, gy, z)); gy += 26 }
+        ctx.stroke(grid, with: .color(ink.opacity(dark ? 0.07 : 0.08)), lineWidth: 0.7)
+    }
+
+    private func rims(_ ctx: inout GraphicsContext, _ r: FloorLayout.RoomBox, needs: Bool, stuck: Bool) {
         let leftC: Color? = needs ? Attention.needsYou : (stuck ? Attention.stuck : nil)
         let rightC: Color? = stuck ? Attention.stuck : (needs ? Attention.needsYou : nil)
+        guard leftC != nil || rightC != nil else { return }
+        let z = floorZ + 0.3
+        var g = ctx
         func rim(_ a: CGPoint, _ b: CGPoint, _ col: Color) {
             var p = Path(); p.move(to: a); p.addLine(to: b)
             var glow = g; glow.addFilter(.blur(radius: 3.5 * cam.s))
             glow.stroke(p, with: .color(col.opacity(0.55)), lineWidth: 3 * cam.s)
             g.stroke(p, with: .color(col), style: StrokeStyle(lineWidth: max(1.4, 1.6 * cam.s), lineCap: .round))
         }
-        if let lc = leftC { rim(P(r.x0, r.y0 + r.d, z), P(r.x0 + r.w, r.y0 + r.d, z), lc) }
-        if let rc = rightC { rim(P(r.x0 + r.w, r.y0 + r.d, z), P(r.x0 + r.w, r.y0, z), rc) }
+        if let lc = leftC { rim(P(r.x0 + 3, r.y1 - 3, z), P(r.x1 - 3, r.y1 - 3, z), lc) }
+        if let rc = rightC { rim(P(r.x1 - 3, r.y1 - 3, z), P(r.x1 - 3, r.y0 + 3, z), rc) }
+    }
 
-        // muros bajos al fondo; el departamento tiene una puerta al pasillo en el muro izquierdo
-        let wh = Iso.wallH
-        _ = prism(&g, r.x0, r.y0, z, r.w, Iso.wallT, wh, top: wallTop, left: wallL, right: wallR, edge: dark ? 0.2 : 0.9)
-        let door = r.y0 + r.d - 30
-        let segs = isLobby ? [(r.y0 + Iso.wallT, r.y0 + r.d)] : [(r.y0 + Iso.wallT, door - 12), (door + 12, r.y0 + r.d)]
-        for s in segs where s.1 - s.0 > 0.5 {
-            _ = prism(&g, r.x0, s.0, z, Iso.wallT, s.1 - s.0, wh, top: wallTop, left: wallL, right: wallR, edge: dark ? 0.2 : 0.9)
+    private func drawEntrance(_ ctx: inout GraphicsContext) {
+        guard let en = layout.entrance else { return }
+        let b = Box(layout.shell), z = floorZ + 0.2
+        let mat = poly([sidePt(b, en.side, en.from + 3, 2, z), sidePt(b, en.side, en.to - 3, 2, z),
+                        sidePt(b, en.side, en.to - 3, 22, z), sidePt(b, en.side, en.from + 3, 22, z)])
+        ctx.fill(mat, with: .color(ink.opacity(dark ? 0.22 : 0.12)))
+        ctx.stroke(mat, with: .color(ink.opacity(dark ? 0.25 : 0.18)), lineWidth: 0.7)
+        for s in [en.from, en.to] {
+            pane(&ctx, [sidePt(b, en.side, s, 0, floorZ), sidePt(b, en.side, s, 14, floorZ),
+                        sidePt(b, en.side, s, 14, floorZ + Iso.wallH), sidePt(b, en.side, s, 0, floorZ + Iso.wallH)])
+        }
+    }
+
+    private func touches(_ q: FloorLayout.RoomBox, _ r: FloorLayout.RoomBox, _ side: Side) -> Bool {
+        let ox = min(q.x1, r.x1) - max(q.x0, r.x0), oy = min(q.y1, r.y1) - max(q.y0, r.y0)
+        switch side {
+        case .north: return abs(q.y1 - r.y0) < 0.5 && ox > 1
+        case .south: return abs(q.y0 - r.y1) < 0.5 && ox > 1
+        case .west: return abs(q.x1 - r.x0) < 0.5 && oy > 1
+        case .east: return abs(q.x0 - r.x1) < 0.5 && oy > 1
+        }
+    }
+
+    private func walls(_ r: FloorLayout.RoomBox, solids: [FloorLayout.RoomBox]) -> [Wall] {
+        let s = layout.shell, e = 0.5, T = Iso.wallT
+        var out: [Wall] = []
+        for side in [Side.north, .west, .south, .east] {
+            let perimeter: Bool
+            switch side {
+            case .north: perimeter = abs(r.y0 - s.y0) < e
+            case .south: perimeter = abs(r.y1 - s.y1) < e
+            case .west: perimeter = abs(r.x0 - s.x0) < e
+            case .east: perimeter = abs(r.x1 - s.x1) < e
+            }
+            if !perimeter {
+                if isOpen(r) { continue }
+                let nb = solids.filter { $0 != r && touches($0, r, side) }
+                let blocked = side.isBack ? nb.contains(where: { $0.index == FloorLayout.coreIndex }) : !nb.isEmpty
+                if blocked { continue }
+            }
+            let lo: Double, hi: Double
+            switch side {
+            case .north, .south: lo = r.x0; hi = r.x1
+            case .west, .east: lo = r.y0; hi = r.y1
+            }
+            var segs: [(Double, Double)] = [(lo, hi)]
+            if let d = r.door, d.side == side { segs = [(lo, d.from), (d.to, hi)] }
+            let panes: [(Double, Double)] = perimeter ? r.windows.filter { $0.side == side }.map { ($0.from, $0.to) } : []
+            let h = side.isBack ? Iso.wallH : curbH
+            for (a, b) in segs where b - a > 0.5 {
+                let gl = panes.filter { $0.0 < b && $0.1 > a }.map { (max($0.0, a), min($0.1, b)) }
+                switch side {
+                case .north: out.append(Wall(side: side, x: a, y: r.y0, w: b - a, d: T, h: h, facade: perimeter, glass: gl))
+                case .south: out.append(Wall(side: side, x: a, y: r.y1 - T, w: b - a, d: T, h: h, facade: perimeter, glass: gl))
+                case .west: out.append(Wall(side: side, x: r.x0, y: a, w: T, d: b - a, h: h, facade: perimeter, glass: gl))
+                case .east: out.append(Wall(side: side, x: r.x1 - T, y: a, w: T, d: b - a, h: h, facade: perimeter, glass: gl))
+                }
+            }
+        }
+        return out
+    }
+
+    private func drawWall(_ ctx: inout GraphicsContext, _ w: Wall) {
+        let z = floorZ
+        _ = prism(&ctx, w.x, w.y, z, w.w, w.d, w.h, top: wallTop, left: wallL, right: wallR, edge: dark ? 0.2 : 0.9)
+        guard w.facade else { return }
+        for (a, b) in w.glass {
+            switch w.side {
+            case .north:
+                let y = w.y + w.d
+                pane(&ctx, [P(a, y, z + 3), P(b, y, z + 3), P(b, y, z + w.h - 2.5), P(a, y, z + w.h - 2.5)])
+            case .west:
+                let x = w.x + w.w
+                pane(&ctx, [P(x, a, z + 3), P(x, b, z + 3), P(x, b, z + w.h - 2.5), P(x, a, z + w.h - 2.5)])
+            case .south:
+                let y = w.y + w.d / 2, z0 = z + w.h, z1 = z + w.h + glassH
+                strip(&ctx, [P(a, y, z0), P(b, y, z0), P(b, y, z1), P(a, y, z1)])
+            case .east:
+                let x = w.x + w.w / 2, z0 = z + w.h, z1 = z + w.h + glassH
+                strip(&ctx, [P(x, a, z0), P(x, b, z0), P(x, b, z1), P(x, a, z1)])
+            }
+        }
+    }
+
+    private func pane(_ ctx: inout GraphicsContext, _ q: [CGPoint]) {
+        let p = poly(q)
+        ctx.fill(p, with: .color(glass.opacity(dark ? 0.55 : 0.75)))
+        var hl = Path(); hl.move(to: q[0]); hl.addLine(to: q[2])
+        ctx.stroke(hl, with: .color(.white.opacity(dark ? 0.12 : 0.35)), lineWidth: 0.7)
+        ctx.stroke(p, with: .color(.white.opacity(dark ? 0.18 : 0.5)), lineWidth: 0.6)
+    }
+
+    private func strip(_ ctx: inout GraphicsContext, _ q: [CGPoint]) {
+        ctx.fill(poly(q), with: .color(glass.opacity(dark ? 0.22 : 0.32)))
+        var l = Path()
+        l.move(to: q[3]); l.addLine(to: q[2])
+        l.move(to: q[0]); l.addLine(to: q[3])
+        l.move(to: q[1]); l.addLine(to: q[2])
+        ctx.stroke(l, with: .color(.white.opacity(dark ? 0.25 : 0.7)), lineWidth: 0.8)
+    }
+
+    private func drawCore(_ ctx: inout GraphicsContext, _ r: FloorLayout.RoomBox) {
+        let z = floorZ, h = coreH, tz = z + h + 0.2
+        _ = prism(&ctx, r.x0, r.y0, z, r.w, r.d, h, top: coreTop, left: coreL, right: coreR, edge: dark ? 0.18 : 0.8)
+        let alongY = r.d >= r.w, m = 10.0
+        let sx0 = r.x0 + m, sy0 = r.y0 + m
+        let sx1 = alongY ? r.x1 - m : r.x0 + r.w / 2 - 4
+        let sy1 = alongY ? r.y0 + r.d / 2 - 4 : r.y1 - m
+        if sx1 - sx0 > 6 && sy1 - sy0 > 6 {
+            ctx.fill(quad(sx0, sy0, sx1, sy1, tz), with: .color(ink.opacity(dark ? 0.10 : 0.06)))
+            var steps = Path()
+            if alongY {
+                var y = sy0 + 7
+                while y < sy1 - 1 { steps.move(to: P(sx0, y, tz)); steps.addLine(to: P(sx1, y, tz)); y += 7 }
+                let mx = (sx0 + sx1) / 2
+                steps.move(to: P(mx, sy0, tz)); steps.addLine(to: P(mx, sy1, tz))
+            } else {
+                var x = sx0 + 7
+                while x < sx1 - 1 { steps.move(to: P(x, sy0, tz)); steps.addLine(to: P(x, sy1, tz)); x += 7 }
+                let my = (sy0 + sy1) / 2
+                steps.move(to: P(sx0, my, tz)); steps.addLine(to: P(sx1, my, tz))
+            }
+            ctx.stroke(steps, with: .color(ink.opacity(dark ? 0.22 : 0.20)), lineWidth: 0.7)
+            ctx.stroke(quad(sx0, sy0, sx1, sy1, tz), with: .color(ink.opacity(dark ? 0.25 : 0.22)), lineWidth: 0.8)
+        }
+        let ex0 = alongY ? r.x0 + m : r.x0 + r.w / 2 + 4
+        let ey0 = alongY ? r.y0 + r.d / 2 + 4 : r.y0 + m
+        let ex1 = r.x1 - m, ey1 = r.y1 - m
+        let shaft = Color.black.opacity(dark ? 0.35 : 0.14)
+        if alongY {
+            let mid = (ex0 + ex1) / 2
+            for (a, b) in [(ex0, mid - 3), (mid + 3, ex1)] where b - a > 4 && ey1 - ey0 > 4 {
+                ctx.fill(quad(a, ey0, b, ey1, tz), with: .color(shaft))
+            }
+        } else {
+            let mid = (ey0 + ey1) / 2
+            for (a, b) in [(ey0, mid - 3), (mid + 3, ey1)] where b - a > 4 && ex1 - ex0 > 4 {
+                ctx.fill(quad(ex0, a, ex1, b, tz), with: .color(shaft))
+            }
+        }
+        guard let d = r.door, !d.side.isBack else { return }
+        let bx = Box(r), mid = (d.from + d.to) / 2, dh = min(30, h - 8)
+        for (a, e) in [(d.from, mid - 0.6), (mid + 0.6, d.to)] {
+            let q = poly([sidePt(bx, d.side, a, 0, z), sidePt(bx, d.side, e, 0, z), sidePt(bx, d.side, e, 0, z + dh), sidePt(bx, d.side, a, 0, z + dh)])
+            ctx.fill(q, with: .color(metal))
+            ctx.stroke(q, with: .color(.white.opacity(dark ? 0.12 : 0.4)), lineWidth: 0.6)
+        }
+        let fr = poly([sidePt(bx, d.side, d.from - 3, 0, z), sidePt(bx, d.side, d.to + 3, 0, z),
+                       sidePt(bx, d.side, d.to + 3, 0, z + dh + 3), sidePt(bx, d.side, d.from - 3, 0, z + dh + 3)])
+        ctx.stroke(fr, with: .color(ink.opacity(dark ? 0.3 : 0.25)), lineWidth: 0.9)
+        let lp = sidePt(bx, d.side, mid, 0, z + dh + 8), lr = 1.8 * cam.s
+        let pulse = 0.5 + 0.5 * sin(t * 1.3)
+        ctx.fill(Path(ellipseIn: CGRect(x: lp.x - lr, y: lp.y - lr, width: 2 * lr, height: 2 * lr)), with: .color(lamp.opacity(0.5 + 0.4 * pulse)))
+    }
+
+    private var wood: (Color, Color, Color) { (c(0.30, (0.86, 0.76, 0.60)), c(0.22, (0.76, 0.66, 0.50)), c(0.16, (0.66, 0.56, 0.42))) }
+    private var fabric: (Color, Color, Color) { (c(0.27, (0.66, 0.70, 0.77)), c(0.20, (0.56, 0.60, 0.67)), c(0.15, (0.48, 0.52, 0.59))) }
+    private var counterTone: (Color, Color, Color) { (c(0.38, (0.97, 0.96, 0.94)), c(0.26, (0.84, 0.82, 0.79)), c(0.19, (0.74, 0.72, 0.69))) }
+    private var potTone: (Color, Color, Color) { (c(0.30, (0.80, 0.62, 0.48)), c(0.22, (0.70, 0.52, 0.40)), c(0.16, (0.60, 0.44, 0.34))) }
+    private var leaf: Color { dark ? Color(red: 0.24, green: 0.42, blue: 0.28) : Color(red: 0.42, green: 0.66, blue: 0.44) }
+    private var rugTone: Color { dark ? Color(red: 0.30, green: 0.24, blue: 0.34) : Color(red: 0.82, green: 0.74, blue: 0.84) }
+
+    private func block(_ g: inout GraphicsContext, _ x: Double, _ y: Double, _ w: Double, _ d: Double, _ h: Double,
+                       _ col: (Color, Color, Color), z: Double? = nil) {
+        _ = prism(&g, x, y, z ?? floorZ, w, d, h, top: col.0, left: col.1, right: col.2, edge: dark ? 0.12 : 0.5)
+    }
+
+    private func plant(_ g: inout GraphicsContext, _ x: Double, _ y: Double) {
+        block(&g, x - 4, y - 4, 8, 8, 7, potTone)
+        let q = P(x, y, floorZ + 14), r = 7.5 * cam.s
+        g.fill(Path(ellipseIn: CGRect(x: q.x - r, y: q.y - r * 0.85, width: 2 * r, height: 1.7 * r)), with: .color(leaf))
+        let q2 = P(x - 1.5, y - 1.5, floorZ + 18), r2 = 4.5 * cam.s
+        g.fill(Path(ellipseIn: CGRect(x: q2.x - r2, y: q2.y - r2, width: 2 * r2, height: 2 * r2)), with: .color(.white.opacity(dark ? 0.06 : 0.14)))
+    }
+
+    private func stool(_ g: inout GraphicsContext, _ x: Double, _ y: Double) {
+        block(&g, x - 5, y - 5, 10, 10, 6, fabric)
+    }
+
+    private func roundTable(_ g: inout GraphicsContext, _ x: Double, _ y: Double) {
+        stool(&g, x - 6, y - 14)
+        block(&g, x - 2, y - 2, 4, 4, 9, wood)
+        let top = ellipse(x, y, floorZ + 10, 10, n: 24)
+        g.fill(top, with: .color(wood.0))
+        g.stroke(top, with: .color(.white.opacity(dark ? 0.12 : 0.5)), lineWidth: 0.7)
+        stool(&g, x + 6, y + 14)
+    }
+
+    private func counterAlongBack(_ r: FloorLayout.RoomBox, length: Double) -> (rect: Box, front: Bool, rest: Box) {
+        let T = Iso.wallT + 2, cd = 18.0, inset = 20.0
+        if r.w >= r.d {
+            let front = r.door?.side == .north
+            let l = max(10, min(length, r.w - 2 * inset))
+            let y = front ? r.y1 - T - cd : r.y0 + T
+            let rect = Box(x0: r.x0 + inset, y0: y, x1: r.x0 + inset + l, y1: y + cd)
+            let rest = front ? Box(x0: r.x0 + inset, y0: r.y0 + inset, x1: r.x1 - inset, y1: y - 8)
+                             : Box(x0: r.x0 + inset, y0: y + cd + 8, x1: r.x1 - inset, y1: r.y1 - inset)
+            return (rect, front, rest)
+        }
+        let front = r.door?.side == .west
+        let l = max(10, min(length, r.d - 2 * inset))
+        let x = front ? r.x1 - T - cd : r.x0 + T
+        let rect = Box(x0: x, y0: r.y0 + inset, x1: x + cd, y1: r.y0 + inset + l)
+        let rest = front ? Box(x0: r.x0 + inset, y0: r.y0 + inset, x1: x - 8, y1: r.y1 - inset)
+                         : Box(x0: x + cd + 8, y0: r.y0 + inset, x1: r.x1 - inset, y1: r.y1 - inset)
+        return (rect, front, rest)
+    }
+
+    private func drawFurniture(_ ctx: inout GraphicsContext, _ r: FloorLayout.RoomBox) {
+        guard let kind = r.commons else { return }
+        let ix0 = r.x0 + 22, iy0 = r.y0 + 22, ix1 = r.x1 - 22, iy1 = r.y1 - 22
+        guard ix1 - ix0 > 24, iy1 - iy0 > 24 else {
+            if kind == .open && r.w > 20 && r.d > 20 { plant(&ctx, r.x0 + r.w / 2, r.y0 + r.d / 2) }
+            return
+        }
+        let cx = (ix0 + ix1) / 2, cy = (iy0 + iy1) / 2
+        let wide = r.w >= r.d
+        switch kind {
+        case .kitchenette, .cafe:
+            let k = counterAlongBack(r, length: kind == .cafe ? 110 : 130)
+            let cr = k.rect
+            func counter() {
+                block(&ctx, cr.x0, cr.y0, cr.w, cr.d, 13, counterTone)
+                let sx = wide ? cr.x0 + 10 : cr.x0 + 4, sy = wide ? cr.y0 + 4 : cr.y0 + 10
+                ctx.fill(quad(sx, sy, sx + (wide ? 18 : 10), sy + (wide ? 10 : 18), floorZ + 13.1), with: .color(metal))
+                if kind == .cafe {
+                    let mx = wide ? cr.x1 - 20 : cr.x0 + 3, my = wide ? cr.y0 + 3 : cr.y1 - 20
+                    block(&ctx, mx, my, 12, 12, 11, (monBody, monBody.opacity(0.9), monBody.opacity(0.8)), z: floorZ + 13)
+                }
+            }
+            if !k.front { counter() }
+            let rest = k.rest
+            if rest.w > 30 && rest.d > 30 {
+                if kind == .kitchenette {
+                    let tx = (rest.x0 + rest.x1) / 2, ty = (rest.y0 + rest.y1) / 2
+                    let tw = min(44, rest.w - 6), td = min(24, rest.d - 6)
+                    stool(&ctx, tx - tw / 4, ty - td / 2 - 8)
+                    stool(&ctx, tx + tw / 4, ty - td / 2 - 8)
+                    block(&ctx, tx - tw / 2, ty - td / 2, tw, td, 10, wood)
+                    stool(&ctx, tx - tw / 4, ty + td / 2 + 8)
+                    stool(&ctx, tx + tw / 4, ty + td / 2 + 8)
+                } else {
+                    let cols = max(1, min(3, Int(rest.w / 64))), rows = max(1, min(3, Int(rest.d / 64)))
+                    for j in 0..<rows {
+                        for i in 0..<cols {
+                            let x = rest.x0 + (Double(i) + 0.5) * rest.w / Double(cols)
+                            let y = rest.y0 + (Double(j) + 0.5) * rest.d / Double(rows)
+                            roundTable(&ctx, x, y)
+                        }
+                    }
+                }
+            }
+            if k.front { counter() }
+        case .meeting:
+            let tw = wide ? max(30, min(ix1 - ix0 - 20, 170)) : min(36, ix1 - ix0 - 4)
+            let td = wide ? min(36, iy1 - iy0 - 4) : max(30, min(iy1 - iy0 - 20, 170))
+            let tx = cx - tw / 2, ty = cy - td / 2
+            let n = max(1, Int((wide ? tw : td) / 30))
+            func chairs(_ back: Bool) {
+                for i in 0..<n {
+                    let f = (Double(i) + 0.5) / Double(n)
+                    if wide {
+                        block(&ctx, tx + f * tw - 5, back ? ty - 13 : ty + td + 3, 10, 10, 6, fabric)
+                    } else {
+                        block(&ctx, back ? tx - 13 : tx + tw + 3, ty + f * td - 5, 10, 10, 6, fabric)
+                    }
+                }
+            }
+            chairs(true)
+            block(&ctx, tx, ty, tw, td, 10, wood)
+            chairs(false)
+        case .lounge:
+            let rw = min(ix1 - ix0, 130), rd = min(iy1 - iy0, 90)
+            let rx = cx - rw / 2, ry = cy - rd / 2
+            let rug = quad(rx, ry, rx + rw, ry + rd, floorZ + 0.15)
+            ctx.fill(rug, with: .color(rugTone.opacity(dark ? 0.8 : 0.7)))
+            ctx.stroke(rug, with: .color(.white.opacity(dark ? 0.08 : 0.4)), lineWidth: 0.8)
+            if ix1 - rx - rw > 16 { plant(&ctx, ix1 - 6, iy0 + 6) }
+            let sw = max(20, rw - 30)
+            block(&ctx, rx + 24, ry - 2, sw, 6, 15, fabric)
+            if rd > 50 {
+                block(&ctx, rx - 2, ry + 26, 6, rd - 36, 15, fabric)
+                block(&ctx, rx + 4, ry + 26, 16, rd - 36, 7, fabric)
+            }
+            block(&ctx, rx + 24, ry + 4, sw, 16, 7, fabric)
+            block(&ctx, cx - 14, cy + 4, 32, 18, 6, wood)
+        case .open:
+            plant(&ctx, ix0 + 6, iy0 + 6)
+            if ix1 - ix0 > 60 { plant(&ctx, ix1 - 6, iy0 + 6) }
+            if wide { block(&ctx, cx - 24, cy - 7, 48, 14, 6, wood) } else { block(&ctx, cx - 7, cy - 24, 14, 48, 6, wood) }
+            if iy1 - iy0 > 60 { plant(&ctx, ix0 + 6, iy1 - 6) }
+            if ix1 - ix0 > 60 && iy1 - iy0 > 60 { plant(&ctx, ix1 - 6, iy1 - 6) }
+        case .reception:
+            plant(&ctx, ix0 + 6, iy0 + 6)
+            if ix1 - ix0 > 60 { plant(&ctx, ix1 - 6, iy0 + 6) }
+            if wide {
+                let l = min(100, ix1 - ix0 - 10)
+                stool(&ctx, cx, cy - 8)
+                block(&ctx, cx - l / 2, cy + 6, l, 18, 13, counterTone)
+                block(&ctx, cx - l / 2, cy + 6, l, 4, 2, wood, z: floorZ + 13)
+            } else {
+                let l = min(100, iy1 - iy0 - 10)
+                stool(&ctx, cx - 8, cy)
+                block(&ctx, cx + 6, cy - l / 2, 18, l, 13, counterTone)
+                block(&ctx, cx + 6, cy - l / 2, 4, l, 2, wood, z: floorZ + 13)
+            }
         }
     }
 
     // Suelo: sombras de contacto, marcas de selección, anillos de estado ---------
 
-    /// Sombras de contacto de escritorios y muñecos (en una capa con desenfoque que puede compartir varios pisos).
     func contactShadows(_ l: inout GraphicsContext, looks: [String: FloorLook?]) {
         let z = floorZ
+        if let c = layout.core {
+            l.fill(castShadow(c.x0, c.y0, c.w, c.d, coreH * 0.6, z: z), with: .color(.black.opacity(dark ? 0.45 : 0.16)))
+        }
         for sp in layout.spots {
             guard let lk = looks[sp.id] ?? nil else { continue }
             let op = lk == .retired ? 0.35 : 1
@@ -450,31 +869,6 @@ struct FloorRenderer {
     private var cabL: Color { c(0.135, (0.420, 0.415, 0.405)) }
     private var cabR: Color { c(0.090, (0.330, 0.325, 0.318)) }
     private var vent: Color { Color.black.opacity(dark ? 0.45 : 0.30) }
-
-    /// Losa y muros como un departamento; suelo técnico más oscuro. Canto rojo si hay un repo en rojo o un listener caído, ámbar
-    /// si falla un script o un webhook, o hay un listener degradado.
-    private func drawMachineRoom(_ ctx: inout GraphicsContext, _ r: FloorLayout.RoomBox, _ k: Int) {
-        guard plan.machineRooms.indices.contains(k) else { return }
-        let mr = plan.machineRooms[k]
-        let stuck = mr.worstLight == .red || mr.listeners.contains { $0.state == .down }
-        let needs = !mr.failingAutomations.isEmpty || mr.subscriptions.contains(where: \.failing) || mr.listeners.contains { $0.state == .degraded }
-        drawRoom(&ctx, r, needs: needs && !stuck, stuck: stuck)
-        let z = floorZ + 0.1, e = 6.0
-        let tiles = poly([P(r.x0 + e, r.y0 + e, z), P(r.x0 + r.w - e, r.y0 + e, z), P(r.x0 + r.w - e, r.y0 + r.d - e, z), P(r.x0 + e, r.y0 + r.d - e, z)])
-        ctx.fill(tiles, with: .color((dark ? Color.black : Color(red: 0.30, green: 0.32, blue: 0.36)).opacity(dark ? 0.24 : 0.07)))
-        var grid = Path()
-        var gx = r.x0 + 26.0
-        while gx < r.x0 + r.w - e { grid.move(to: P(gx, r.y0 + e, z)); grid.addLine(to: P(gx, r.y0 + r.d - e, z)); gx += 26 }
-        var gy = r.y0 + 26.0
-        while gy < r.y0 + r.d - e { grid.move(to: P(r.x0 + e, gy, z)); grid.addLine(to: P(r.x0 + r.w - e, gy, z)); gy += 26 }
-        ctx.stroke(grid, with: .color(ink.opacity(dark ? 0.07 : 0.08)), lineWidth: 0.7)
-        if let m = layout.machines.first(where: { $0.index == k }), m.cabinets.isEmpty {
-            // rack sin repos: un armario apagado donde irían
-            var g = ctx; g.opacity = 0.4
-            let x = m.x0 + m.w / 2 - FloorLayout.cabW / 2, y = m.y0 + FloorLayout.pad + 6
-            _ = prism(&g, x, y, floorZ, FloorLayout.cabW, FloorLayout.cabD, FloorLayout.cabH, top: cabTop, left: cabL, right: cabR, edge: dark ? 0.16 : 0.5)
-        }
-    }
 
     private func drawMachineSpot(_ ctx: inout GraphicsContext, _ sp: FloorLayout.Spot) {
         guard let k = FloorLayout.machineSlot(sp.room), let mr = plan.machineRoom(of: sp.id) else { return }
