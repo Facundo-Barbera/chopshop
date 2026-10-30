@@ -9,12 +9,14 @@ public struct AttentionActions: @unchecked Sendable {
     public var answer: @MainActor (_ task: MockTask, _ option: String) async -> String?
     public var open: @MainActor (_ url: URL) -> Void
     public var settle: (@MainActor (_ threadID: String) async -> String?)?
+    public var cancel: (@MainActor (_ employee: String, _ task: String) async -> String?)?
     public var canAct: Bool
 
     public init(answer: @escaping @MainActor (_ task: MockTask, _ option: String) async -> String?,
                 open: @escaping @MainActor (_ url: URL) -> Void,
-                settle: (@MainActor (_ threadID: String) async -> String?)? = nil, canAct: Bool = true) {
-        self.answer = answer; self.open = open; self.settle = settle; self.canAct = canAct
+                settle: (@MainActor (_ threadID: String) async -> String?)? = nil,
+                cancel: (@MainActor (_ employee: String, _ task: String) async -> String?)? = nil, canAct: Bool = true) {
+        self.answer = answer; self.open = open; self.settle = settle; self.cancel = cancel; self.canAct = canAct
     }
 }
 
