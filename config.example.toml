@@ -140,3 +140,20 @@ events_days = 90                          # eventos (y sus entregas) más viejos
 # Unidad systemd --user (`chopshop agent print-unit`).
 [agent.service]
 read_write_paths = []                     # rutas extra de escritura (ProtectSystem=strict); ya incluye home, db_path y general.home
+
+# Servidor MCP multi-máquina (`chopshop mcp serve`): orquesta los agentes de [app] agent_url y [app.agents.*]. Solo 127.0.0.1.
+[mcp]
+port = 3797
+path = "/mcp"
+token_file = "~/.config/chopshop/mcp/token"                  # bearer obligatorio (0600); se genera si no existe y nunca se imprime
+credentials_file = "~/.config/chopshop/mcp/credentials.json" # credenciales de dispositivo por agente (`chopshop mcp pair`), 0600
+state_dir = "~/.chopshop/mcp"                                # suscripciones de webhook y cursores de eventos
+include_local = true                                         # incluir el agente de esta máquina (127.0.0.1:<agent.port>)
+timeout = 15                                                 # s por petición a cada agente
+poll_interval = 5                                            # s entre lecturas de /events para los webhooks
+allowed_hosts = []                                           # nombres extra válidos en la cabecera Host (p. ej. el de tailscale funnel)
+
+# Roles y tope por máquina para elegir host en thread_start/fanout (opcional).
+[mcp.machines.host-b]
+roles = ["tests"]
+cap = 4

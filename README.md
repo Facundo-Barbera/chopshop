@@ -253,6 +253,42 @@ Para regenerarlas con datos de ejemplo, ver [`docs/screenshots.md`](docs/screens
 
 `apps/agent/chopshop/agent` es el servicio (v0.6, en desarrollo) que corre sin interfaz en cada máquina: mide CPU/RAM/disco por app y proyecto, guarda el historial en SQLite, vigila los hilos de T3 y expone una API HTTP por Tailscale. La app pasa a ser un cliente puro. Diseño en [`docs/agent-architecture.md`](docs/agent-architecture.md) contrato en [`docs/agent-api.md`](docs/agent-api.md) e instalación como servicio `systemd --user` en [`docs/agent-service.md`](docs/agent-service.md). Su configuración vive en la sección `[agent]` del `config.toml`.
 
+## Servidor MCP multi-máquina
+
+`chopshop mcp serve` corre en una máquina siempre encendida y orquesta, por MCP (Streamable HTTP, JSON-RPC por `POST`), los chopshop-agent de todas las máquinas: las mismas de la app (`[app] agent_url` y `[app.agents.<nombre>]`, con `enabled`) más el agente local (`[mcp] include_local`). Habla con cada agente con el mismo cliente HTTP que la CLI.
+
+Herramientas: `machines_list`, `projects_list`, `thread_start` (sin `host` elige la máquina menos cargada que tenga el proyecto y el rol), `thread_send` (`steer: true` para inyectar en el turno en curso), `thread_show`, `threads_list`, `pending_list`, `pending_answer`, `thread_settle` (nunca archiva), `thread_interrupt`, `fanout`, `subscribe` / `unsubscribe` / `subscriptions_list` (webhooks con los eventos de todas las máquinas; `heartbeat_s` > 0 activa heartbeats periódicos, apagados por defecto).
+
+```toml
+[mcp]
+port = 3797                                   # siempre en 127.0.0.1
+path = "/mcp"
+token_file = "~/.config/chopshop/mcp/token"   # bearer obligatorio (0600); se genera si no existe
+credentials_file = "~/.config/chopshop/mcp/credentials.json"
+allowed_hosts = []                            # nombre MagicDNS público si lo expones con funnel
+
+[mcp.machines.host-b]                         # opcional: roles y tope para la elección de host
+roles = ["tests"]
+cap = 4
+```
+
+- Arranque: `chopshop mcp serve` (o la unidad `systemd/chopshop-mcp.service`: ajusta `ExecStart`, cópiala a `~/.config/systemd/user/` y `systemctl --user start chopshop-mcp`). `chopshop mcp token` genera el bearer si falta y muestra solo su ruta; el token nunca se imprime. Si el archivo no tiene permisos 600 el servidor no arranca.
+- Credenciales: el agente local se usa por loopback (con `[agent] token_file` si existe). Para cada máquina remota, `chopshop pair create` en esa máquina y `chopshop mcp pair <nombre> <CÓDIGO>` aquí: la credencial de dispositivo se guarda en `credentials_file` (0600). Las escrituras exigen que esta máquina sea del `owner_login` de Tailscale del agente remoto.
+- Los agentes deben ser de esta versión: `thread_start`, `thread_send`, `thread_show`, `thread_interrupt` y `projects_list` usan las rutas `GET /t3/projects`, `GET /thread`, `POST /threads`, `POST /threads/send` y `POST /threads/interrupt`.
+- Clientes MCP: URL `http://127.0.0.1:3797/mcp` con la cabecera `Authorization: Bearer <contenido de token_file>`.
+
+### Exponerlo con Tailscale Funnel
+
+Solo ese puerto y esa ruta, por HTTPS público de Funnel (puertos 443, 8443 o 10000). Añade el nombre público a `[mcp] allowed_hosts` y reinicia el servidor:
+
+```sh
+tailscale funnel --bg --https=443 --set-path=/mcp http://127.0.0.1:3797/mcp
+tailscale funnel status                         # comprobar
+tailscale funnel --https=443 --set-path=/mcp off  # retirarlo
+```
+
+La URL queda en `https://<nombre MagicDNS de la máquina>/mcp` (el que muestra `tailscale funnel status`); el bearer sigue siendo obligatorio y no se publica nada más del host.
+
 ## Tests
 
 ```sh

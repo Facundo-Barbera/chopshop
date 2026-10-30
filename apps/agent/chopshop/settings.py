@@ -69,6 +69,18 @@ DEFAULTS = {
         "forge": {"enabled": "auto", "interval_s": 60},
         "retention": {"raw_hours": 24, "m1_days": 30, "h1_days": 365, "events_days": 90},
     },
+    "mcp": {
+        "port": 3797,
+        "path": "/mcp",
+        "token_file": "~/.config/chopshop/mcp/token",
+        "credentials_file": "~/.config/chopshop/mcp/credentials.json",
+        "state_dir": "~/.chopshop/mcp",
+        "include_local": True,
+        "timeout": 15,
+        "poll_interval": 5,
+        "allowed_hosts": [],
+        "machines": {},
+    },
 }
 
 _cache = {}
