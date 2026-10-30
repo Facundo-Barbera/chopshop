@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/backend/v2/hub/commands.post.request.schema.json",
+  "title": "POST /v1/commands (DESPUÉS)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "machine_id",
+    "name",
+    "args"
+  ],
+  "properties": {
+    "machine_id": {
+      "$ref": "../common.schema.json#/$defs/uuid"
+    },
+    "name": {
+      "$ref": "../common.schema.json#/$defs/command_name"
+    },
+    "args": {}
+  }
+}

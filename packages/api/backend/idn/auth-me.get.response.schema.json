@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/backend/v2/idn/auth-me.get.response.schema.json",
+  "title": "GET /v1/auth/me",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "user",
+    "session"
+  ],
+  "properties": {
+    "user": {
+      "$ref": "../common.schema.json#/$defs/user"
+    },
+    "session": {
+      "$ref": "../common.schema.json#/$defs/session"
+    },
+    "csrf_token": {
+      "$ref": "../common.schema.json#/$defs/csrf_token"
+    }
+  }
+}

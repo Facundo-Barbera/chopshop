@@ -1,0 +1,22 @@
+{
+  "user": {
+    "id": "0b6f3c1e-5d2a-4c7e-9a41-6f2d8e3b7c10",
+    "email": "dueno@chopshop.test",
+    "display_name": "Dueño",
+    "role": "owner",
+    "status": "active",
+    "created_at": "2026-10-30T12:00:00.000Z"
+  },
+  "session": {
+    "id": "4b7e1a9c-3d6f-4a28-8e5b-2c9f6a1d7e37",
+    "user_id": "0b6f3c1e-5d2a-4c7e-9a41-6f2d8e3b7c10",
+    "client": "mac",
+    "device_name": "Mac mini",
+    "user_agent": "chopshop-mac/0.9.0",
+    "created_at": "2026-10-30T12:00:00.000Z",
+    "last_seen_at": "2026-10-30T12:05:00.000Z",
+    "expires_at": "2026-11-29T12:05:00.000Z",
+    "current": true,
+    "token": "ss1_EXAMPLEexampleEXAMPLEexampleEXAMPLEexampleE"
+  }
+}

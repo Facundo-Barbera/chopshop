@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/backend/v2/wsp/workspaces-id-campus.put.request.schema.json",
+  "title": "PUT /v1/workspaces/{id}/campus",
+  "$ref": "../common.schema.json#/$defs/campus"
+}

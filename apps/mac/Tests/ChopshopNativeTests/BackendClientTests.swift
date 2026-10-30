@@ -21,7 +21,7 @@ final class Flag: @unchecked Sendable { var hits = 0 }
 
 final class BackendClientTests: XCTestCase {
     let api = URL(string: "https://api.example.test")!
-    let user = #"{"id":"u1","email":"a@b.cd","display_name":null,"role":"owner","status":"active","created_at":"2026-10-30T12:00:00.000Z"}"#
+    let user = #"{"id":"u1","email":"a@b.test","display_name":null,"role":"owner","status":"active","created_at":"2026-10-30T12:00:00.000Z"}"#
     let token = "ss1_" + String(repeating: "A", count: 43)
 
     func client(_ http: FakeHTTP, _ store: SessionStore, flag: Flag? = nil) -> BackendClient {
@@ -33,7 +33,7 @@ final class BackendClientTests: XCTestCase {
         let http = FakeHTTP()
         http.responses["POST /v1/auth/login"] = (200, #"{"user":\#(user),"session":{"id":"s1","client":"mac","expires_at":"x"},"token":"\#(token)"}"#)
         let store = InMemorySessionStore()
-        let r = try await client(http, store).login(email: "a@b.cd", password: "secreto-largo-1")
+        let r = try await client(http, store).login(email: "a@b.test", password: "secreto-largo-1")
         XCTAssertEqual(r.user.role, .owner)
         XCTAssertEqual(store.load(apiURL: api), token)
         XCTAssertNil(http.seen[0].value(forHTTPHeaderField: "Authorization"))
@@ -41,7 +41,7 @@ final class BackendClientTests: XCTestCase {
         let b = try http.body(0)
         XCTAssertEqual(b["client"]?.string, "mac")
         XCTAssertEqual(b["device_name"]?.string, "mac-mini")
-        XCTAssertEqual(b["email"]?.string, "a@b.cd")
+        XCTAssertEqual(b["email"]?.string, "a@b.test")
     }
 
     func testAuthenticatedCallSendsBearer() async throws {
@@ -76,7 +76,7 @@ final class BackendClientTests: XCTestCase {
         let store = InMemorySessionStore()
         let flag = Flag()
         do {
-            _ = try await client(http, store, flag: flag).login(email: "a@b.cd", password: "x")
+            _ = try await client(http, store, flag: flag).login(email: "a@b.test", password: "x")
             XCTFail("debía fallar")
         } catch let e as BackendError {
             XCTAssertEqual(e.code, .unauthorized)
@@ -97,7 +97,7 @@ final class BackendClientTests: XCTestCase {
             XCTAssertEqual(body.code, .conflict)
             XCTAssertEqual(body.current?["rev"]?.int, 4)
         }
-        do { _ = try await c.invite(email: "w@b.cd", workspaceIDs: ["w1"]); XCTFail() } catch let e as BackendError {
+        do { _ = try await c.invite(email: "w@b.test", workspaceIDs: ["w1"]); XCTFail() } catch let e as BackendError {
             guard case .api(429, let body) = e else { return XCTFail("\(e)") }
             XCTAssertEqual(body.retryAfterS, 30)
         }
@@ -191,7 +191,7 @@ final class LocalAgentLinkerTests: XCTestCase {
             try await linker.link(agentURL: agent, nonceFile: URL(fileURLWithPath: "/nonexistent/link.nonce"), payload: payload); XCTFail()
         } catch let e as LocalLinkError { XCTAssertEqual(e, .nonceUnavailable) }
         do {
-            try await linker.link(agentURL: URL(string: "http://mac-mini.tail.ts.net:8787")!, nonceFile: try nonceFile("n"), payload: payload)
+            try await linker.link(agentURL: URL(string: "http://mac-mini.test:8787")!, nonceFile: try nonceFile("n"), payload: payload)
             XCTFail()
         } catch let e as LocalLinkError { XCTAssertEqual(e, .notLoopback) }
         XCTAssertEqual(http.seen.count, 1)

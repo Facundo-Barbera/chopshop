@@ -1,0 +1,27 @@
+{
+  "layout": {
+    "floors": [
+      {
+        "name": "Producto",
+        "rooms": [
+          {
+            "role": "triage",
+            "desks": 1,
+            "permanent": true
+          },
+          {
+            "role": "backend",
+            "desks": 2
+          }
+        ]
+      }
+    ],
+    "half_life": "10m",
+    "capacity": {
+      "flex_per_floor": 0,
+      "max_extra_floors": 0,
+      "outsourcing": false
+    }
+  },
+  "rev": 3
+}
