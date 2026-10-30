@@ -387,7 +387,7 @@ public struct CityView: View {
             }
         }
         .onChange(of: backRequest) { _, _ in stepOut() }
-        .task { if Self.demoTour, frozenTime == nil, frozenZoom == nil { await tour() } }
+        .task(id: model.floors.count) { if Self.demoTour, frozenTime == nil, frozenZoom == nil { await tour() } }
         .hotReload()
     }
 
@@ -424,14 +424,14 @@ public struct CityView: View {
                 guard await pause(0.1) else { return }
                 waited += 0.1
             }
-            guard await pause(2) else { return }
+            guard await pause(4) else { return }
             while let pos = floorPosition(), pos.i < pos.n - 1 {
                 stepFloor(1)
-                guard await pause(1.5) else { return }
+                guard await pause(2.5) else { return }
             }
             while let pos = floorPosition(), pos.i > 0 {
                 stepFloor(-1)
-                guard await pause(1.5) else { return }
+                guard await pause(2.5) else { return }
             }
             goCity()
             guard await pause(Self.zoomDuration) else { return }
