@@ -214,7 +214,18 @@ importers:
         specifier: ^0.28.0
         version: 0.28.2
 
-  apps/web-admin: {}
+  apps/web-admin:
+    dependencies:
+      react:
+        specifier: ^19.0.0
+        version: 19.3.1
+      react-dom:
+        specifier: ^19.0.0
+        version: 19.3.1(react@19.3.1)
+    devDependencies:
+      esbuild:
+        specifier: ^0.28.0
+        version: 0.28.2
 
   packages/api: {}
 
