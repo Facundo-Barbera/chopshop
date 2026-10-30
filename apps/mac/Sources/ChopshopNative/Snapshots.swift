@@ -11,7 +11,6 @@ public enum Snapshots {
         let time: Double
         let dark: Bool
         var selected: String? = nil
-        var mode: GraphMode = .office
         var body: some View {
             let snap = Fixtures.snapshot
             let hosts = Set(snap.batches(of: project).map(\.host))
@@ -26,7 +25,7 @@ public enum Snapshots {
                 .padding(.horizontal, 20).frame(height: 44)
                 .background(Color(nsColor: .windowBackgroundColor))
                 Divider()
-                ProjectContent(project: project, snapshot: snap, frozenTime: time, selectedNode: selected, mode: mode)
+                ProjectContent(project: project, snapshot: snap, frozenTime: time, selectedNode: selected)
                     .padding(.horizontal, 26).padding(.vertical, 22)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                     .background(Color(nsColor: .windowBackgroundColor))
@@ -35,9 +34,9 @@ public enum Snapshots {
         }
     }
 
-    public static func render(project: String, dark: Bool, time: Double, selected: String? = nil, mode: GraphMode = .office, width: CGFloat = 1100, height: CGFloat = 900, to path: String) {
+    public static func render(project: String, dark: Bool, time: Double, selected: String? = nil, width: CGFloat = 1100, height: CGFloat = 900, to path: String) {
         NSApp?.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
-        let r = ImageRenderer(content: Frame(project: project, time: time, dark: dark, selected: selected, mode: mode).frame(width: width).fixedSize(horizontal: false, vertical: true))
+        let r = ImageRenderer(content: Frame(project: project, time: time, dark: dark, selected: selected).frame(width: width).fixedSize(horizontal: false, vertical: true))
         r.scale = 2
         guard let img = r.nsImage, let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
               let png = rep.representation(using: .png, properties: [:]) else { print("sin imagen: \(path)"); return }
@@ -45,7 +44,7 @@ public enum Snapshots {
         print("ok \(path)")
     }
 
-    /// Solo la oficina (para ver el tooltip de hover, que ImageRenderer no puede provocar solo).
+    /// Solo la oficina (para ver el resaltado de hover, que ImageRenderer no puede provocar solo; en el mundo no hay tooltips).
     public static func renderOffice(project: String, dark: Bool, hovered: String?, selected: String? = nil, width: CGFloat = 1000, height: CGFloat = 640, to path: String) {
         NSApp?.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
         let snap = Fixtures.snapshot

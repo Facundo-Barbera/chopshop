@@ -1,14 +1,17 @@
 import AppKit
 import ChopshopNative
 
-// uso: ChopshopSnap <directorio de salida> [demo|demo-keys|city-keys|city-video [vídeo.mp4]|machine-room|floor|city-office]
+// uso: ChopshopSnap <directorio de salida> [demo|demo-keys|city-keys|city-video [vídeo.mp4]|machine-room|floor|city-office|shell]
 //   sin 2º argumento: capturas de proyecto/oficina
 //   demo: fotogramas clave de la demo (key-*.png) + secuencia seq/f0000.jpg a 12 fps (demo-keys: solo las claves)
 //   city-keys: claves de la ciudad (city-0N-*.png, 1400×900 @1x) desde city-fixture.jsonl
 //   city-video: la cronología de la ciudad en MP4 H.264, 1400×900 a 30 fps (por defecto <salida>/city.mp4)
-//   machine-room: sala de máquinas desde machine-room-fixture.jsonl (machine-room-dark.png / machine-room-light.png)
-//   floor: previews de FloorOfficeView (floor-*.png: piso Producto oscuro/claro, triage seleccionado, vestíbulo)
-//   city-office: ciudad v3 de CityOfficeFixture (city-office-*.png: varios pisos y vestíbulo, zoom al piso Docs y el piso montado)
+//   machine-room: panel de la sala de máquinas de Awesome GB desde machine-room-fixture.jsonl (machine-room-dark/-light.png)
+//   floor: previews de FloorOfficeView (floor-*.png: piso Producto con su sala de máquinas oscuro/claro, triage seleccionado,
+//          armario del repo principal seleccionado, vestíbulo)
+//   city-office: ciudad v3 de CityOfficeFixture (city-office-*.png: varios pisos y vestíbulo, zoom al piso Docs y el piso montado,
+//                zoom al piso Producto con la sala de máquinas)
+//   shell: armazón de la oficina sobre CityOfficeFixture (shell-*.png: HUD, minimapa, paneles Atención/Lotes, hilo, paleta)
 let args = Array(CommandLine.arguments.dropFirst())
 let out = args.first ?? "/tmp/chopshop-snaps"
 try? FileManager.default.createDirectory(atPath: out, withIntermediateDirectories: true)
@@ -60,6 +63,10 @@ if let mode = args.dropFirst().first, mode == "machine-room" {
     }
     exit(0)
 }
+if let mode = args.dropFirst().first, mode == "shell" {
+    MainActor.assumeIsolated { Snapshots.renderShell(to: out) }
+    exit(0)
+}
 if let mode = args.dropFirst().first, mode == "floor" || mode == "city-office" {
     MainActor.assumeIsolated {
         if mode == "floor" { Snapshots.renderFloors(to: out) } else { Snapshots.renderCityOffice(to: out) }
@@ -76,7 +83,6 @@ MainActor.assumeIsolated {
     Snapshots.render(project: "nuskills", dark: true, time: 3.3, height: 1060, to: "\(out)/nuskills-dark-t2.png")
     Snapshots.render(project: "nuskills", dark: true, time: 2.0, selected: "n9", height: 1060, to: "\(out)/nuskills-dark-selected.png")
     Snapshots.render(project: "nuskills", dark: false, time: 2.0, selected: "n9", height: 1060, to: "\(out)/nuskills-light-selected.png")
-    Snapshots.render(project: "nuskills", dark: true, time: 2.0, mode: .graph, height: 1020, to: "\(out)/nuskills-dark-grafo.png")
     Snapshots.renderOffice(project: "nuskills", dark: true, hovered: "n4", to: "\(out)/office-hover-dark.png")
     Snapshots.renderOffice(project: "nuskills", dark: false, hovered: "n9", to: "\(out)/office-hover-light.png")
 }

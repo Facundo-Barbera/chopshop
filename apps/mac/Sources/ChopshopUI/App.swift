@@ -21,11 +21,7 @@ struct ChopshopApp: App {
                 Button("Ajustes…") { model.showSettings = true }
                     .keyboardShortcut(",", modifiers: .command)
             }
-            CommandMenu("Ir a") {
-                ForEach(Array(Section.views.enumerated()), id: \.element) { i, s in
-                    Button(s.title) { model.nav = .section(s) }.keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: .command)
-                }
-            }
+            CommandMenu("Oficina") { OfficeMenu(model: model) }
             UpdaterCommands()  // Sparkle: «Buscar actualizaciones…» (inactivo sin SUFeedURL; ver Updater.swift)
         }
     }

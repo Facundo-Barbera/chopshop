@@ -14,6 +14,8 @@ let package = Package(
             dependencies: ["ChopshopNative", .product(name: "Sparkle", package: "Sparkle")],
             path: "Sources/ChopshopUI"
         ),
+        // Lanzador del agente incrustado (Contents/MacOS/chopshop-agent): lo arranca launchd vía SMAppService; ver BundledAgent.swift
+        .executableTarget(name: "ChopshopAgent", path: "Sources/ChopshopAgent"),
         // Capa nativa: stream en vivo, proyección, emparejamiento (puro, macOS 13) y la oficina/grafo (vistas @available(macOS 26),
         // solo con el SDK de macOS 26+). Sin NATIVE_PREVIEWS: los #Preview y sus recursos son del banco de pruebas (apps/mac/native).
         .target(

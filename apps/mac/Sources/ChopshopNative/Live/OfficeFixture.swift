@@ -1,8 +1,8 @@
 import Foundation
 
 /// Estado v3 fijo (tests y, en sus hilos, Previews y capturas de la ciudad, la oficina y la sala de máquinas): `awesome-gb` con dos pisos (Producto con triage permanente,
-/// backend y frontend; Docs), ocupantes en todos los estados, vestíbulo con un hilo sin rol y otro esperando escritorio, y la sala de
-/// máquinas con listeners, una automatización y el rack (main + Engine CX). `chopshop` sigue sin bloque `office:` (piso clásico).
+/// backend y frontend; Docs), ocupantes en todos los estados, vestíbulo con un hilo sin rol y otro esperando escritorio, y una sala de
+/// máquinas en Producto (declarada en `machine_rooms`) con listeners, una automatización y el rack (main + Engine CX). `chopshop` sigue sin bloque `office:` (piso clásico).
 /// Determinista: `now` es 2026-10-29T16:30:00Z.
 public enum OfficeFixture {
     public static let now = 1_793_291_400.0          // 2026-10-29T16:30:00Z
@@ -39,6 +39,8 @@ public enum OfficeFixture {
         e.append(env(1, "2026-10-29T15:00:00.000Z", "office.changed", subject: .init(kind: "office", id: project), [
             "project": .string(project), "by": "profile", "company": "Awesome GB", "half_life_s": 1800,
             "floors": [floor0, floor1],
+            "machine_rooms": [["name": "Sala de máquinas", "floor": 0, "repos": ["*"], "listeners": ["*"], "automations": ["*"],
+                               "subscriptions": ["*"]]],
         ]))
         // backend: uno corriendo, uno que te pregunta, uno terminado hace 30 min (a media semivida), uno libre
         e.append(task(2, "2026-10-29T15:40:00.000Z", thread: "mcp:b7", title: "[be] login con passkeys", phase: "running", role: "backend"))

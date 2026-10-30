@@ -75,39 +75,3 @@ struct GraphInspector: View {
                                                       startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 0.8))
     }
 }
-
-// MARK: - Previews
-
-@available(macOS 26.0, *)
-private func previewGraph(_ project: String) -> (MockGraph, [String: MockTask], [String: String]) {
-    let snap = Fixtures.snapshot
-    var host: [String: String] = [:]
-    for b in snap.batches(of: project) { for t in b.tasks { host[t.id] = b.host } }
-    let tasks = Dictionary(snap.tasks(of: project).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-    return (snap.graph(for: project)!, tasks, host)
-}
-
-#if NATIVE_PREVIEWS
-#Preview("GraphView · nuskills · oscuro", traits: .fixedLayout(width: 1000, height: 520)) {
-    let (g, t, h) = previewGraph("nuskills")
-    return GraphView(graph: g, tasks: t, hostOf: h).background(GraphBackdrop()).preferredColorScheme(.dark)
-}
-#endif
-#if NATIVE_PREVIEWS
-#Preview("GraphView · nuskills · claro", traits: .fixedLayout(width: 1000, height: 520)) {
-    let (g, t, h) = previewGraph("nuskills")
-    return GraphView(graph: g, tasks: t, hostOf: h).background(GraphBackdrop()).preferredColorScheme(.light)
-}
-#endif
-#if NATIVE_PREVIEWS
-#Preview("GraphView · con nodo seleccionado · oscuro", traits: .fixedLayout(width: 1000, height: 520)) {
-    let (g, t, h) = previewGraph("nuskills")
-    return GraphView(graph: g, tasks: t, hostOf: h, selected: "n9").background(GraphBackdrop()).preferredColorScheme(.dark)
-}
-#endif
-#if NATIVE_PREVIEWS
-#Preview("GraphView · bixku-utilities · claro", traits: .fixedLayout(width: 1000, height: 380)) {
-    let (g, t, h) = previewGraph("bixku-utilities")
-    return GraphView(graph: g, tasks: t, hostOf: h).background(GraphBackdrop()).preferredColorScheme(.light)
-}
-#endif

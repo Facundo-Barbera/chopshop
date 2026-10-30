@@ -94,19 +94,21 @@ extension ListenerHealth {
     }
 }
 
-/// Sala de máquinas: rack de repos con luces (clic → runs del módulo con disparador y origen), listeners del agente,
-/// automatizaciones y webhooks salientes. Tercera vista de la app (Ciudad · Oficina · Sala de máquinas).
+/// Contenido de la sala de máquinas de un proyecto (el panel lateral al elegir su sala en el piso, `MachineRoomDetail`): resumen, rack
+/// de sus repos con luces (clic → runs del módulo con disparador y origen), sus scripts, sus webhooks y los listeners del agente.
+/// Columna estrecha: cabe en el panel lateral del piso.
 @available(macOS 26.0, *)
 public struct MachineRoomView: View {
     let room: MachineRoom
     /// Reloj fijo (capturas); nil = ahora, refrescado cada 15 s.
     var frozenNow: Date?
+    let width: CGFloat
     @State private var selected: String?
 
-    public init(room: MachineRoom) { self.room = room }
+    public init(room: MachineRoom, width: CGFloat = 328) { self.room = room; self.width = width }
 
-    init(room: MachineRoom, frozenNow: Date?, selected: String? = nil) {
-        self.room = room; self.frozenNow = frozenNow; _selected = State(initialValue: selected)
+    init(room: MachineRoom, frozenNow: Date?, selected: String? = nil, width: CGFloat = 328) {
+        self.room = room; self.frozenNow = frozenNow; self.width = width; _selected = State(initialValue: selected)
     }
 
     private var current: RackUnit? {
@@ -116,32 +118,27 @@ public struct MachineRoomView: View {
     public var body: some View {
         TimelineView(.periodic(from: .now, by: 15)) { ctx in
             let now = frozenNow ?? ctx.date
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 14) {
                 summary
-                HStack(alignment: .top, spacing: 18) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        SectionTitle("Rack", detail: "\(room.rack.count) módulos")
-                        if room.rack.isEmpty {
-                            EmptyNote("Sin repos en el rack: decláralos en `rack.repos` del perfil.")
-                        } else {
-                            RackView(room: room, width: 380, selected: Binding(get: { current?.id }, set: { selected = $0 }), frozen: frozenNow != nil)
-                        }
+                VStack(alignment: .leading, spacing: 8) {
+                    SectionTitle("Rack", detail: room.rack.count == 1 ? "1 repo" : "\(room.rack.count) repos")
+                    if room.rack.isEmpty {
+                        EmptyNote("Sin repos en el rack: decláralos en `rack.repos` del perfil.")
+                    } else {
+                        RackView(room: room, width: width, selected: Binding(get: { current?.id }, set: { selected = $0 }), frozen: frozenNow != nil)
                     }
-                    .frame(width: 380)
-                    UnitDetail(unit: current, now: now)
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
-                HStack(alignment: .top, spacing: 18) {
-                    ListenersPanel(listeners: room.listeners, now: now).frame(maxWidth: .infinity, alignment: .topLeading)
-                    AutomationsPanel(automations: room.automations, now: now).frame(maxWidth: .infinity, alignment: .topLeading)
-                    SubscriptionsPanel(subscriptions: room.subscriptions, now: now).frame(maxWidth: .infinity, alignment: .topLeading)
-                }
+                if !room.rack.isEmpty { UnitDetail(unit: current, now: now) }
+                AutomationsPanel(automations: room.automations, now: now)
+                SubscriptionsPanel(subscriptions: room.subscriptions, now: now)
+                ListenersPanel(listeners: room.listeners, now: now)
             }
+            .frame(width: width, alignment: .topLeading)
         }
     }
 
     private var summary: some View {
-        HStack(spacing: 18) {
+        VStack(alignment: .leading, spacing: 6) {
             SummaryChip(color: room.worstLight.color, text: room.rack.isEmpty ? "rack vacío" : MachineRoomText.light(room.worstLight),
                         blinking: room.worstLight.blinks)
             SummaryChip(color: room.activeRuns > 0 ? RackLight.amber.color : Color.secondary,
@@ -153,9 +150,8 @@ public struct MachineRoomView: View {
                         blinking: false)
             let failing = room.failingAutomations.count
             if failing > 0 {
-                SummaryChip(color: Attention.stuck, text: "\(failing) automatización\(failing == 1 ? "" : "es") fallando", blinking: false)
+                SummaryChip(color: Attention.stuck, text: "\(failing) script\(failing == 1 ? "" : "s") fallando", blinking: false)
             }
-            Spacer()
         }
     }
 }
@@ -286,7 +282,7 @@ private struct ListenersPanel: View {
     let listeners: [ListenerStatus]
     let now: Date
     var body: some View {
-        Panel(title: "Listeners", detail: listeners.isEmpty ? nil : "\(listeners.count)") {
+        Panel(title: "Listeners", detail: listeners.isEmpty ? nil : "\(listeners.count) · del agente, para todos") {
             if listeners.isEmpty { EmptyNote("El agente aún no publicó `listener.state`.") }
             ForEach(listeners) { l in
                 HStack(spacing: 8) {
@@ -314,15 +310,14 @@ private struct AutomationsPanel: View {
     let now: Date
     private var sorted: [AutomationStatus] { automations.sorted { ($0.project ?? "", $0.name) < ($1.project ?? "", $1.name) } }
     var body: some View {
-        Panel(title: "Automatizaciones", detail: automations.isEmpty ? nil : "\(automations.count)") {
-            if automations.isEmpty { EmptyNote("Ninguna ha corrido todavía.") }
+        Panel(title: "Scripts", detail: automations.isEmpty ? nil : "\(automations.count)") {
+            if automations.isEmpty { EmptyNote("Ningún script ha corrido todavía.") }
             ForEach(sorted) { a in
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 8) {
                         Image(systemName: a.failed ? "xmark.octagon.fill" : "checkmark.circle")
                             .foregroundStyle(a.failed ? Attention.stuck : Color.secondary).font(.caption)
                         Text(a.name).font(.callout.weight(.medium))
-                        if let p = a.project { Text(p).font(.caption).foregroundStyle(.secondary) }
                         Spacer(minLength: 4)
                         if let ago = MachineRoomText.ago(a.ts, now: now) { Text(ago).font(.caption.monospacedDigit()).foregroundStyle(.tertiary) }
                     }
@@ -366,46 +361,5 @@ private struct SubscriptionsPanel: View {
                 }
             }
         }
-    }
-}
-
-// MARK: - En vivo
-
-/// Sala de máquinas en vivo con la `machineRoom` del `LiveStore`. Sin credencial muestra `unpaired`.
-@available(macOS 26.0, *)
-public struct LiveMachineRoomScreen<Unpaired: View>: View {
-    @ObservedObject var store: LiveStore
-    let unpaired: Unpaired
-
-    public init(store: LiveStore, @ViewBuilder unpaired: () -> Unpaired) {
-        self.store = store; self.unpaired = unpaired()
-    }
-
-    public var body: some View {
-        Group {
-            switch store.status {
-            case .noCredential, .unauthorized:
-                unpaired.frame(maxWidth: .infinity, maxHeight: .infinity)
-            default:
-                if store.machineRoom.isEmpty {
-                    VStack(spacing: 8) {
-                        if case .connecting = store.status { ProgressView().controlSize(.small) }
-                        Text(store.status == .live ? "La sala de máquinas está vacía" : "Conectando con el agente…")
-                            .font(.headline).foregroundStyle(.secondary)
-                        Text("Aparece cuando el agente (api_version 3) publique listeners, automatizaciones o el rack.")
-                            .font(.callout).foregroundStyle(.tertiary)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    ScrollView {
-                        MachineRoomView(room: store.machineRoom)
-                            .padding(.horizontal, 26).padding(.vertical, 22)
-                            .frame(maxWidth: 1180)
-                            .frame(maxWidth: .infinity)
-                    }
-                }
-            }
-        }
-        .background(Color(nsColor: .windowBackgroundColor))
     }
 }

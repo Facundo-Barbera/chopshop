@@ -11,7 +11,9 @@
 - `lobby` = vestíbulo (hilos activos sin rol y los que esperan escritorio), regla en `lobby.py`.
 - `recent` = últimos 50 sobres, el más nuevo primero.
 - `machine_room` (v3): listeners, automatizaciones y webhooks de la sala de máquinas (`machine_room.py`); sus `subscriptions` las
-  rellena `Projector.current()` desde SQLite (no vienen de sobres).
+  rellena `Projector.current()` desde SQLite (no vienen de sobres). Cada proyecto lleva además sus salas (0..N, las que declara su
+  perfil en `machine_rooms:`): `projects[].machine_rooms` (`machine_room.rooms`), las que pinta su piso, recalculadas tras cada
+  sobre; `projects[].machine_room` = la primera o null (clientes anteriores).
 Los sobres salen de `events.list_after` (contrato del bus, docs/event-envelope.md)."""
 import copy
 import threading
@@ -159,6 +161,7 @@ def _apply(state, env):
                 p["attention"].sort(key=lambda a: (a["seq"] or 0))
         _counts(p)
         lobby.apply(state, p, env)
+    machine_room.rooms(state)
     state["recent"] = [env] + state["recent"][:RECENT - 1]
     return state
 
@@ -198,7 +201,7 @@ def _apply_office(state, p, typ, env, body):
             d["lineage"] = prev.get("lineage") or []
             d["notes_pending"] = prev.get("notes_pending") or 0
         p["office"] = {"company": body.get("company"), "half_life_s": body.get("half_life_s") or DEFAULT_HALF_LIFE,
-                       "floors": floors}
+                       "floors": floors, "machine_rooms": copy.deepcopy(body.get("machine_rooms") or [])}
         return
     tid = body.get("thread_id")
     if typ == "task.state":

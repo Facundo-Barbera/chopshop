@@ -533,7 +533,7 @@ class TestCli(TmpCase):
         self.assertEqual(rc, 0, err.getvalue())
         self.assertTrue(result.get("up"), result)
         self.assertEqual(result["status_rc"], 0)
-        self.assertIn("chopshop-agent 0.6.0 en host-a", result["status"])
+        self.assertIn("chopshop-agent %s en host-a" % service.__version__, result["status"])
         self.assertIn("unidad systemd chopshop-agent: active", result["status"])
         self.assertEqual(installed[signal.SIGTERM], "previo-%d" % signal.SIGTERM)       # `run` restaura los manejadores
         self.assertEqual(installed[signal.SIGINT], "previo-%d" % signal.SIGINT)

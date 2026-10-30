@@ -4,7 +4,7 @@ Banco de pruebas de `ChopshopNative`, la capa nativa que **la app real** (`apps/
 para el detalle de proyecto en vivo. Aquí se ve con datos de prueba (`Fixtures`) o reproduciendo `ui-fixture.jsonl` (`FixtureStream`).
 
 - **Oficina isométrica** (`IsoOfficeView`): salas por rango, escritorios por tarea, cables, barra "Atención", inspector.
-- **Grafo en capas** (`GraphView`) y la vista de proyecto (`ProjectView`) con el selector Oficina / Grafo.
+- **Armazón de la oficina** (`Shell/`: `OfficeShell`, HUD, paleta ⌘K, paneles, minimapa) y la vista de proyecto (`ProjectView`). La vista Grafo se quitó (docs/plans/office-first-ui.md).
 - **Demo de población y crecimiento** (`DemoTimeline.swift`, `DemoView.swift`): un guion de eventos (con forma de *envelope*) se aplica
   a un store y la oficina se levanta sola: salas que suben, escritorios que brotan, figuras que caminan, cables que se dibujan,
   pregunta (ámbar), tarea atascada (rojo), tareas nuevas a mitad con la cámara ajustándose. ~56 s en bucle.
@@ -34,17 +34,22 @@ swift run ChopshopSnap /tmp/city city-video /tmp/city/city.mp4  # MP4 H.264 1400
 
 ## Sala de máquinas
 
-Tercera vista (Ciudad · Oficina · **Sala de máquinas**, `MachineRoom/`): el registro de lo que corre en la máquina del agente
-— listeners (hilos de fondo con estado, último ciclo y backoff), scripts (automatizaciones: última ejecución, disparador, exit,
-duración, próximo horario), webhooks salientes (último envío bueno o fallo, firmados o no) y el rack de repos (luz por módulo,
-runs de Actions con disparador y origen). Lógica pura en `MachineRoomModel.swift` (`MachineRoom` pliega `machine_room` con la
-misma regla que `agent/machine_room.py`; tests en `MachineRoomTests` y `OfficeEquivalenceTests`); vista en `MachineRoomView` y
-`RackRender.swift` (macOS 26). `LiveState.machineRoom` guarda la misma sala como JSON (equivalencia con la proyección).
+**Salas** de los pisos de cada proyecto (no hay vista aparte ni entrada en la barra lateral), opcionales: 0, 1 o varias, las que
+declara el perfil local en `machine_rooms:` (piso y qué aloja). Cada una muestra el registro de lo que corre en la máquina del
+agente que aloja — repos del rack (un armario por repo con luz de estado y un led por run de Actions; el panel muestra
+disparador y origen), scripts (automatizaciones: última ejecución, disparador, exit, duración, próximo horario), webhooks
+salientes (último envío bueno o fallo, firmados o no) y listeners del agente (hilos de fondo con estado, último ciclo y
+backoff). Lógica pura en `MachineRoomModel.swift` (`MachineRoom` pliega `machine_room` con la misma regla que
+`agent/machine_room.py`; `MachineRoomConfig` = una sala del perfil; `scoped(to:_:)` = `machine_room.scope`; tests en
+`MachineRoomTests`, `FloorPlanTests` y `OfficeEquivalenceTests`). En el piso: `FloorPlan.machineRooms`, `FloorLayout.machines`,
+`FloorRenderer` (también en el zoom de la ciudad) y el panel lateral (`MachineRoomDetail` en `ProjectWorkspace`) con `MachineRoomView` y `RackRender.swift`
+(macOS 26). Las salas salen de `LiveState.machineRoom` + `office.machineRooms` (equivalencia con la proyección).
 
-- En la app: barra lateral → **Sala de máquinas** (`LiveMachineRoomScreen(store:unpaired:)`, macOS 26).
+- En la app: abre la oficina del proyecto (Ciudad → clic en el piso) y haz clic en un armario o en la consola: el detalle sale en el panel lateral.
 - Datos de prueba: `Resources/machine-room-fixture.jsonl` (copia de `apps/agent/tests/fixtures/events/machine-room-fixture.jsonl`;
   su proyección dorada está en `Tests/ChopshopNativeTests/Resources/machine-room-fixture.state.json`).
-- Capturas: `swift run ChopshopSnap /tmp/mr machine-room` → `machine-room-dark.png` / `machine-room-light.png`.
+- Capturas: `swift run ChopshopSnap /tmp/mr machine-room` → `machine-room-dark.png` / `machine-room-light.png` (el panel de la
+  sala de Awesome GB); la sala dentro del piso sale en `floor-*.png` y en `city-office-zoom-producto.png`.
 
 Oficina por departamentos (`Office/`): `swift run ChopshopSnap /tmp/of floor` → `floor-*.png` (las previews de `FloorOfficeView`)
 y `swift run ChopshopSnap /tmp/of city-office` → `city-office-*.png` (ciudad v3 de `CityOfficeFixture`: varios pisos por proyecto,
@@ -59,7 +64,7 @@ vestíbulo en planta baja, zoom al piso Docs y ese piso montado).
   `apps/agent/chopshop/agent/projection.py`), `SSEParser`, `AgentStream` (`GET /stream`), `LiveStore` (reconexión, backoff,
   `Last-Event-ID`), `FixtureStream`, `SnapshotMapper` (proyección → modelos de la oficina), `PairingClient` y `CredentialStore`
   (Keychain). Pruebas: `apps/mac/Tests/ChopshopNativeTests` (`cd apps/mac && swift test`).
-- Las vistas (`IsoOfficeView`, `GraphView`, `ProjectView`/`ProjectContent`, `LiveProjectScreen`, …) llevan `@available(macOS 26.0, *)`;
+- Las vistas (`IsoOfficeView`, `OfficeShell`, `ProjectView`/`ProjectContent`, `LiveProjectScreen`, …) llevan `@available(macOS 26.0, *)`;
   la app las usa tras `if #available(macOS 26, *)` y en macOS < 26 se queda con la vista web. El vidrio (`glassEffect`) va tras
   `#if compiler(>=6.2)`: con un Xcode anterior a 26 cae a un sustituto plano (no probado: solo se ha compilado con Xcode 27).
 - Acciones: `\.attentionActions` en el entorno (responder por `POST /answer`, abrir el hilo en T3). Sin ellas (aquí) los

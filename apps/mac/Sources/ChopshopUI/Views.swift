@@ -1,7 +1,65 @@
 import SwiftUI
 import ChopshopNative
 
+/// En macOS 26 la ventana es la oficina (docs/plans/office-first-ui.md): el mundo a ventana completa con el armazón encima
+/// (HUD, paleta, paneles, minimapa). La UI web con barra lateral queda de reserva: macOS < 26, agente sin `/stream` (o sin
+/// configurar) y «Seguir con la vista clásica».
 struct RootView: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        Group {
+            if #available(macOS 26.0, *) {
+                if model.preferWeb { ClassicRoot() } else { RootSwitch(store: model.live) }
+            } else {
+                ClassicRoot()
+            }
+        }
+        .sheet(isPresented: $model.showSettings) {
+            SettingsView().environmentObject(model)
+        }
+    }
+}
+
+/// Oficina mientras el stream en vivo tenga algo que enseñar; si no (sin agente, o un agente anterior a api_version 2 sin
+/// `/stream`), la vista clásica.
+@available(macOS 26.0, *)
+private struct RootSwitch: View {
+    @ObservedObject var store: LiveStore
+
+    private var office: Bool {
+        switch store.status {
+        case .idle: return false
+        case .reconnecting: return store.hasData
+        default: return true
+        }
+    }
+
+    var body: some View {
+        if office { OfficeRoot() } else { ClassicRoot() }
+    }
+}
+
+/// La oficina a ventana completa: sin barra lateral; el título de la ventana lleva el estado de la conexión.
+@available(macOS 26.0, *)
+struct OfficeRoot: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        OfficeShell(store: model.live, shell: model.shell) { context in
+            ShellCityWorld(store: model.live, context: context)
+        } unpaired: {
+            PairingScreen()
+        }
+        .environment(\.attentionActions, model.attentionActions)
+        .navigationTitle("Chopshop")
+        .navigationSubtitle(model.statusLine)
+        .toolbar { ToolbarItem(placement: .navigation) { LiveIndicator(store: model.live) } }
+    }
+}
+
+/// La interfaz de siempre: barra lateral + UI web (y la sala de máquinas / el proyecto nativos encima en macOS 26).
+struct ClassicRoot: View {
     @EnvironmentObject var model: AppModel
 
     var body: some View {
@@ -18,13 +76,14 @@ struct RootView: View {
                         LiveProjectScreen(project: p, store: model.live) { PairingScreen() }
                             .environment(\.attentionActions, model.attentionActions)
                     }
-                    if model.selection == .machineRoom {
-                        LiveMachineRoomScreen(store: model.live) { PairingScreen() }
+                    if model.selection == .city {
+                        LiveCityRoot(store: model.live)
+                            .environment(\.attentionActions, model.attentionActions)
                     }
                 }
             }
             .navigationTitle(title)
-            .navigationSubtitle(subtitle)
+            .navigationSubtitle(model.statusLine)
             .toolbar {
                 ToolbarItem(placement: .navigation) { LiveIndicator(store: model.live) }
                 ToolbarItemGroup(placement: .primaryAction) {
@@ -39,22 +98,37 @@ struct RootView: View {
             }
         }
         .background(WindowGlass())
-        .sheet(isPresented: $model.showSettings) {
-            SettingsView().environmentObject(model)
-        }
     }
 
     private var title: String {
         if model.selection == .project, let p = model.project { return p }
         return model.selection == .overview ? "Chopshop" : model.selection.title
     }
+}
 
-    private var subtitle: String {
-        if model.link == .unconfigured { return "⚠︎ sin agente configurado" }
-        if let e = model.lastError { return "⚠︎ " + e.prefix(60) }
-        guard let d = model.lastUpdate else { return "cargando…" }
-        let f = DateFormatter(); f.dateFormat = "HH:mm:ss"
-        return "actualizado " + f.string(from: d)
+/// Menú «Oficina» (macOS 26, oficina): los atajos del armazón (`ShellKeymap`). En la vista clásica, las secciones de siempre.
+struct OfficeMenu: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        if #available(macOS 26.0, *) {
+            if model.preferWeb { sections } else { shortcuts }
+        } else {
+            sections
+        }
+    }
+
+    private var shortcuts: some View {
+        ForEach(ShellKeymap.all.filter(\.command), id: \.action) { k in
+            Button(k.title) { model.shell.perform(k.action) }
+                .keyboardShortcut(KeyEquivalent(Character(k.key)), modifiers: k.shift ? [.command, .shift] : .command)
+        }
+    }
+
+    private var sections: some View {
+        ForEach(Array(Section.views.enumerated()), id: \.element) { i, s in
+            Button(s.title) { model.nav = .section(s) }.keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: .command)
+        }
     }
 }
 
@@ -225,7 +299,7 @@ struct Sidebar: View {
                         .font(.caption.weight(.medium))
                         .help("Estado de la conexión con los agentes de Chopshop (API por Tailscale). Se configuran en Ajustes… (⌘,) o en la sección [app] de ~/.config/chopshop/config.toml")
                     Spacer()
-                    Text("v0.6")
+                    Text("v0.9")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
@@ -382,5 +456,20 @@ struct StatusCapsule<Content: View>: View {
         #else
         inner.background(.ultraThinMaterial, in: Capsule())
         #endif
+    }
+}
+
+/// «Ciudad» de la barra lateral (macOS 26): un edificio por proyecto; clic en un piso → zoom a la oficina del proyecto (vestíbulo,
+/// pisos por rol y sala de máquinas en un solo mundo). Sin credencial, la pantalla de emparejar.
+@available(macOS 26.0, *)
+private struct LiveCityRoot: View {
+    @ObservedObject var store: LiveStore
+    var body: some View {
+        switch store.status {
+        case .noCredential, .unauthorized:
+            PairingScreen().frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(nsColor: .windowBackgroundColor))
+        default:
+            LiveCityScreen(store: store, perProject: true)
+        }
     }
 }
