@@ -20,3 +20,6 @@ config.toml
 
 # Artefactos de las pruebas de renderizado de la UI
 .test-build/
+
+# Workspace de desarrollo con hot reload (lo genera apps/mac/dev.sh)
+apps/mac/ChopshopDev_*.xcworkspace/
