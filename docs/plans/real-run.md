@@ -8,10 +8,10 @@ Un agente de prueba, su MCP y un perfil local fuera del repo, contra el T3 real 
 | pieza | valor |
 |---|---|
 | config | `/tmp/e12/xdg/chopshop/config.toml` (`CHOPSHOP_CONFIG`, `XDG_CONFIG_HOME=/tmp/e12/xdg`, `CHOPSHOP_HOME=/tmp/e12/home`) |
-| agente | `chopshop agent run`, `127.0.0.1:3891`, `auth = "none-local"`, `machine_id = "e12-test"`, DB `/tmp/e12/home/agent/agent.db` |
+| agente | `chopshop agent run`, `127.0.0.1:3891`, `auth = "none-local"`, `machine_id = "e12-test"`, DB `<dir-de-prueba>/agent/agent.db` |
 | despachador | `[agent.dispatcher] enabled = true, max_threads = 2, interval = 5`; roles, GitHub y forge apagados |
 | MCP | `chopshop mcp serve`, `127.0.0.1:3897`, token y credenciales bajo `/tmp/e12/xdg` |
-| perfil | `/tmp/e12/home/profiles/chopshop-e12.yaml`: `t3_project` = proyecto `chopshop` de T3, `workspace: root` (sin worktrees ni ramas), `runtime_mode: approval-required`, `cannot_run: [git push, git commit, rm]`, `model: claudeAgent/claude-haiku-5-5`; dos pisos con cuatro escritorios `permanent: true`: triage y qa (Operaciones) y release y docs (Entrega) |
+| perfil | `<dir-de-prueba>/profiles/chopshop-e12.yaml`: `t3_project` = proyecto `chopshop` de T3, `workspace: root` (sin worktrees ni ramas), `runtime_mode: approval-required`, `cannot_run: [git push, git commit, rm]`, `model: claudeAgent/claude-haiku-5-5`; dos pisos con cuatro escritorios `permanent: true`: triage y qa (Operaciones) y release y docs (Entrega) |
 
 Por MCP: `project_register {name: chopshop-e12, company, t3_project}` (idempotente: el perfil ya existía) y 8 × `task_enqueue`,
 dos por rol, todas de solo lectura sobre el repo (resumir un archivo o listar TODOs, versiones o títulos), cada una con
@@ -103,5 +103,5 @@ funciona con la forma de `/state` (como `snapshot.office.json`). Debería decir 
 
 - 16 hilos de T3 en el proyecto `chopshop` (8 de la pasada 2 y 8 de la pasada 3), todos con settle; los 8 de la pasada 1 no llegaron
   a crearse.
-- Una credencial de pairing de T3 para el agente de prueba (`/tmp/e12/home/t3-credential-agent.json`).
+- Una credencial de pairing de T3 para el agente de prueba (`<dir-de-prueba>/t3-credential-agent.json`).
 - El agente de prueba y su MCP quedaron detenidos (puertos 3891 y 3897 libres).
