@@ -181,12 +181,12 @@ def _text(v, key, required=False):
     return v.strip()
 
 
-def minimal_profile(name, company, t3_project=None, repo=None, host=None):
+def minimal_profile(name, company, t3_project=None, repo=None, host=None, model=None):
     p = profile.profile_path(name)
     if os.path.exists(p):
         return False
     lines = ["project: %s" % name]
-    for k, v in (("t3_project", t3_project), ("repo", repo), ("host", host)):
+    for k, v in (("t3_project", t3_project), ("repo", repo), ("host", host), ("model", model)):
         if v:
             lines.append("%s: %s" % (k, json.dumps(v, ensure_ascii=False)))
     lines += ["office:", "  company: %s" % json.dumps(company, ensure_ascii=False), "  floors:", "    - name: Principal",
@@ -199,12 +199,16 @@ def minimal_profile(name, company, t3_project=None, repo=None, host=None):
     return True
 
 
-def register(name, company=None, t3_project=None, repo=None, host=None):
+def register(name, company=None, t3_project=None, repo=None, host=None, model=None):
     name = _name(name)
     company = _text(company, "company")
     t3_project, repo, host = _text(t3_project, "t3_project"), _text(repo, "repo"), _text(host, "host")
+    model = _text(model, "model")
     if host and host not in profile.hosts():
         raise RegistryError(400, "host desconocido: %s" % host)
+    if model and "/" not in model:
+        raise RegistryError(400, "model debe ser 'instancia/modelo' (p. ej. claudeAgent/claude-haiku-5-5)")
+    _check_model(name, t3_project, repo, host, model)
     with _lock:
         entries = load()
         old = entries.get(name)
@@ -217,8 +221,19 @@ def register(name, company=None, t3_project=None, repo=None, host=None):
         entries[name] = _entry(name, raw)
         _write(entries)
     e = entries[name]
-    made = minimal_profile(name, e["company"], t3_project, repo, host)
+    made = minimal_profile(name, e["company"], t3_project, repo, host, model)
     return e, old is None, made
+
+
+def _check_model(name, t3_project, repo, host, model):
+    from .. import engine
+    try:
+        prof = profile.load(name)
+    except profile.ProfileError:
+        prof = {"project": name, "t3_project": t3_project, "repo": repo, "host": host, "model": model}
+    why = engine.model_problem(prof)
+    if why:
+        raise RegistryError(400, why)
 
 
 def set_enabled(name, flag):
@@ -241,7 +256,8 @@ def api_list():
 
 
 def api_register(body):
-    e, created, made = register(body.get("name"), body.get("company"), body.get("t3_project"), body.get("repo"), body.get("host"))
+    e, created, made = register(body.get("name"), body.get("company"), body.get("t3_project"), body.get("repo"), body.get("host"),
+                               body.get("model"))
     return {"ok": True, "project": public(e), "created": created, "profile_created": made}
 
 
