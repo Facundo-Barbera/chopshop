@@ -71,7 +71,7 @@
     "seed": "Personal",
     "setback_inset": 7.48,
     "setback_level": 3,
-    "windows": "punched"
+    "windows": "paired"
    }
   },
   {
@@ -97,17 +97,17 @@
     }
    ],
    "height": 62.7,
-   "roof_h": 42.0,
+   "roof_h": 24.0,
    "style": {
     "door_bay": 1,
     "ground_scale": 1.35,
     "material": "slate",
     "plinth_h": 6.0,
-    "roof": "mast",
+    "roof": "penthouse",
     "seed": "iAware",
     "setback_inset": 11.56,
     "setback_level": 3,
-    "windows": "punched"
+    "windows": "vertical"
    }
   },
   {
@@ -152,17 +152,17 @@
     }
    ],
    "height": 98.5,
-   "roof_h": 42.0,
+   "roof_h": 24.0,
    "style": {
     "door_bay": 1,
     "ground_scale": 1.25,
     "material": "brick",
     "plinth_h": 4.0,
-    "roof": "mast",
+    "roof": "penthouse",
     "seed": "ozom",
     "setback_inset": 7.48,
     "setback_level": null,
-    "windows": "paired"
+    "windows": "ribbon"
    }
   },
   {
@@ -198,7 +198,7 @@
     "seed": "Bixku",
     "setback_inset": 11.56,
     "setback_level": null,
-    "windows": "vertical"
+    "windows": "paired"
    }
   },
   {
@@ -243,13 +243,13 @@
     }
    ],
    "height": 102.7,
-   "roof_h": 24.0,
+   "roof_h": 28.0,
    "style": {
     "door_bay": 4,
     "ground_scale": 1.35,
     "material": "concrete",
     "plinth_h": 4.0,
-    "roof": "penthouse",
+    "roof": "tank",
     "seed": "Otros",
     "setback_inset": 7.48,
     "setback_level": 2,
@@ -365,7 +365,7 @@
     "seed": "Awesome GB",
     "setback_inset": 11.56,
     "setback_level": null,
-    "windows": "punched"
+    "windows": "vertical"
    }
   }
  ]

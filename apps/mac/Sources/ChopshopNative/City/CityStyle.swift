@@ -45,11 +45,16 @@ public struct CityBuildingStyle: Hashable, Sendable {
     public var setbackLevel: Int?
     public var setbackInset: Double
 
+    /// Sales de ventanas y azotea: elegidas para que las seis empresas de las escenas no repitan más de dos veces ni ritmo ni
+    /// remate, y los cuatro edificios con pisos altos (los que enseñan ventanas) tengan ritmos distintos. Igual en city_style.py.
+    static let windowsSalt = "windows29"
+    static let roofSalt = "roof41"
+
     public init(seed: String) {
         self.seed = seed
         material = Self.pick(seed, "material", Material.allCases)
-        windows = Self.pick(seed, "windows", Windows.allCases)
-        roof = Self.pick(seed, "roof", Roof.allCases)
+        windows = Self.pick(seed, Self.windowsSalt, Windows.allCases)
+        roof = Self.pick(seed, Self.roofSalt, Roof.allCases)
         plinthH = Self.pick(seed, "plinth", Self.plinthHs)
         groundScale = Self.pick(seed, "ground", Self.groundScales)
         doorBay = Self.pick(seed, "door", Self.doorBays)

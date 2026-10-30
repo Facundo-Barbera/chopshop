@@ -17,3 +17,14 @@ enrasadas (sin cornisa por piso salvo la banda), terrazas con pretil y remates (
       ventanas, azotea) y no como libros; cada empresa distinta; paleta neutra, color solo en pisos ámbar/rojo.
 - [ ] Vídeo/zoom: el piso elegido se ahueca en su sitio (también con retranqueo y planta baja alta); la oficina cae en la losa.
 - [ ] Clic/hover: el contorno coincide con cada piso (la planta baja incluye el plinto).
+
+## Resultado en el Mac (2026-10-29)
+
+- `swift build` en `apps/mac` y `apps/mac/native`: compila sin cambios (ninguno de los riesgos se materializó).
+- `swift test` (apps/mac): 95 tests en verde, incluidos `CityStyleTests`, `CityTests` y `CityOfficeTests`; `test_city_style.py`: 10 OK.
+- Capturas offscreen (`ChopshopSnap … city-keys` y `city-office`): se leen como edificios (plinto, vestíbulo con puerta y
+  marquesina, filas de ventanas, azotea con remate); paleta neutra, color solo en pisos ámbar/rojo.
+- Distinción: con las sales originales 4 de 6 empresas salían `punched` (y 4 de 6 con mástil; `ribbon` nunca). Sales nuevas
+  (`windows29`, `roof41`, en Swift y Python, dorada regenerada): ritmos y remates como mucho dos veces cada uno, y los cuatro
+  edificios con pisos altos (Personal, ozom, Otros, Awesome GB) con ritmos distintos (pareados, banda, sueltos, verticales).
+- Pendiente (no se hizo sin input real): vídeo/zoom interactivo y clic/hover a mano.
