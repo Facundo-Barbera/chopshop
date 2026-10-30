@@ -71,6 +71,10 @@ public struct OfficeShell<World: View, Unpaired: View>: View {
                     ShellMinimapView(model: city, focused: shell.state.focus?.target.project) { shell.state.go(.project($0)) }
                         .padding(16)
                 }
+            } else if shell.state.section == .machines, let m = shell.machines {
+                MachinesView(model: m)
+            } else if shell.state.section == .watchers, let backend = shell.backend {
+                WatchersSection(client: backend)
             } else if shell.state.section == .settings, let accountSettings {
                 AccountSettingsView(model: accountSettings)
             } else {
