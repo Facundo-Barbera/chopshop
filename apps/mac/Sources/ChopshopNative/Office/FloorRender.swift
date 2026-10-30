@@ -179,7 +179,8 @@ struct FloorRenderer {
 
     private var isLobby: Bool { plan.kind == .lobby }
     private var floorZ: Double { Iso.slabH }
-    private var coreH: Double { FloorLayout.topH - Iso.slabH }
+    static let coreH = 26.0
+    private var coreH: Double { Self.coreH }
     private var curbH: Double { 4.0 }
     private var glassH: Double { 9.0 }
 
@@ -367,6 +368,7 @@ struct FloorRenderer {
         let z = floorZ + 0.05
         ctx.fill(quad(r.x0, r.y0, r.x1, r.y1, z),
                  with: .color((dark ? Color.black : Color(red: 0.55, green: 0.52, blue: 0.46)).opacity(dark ? 0.22 : 0.10)))
+        guard max(r.w, r.d) >= 160 else { return }
         var l = Path()
         if r.w >= r.d {
             l.move(to: P(r.x0 + 14, r.y0 + r.d / 2, z)); l.addLine(to: P(r.x1 - 14, r.y0 + r.d / 2, z))
