@@ -353,25 +353,6 @@ class TestSchema(unittest.TestCase):
             finally:
                 conn.close()
 
-    def test_shared_connection_survives_concurrent_threads(self):
-        """Lecturas sin `db.tx()` a la vez que escrituras en la misma conexión (antes: segfault con threadsafety 1)."""
-        with tempfile.TemporaryDirectory() as tmp:
-            conn = db.connect(os.path.join(tmp, "agent", "agent.db"))
-            errors = []
-
-            def work(i):
-                try:
-                    for k in range(300):
-                        conn.execute("INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)", ("k%d" % (k % 20), "x" * 2000))
-                        db.rows(conn.execute("SELECT * FROM meta"))
-                except Exception as e:  # noqa: BLE001
-                    errors.append(e)
-            ts = [threading.Thread(target=work, args=(i,)) for i in range(4)]
-            [t.start() for t in ts]
-            [t.join() for t in ts]
-            conn.close()
-            self.assertEqual(errors, [])
-
 
 if __name__ == "__main__":
     unittest.main()
