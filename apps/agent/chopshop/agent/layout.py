@@ -352,12 +352,12 @@ def _room_desks(f):
                and r.get("desks", 1) > 0)
 
 
-def flex_count(prof, f):
-    return max(0, min(capacity(prof)["flex_per_floor"], MAX_DESKS_PER_FLOOR - _room_desks(f)))
+def flex_count(prof):
+    return capacity(prof)["flex_per_floor"]
 
 
 def elastic_floor_desks(prof):
-    sizes = [_room_desks(f) + flex_count(prof, f) for f in floors(prof)]
+    sizes = [_room_desks(f) + flex_count(prof) for f in floors(prof)]
     return min(MAX_DESKS_PER_FLOOR, max([MIN_ELASTIC_FLOOR_DESKS] + sizes))
 
 
@@ -405,7 +405,7 @@ def desks(prof):
             for slot in range(n if _int(n) and n > 0 else 0):
                 out.append({"id": desk_id(project, fi, r["role"], slot), "project": project, "floor": fi,
                             "role": r["role"], "slot": slot, "permanent": bool(r.get("permanent")), "zone": "room"})
-        for slot in range(flex_count(prof, f)):
+        for slot in range(flex_count(prof)):
             out.append({"id": desk_id(project, fi, FLEX_ROLE, slot), "project": project, "floor": fi,
                         "role": FLEX_ROLE, "slot": slot, "permanent": False, "zone": "flex"})
     return out
@@ -432,7 +432,7 @@ def structure(prof, retired=(), extra_floors=0, outsourced_floors=0, building=No
             rooms.append({"role": r["role"], "permanent": bool(r.get("permanent")), "flex": False,
                           "desks": [{"id": desk_id(project, fi, r["role"], s), "slot": s, "retired": False}
                                     for s in range(n)]})
-        nf = flex_count(prof, f)
+        nf = flex_count(prof)
         if nf:
             rooms.append(_elastic_room(project, fi, FLEX_ROLE, nf))
         fl.append({"index": fi, "name": f.get("name") if isinstance(f.get("name"), str) else None, "rooms": rooms,
