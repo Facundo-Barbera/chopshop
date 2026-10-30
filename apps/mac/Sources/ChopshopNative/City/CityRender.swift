@@ -960,8 +960,8 @@ struct CityRenderer {
                 // los escritorios son fijos: el piso entero aparece con el zoom
                 go.opacity = g.opacity * rr
                 go.fill(poly([P(R.x0 + wt, R.y0 + wt, zb), P(R.x1 - wt, R.y0 + wt, zb), P(R.x1 - wt, R.y1 - wt, zb), P(R.x0 + wt, R.y1 - wt, zb)]),
-                        with: .color(Color(red: 0.942, green: 0.926, blue: 0.893)))
-                FloorRenderer(plan: plan, layout: lay, cam: ocam, box: z.floorBox ?? FloorCameraBox(), dark: false, t: t, now: now,
+                        with: .color(dark ? Color(white: 0.124) : Color(red: 0.942, green: 0.926, blue: 0.893)))
+                FloorRenderer(plan: plan, layout: lay, cam: ocam, box: z.floorBox ?? FloorCameraBox(), dark: dark, t: t, now: now,
                               selected: nil, hovered: z.hoveredSpot, embedded: true).draw(&go)
             case .graph(var sc):
                 // las salas se extruyen y los escritorios brotan con el zoom
