@@ -101,8 +101,17 @@ public struct ShellState: Equatable, Sendable {
     /// El usuario pulsó algo en el mundo: se abre su detalle (sin mover la cámara: ya está ahí).
     public mutating func select(_ target: ShellTarget) {
         if target == .city { selectedThread = nil; return }
+        if case .project = target {
+            selectedThread = nil
+            if case .target = inspector { inspector = nil }
+            return
+        }
         selectedThread = target.threadID
         show(.target(target))
+    }
+
+    public mutating func attentionArrived() {
+        if inspector == nil { show(.panel(.attention)) }
     }
 
     /// La paleta, el minimapa o ⌘J piden ir a algo: el mundo hace zoom y el inspector muestra su detalle.
