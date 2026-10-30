@@ -7,9 +7,19 @@
   "machines": [
     {
       "machine_id": "contabo-dev",
+      "online": true,
+      "stale": false,
       "seq": 1842,
       "snapshot_age_s": 48,
       "expires_at": "2026-10-30T14:04:12.004Z"
+    },
+    {
+      "machine_id": "nas-casa",
+      "online": false,
+      "stale": true,
+      "seq": null,
+      "snapshot_age_s": null,
+      "expires_at": null
     }
   ],
   "snapshots": [

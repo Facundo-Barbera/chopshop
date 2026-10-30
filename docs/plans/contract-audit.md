@@ -77,7 +77,7 @@ Convención de URL distinta en cada lado: el agente usa `[relay] url` **tal cual
 | `GET /agent/ws` | `AGENT_WS_PATH`, igual que arriba | nadie | nadie | ✓ (alias) | **OK** (sin uso) |
 | `GET /whoami` | R6: `viewer`/`machine` → `{role, machine_id}`; `admin` → 403 | nadie | nadie (usa el frame `whoami` por WebSocket) | ✓; **sin schema** | **conocido** (BUG-1) + BUG-3 |
 | `GET /stream` | R5: SSE, solo `viewer` | nadie | nadie (el `/stream` de la Mac es el de la API del agente) | ✓ ruta; **formato sin contrato** | BUG-3 |
-| `GET /state` | R5: `{v, type: "state", id, ts, head, machines[], snapshots[]}`, solo `viewer` | nadie | nadie | ✓ ruta; **cuerpo sin contrato** | BUG-3 |
+| `GET /state` | R5: `{v, type: "state", id, ts, head, machines[{machine_id, online, stale, seq, snapshot_age_s, expires_at}], snapshots[]}`, solo `viewer` | nadie | nadie | ✓ (`state`) | **OK** (BUG-3 y BUG-10 resueltos) |
 | `POST /v1/pair` | R3, solo `anónimo` | nadie | nadie | ✓ | **OK\*** (sin cliente) |
 | `POST /pair` | retirado en R9 → 404 | nadie | nadie | ✓ (sin alias) | **OK** (BUG-9 resuelto) |
 | `POST /v1/pair/codes`, `DELETE /v1/tokens/<id>`, `DELETE /v1/pair/codes/<id>` | R3 + R6, solo `admin` | A3 `unpair` solo lo menciona | nadie | ✓ | **OK** |
@@ -172,7 +172,8 @@ que no: F7). Por el relay (A2) todos salen con `subject.id` = empleado o tarea, 
 - **BUG-9** (decisión; **resuelto en R9**: se retiró el alias, el relay responde 404 a `POST /pair`) El alias `POST /pair`
   del relay comparte nombre con `POST /pair` de la API del agente (`cs1_`, `device_id`). Un cliente que apunte al host equivocado recibe `400 campos desconocidos` en vez de un error claro. *Sugerencia*:
   retirar el alias (no lo usa nadie) o documentar la diferencia en los dos contratos.
-- **BUG-10** Un visor no ve `online`/`stale` por máquina: `GET /state` solo lista las máquinas con snapshot vivo
+- **BUG-10** *(resuelto en R11: `online`/`stale` en `state.machines[]`; `/state` lista también las máquinas con token de
+  agente sin snapshot vivo)* Un visor no ve `online`/`stale` por máquina: `GET /state` solo lista las máquinas con snapshot vivo
   (`listSnapshots` purga los caducados) y el `ViewerHub` no sabe qué agentes tienen el WebSocket abierto. Añadirlo cambia el
   Worker. *Tarea chica (R)*: que `machineInfo` reciba el estado de conexión de `AgentSockets` (`online`) y que `/state` liste también
   las máquinas con token de agente de la cuenta sin snapshot vivo (`stale: true`, `seq`/`expires_at` `null`); luego, añadir los
