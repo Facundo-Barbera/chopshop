@@ -207,6 +207,16 @@ public enum CityHit {
         return nil
     }
 
+    public static func campus(at p: CGPoint, in m: CityModel, frame f: IsoFrame) -> String? {
+        for c in m.campuses {
+            let k = CityGeo.tile
+            for r in c.lots where contains([f.pt(r.x0 - k, r.y0 - k), f.pt(r.x1 + k, r.y0 - k), f.pt(r.x1 + k, r.y1 + k), f.pt(r.x0 - k, r.y1 + k)], p) {
+                return c.name
+            }
+        }
+        return nil
+    }
+
     /// Proyecto del piso bajo `p` (nil fuera de la ciudad o en el vestíbulo, que no es de ningún proyecto).
     public static func floor(at p: CGPoint, in m: CityModel, frame f: IsoFrame) -> String? {
         floorID(at: p, in: m, frame: f).flatMap { m.floor(id: $0) }.flatMap { $0.isLobby ? nil : $0.project }
