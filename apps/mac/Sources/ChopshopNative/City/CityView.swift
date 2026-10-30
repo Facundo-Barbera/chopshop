@@ -80,6 +80,9 @@ final class CityViewBox {
 /// fundido). Un proyecto sin `office` (agente v2) sigue abriendo la `IsoOfficeView` del grafo. Esc o "Ciudad" vuelve.
 @available(macOS 26.0, *)
 public struct CityView: View {
+    #if DEBUG && HOT_RELOAD
+    @ObserveInjection var inject
+    #endif
     let model: CityModel
     let lights: CityLights
     let snapshot: MockSnapshot
@@ -331,6 +334,7 @@ public struct CityView: View {
             }
         }
         .onChange(of: backRequest) { _, _ in stepOut() }
+        .hotReload()
     }
 
     private func content(p: Double, t: Double, office: Bool) -> some View {
@@ -783,6 +787,9 @@ struct IsoRoomLabel: View {
 /// desde la escena "Ciudad".
 @available(macOS 26.0, *)
 public struct LiveCityScreen: View {
+    #if DEBUG && HOT_RELOAD
+    @ObserveInjection var inject
+    #endif
     @ObservedObject var store: LiveStore
     let directory: CompanyDirectory
     let onSelectFloor: ((String) -> Void)?
@@ -814,6 +821,7 @@ public struct LiveCityScreen: View {
         .toolbar { ToolbarItem(placement: .primaryAction) { MachineStatusButton(machines: store.snapshot.machines) } }
         .onAppear { refresh() }
         .onReceive(store.$snapshot) { _ in refresh() }
+        .hotReload()
     }
 
     private func refresh() {

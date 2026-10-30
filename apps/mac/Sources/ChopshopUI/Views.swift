@@ -43,6 +43,9 @@ private struct RootSwitch: View {
 /// La oficina a ventana completa: sin barra lateral; el título de la ventana lleva el estado de la conexión.
 @available(macOS 26.0, *)
 struct OfficeRoot: View {
+    #if DEBUG && HOT_RELOAD
+    @ObserveInjection var inject
+    #endif
     @EnvironmentObject var model: AppModel
 
     var body: some View {
@@ -55,11 +58,15 @@ struct OfficeRoot: View {
         .navigationTitle("Chopshop")
         .navigationSubtitle(model.statusLine)
         .toolbar { ToolbarItem(placement: .navigation) { LiveIndicator(store: model.live) } }
+        .hotReload()
     }
 }
 
 /// La interfaz de siempre: barra lateral + UI web (y la sala de máquinas / el proyecto nativos encima en macOS 26).
 struct ClassicRoot: View {
+    #if DEBUG && HOT_RELOAD
+    @ObserveInjection var inject
+    #endif
     @EnvironmentObject var model: AppModel
 
     var body: some View {
@@ -98,6 +105,7 @@ struct ClassicRoot: View {
             }
         }
         .background(WindowGlass())
+        .hotReload()
     }
 
     private var title: String {

@@ -6,6 +6,9 @@ import SwiftUI
 /// Sin tooltips sobre el mundo: lo que haya que leer está en el inspector o en la paleta.
 @available(macOS 26.0, *)
 public struct OfficeShell<World: View, Unpaired: View>: View {
+    #if DEBUG && HOT_RELOAD
+    @ObserveInjection var inject
+    #endif
     @ObservedObject var store: LiveStore
     @ObservedObject var shell: ShellController
     let world: (ShellWorldContext) -> World
@@ -38,6 +41,7 @@ public struct OfficeShell<World: View, Unpaired: View>: View {
         }
         .onAppear { shell.snapshot = store.snapshot }
         .onReceive(store.$snapshot) { shell.snapshot = $0 }
+        .hotReload()
     }
 
     private var inspectorShown: Binding<Bool> {
@@ -87,6 +91,9 @@ public struct OfficeShell<World: View, Unpaired: View>: View {
 /// propia: el HUD es del armazón.
 @available(macOS 26.0, *)
 public struct ShellCityWorld: View {
+    #if DEBUG && HOT_RELOAD
+    @ObserveInjection var inject
+    #endif
     @ObservedObject var store: LiveStore
     let context: ShellWorldContext
     @State private var model = CityModel(buildings: [], groundX: 1, groundY: 1)
@@ -119,6 +126,7 @@ public struct ShellCityWorld: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear { refresh() }
         .onReceive(store.$snapshot) { _ in refresh() }
+        .hotReload()
     }
 
     private func refresh() {
@@ -134,6 +142,9 @@ public struct ShellCityWorld: View {
 /// las máquinas caídas o saturadas. Cada uno abre su panel.
 @available(macOS 26.0, *)
 struct ShellHUDView: View {
+    #if DEBUG && HOT_RELOAD
+    @ObserveInjection var inject
+    #endif
     let hud: ShellHUD
     let open: (ShellPanel) -> Void
 
@@ -144,6 +155,7 @@ struct ShellHUDView: View {
             counter("server.rack", hud.machinesLabel, tint: hud.machinesAlert ? Attention.needsYou : nil) { open(.machines) }
         }
         .padding(.horizontal, 8)
+        .hotReload()
     }
 
     private var attentionTint: Color? {
