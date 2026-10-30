@@ -161,10 +161,6 @@ final class FloorLabDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ n: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
-        DispatchQueue.main.async {
-            NSApp.activate(ignoringOtherApps: true)
-            NSApp.windows.first { $0.canBecomeKey }?.makeKeyAndOrderFront(nil)
-        }
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ s: NSApplication) -> Bool { true }
 }
@@ -182,6 +178,11 @@ func relaunchAsBundle() -> Bool {
         let plist = info.filter { $0.key.hasPrefix("CF") || $0.key.hasPrefix("NS") }
         try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
             .write(to: app.appendingPathComponent("Contents/Info.plist"))
+        let sign = Process()
+        sign.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        sign.arguments = ["--force", "--deep", "--sign", "-", app.path]
+        try sign.run()
+        sign.waitUntilExit()
     } catch {
         return false
     }
@@ -197,7 +198,6 @@ func relaunchAsBundle() -> Bool {
 }
 
 if relaunchAsBundle() { exit(0) }
-NSApplication.shared.setActivationPolicy(.regular)
 if #available(macOS 26.0, *) {
     FloorLabApp.main()
 } else {
