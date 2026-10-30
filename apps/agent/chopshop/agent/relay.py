@@ -5,7 +5,7 @@ import os
 import socket
 import time
 
-from .. import relaycfg, relaysync, wsclient
+from .. import cloudsync, relaycfg, relaysync, wsclient
 from . import USER_AGENT, envelope, events
 
 log = logging.getLogger("chopshop.agent.relay")
@@ -74,7 +74,7 @@ def _machine_stamp():
 
 class RelayLink:
     def __init__(self, url, token, machine_id, conn, snapshot_fn, state_fn, profiles_fn, stop_event,
-                 clock=time.monotonic, factory=None, backoff=None, jitter=None, tick=TICK):
+                 clock=time.monotonic, factory=None, backoff=None, jitter=None, tick=TICK, sync_fn=None):
         self.url, self._token, self.machine_id, self.conn = url, token, machine_id, conn
         self.snapshot_fn, self.state_fn, self.profiles_fn = snapshot_fn, state_fn, profiles_fn
         self.stop, self.clock, self.tick = stop_event, clock, tick
@@ -87,8 +87,20 @@ class RelayLink:
         self.sent = {"snapshot": 0, "event": 0}
         self.v = 2 if relaycfg.MACHINE_CRED_RE.match(token or "") else 1
         self.machine, self.rev = None, None
+        self.sync_fn = sync_fn or cloudsync.apply
         self.workspaces, self.ws_map = [], {}
         self._synced = False
+        if self.v == 2:
+            self._cached_map()
+
+    def _cached_map(self):
+        try:
+            st = cloudsync.read_state()
+        except OSError:
+            st = None
+        if st:
+            self.workspaces, self.ws_map = relaysync.workspace_map(st)
+            self.rev = st.get("rev")
 
     def _client(self):
         headers = {"Authorization": "Bearer " + self._token, "User-Agent": USER_AGENT}
@@ -179,6 +191,7 @@ class RelayLink:
             self.workspaces, self.ws_map = relaysync.workspace_map(msg)
             self.rev = msg.get("rev")
             self._synced = True
+            self._apply_sync(client, msg)
         elif kind == "error":
             log.warning("relay: error %s: %s", msg.get("code"), msg.get("message"))
             retry = msg.get("retry_after_s")
@@ -186,6 +199,19 @@ class RelayLink:
                 self._hold = self.clock() + float(retry)
             if msg.get("close"):
                 raise wsclient.WSClosed(self._close_code(msg), "el relay cierra: %s" % msg.get("code"))
+
+    def _apply_sync(self, client, msg):
+        try:
+            res = self.sync_fn(msg)
+        except Exception as e:
+            log.exception("relay: no pude aplicar el sync")
+            res = {"applied": [], "errors": [{"project": p.get("name"), "message": ("%s: %s" % (type(e).__name__, e))[:512]}
+                                             for p in msg.get("projects") or [] if isinstance(p, dict)
+                                             and isinstance(p.get("name"), str) and cloudsync.NAME_RE.match(p["name"])]}
+        rev = msg.get("rev")
+        self._send(client, {"v": 2, "type": "sync.ack", "id": envelope.new_id(), "ts": envelope.iso(), "re": msg.get("id"),
+                            "rev": rev if isinstance(rev, int) and not isinstance(rev, bool) else 0,
+                            "applied": list(res.get("applied") or []), "errors": list(res.get("errors") or [])})
 
     def _close_code(self, msg):
         status = REFUSED.get(msg.get("code"))
