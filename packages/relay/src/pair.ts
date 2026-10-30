@@ -217,7 +217,7 @@ export class Pairing {
       now,
       expiresAt,
     );
-    return { id, code: `${code.slice(0, 4)}-${code.slice(4)}`, scope, name, expires_at: iso(expiresAt) };
+    return { id, code: `${code.slice(0, 4)}-${code.slice(4)}`, scope, name, account, expires_at: iso(expiresAt) };
   }
 
   private ipKey(request: Request): string {
