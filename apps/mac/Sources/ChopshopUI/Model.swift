@@ -84,6 +84,12 @@ final class AppModel: ObservableObject {
         let url = AppConfig.load().agents.first(where: \.isRelay).flatMap { BackendAuth.apiURL($0.url) } ?? BackendClient.defaultAPIURL
         return BackendAuth(apiURL: url, store: sessions, deviceName: deviceName)
     }()
+    private(set) lazy var accountSettings: AccountSettingsModel = {
+        let m = AccountSettingsModel(backend: { [weak self] in self.flatMap { $0.auth.session == nil ? nil : $0.auth.client } })
+        m.onLogout = { [weak self] in await self?.logout() }
+        m.onSources = { [weak self] in self?.showSettings = true }
+        return m
+    }()
     @Published var skipLogin = false
     private(set) lazy var workspaces = CityWorkspacesModel(
         client: { [weak self] in self?.auth.session == nil ? nil : self?.auth.client },
@@ -350,6 +356,11 @@ final class AppModel: ObservableObject {
     private func sessionChanged(_ phase: BackendAuth.Phase) {
         guard phase != .checking else { return }
         shell.state.role = isWatcher ? .watcher : .owner
+        shell.machines = phase == .signedOut || isWatcher ? nil
+            : MachinesModel(client: auth.client, agentURL: URL(string: "http://127.0.0.1:\(BundledAgent.port())")!, hostName: deviceName)
+        shell.backend = auth.session != nil ? auth.client : nil
+        accountSettings.reset(user: auth.session?.user)
+        accountSettings.apiHost = auth.session?.apiURL.host
         pairingRevision += 1
         if case .signedIn(let s) = phase { ensureCloudSpec(s.apiURL) }
         reloadConfig()
