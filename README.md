@@ -18,14 +18,14 @@ Capa delgada entre tus bots y T3 Code. Un bot (o una persona) manda instruccione
 | `apps/agent/` | Servicio Python (solo stdlib): CLI `bin/chopshop`, motor, `chopshop/agent` (servicio headless por máquina), `tests/`, `tools/` |
 | `apps/mac/` | `Chopshop.app` (SwiftUI + WKWebView): `Package.swift`, `Sources/`, `Resources/web` (bundle React), `build.sh`, `shot.sh` |
 | `apps/ui/` | React de la app (esbuild); genera `apps/mac/Resources/web` |
+| `apps/relay/` | Relay en Cloudflare Workers (un Durable Object) para ver las máquinas sin Tailscale ([`docs/relay.md`](docs/relay.md)) |
 | `packages/api/` | Cliente JS de la API del agente, tipos compartidos y la combinación de snapshots de varias máquinas que usa la UI; schemas del relay (`relay/`) y de empleados (`fixtures/`) |
-| `packages/relay/` | Relay en Cloudflare Workers (un Durable Object) para ver las máquinas sin Tailscale ([`docs/relay.md`](docs/relay.md)) |
 | `docs/` | Arquitectura y contrato de la API del agente |
 | `examples/` | Ejemplos (p. ej. lista de bugs de demostración) |
 | `assets/` | Capturas de pantalla |
 | `config.example.toml` | Plantilla de configuración con datos falsos |
 
-La orquestación usa **Turborepo + pnpm workspaces** (solo JS/TS; los scripts de Python y Swift se envuelven como tareas de turbo).
+La orquestación usa **Turborepo + pnpm workspaces** (solo JS/TS; los scripts de Python y Swift se envuelven como tareas de turbo). `apps/*` son las aplicaciones desplegables o ejecutables y `packages/*` las librerías compartidas; ambos globs están en `pnpm-workspace.yaml`, así que una app nueva (p. ej. `apps/web-admin`) solo necesita su `package.json`. Tareas: `build` y `check` se cachean; `test` y `app` no (los tests leen archivos de todo el repo).
 
 ## Instalación
 
@@ -311,7 +311,7 @@ interval = 5
 
 ## Relay (Cloudflare)
 
-`packages/relay` es un Worker de Cloudflare con un Durable Object al que cada agente se conecta **de salida** para publicar su
+`apps/relay` es un Worker de Cloudflare con un Durable Object al que cada agente se conecta **de salida** para publicar su
 estado; la app de Mac lo lee con un token de visor, sin Tailscale. Es de solo lectura: no despacha nada. Arquitectura, roles,
 pairing, tokens, deploy y límites en [`docs/relay.md`](docs/relay.md); formato de los mensajes en
 [`docs/relay-protocol.md`](docs/relay-protocol.md).
@@ -329,8 +329,9 @@ desde una máquina.
 ## Tests
 
 ```sh
-pnpm test      # python unittest (apps/agent) + node --test (packages/api) + chequeos
-pnpm check     # compileall, node --check y bash -n
+pnpm test      # python unittest (apps/agent) + node --test (apps/ui, apps/relay, packages/api) + chequeos
+pnpm build     # bundle de la UI (apps/ui -> apps/mac/Resources/web)
+pnpm check     # compileall, node --check, tsc --noEmit (apps/relay) y bash -n
 ```
 
 Sin pnpm, solo el motor: `cd apps/agent && python3 -m unittest discover -s tests`. Los tests no arrancan servicios ni tocan tu configuración real.
