@@ -124,6 +124,34 @@ class TestValidate(unittest.TestCase):
         self.assertEqual(L.validate_building(profs), [])
 
 
+class TestMachineRooms(unittest.TestCase):
+    def test_optional_and_many(self):
+        p = office(floor(room("be")), floor(room("docs")))
+        self.assertEqual((L.validate(p), L.machine_rooms(p), L.structure(p)["machine_rooms"]), ([], [], []))
+        p["machine_rooms"] = [{"name": "A", "repos": ["o/*"]}, {"name": "B", "floor": 1, "listeners": ["forge"]},
+                              {"name": "C", "floor": 1}]
+        self.assertEqual(L.validate(p), [])
+        self.assertEqual([(r["name"], r["floor"]) for r in L.structure(p)["machine_rooms"]], [("A", 0), ("B", 1), ("C", 1)])
+        self.assertEqual(L.machine_rooms(p)[0], {"name": "A", "floor": 0, "repos": ["o/*"], "listeners": [], "automations": [],
+                                                 "subscriptions": []})
+
+    def test_errors(self):
+        p = office(floor(*[room("r%d" % i) for i in range(6)]))
+        p["machine_rooms"] = [{"name": "A"}, {"name": "A", "floor": 3, "rack": []}, {"floor": 0, "repos": "o/r"}, "x"]
+        errs = L.validate(p)
+        for frag in ("machine_rooms[1].name repetido", "machine_rooms[1].floor debe ser un piso", "machine_rooms[1].rack desconocido",
+                     "machine_rooms[2].name", "machine_rooms[2].repos", "machine_rooms[3]: se esperaba un mapa",
+                     "office.floors[0]: 8 departamentos + salas"):
+            self.assertTrue(any(frag in e for e in errs), (frag, errs))
+        self.assertEqual([r["name"] for r in L.machine_rooms(p)], ["A"])      # la lectura se queda con las válidas
+        self.assertTrue(any("necesita office.floors" in e for e in L.validate({"project": "p", "machine_rooms": [{"name": "A"}]})))
+        self.assertTrue(L.validate({"project": "p", "machine_rooms": {"name": "A"}}))
+
+    def test_example(self):
+        rs = L.machine_rooms(miniyaml.load(EXAMPLE))
+        self.assertEqual([(r["name"], r["floor"]) for r in rs], [("Sala de máquinas", 0), ("Sala de docs", 1)])
+
+
 class TestDesks(unittest.TestCase):
     def setUp(self):
         self.prof = miniyaml.load(EXAMPLE)

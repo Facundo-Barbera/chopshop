@@ -93,11 +93,29 @@ public struct CityView: View {
     /// Piso v3 enfocado, del `office` tipado de la proyección (nil si el proyecto no lo trae).
     private var targetPlan: FloorPlan? { target.flatMap { plan($0, floor: targetFloor) } }
 
-    private func plan(_ project: String, floor id: String?) -> FloorPlan? {
-        guard let state else { return nil }
-        let all = FloorPlan.floors(in: state, project: project)
+    /// Pisos de la oficina del proyecto (`ProjectOffice`: los del perfil o, sin `office`, los sintéticos por rol, y el vestíbulo).
+    private func floors(_ project: String) -> [FloorPlan] {
+        state.map { ProjectOffice.floors(in: $0, project: project, now: officeNow ?? Date()) } ?? []
+    }
+
+    /// Índice (en `floors`) del piso pulsado; si no se sabe, el de escritorios más bajo, o el vestíbulo si no hay otro.
+    private func floorIndex(_ project: String, floor id: String?, in all: [FloorPlan]) -> Int? {
+        guard !all.isEmpty else { return nil }
         let idx = id.flatMap { model.floor(id: $0) }.flatMap { $0.isLobby ? nil : $0.floorIndex }
-        return idx.flatMap { i in all.first { $0.floorIndex == i } } ?? all.first
+        return idx.flatMap { i in all.firstIndex { $0.kind != .lobby && $0.floorIndex == i } }
+            ?? all.firstIndex { $0.kind != .lobby } ?? 0
+    }
+
+    /// Proyecto en el que entra un piso pulsado: el suyo; el del vestíbulo, si el edificio es de un solo proyecto.
+    private func project(of fl: CityFloor) -> String? {
+        guard fl.isLobby else { return fl.project }
+        let ps = Set(model.buildings.first { $0.floors.contains { $0.id == fl.id } }?.floors.filter { !$0.isLobby }.map(\.project) ?? [])
+        return ps.count == 1 ? ps.first : nil
+    }
+
+    private func plan(_ project: String, floor id: String?) -> FloorPlan? {
+        let all = floors(project)
+        return floorIndex(project, floor: id, in: all).map { all[$0] }
     }
 
     /// Hay algo que abrir: el piso v3 o, sin `office`, el grafo.
@@ -200,8 +218,11 @@ public struct CityView: View {
                 // el grafo primero: con la oficina montada, "Grafo" también tiene que verse
                 if showGraph, let pr = graphProject, let g = graph(pr) {
                     GraphView(graph: g, tasks: tasks(pr), hostOf: hosts(pr), frozenTime: frozenTime, flatChrome: flatChrome)
-                } else if office, let plan = targetPlan {
-                    FloorOfficeView(plan: plan, frozenNow: officeNow, flatChrome: flatChrome, onInspect: onInspect)
+                } else if office, let pr = target, let state, let plan = targetPlan {
+                    // el mundo entero del proyecto, encuadrado al principio igual que el final del zoom (el piso pulsado)
+                    OfficeWorldView(state: state, project: pr, now: officeNow,
+                                    focusRegion: plan.kind == .lobby ? "lobby:\(plan.name ?? "")" : "floor:\(plan.floorIndex)",
+                                    onSelect: { tid in if let tid, FloorLayout.machinePart(tid) == nil { onInspect?(tid) } })
                 } else if office, let pr = target, let g = graph(pr) {
                     IsoOfficeView(graph: g, tasks: tasks(pr), hostOf: hosts(pr), frozenTime: frozenTime, flatChrome: flatChrome)
                 } else {
@@ -332,8 +353,8 @@ public struct CityView: View {
         }
         .gesture(SpatialTapGesture().onEnded { e in
             guard !zoomed, p == 0, let f = box.cityFrame, let id = CityHit.floorID(at: e.location, in: model, frame: f),
-                  let fl = model.floor(id: id), !fl.isLobby else { return }  // el vestíbulo no entra
-            select(fl.project, floor: fl.id)
+                  let fl = model.floor(id: id), let pr = project(of: fl) else { return }  // el vestíbulo compartido no entra
+            select(pr, floor: fl.isLobby ? nil : fl.id)
         })
     }
 
@@ -345,12 +366,9 @@ public struct CityView: View {
             return IsoAlert(id: a.floor.isEmpty ? a.project : a.floor, label: label, title: a.title,
                             visual: a.status == .needsYou ? .needsYou : .stuck)
         }
-        let officeAlerts: [IsoAlert]
-        if let plan = targetPlan {
-            officeAlerts = FloorOfficeView.alerts(plan, layout: FloorLayout(plan: plan), now: officeNow ?? Date())
-        } else {
-            officeAlerts = target.flatMap { pr in graph(pr).map { Self.officeAlerts(box.scene(graph: $0, tasks: tasks(pr)), tasks: tasks(pr)) } } ?? []
-        }
+        // dentro de una oficina no hay barra encima (visualizador puro); solo en la vista Grafo del proyecto sin pisos
+        let officeAlerts: [IsoAlert] = targetPlan != nil ? [] :
+            target.flatMap { pr in graph(pr).map { Self.officeAlerts(box.scene(graph: $0, tasks: tasks(pr)), tasks: tasks(pr)) } } ?? []
         return ZStack(alignment: .bottomLeading) {
             ZStack(alignment: .top) {
                 if !cityAlerts.isEmpty && ch < 1 {
@@ -524,18 +542,20 @@ struct IsoRoomLabel: View {
 // MARK: - En vivo
 
 /// Ciudad en vivo (macOS 26): la flota del `LiveStore` (el mismo estado que pinta la oficina). `onSelectFloor` recibe el proyecto
-/// del piso pulsado (la vista ya hace el zoom a su oficina). La app la abrirá desde la barra lateral; el banco de pruebas, desde la
-/// escena "Ciudad".
+/// del piso pulsado (la vista ya hace el zoom a su oficina). La app la abre desde la barra lateral («Ciudad»); el banco de pruebas,
+/// desde la escena "Ciudad".
 @available(macOS 26.0, *)
 public struct LiveCityScreen: View {
     @ObservedObject var store: LiveStore
     let directory: CompanyDirectory
     let onSelectFloor: ((String) -> Void)?
+    /// Un edificio por proyecto (la barra lateral de la app) o uno por empresa (banco de pruebas).
+    let perProject: Bool
     @State private var model = CityModel(buildings: [], groundX: 1, groundY: 1)
     @State private var lights = CityLights()
 
-    public init(store: LiveStore, directory: CompanyDirectory = .standard, onSelectFloor: ((String) -> Void)? = nil) {
-        self.store = store; self.directory = directory; self.onSelectFloor = onSelectFloor
+    public init(store: LiveStore, directory: CompanyDirectory = .standard, perProject: Bool = false, onSelectFloor: ((String) -> Void)? = nil) {
+        self.store = store; self.directory = directory; self.perProject = perProject; self.onSelectFloor = onSelectFloor
     }
 
     public var body: some View {
@@ -547,20 +567,20 @@ public struct LiveCityScreen: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                CityView(model: model, lights: lights, snapshot: store.snapshot, onSelectFloor: onSelectFloor)
-                    .padding(.horizontal, 26).padding(.vertical, 22)
+                CityView(model: model, lights: lights, snapshot: store.snapshot, state: store.state, onSelectFloor: onSelectFloor)
+                    .padding(10)
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .navigationTitle("Ciudad")
-        .navigationSubtitle("\(model.buildings.count) empresas · \(model.projectCount) proyectos")
+        .navigationSubtitle(perProject ? "\(model.projectCount) proyectos" : "\(model.buildings.count) empresas · \(model.projectCount) proyectos")
         .toolbar { ToolbarItem(placement: .primaryAction) { MachineStatusButton(machines: store.snapshot.machines) } }
         .onAppear { refresh() }
         .onReceive(store.$snapshot) { _ in refresh() }
     }
 
     private func refresh() {
-        let m = CityModel.build(store.state, directory: directory)
+        let m = CityModel.build(store.state, directory: directory, perProject: perProject)
         lights.observe(m, at: Date().timeIntervalSinceReferenceDate)
         if m != model { model = m }
     }

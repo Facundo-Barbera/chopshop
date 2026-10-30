@@ -78,8 +78,12 @@ public struct CityFloor: Hashable, Sendable, Identifiable {
     /// Planta baja del edificio: el vestíbulo (`project` vacío; sus avisos llevan el proyecto del hilo).
     public var isLobby = false
     public var id: String { isLobby ? "lobby:\(company)" : floorIndex.map { "\(project)#\($0)" } ?? project }
-    /// Texto de la píldora.
-    public var label: String { isLobby ? "Vestíbulo" : floorName.map { "\(project) · \($0)" } ?? project }
+    /// Texto de la píldora (en un edificio por proyecto, el proyecto ya está en la azotea: solo el piso).
+    public var label: String {
+        if isLobby { return "Vestíbulo" }
+        if company == project { return floorName ?? project }
+        return floorName.map { "\(project) · \($0)" } ?? project
+    }
 }
 
 public struct CityBuilding: Hashable, Sendable, Identifiable {
@@ -205,15 +209,18 @@ public struct CityModel: Equatable, Sendable {
     /// Agrupa los proyectos por empresa (orden estable: el de la tabla, luego por nombre; pisos por nombre de proyecto y, dentro, por
     /// índice de piso) y reparte los edificios en una cuadrícula. Un edificio con algún proyecto con `office` lleva el vestíbulo en la
     /// planta baja; los proyectos sin `office` (agente v2 o perfil sin bloque) siguen en un piso con todos sus hilos.
-    public static func build(_ s: LiveState, directory: CompanyDirectory = .standard) -> CityModel {
+    /// `perProject`: un edificio por proyecto (el nombre del proyecto en la azotea; sus pisos y su vestíbulo), como la «Ciudad»
+    /// de la barra lateral; si no, uno por empresa con un piso por proyecto.
+    public static func build(_ s: LiveState, directory: CompanyDirectory = .standard, perProject: Bool = false) -> CityModel {
         var groups: [String: [LiveState.Project]] = [:]
         var offices: [String: CityOffice] = [:]
         for p in s.projects {
             let o = CityOffice(p.office)
             offices[p.name] = o
-            groups[o?.company ?? directory.company(of: p.name), default: []].append(p)
+            groups[perProject ? p.name : (o?.company ?? directory.company(of: p.name)), default: []].append(p)
         }
-        let companies = groups.keys.sorted { directory.rank($0) < directory.rank($1) }
+        let companies = perProject ? groups.keys.sorted { ($0.lowercased(), $0) < ($1.lowercased(), $1) }
+                                   : groups.keys.sorted { directory.rank($0) < directory.rank($1) }
         let cols = max(1, Int(Double(companies.count).squareRoot().rounded(.up)))
         var buildings: [CityBuilding] = []
         for (i, c) in companies.enumerated() {

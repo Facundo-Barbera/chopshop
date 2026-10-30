@@ -6,9 +6,11 @@ import ChopshopNative
 //   demo: fotogramas clave de la demo (key-*.png) + secuencia seq/f0000.jpg a 12 fps (demo-keys: solo las claves)
 //   city-keys: claves de la ciudad (city-0N-*.png, 1400×900 @1x) desde city-fixture.jsonl
 //   city-video: la cronología de la ciudad en MP4 H.264, 1400×900 a 30 fps (por defecto <salida>/city.mp4)
-//   machine-room: sala de máquinas desde machine-room-fixture.jsonl (machine-room-dark.png / machine-room-light.png)
-//   floor: previews de FloorOfficeView (floor-*.png: piso Producto oscuro/claro, triage seleccionado, vestíbulo)
-//   city-office: ciudad v3 de CityOfficeFixture (city-office-*.png: varios pisos y vestíbulo, zoom al piso Docs y el piso montado)
+//   machine-room: panel de la sala de máquinas de Awesome GB desde machine-room-fixture.jsonl (machine-room-dark/-light.png)
+//   floor: previews de FloorOfficeView (floor-*.png: piso Producto con su sala de máquinas oscuro/claro, triage seleccionado,
+//          armario del repo principal seleccionado, vestíbulo)
+//   city-office: ciudad v3 de CityOfficeFixture (city-office-*.png: varios pisos y vestíbulo, zoom al piso Docs y el piso montado,
+//                zoom al piso Producto con la sala de máquinas)
 let args = Array(CommandLine.arguments.dropFirst())
 let out = args.first ?? "/tmp/chopshop-snaps"
 try? FileManager.default.createDirectory(atPath: out, withIntermediateDirectories: true)

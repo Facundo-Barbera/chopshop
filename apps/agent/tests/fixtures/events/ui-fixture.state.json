@@ -130,6 +130,8 @@
         "waiting_bot": 0
       },
       "graphs": [],
+      "machine_room": null,
+      "machine_rooms": [],
       "name": "bixku-utilities",
       "office": null,
       "tasks": [
@@ -199,6 +201,8 @@
         "waiting_bot": 1
       },
       "graphs": [],
+      "machine_room": null,
+      "machine_rooms": [],
       "name": "chopshop",
       "office": null,
       "tasks": [
@@ -310,6 +314,8 @@
           "status": "failed"
         }
       ],
+      "machine_room": null,
+      "machine_rooms": [],
       "name": "nuskills",
       "office": null,
       "tasks": [
