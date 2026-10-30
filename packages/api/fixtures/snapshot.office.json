@@ -1,0 +1,196 @@
+{
+  "api_version": 3,
+  "projects": [
+    {
+      "name": "awesome-gb",
+      "office": {
+        "company": "Awesome GB",
+        "half_life_s": 1800,
+        "floors": [
+          {
+            "index": 0,
+            "name": "Producto",
+            "rooms": [
+              {
+                "role": "triage",
+                "permanent": true,
+                "desks": [
+                  {
+                    "id": "awesome-gb/0/triage/0",
+                    "slot": 0,
+                    "retired": false,
+                    "occupant": {
+                      "thread_id": "mcp:c41f",
+                      "title": "Triage #212 · login falla en Safari",
+                      "role": "triage",
+                      "phase": "running",
+                      "attention": null,
+                      "since": "2027-01-15T09:12:00.000Z",
+                      "ended_at": null,
+                      "touched_at": null,
+                      "half_life_s": 1800
+                    },
+                    "lineage": [],
+                    "notes_pending": 0
+                  }
+                ]
+              },
+              {
+                "role": "qa",
+                "permanent": true,
+                "desks": [
+                  {
+                    "id": "awesome-gb/0/qa/0",
+                    "slot": 0,
+                    "retired": false,
+                    "occupant": null,
+                    "lineage": [],
+                    "notes_pending": 0
+                  }
+                ]
+              },
+              {
+                "role": "release",
+                "permanent": true,
+                "desks": [
+                  {
+                    "id": "awesome-gb/0/release/0",
+                    "slot": 0,
+                    "retired": false,
+                    "occupant": {
+                      "thread_id": "mcp:r7c2",
+                      "title": "Release 2.4.0",
+                      "role": "release",
+                      "phase": "running",
+                      "attention": null,
+                      "since": "2027-01-15T09:12:00.000Z",
+                      "ended_at": null,
+                      "touched_at": null,
+                      "half_life_s": 1800
+                    },
+                    "lineage": [],
+                    "notes_pending": 0
+                  }
+                ]
+              },
+              {
+                "role": "docs",
+                "permanent": true,
+                "desks": [
+                  {
+                    "id": "awesome-gb/0/docs/0",
+                    "slot": 0,
+                    "retired": false,
+                    "occupant": null,
+                    "lineage": [],
+                    "notes_pending": 0
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "lobby": [],
+  "employees": [
+    {
+      "id": "awesome-gb/0/triage/0",
+      "project": "awesome-gb",
+      "floor": 0,
+      "role": "triage",
+      "slot": 0,
+      "name": "Tría",
+      "state": "working",
+      "thread_id": "mcp:c41f",
+      "task": "q:01MCC5Y3S0F8YH6PV8TEN7BD00",
+      "title": "Triage #212 · login falla en Safari",
+      "since": "2027-01-15T09:12:00.000Z",
+      "queue_len": 1
+    },
+    {
+      "id": "awesome-gb/0/qa/0",
+      "project": "awesome-gb",
+      "floor": 0,
+      "role": "qa",
+      "slot": 0,
+      "name": "Quique",
+      "state": "idle",
+      "thread_id": "mcp:a210",
+      "task": null,
+      "title": null,
+      "since": "2027-01-15T09:12:00.000Z",
+      "queue_len": 0
+    },
+    {
+      "id": "awesome-gb/0/release/0",
+      "project": "awesome-gb",
+      "floor": 0,
+      "role": "release",
+      "slot": 0,
+      "name": "Rosa",
+      "state": "working",
+      "thread_id": "mcp:r7c2",
+      "task": null,
+      "title": "Release 2.4.0",
+      "since": "2027-01-15T09:12:00.000Z",
+      "queue_len": 0
+    },
+    {
+      "id": "awesome-gb/0/docs/0",
+      "project": "awesome-gb",
+      "floor": 0,
+      "role": "docs",
+      "slot": 0,
+      "name": null,
+      "state": "idle",
+      "thread_id": null,
+      "task": null,
+      "title": null,
+      "since": "2027-01-15T09:12:00.000Z",
+      "queue_len": 2
+    }
+  ],
+  "queues": {
+    "awesome-gb/0/triage/0": {
+      "items": [
+        {
+          "task": "q:01MCC5Y3S0F8YH6PV8TEN7BTR0",
+          "title": "triage pendiente 1",
+          "enqueued_at": "2027-01-15T09:01:00.000Z",
+          "by": "triage-bot",
+          "trigger": "desk.note"
+        }
+      ],
+      "updated": "2027-01-15T09:12:00.000Z"
+    },
+    "awesome-gb/0/qa/0": {
+      "items": [],
+      "updated": null
+    },
+    "awesome-gb/0/release/0": {
+      "items": [],
+      "updated": null
+    },
+    "awesome-gb/0/docs/0": {
+      "items": [
+        {
+          "task": "q:01MCC5Y3S0F8YH6PV8TEN7BDO0",
+          "title": "docs pendiente 1",
+          "enqueued_at": "2027-01-15T09:01:00.000Z",
+          "by": "triage-bot",
+          "trigger": "desk.note"
+        },
+        {
+          "task": "q:01MCC5Y3S0F8YH6PV8TEN7BDO1",
+          "title": "docs pendiente 2",
+          "enqueued_at": "2027-01-15T09:01:00.000Z",
+          "by": "triage-bot",
+          "trigger": "desk.note"
+        }
+      ],
+      "updated": "2027-01-15T09:12:00.000Z"
+    }
+  }
+}

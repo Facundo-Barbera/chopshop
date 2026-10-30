@@ -97,6 +97,7 @@ public struct FloorPlan: Equatable, Sendable {
         public var notesPending: Int
         /// Últimos ocupantes (hilo, motivo de salida), el más reciente primero.
         public var lineage: [Lineage]
+        public var employee: LiveState.Employee? = nil
     }
 
     public struct Room: Equatable, Sendable, Identifiable {
@@ -162,6 +163,7 @@ public struct FloorPlan: Equatable, Sendable {
         let hl = office["half_life_s"]?.double ?? defaultHalfLife
         let declared = (office["floors"]?.array ?? []).enumerated().map { (i, f) in (f, f["index"]?.int ?? i, false) }
         let label = nonEmpty(office["outsourced"]?["label"]?.string) ?? "Contratista"
+        let employees = (state["employees"]?.array ?? []).compactMap(LiveState.Employee.init(json:))
         let contracted = (office["outsourced"]?["floors"]?.array ?? []).enumerated().map { (i, f) in (f, outsourcedBase + (f["index"]?.int ?? i), true) }
         let plans = (declared + contracted).map { (f, index, out) -> FloorPlan in
             var plan = FloorPlan(kind: .floor(project: project, index: index), company: company,
@@ -178,7 +180,7 @@ public struct FloorPlan: Equatable, Sendable {
                     }
                     return Desk(id: id, slot: d["slot"]?.int ?? k, retired: d["retired"]?.bool ?? false,
                                 occupant: Occupant(d["occupant"], project: project, halfLife: hl),
-                                notesPending: d["notes_pending"]?.int ?? 0, lineage: lineage)
+                                notesPending: d["notes_pending"]?.int ?? 0, lineage: lineage, employee: employees.first { $0.id == id })
                 }
                 return Room(role: role, permanent: r["permanent"]?.bool ?? false, desks: desks.sorted { $0.slot < $1.slot },
                             flex: r["flex"]?.bool)
@@ -238,7 +240,8 @@ public struct FloorPlan: Equatable, Sendable {
             plan.rooms = f.rooms.map { r in
                 let desks = r.desks.map { d in
                     Desk(id: d.id, slot: d.slot, retired: d.retired, occupant: d.occupant.map { Occupant($0, project: project) },
-                         notesPending: d.notesPending, lineage: d.lineage.map { Lineage(thread: $0.threadID, reason: $0.reason) })
+                         notesPending: d.notesPending, lineage: d.lineage.map { Lineage(thread: $0.threadID, reason: $0.reason) },
+                         employee: state.employee(d.id))
                 }
                 return Room(role: r.role, permanent: r.permanent, desks: desks.sorted { $0.slot < $1.slot }, flex: r.flex)
             }

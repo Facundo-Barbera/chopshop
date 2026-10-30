@@ -121,6 +121,19 @@ public extension Snapshots {
         }
     }
 
+    static func renderEmployees(fixture path: String, to out: String) {
+        guard let data = FileManager.default.contents(atPath: path), let json = try? JSONDecoder().decode(JSONValue.self, from: data),
+              let state = LiveState(json: json) else { print("sin fixture: \(path)"); return }
+        for project in Set(state.employees.map(\.project)).sorted() {
+            for plan in FloorPlan.floors(in: state, project: project) {
+                for dark in [true, false] {
+                    write(FloorOfficeView(plan: plan, frozenNow: FloorFixture.now, flatChrome: true).background(IsoBackdrop()), dark: dark,
+                          size: CGSize(width: 1100, height: 620), to: "\(out)/employees-\(project)-\(plan.floorIndex)-\(dark ? "dark" : "light").png")
+                }
+            }
+        }
+    }
+
     private static func write(_ v: some View, dark: Bool, size: CGSize, to path: String) {
         NSApp?.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
         let r = ImageRenderer(content: v.frame(width: size.width, height: size.height).environment(\.colorScheme, dark ? .dark : .light))
