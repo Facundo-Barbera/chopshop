@@ -107,39 +107,6 @@ struct ActionResult {
     }
 }
 
-// MARK: - Transporte
-
-protocol HTTPTransport {
-    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse)
-}
-
-/// URLSession efímera (sin caché ni cookies) con tiempos de espera cortos; nunca sigue redirecciones
-/// (así el `Authorization` no puede acabar en otro host).
-struct URLSessionTransport: HTTPTransport {
-    private let session: URLSession
-
-    init(timeout: TimeInterval = 6) {
-        let cfg = URLSessionConfiguration.ephemeral
-        cfg.timeoutIntervalForRequest = timeout
-        cfg.timeoutIntervalForResource = timeout * 2
-        cfg.waitsForConnectivity = false
-        session = URLSession(configuration: cfg)
-    }
-
-    private final class NoRedirect: NSObject, URLSessionTaskDelegate {
-        func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
-                        newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
-            completionHandler(nil)
-        }
-    }
-
-    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
-        let (data, resp) = try await session.data(for: request, delegate: NoRedirect())
-        guard let http = resp as? HTTPURLResponse else { throw URLError(.badServerResponse) }
-        return (data, http)
-    }
-}
-
 // MARK: - Relay
 
 enum RelayView {
