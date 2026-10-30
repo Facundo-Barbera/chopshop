@@ -282,16 +282,14 @@ final class CityTests: XCTestCase {
         }
     }
 
-    func testEverythingButTheOfficeIsGoneBeforeTheEnd() {
+    func testTheCityStaysAndTheBuildingIsCutBeforeTheEnd() {
         let p = 0.98
         XCTAssertEqual(CityTransition.labels(p), 0)
-        XCTAssertEqual(CityTransition.others(p), 0)
+        XCTAssertEqual(CityTransition.others(p), CityTransition.othersDim, accuracy: 1e-9)
+        XCTAssertEqual(CityTransition.occluders(p), CityTransition.occluderDim, accuracy: 1e-9)
         XCTAssertEqual(CityTransition.upperAlpha(p), 0)
-        XCTAssertEqual(CityTransition.lowerAlpha(p), 0)
         XCTAssertEqual(CityTransition.glow(p), 0)
-        XCTAssertEqual(CityTransition.frontWalls(p), 0)
-        XCTAssertEqual(CityTransition.backWalls(p), 0)
-        XCTAssertEqual(CityTransition.slab(p), 0)
+        XCTAssertEqual(CityTransition.frontWalls(p), CityTransition.frontCut, accuracy: 1e-9)
         XCTAssertEqual(CityTransition.roomRise(p), 1)
         XCTAssertEqual(CityTransition.deskPop(p), 1)
         XCTAssertEqual(CityTransition.upperLift(p), 1)
@@ -299,8 +297,7 @@ final class CityTests: XCTestCase {
         XCTAssertEqual(CityTransition.labels(0), 1)
         XCTAssertEqual(CityTransition.others(0), 1)
         XCTAssertEqual(CityTransition.frontWalls(0), 1)
-        XCTAssertEqual(CityTransition.backWalls(0), 1)
-        XCTAssertEqual(CityTransition.slab(0), 1)
+        XCTAssertEqual(CityTransition.occluders(0), 1)
         XCTAssertEqual(CityTransition.upperLift(0), 0)
         // cabecera: nunca dos textos a la vez, y en p = 1 solo el del proyecto
         for i in 0...1000 {
@@ -311,7 +308,7 @@ final class CityTests: XCTestCase {
         XCTAssertEqual(CityTransition.chromeOut(CityTransition.chrome(1)), 0)
         // sin saltos: smoothstep sube como mucho 1.5/ancho; el más estrecho (labels, 0.06) da 0.025 por paso de 0.001
         for f in [CityTransition.labels, CityTransition.others, CityTransition.upperLift, CityTransition.upperAlpha, CityTransition.frontWalls,
-                  CityTransition.backWalls, CityTransition.roomRise, CityTransition.deskPop, CityTransition.slab, CityTransition.chrome] {
+                  CityTransition.occluders, CityTransition.roomRise, CityTransition.deskPop, CityTransition.chrome] {
             for i in 0..<1000 { XCTAssertLessThan(abs(f(Double(i + 1) / 1000) - f(Double(i) / 1000)), 0.03) }
         }
     }
