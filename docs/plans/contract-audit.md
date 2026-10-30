@@ -161,9 +161,9 @@ que no: F7). Por el relay (A2) todos salen con `subject.id` = empleado o tarea, 
   `desk.assigned` del hilo lanzado no sabe de qué tarea vino. *Tarea chica (dentro de E14, cableado del despachador)*: pasar
   `qtask` de la tarea del lote a `office.assign` / al cuerpo de `desk.assigned` y mapearlo a `reason: queue`, `task`.
 - **BUG-6** `task.cancelled` con `phase: running` no tiene camino: `queue.cancel` solo acepta tareas en cola. *Tarea chica*: que
-  `task_cancel` del MCP acepte una tarea `dequeued` con hilo vivo, interrumpa el hilo y emita `phase: running` con `thread_id`.
+  `task_cancel` del MCP acepte una tarea `dequeued` con hilo vivo, interrumpa el hilo y emita `phase: running` con `thread_id`. **Resuelto en E15.**
 - **BUG-7** `employee.renamed` con `by: human`/bot: `employees.rename` no tiene llamador. *Tarea chica*: herramienta MCP
-  `employee_rename` (o ruta de la API) que llame a `rename` y emita el sobre como `employees_sync`.
+  `employee_rename` (o ruta de la API) que llame a `rename` y emita el sobre como `employees_sync`. **Resuelto en E15** (`employee_rename`).
 - **BUG-8** Revocar un token `viewer` no cierra su `GET /stream` abierto (R5 no guarda el `token_id` de cada visor). *Tarea
   chica*: guardar `tokenId` en `Viewer` y cerrarlo desde el caso `revoke` de `index.ts`, igual que F5.
 - **BUG-9** (decisión) El alias `POST /pair` del relay comparte nombre con `POST /pair` de la API del agente (`cs1_`,

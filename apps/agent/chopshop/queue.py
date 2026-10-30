@@ -143,6 +143,28 @@ class Queue:
         self._changed(employee, rows, "cancelled", task, now, cause=ev or cause)
         return dict(r, state="cancelled", ended=now, cancel_by=str(by), cancel_reason=reason, note=note)
 
+    def cancel_running(self, task, by, reason="manual", note=None, thread_id=None, cause=None):
+        if reason not in CANCEL_REASONS:
+            raise QueueError("reason inválido: %r (%s)" % (reason, ", ".join(CANCEL_REASONS)))
+        with self._lock:
+            now = self.clock()
+            with db.tx():
+                r = self.conn.execute("SELECT * FROM employee_queue WHERE task=?", (task,)).fetchone()
+                if not r or r["state"] != "dequeued":
+                    return None
+                extra = dict(db.jload(r["extra"], {}) or {}, thread_id=thread_id)
+                self.conn.execute(
+                    "UPDATE employee_queue SET state='cancelled', ended=?, cancel_by=?, cancel_reason=?, note=?, extra=?"
+                    " WHERE task=?", (now, str(by), reason, note, db.jdump(extra), task))
+            body = {"task": task, "employee": r["employee"], "phase": "running", "by": str(by), "reason": reason,
+                    "thread_id": thread_id}
+            if note:
+                body["note"] = note
+            self._emit("task.cancelled", r["employee"], body, now, cause=cause,
+                       subj=envelope.subject("task", task, r["title"]))
+        return dict(r, state="cancelled", ended=now, cancel_by=str(by), cancel_reason=reason, note=note,
+                    extra=db.jdump(extra))
+
     def announce(self, since):
         """Sobres de lo que otro proceso (el MCP, sin `emit_fn`) cambió en la tabla: `task.enqueued` de cada tarea en cola sin
         su sobre (mismo id que la tarea) y `task.cancelled` de cada cancelada desde `since` sin el suyo, cada uno seguido de
@@ -171,13 +193,17 @@ class Queue:
                     self._changed(employee, live, "enqueued", task, now, cause=ev)
                     out.append(("task.enqueued", task))
                     continue
-                body = {"task": task, "employee": employee, "phase": "queued", "by": r["cancel_by"] or "human",
+                ex = db.jload(r["extra"], {}) or {}
+                running = "thread_id" in ex
+                body = {"task": task, "employee": employee, "phase": "running" if running else "queued",
+                        "by": r["cancel_by"] or "human",
                         "reason": r["cancel_reason"] if r["cancel_reason"] in CANCEL_REASONS else "manual",
-                        "thread_id": None}
+                        "thread_id": ex.get("thread_id")}
                 if r["note"]:
                     body["note"] = r["note"]
                 ev = self._emit("task.cancelled", employee, body, now, subj=subj)
-                self._changed(employee, live, "cancelled", task, now, cause=ev)
+                if not running:
+                    self._changed(employee, live, "cancelled", task, now, cause=ev)
                 out.append(("task.cancelled", task))
         return out
 

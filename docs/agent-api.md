@@ -372,14 +372,16 @@ prompt); el mantenimiento borra las consumidas o caducadas con más de 7 días.
 ### Colas de empleados y despachador (`[agent.dispatcher]`, opt-in)
 
 Las colas de los empleados (`docs/employees.md`) las llena también el proceso MCP (`task_enqueue`/`task_cancel`), que escribe
-en la misma SQLite sin emitir sobres. El hilo `dispatcher` del agente (solo si `[agent.dispatcher] enabled = true`, apagado por
+en la misma SQLite y emite sus sobres en el mismo bus (`task_cancel` también corta una tarea ya despachada: interrumpe su hilo
+y emite `task.cancelled phase: running`; `employee_rename` emite `employee.renamed`). El hilo `dispatcher` del agente (solo si `[agent.dispatcher] enabled = true`, apagado por
 defecto porque **lanza hilos de T3**, y solo si algún perfil declara escritorios permanentes), cada `interval` s (5):
 
 1. **anuncia** lo que otro proceso cambió: `task.enqueued` (mismo id que la tarea, `q:<id>`) de cada tarea en cola que aún no
    tiene su sobre y `task.cancelled phase: queued` de cada cancelación de la última hora sin el suyo, cada uno seguido de su
-   `queue.changed` (con `cause`). Es idempotente (mira el bus), así que también recupera lo encolado con el agente parado;
+   `queue.changed` (con `cause`; las cortadas en marcha salen `phase: running` con `thread_id` y sin `queue.changed`). Es idempotente (mira el bus), así que también recupera lo encolado con el agente parado;
 2. **cierra** los hilos de escritorio terminados (`dispatcher.Dispatcher.close`: settle en T3, la tarea de cola pasa a
-   `done`/`failed`) y libera su escritorio (`desk.released reason: manual` → `employee.idle reason: done|failed`; si el hilo
+   `done`/`failed`, o se queda `cancelled` si la cortó `task_cancel`) y libera su escritorio (`desk.released reason: manual` →
+   `employee.idle reason: done|failed|cancelled`; si el hilo
    nunca llegó a sentarse, `employee.idle` sale directo);
 3. **despacha**: mientras haya menos de `max_threads` (2) hilos de escritorio vivos en total, saca la primera tarea de la cola de
    cada empleado libre (`queue.changed reason: dequeued`) y la lanza como lote de una tarea del motor (`role`, `desk`, `qtask`);
