@@ -100,7 +100,7 @@ def validate(opts):
     if sev is not None and sev not in SEVERITIES:
         raise WebhookError("min_severity admite: %s" % ", ".join(SEVERITIES))
     out["min_severity"] = sev
-    for k in ("only_changes", "context"):
+    for k in ("only_changes", "context", "heartbeats"):
         v = o.get(k)
         if v is not None and not isinstance(v, bool):
             raise WebhookError("%s debe ser true/false" % k)
@@ -115,7 +115,7 @@ def validate(opts):
 
 
 FIELDS = ("projects", "types", "exclude_types", "min_severity", "needs", "only_changes", "context", "debounce_s",
-          "secret_file", "headers_file")
+          "secret_file", "headers_file", "heartbeats")
 JSON_FIELDS = ("projects", "types", "exclude_types", "needs")
 
 
@@ -132,14 +132,15 @@ def effective(row):
         "events": jl("events") or [], "types": jl("types"), "exclude_types": jl("exclude_types") or [],
         "min_severity": r.get("min_severity"), "needs": jl("needs") or [],
         "only_changes": bool(r.get("only_changes")), "context": bool(r.get("context")),
-        "debounce_s": float(r.get("debounce_s") or 0),
+        "debounce_s": float(r.get("debounce_s") or 0), "heartbeats": bool(r.get("heartbeats")),
     }
 
 
 def public(sub):
     return {"projects": sub["projects"], "types": sub["types"], "exclude_types": sub["exclude_types"],
             "min_severity": sub["min_severity"], "needs": sub["needs"], "only_changes": sub["only_changes"],
-            "context": sub["context"], "debounce_s": sub["debounce_s"], "signed": bool(sub["secret_file"]),
+            "context": sub["context"], "debounce_s": sub["debounce_s"], "heartbeats": sub["heartbeats"],
+            "signed": bool(sub["secret_file"]),
             "headers": bool(sub.get("headers_file"))}
 
 
@@ -169,6 +170,11 @@ def matches(sub, env):
     if sub["needs"] and (env.get("needs") or NEEDS_NONE) not in sub["needs"]:
         return False
     return True
+
+
+def is_heartbeat(env):
+    b = env.get("body")
+    return env.get("type") == "listener.state" and isinstance(b, dict) and b.get("heartbeat") is True
 
 
 def build_context(conn, env):
@@ -410,6 +416,8 @@ class Dispatcher:
         chosen += [effective({"name": n, "webhook_file": f}) for n, f in fixed.items() if n not in names]
         out = []
         key = subject_key(env)
+        heartbeat = is_heartbeat(env)
+        chosen = [s for s in chosen if s["heartbeats"] or not heartbeat]
         for sub in chosen:
             name = sub["name"]
             if sub["only_changes"] and env.get("type") == "task.state" and key:

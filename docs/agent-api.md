@@ -33,7 +33,7 @@ si necesitas columnas, usa los campos `extra` JSON). `user_version` 2: la migrac
 | `projection.py` | integrador | `apply(state, envelope) -> state` (pura, idempotente por `seq`), `fold(envs)`, `state(conn, cfg)`, `Projector(conn, cfg).current()` (incremental), `envelopes_after(conn, after)` (sobres del bus sin `event`/`machine_id`), `filter_project`. |
 | `office.py` | hilo office | `Office(conn, cfg, emit_fn, profiles_fn=None, clock)`: `.reload()` (perfiles con `office:` → tabla `desks`; retira, nunca borra; emite `office.changed {by: "profile"}` al cambiar la estructura o si el último ya no está retenido), `.tick()` (pliega los `task.state` nuevos del bus con cursor `office_cursor` en `meta`: asigna, hereda, encola por rol lleno), `.assign(desk_id, thread_id)` (`OfficeError` 404/409/400), `.release(desk_id, reason)` (para quien decida la salida, p. ej. la semivida), `.desk(desk_id)`. Tablas `desks`, `desk_occupancy` (ocupante = `until` nulo; linaje ≤ 20), `office_threads` (última `task.state` por hilo), `desk_waiting`; `t3_threads` gana `role` y `ended_at` (esquema 5). Herencia: si un ocupante del rol ya terminó (fase terminal, sin atención), el hilo nuevo hereda el que terminó antes (`reason: inherited`); si no, el primer libre (`start`); la herencia es el último ocupante del escritorio (también ya salido). Rol lleno o sin escritorios → `desk.waiting`; sube en cuanto uno queda libre o su ocupante termina. Los hilos sin rol no se sientan (vestíbulo: aparte). `[agent.office] enabled, interval`. |
 | `halflife.py` | hilo semivida | `opacity/exit_at/gone(phase, attention, ended_at, touched_at, half_life_s[, now])` (pura); `touch(conn, thread_id, now)` / `touched_at` / `touches` (tabla propia `thread_touch`, `CREATE TABLE IF NOT EXISTS`, sin tocar `user_version`); `stamp(conn, event, body)` (añade `touched_at` a los `task.state` que emite `AgentService.emit`); `schedule(state, touches)` / `due(state, now, touches)` sobre la proyección v3 (ocupantes y `lobby`; con `attention` en el ocupante o abierta en `projects[].attention` no sale); `Fader(conn, state_fn, emit_fn, clock)`: `.sweep()` emite `desk.released reason: faded` (`desk: null` en el vestíbulo), `.next_delay()` (1–30 s). Hilo `halflife` del servicio (`agent.halflife_enabled`, por defecto `true`). `POST /touch` y `POST /answer` tocan. |
-| `listeners.py` | integrador | `Listeners(emit, clock).report(hilo, estado, error, backoff_s)` → `listener.state` por transición + latido horario. |
+| `listeners.py` | integrador | `Listeners(emit, clock).report(hilo, estado, error, backoff_s)` → `listener.state` por transición + latido horario (`body.heartbeat: true`; no va por webhook salvo `heartbeats`). |
 | `machine_room.py` | integrador | Reductor de `machine_room` (listeners y automatizaciones: `apply`, `filter_project`; el rack es de otro módulo) que llama `projection._apply`; `subscriptions(conn)` / `live(state, conn)` rellenan `machine_room.subscriptions` (`{name, projects, last_ok, last_error, last_error_at, signed}`) en `Projector.current()`; `rooms(state)` / `scope(mr, project, cfg)` resuelven `projects[].machine_rooms` (0..N salas, las de `office.machine_rooms`). |
 | `pairing.py` | integrador | `Pairing(conn, clock)`: `create_code(name, ttl)`, `redeem(code, device_name, device_id, ip)`, `check(cred, ip)`, `active(id)`, `list()`, `revoke(id)`, `prune()`; CLI `chopshop pair create\|list\|revoke\|prune`. Tablas propias `pair_codes` y `devices` (`CREATE TABLE IF NOT EXISTS`, sin tocar `user_version`). |
 | `roles.py` | hilo roles | Roles permanentes (fase 6): `Roles(conn, emit_fn, profiles_fn, launch_fn, task_fn, assign_fn, clock)`: `.on_event(sobre)`, `.tick(now)` (schedule), `.sync(now)` (lote lanzado → `assign_fn`, terminado → fin + despertar pendiente), `.manual(project, role)`, `.once(list_after, last_seq)`. Tabla propia `desk_wakes` (`ensure_schema`, `CREATE TABLE IF NOT EXISTS`, sin tocar `user_version`). Ver «Roles permanentes». |
@@ -98,10 +98,10 @@ Todo eso → **403**.
 | `GET /metrics?from=&to=&group=machine\|app\|project&step=` | series (ver `collector.query`) |
 | `GET /events?after=<seq>&limit=` | `{events:[sobre], last_seq, head_seq}` (sobre v1 de `docs/event-envelope.md`, + `event` y `machine_id` viejos): `last_seq` = cursor para la siguiente consulta (seq del último devuelto, o `after` si no hay), `head_seq` = último de la máquina |
 | `GET /threads?project=&limit=` | `{threads:[...]}` desde `t3_threads` (más recientes primero) |
-| `GET /subscriptions` | `{subscriptions:{nombre:{project,events,created,projects,types,exclude_types,min_severity,needs,only_changes,context,debounce_s,signed,headers}}}` (filtros; sin URL ni rutas; `signed` = tiene `secret_file`; `headers` = tiene `headers_file`). Ver «Suscripciones (webhooks v2)» |
+| `GET /subscriptions` | `{subscriptions:{nombre:{project,events,created,projects,types,exclude_types,min_severity,needs,only_changes,context,debounce_s,heartbeats,signed,headers}}}` (filtros; sin URL ni rutas; `signed` = tiene `secret_file`; `headers` = tiene `headers_file`). Ver «Suscripciones (webhooks v2)» |
 | `POST /answer` | `{thread_id, choice, request?}` → responde en T3 (`{ok, request_id, answers, question}`). `AnswerError` (sin pendientes, ambigua, opción no válida) → 400; T3 caído → 502 |
 | `POST /settle` | `{thread_id}` → `t3_thread_organize settle` (nunca archivar) → `{ok, thread_id}` |
-| `POST /subscriptions` / `DELETE /subscriptions/<name>` | `{name, webhook_file, project?, events?, projects?, types?, exclude_types?, min_severity?, needs?, only_changes?, context?, debounce_s?, secret_file?, headers_file?}` (`webhook_file`/`secret_file`/`headers_file` = rutas de archivos existentes en la máquina del agente, nunca una URL; `secret_file` y `headers_file` con permisos 0600). Reemplaza la suscripción entera. Valores inválidos → 400 |
+| `POST /subscriptions` / `DELETE /subscriptions/<name>` | `{name, webhook_file, project?, events?, projects?, types?, exclude_types?, min_severity?, needs?, only_changes?, context?, debounce_s?, heartbeats?, secret_file?, headers_file?}` (`webhook_file`/`secret_file`/`headers_file` = rutas de archivos existentes en la máquina del agente, nunca una URL; `secret_file` y `headers_file` con permisos 0600). Reemplaza la suscripción entera. Valores inválidos → 400 |
 
 ### Forma de `GET /snapshot`
 
@@ -365,6 +365,8 @@ Filtros (todos opcionales; `null` = sin filtro):
 - `context: true`: añade `body.context = {recent: [≤5 sobres previos del mismo sujeto, del más viejo al más nuevo],
   project_summary: {project, counts: {tasks, <phase>: n, needs_human, waiting_bot, stuck}}}` (contadores del último `task.state` de
   cada sujeto entre los 500 eventos más recientes del proyecto).
+- `heartbeats: true`: entrega también los latidos de `listener.state` (`body.heartbeat: true`, sin cambio de estado ni error). Por
+  defecto (y en `cfg["webhook_files"]`) no se entregan: solo las transiciones reales.
 - `batch_window_s`: reservado (solo `0` en v1).
 
 **Compatibilidad**: las suscripciones viejas (`project` + `events: [nombres]`, sin columnas v4) siguen igual: un nombre viejo casa con
@@ -390,14 +392,14 @@ intento=<n>/4 <detail> <ms>ms <ok | reintento N en Ss | sin reintento | reintent
 DEBUG también los omitidos por `only_changes` y los retenidos por `debounce_s`.
 
 **CLI**: `chopshop subscribe <nombre> --webhook-file F [--project p1,p2] [--types 'question.*,task.state'] [--exclude-types ...]
-[--min-severity notice] [--needs bot,human] [--only-changes] [--context] [--debounce 5] [--secret-file K] [--headers-file H]` registra en el agente
+[--min-severity notice] [--needs bot,human] [--only-changes] [--heartbeats] [--context] [--debounce 5] [--secret-file K] [--headers-file H]` registra en el agente
 (`POST /subscriptions`); `chopshop subscribe --list --agent` lista los filtros. Sin opciones v2 ni `--agent` el comando sigue escribiendo
 la suscripción del motor viejo (`state.json`), como antes.
 
 **Esquema**: `user_version` 4 añade a `subscriptions` las columnas nulables `projects`, `types`, `exclude_types`, `needs` (JSON),
 `min_severity`, `only_changes`, `context`, `debounce_s`, `secret_file`, y a `deliveries` `attempts`, `next_retry`. La migración es
 idempotente (solo añade columnas que falten) y conserva las suscripciones existentes. `user_version` 5 son las tablas de la oficina; la 6 añade
-`subscriptions.headers_file` (nulable).
+`subscriptions.headers_file` (nulable) y la 7 `subscriptions.heartbeats` (nulable).
 
 ## Decisiones de los módulos (resumen)
 

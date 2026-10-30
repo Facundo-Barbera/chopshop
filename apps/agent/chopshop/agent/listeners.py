@@ -34,7 +34,8 @@ class Listeners:
             return None
         return self.emit("listener.state", None, {
             "name": name, "state": state, "last_ok": envelope.iso(last_ok) if last_ok else None,
-            "last_cycle": envelope.iso(now), "backoff_s": int(max(0, backoff_s or 0)), "error": error})
+            "last_cycle": envelope.iso(now), "backoff_s": int(max(0, backoff_s or 0)), "error": error,
+        "heartbeat": not changed})
 
     def snapshot(self):
         with self._lock:

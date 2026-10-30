@@ -240,7 +240,7 @@ def cmd_snapshot(a):
     return 0
 
 
-V2_FLAGS = ("types", "exclude_types", "min_severity", "needs", "only_changes", "context", "debounce", "secret_file", "headers_file")
+V2_FLAGS = ("types", "exclude_types", "min_severity", "needs", "only_changes", "context", "debounce", "secret_file", "headers_file", "heartbeats")
 
 
 def _agent_client():
@@ -287,6 +287,8 @@ def _subscribe_agent(a):
             body["only_changes"] = True
         if a.context:
             body["context"] = True
+        if a.heartbeats:
+            body["heartbeats"] = True
         if a.debounce is not None:
             body["debounce_s"] = a.debounce
         if a.secret_file:
@@ -362,6 +364,7 @@ def build():
     x.add_argument("--exclude-types"); x.add_argument("--min-severity", choices=["info", "notice", "warn", "error"])
     x.add_argument("--needs", help="human,bot,approval,none (vacío = cualquiera)")
     x.add_argument("--only-changes", action="store_true", help="omite task.state sin cambio de phase/attention")
+    x.add_argument("--heartbeats", action="store_true", help="entrega también los latidos de listener.state (sin cambio)")
     x.add_argument("--context", action="store_true", help="añade body.context (sobres previos del sujeto + contadores)")
     x.add_argument("--debounce", type=float, help="segundos: colapsa ráfagas por sujeto (se entrega el último)")
     x.add_argument("--secret-file", help="archivo 0600 con el secreto HMAC (X-Chopshop-Signature)")
