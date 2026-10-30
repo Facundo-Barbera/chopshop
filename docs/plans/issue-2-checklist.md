@@ -7,7 +7,7 @@ parte; `[ ]` = pendiente.
 ## Qué se construyó y en qué difiere de la propuesta del issue
 
 - Un Worker y **un** Durable Object (`Hub`, `idFromName("global")`) con SQLite y WebSocket Hibernation para los agentes
-  (`packages/relay`, R1-R9). Los visores leen por HTTP (`GET /state`, `GET /stream` SSE), no por WebSocket.
+  (`apps/relay`, R1-R9). Los visores leen por HTTP (`GET /state`, `GET /stream` SSE), no por WebSocket.
 - Tokens `cr1_` con dos scopes (`agent`, `viewer`) más un token de operador (`RELAY_OPERATOR_TOKEN`), en lugar de los cuatro
   prefijos de la propuesta (`csv1_`, `csm1_`, `css1_`, `cso1_`). No hay token de servicio.
 - El relay es **de solo lectura**: no hay `cmd`/`res` hacia los agentes ni MCP en Cloudflare (fases 3-6 de la propuesta, sin
@@ -51,7 +51,7 @@ parte; `[ ]` = pendiente.
   veía nada). Ahora la respuesta trae `account` (`pair.ts`, schema y fixture `pair-code`). Llega con el próximo tag `relay-v*`;
   mientras tanto, usar siempre `?account=ac-…` (`docs/relay.md` «Elegir la cuenta»).
 - **BUG-10 (K4, abierto):** `GET /state` no dice si una máquina está conectada ni distingue «caducada» de «nunca vista».
-- `packages/relay` no tiene tests propios (solo `tsc --noEmit` en el deploy); los contratos se cubren con
+- `apps/relay` no tiene tests propios (solo `tsc --noEmit` en el deploy); los contratos se cubren con
   `tools/contract_audit.py` y los tests del agente y de la app.
 - La app no usa `GET /stream` del relay: refresca leyendo `GET /state`, así que los eventos en vivo no llegan al visor.
 - En `pair.ts` la ruta de un token `agent` que crea o revoca códigos de su cuenta es inalcanzable: `routes.ts` solo deja esas

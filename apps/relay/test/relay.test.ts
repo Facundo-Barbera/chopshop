@@ -11,7 +11,7 @@ const MACHINE = "contabo-dev";
 type Role = "anonymous" | "viewer" | "machine" | "admin";
 
 function fixture(name: string): Record<string, unknown> {
-  return JSON.parse(readFileSync(new URL(`../../api/relay/fixtures/${name}.json`, import.meta.url), "utf8")) as Record<string, unknown>;
+  return JSON.parse(readFileSync(new URL(`../../../packages/api/relay/fixtures/${name}.json`, import.meta.url), "utf8")) as Record<string, unknown>;
 }
 
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
