@@ -17,26 +17,35 @@ public struct OfficeWorldView: View {
     /// Región con la que abrir encuadrada (p. ej. `floor:0` al entrar desde la ciudad); nil = el mundo entero.
     var focusRegion: String?
     var selected: String?
+    var frame: FloorFrame?
+    var backRequest: Int
+    var fitRequest: Int
     var onSelect: ((String?) -> Void)?
+    var onExit: (() -> Void)?
 
     @State private var box = WorldCameraBox()
     @State private var aspect = 16.0 / 10.0
     @Environment(\.colorScheme) private var scheme
 
     public init(floors: [FloorPlan], frozenNow: Date? = nil, focusRegion: String? = nil, selected: String? = nil,
-                onSelect: ((String?) -> Void)? = nil) {
+                frame: FloorFrame? = nil, backRequest: Int = 0, fitRequest: Int = 0,
+                onSelect: ((String?) -> Void)? = nil, onExit: (() -> Void)? = nil) {
         self.floors = floors; self.frozenNow = frozenNow
-        self.focusRegion = focusRegion; self.selected = selected; self.onSelect = onSelect
+        self.focusRegion = focusRegion; self.selected = selected; self.frame = frame
+        self.backRequest = backRequest; self.fitRequest = fitRequest
+        self.onSelect = onSelect; self.onExit = onExit
     }
 
     /// El mundo de un proyecto de la proyección viva (pisos de `ProjectOffice`, con sus salas de máquinas).
     public init(state: LiveState, project: String, now: Date? = nil, focusRegion: String? = nil, selected: String? = nil,
-                onSelect: ((String?) -> Void)? = nil) {
+                frame: FloorFrame? = nil, backRequest: Int = 0, fitRequest: Int = 0,
+                onSelect: ((String?) -> Void)? = nil, onExit: (() -> Void)? = nil) {
         self.init(floors: ProjectOffice.floors(in: state, project: project, now: now ?? Date()),
-                  frozenNow: now, focusRegion: focusRegion, selected: selected, onSelect: onSelect)
+                  frozenNow: now, focusRegion: focusRegion, selected: selected, frame: frame,
+                  backRequest: backRequest, fitRequest: fitRequest, onSelect: onSelect, onExit: onExit)
     }
 
-    private var world: WorldLayout { box.world(floors: floors, aspect: aspect) }
+    private var world: WorldLayout { box.world(floors: floors, aspect: aspect, frame: frame) }
 
     public var body: some View {
         let w = world
@@ -69,7 +78,7 @@ public struct OfficeWorldView: View {
             box.lastTapped = tid
             onSelect?(tid == selected ? nil : tid)
         })
-        .onAppear { box.installScrollMonitor() }
+        .onAppear { box.onExit = onExit; box.installScrollMonitor() }
         .onDisappear { box.removeScrollMonitor() }
         .onChange(of: selected) { _, tid in
             // elegido desde fuera (la lista del panel): la cámara va a su escritorio (o armario)
@@ -78,6 +87,10 @@ public struct OfficeWorldView: View {
             }
             box.lastTapped = nil
         }
+        .onChange(of: backRequest) { _, _ in
+            if box.showingAll { onExit?() } else { box.fitAll() }
+        }
+        .onChange(of: fitRequest) { _, _ in box.fitAll() }
         .clipped()
     }
 
@@ -91,6 +104,7 @@ public struct OfficeWorldView: View {
     private func canvas(_ w: WorldLayout, t: Double, now: Date) -> some View {
         let dark = scheme == .dark
         let sel = spotID(of: selected, in: w, now: now)
+        box.onExit = onExit
         return Canvas { ctx, size in
             let sp = FrameMeter.signposter.beginInterval("office.draw")
             let t0 = ProcessInfo.processInfo.systemUptime
@@ -206,15 +220,16 @@ final class WorldCameraBox {
     var hovered: String?
     var lastTapped: String?
     var frameInWindow = CGRect.zero
+    var onExit: (() -> Void)?
 
     // mundo en caché (la rejilla depende de la proporción de la vista)
-    private var cacheKey: (floors: [FloorPlan], aspect: Double)?
+    private var cacheKey: (floors: [FloorPlan], aspect: Double, frame: FloorFrame?)?
     private var cached: WorldLayout?
 
-    func world(floors: [FloorPlan], aspect: Double) -> WorldLayout {
-        if let k = cacheKey, let c = cached, k.aspect == aspect, k.floors == floors { return c }
-        let w = WorldLayout(floors: floors, aspect: aspect)
-        cacheKey = (floors, aspect); cached = w
+    func world(floors: [FloorPlan], aspect: Double, frame: FloorFrame? = nil) -> WorldLayout {
+        if let k = cacheKey, let c = cached, k.aspect == aspect, k.frame == frame, k.floors == floors { return c }
+        let w = WorldLayout(floors: floors, aspect: aspect, frame: frame)
+        cacheKey = (floors, aspect, frame); cached = w
         return w
     }
 
@@ -230,6 +245,13 @@ final class WorldCameraBox {
     var dragging = false
     private var dragLast = CGSize.zero
     private var magLast = 1.0
+    private var exitPull = 0.0
+    private var exitPullAt = 0.0
+    private var exitBlockedUntil = 0.0
+
+    static let exitThreshold = 0.55
+    static let exitWindow = 0.7
+    static let exitCooldown = 1.2
 
     static func fitFrame(_ b: IsoBounds, size: CGSize) -> IsoFrame {
         let W = Double(size.width), H = Double(size.height), m = 28.0
@@ -241,11 +263,16 @@ final class WorldCameraBox {
         let resized = sz != size
         size = sz; bounds = w.bounds
         fit = Self.fitFrame(w.bounds, size: sz)
-        if cur == nil || (resized && !touched) || focusRegion != focusedRegion {
+        let regionFrame = focusRegion.flatMap { w.region($0) }.map { OfficeFraming.frame($0.bounds, size: sz) }
+        if cur == nil || (resized && !touched) {
             // primer fotograma: el mundo entero, o la región pedida con el mismo encuadre que el zoom de la ciudad
-            let f = focusRegion.flatMap { w.region($0) }.map { OfficeFraming.frame($0.bounds, size: sz) } ?? fit
+            let f = regionFrame ?? fit
             cur = f; target = f; focusedRegion = focusRegion
-            if focusRegion != nil { touched = true }
+            touched = focusRegion != nil
+        } else if focusRegion != focusedRegion {
+            focusedRegion = focusRegion
+            target = regionFrame ?? fit
+            touched = focusRegion != nil
         } else if resized, var c = cur, var g = target {
             // conservar el punto central al cambiar el tamaño
             c.ax = Double(sz.width) / 2; c.ay = Double(sz.height) / 2; g.ax = c.ax; g.ay = c.ay
@@ -259,6 +286,12 @@ final class WorldCameraBox {
         c.cu += (g.cu - c.cu) * k; c.cv += (g.cv - c.cv) * k; c.ax += (g.ax - c.ax) * k; c.ay += (g.ay - c.ay) * k
         cur = c
         return IsoCam(s: c.s, cu: c.cu, cv: c.cv, ax: c.ax, ay: c.ay)
+    }
+
+    var showingAll: Bool {
+        guard let g = target else { return true }
+        let du = max(1, bounds.maxU - bounds.minU), dv = max(1, bounds.maxV - bounds.minV)
+        return abs(log(g.s / fit.s)) < 0.08 && abs(g.cu - fit.cu) / du < 0.06 && abs(g.cv - fit.cv) / dv < 0.06
     }
 
     // MARK: interacción
@@ -285,6 +318,7 @@ final class WorldCameraBox {
     /// Zoom por `factor` manteniendo quieto el punto de pantalla `p`.
     func zoom(_ factor: Double, at p: CGPoint) {
         guard var g = target else { return }
+        pullOut(factor, atMin: g.s <= minS * 1.001)
         touched = true
         let u = (Double(p.x) - g.ax) / g.s + g.cu, v = (Double(p.y) - g.ay) / g.s + g.cv
         g.s *= factor
@@ -292,6 +326,21 @@ final class WorldCameraBox {
         g.cu = u - (Double(p.x) - g.ax) / g.s; g.cv = v - (Double(p.y) - g.ay) / g.s
         clamp(&g)
         target = g
+    }
+
+    private func pullOut(_ factor: Double, atMin: Bool) {
+        let now = ProcessInfo.processInfo.systemUptime
+        guard factor < 1, atMin, onExit != nil, now >= exitBlockedUntil else {
+            if factor > 1 { exitPull = 0 }
+            return
+        }
+        if now - exitPullAt > Self.exitWindow { exitPull = 0 }
+        exitPullAt = now
+        exitPull += -log(factor)
+        guard exitPull >= Self.exitThreshold, let f = onExit else { return }
+        exitPull = 0
+        exitBlockedUntil = now + Self.exitCooldown
+        DispatchQueue.main.async { f() }
     }
 
     func drag(to tr: CGSize) {
@@ -315,7 +364,7 @@ final class WorldCameraBox {
         touched = true
         let x = sp.cx + r.ox, y = sp.cy + r.oy
         g.s = max(g.s, fit.s * 1.8)
-        g.cu = x - y; g.cv = (x + y) / 2 - Iso.slabH
+        g.cu = x - y; g.cv = (x + y) / 2 - r.oz - Iso.slabH
         g.ax = Double(size.width) / 2; g.ay = Double(size.height) / 2
         clamp(&g)
         target = g

@@ -21,6 +21,7 @@ public struct CityTimeline: Sendable {
     public static let zoomEnd = 17.0
     /// Piso al que se acerca la cámara.
     public static let defaultTarget = "nuskills"
+    public static let seed: UInt64 = 0x5eed_c17e_0f1c_e5a1
 
     public struct Frame: Sendable {
         public var t: Double
@@ -39,19 +40,21 @@ public struct CityTimeline: Sendable {
     public let envelopes: [Envelope]
     public let directory: CompanyDirectory
     public let target: String
+    public let seed: UInt64
     let steps: [Step]
     /// Modelo final (todos los proyectos): fija la disposición de la ciudad durante toda la cronología.
     public let finalModel: CityModel
 
-    public init(envelopes: [Envelope], directory: CompanyDirectory = .standard, target: String = CityTimeline.defaultTarget) {
-        self.envelopes = envelopes; self.directory = directory; self.target = target
+    public init(envelopes: [Envelope], directory: CompanyDirectory = .standard, target: String = CityTimeline.defaultTarget,
+                seed: UInt64 = CityTimeline.seed) {
+        self.envelopes = envelopes; self.directory = directory; self.target = target; self.seed = seed
         let t0 = envelopes.lazy.compactMap { SnapshotMapper.date($0.ts) }.first ?? Date(timeIntervalSince1970: 0)
         // segundos desde el primer sobre, redondeados al ms (`Date` arrastra error: 8.200 saldría 8.2000001 y `frame(at: 8.2)` no lo vería)
         func secs(_ e: Envelope) -> Double? { SnapshotMapper.date(e.ts).map { ($0.timeIntervalSince(t0) * 1000).rounded() / 1000 } }
         var steps: [Step] = []
         var st = LiveState(machine: envelopes.lazy.compactMap(\.machine).first)
         var lights = CityLights()
-        let empty = CityModel.build(st, directory: directory)
+        let empty = CityModel.build(st, directory: directory, seed: seed)
         lights.observe(empty, at: 0)
         steps.append(Step(time: -Double.infinity, state: st, model: empty, lights: lights))
         var i = 0
@@ -62,7 +65,7 @@ public struct CityTimeline: Sendable {
             while j < envelopes.count, (secs(envelopes[j]) ?? time) == time {
                 st.apply(envelopes[j]); j += 1
             }
-            let m = CityModel.build(st, directory: directory)
+            let m = CityModel.build(st, directory: directory, seed: seed)
             lights.observe(m, at: time)
             steps.append(Step(time: time, state: st, model: m, lights: lights))
             i = j
@@ -71,8 +74,9 @@ public struct CityTimeline: Sendable {
         self.finalModel = steps.last?.model ?? empty
     }
 
-    public init(jsonl: Data, directory: CompanyDirectory = .standard, target: String = CityTimeline.defaultTarget) {
-        self.init(envelopes: FixtureStream.parse(jsonl), directory: directory, target: target)
+    public init(jsonl: Data, directory: CompanyDirectory = .standard, target: String = CityTimeline.defaultTarget,
+                seed: UInt64 = CityTimeline.seed) {
+        self.init(envelopes: FixtureStream.parse(jsonl), directory: directory, target: target, seed: seed)
     }
 
     /// Estado (y ventanas) en `t`. El modelo conserva la disposición final (los edificios no se recolocan mientras suben).

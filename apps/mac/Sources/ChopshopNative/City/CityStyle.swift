@@ -94,6 +94,7 @@ public struct CityBuildingStyle: Hashable, Sendable {
 /// Rectángulo de planta (mundo de la ciudad).
 public struct CityRect: Hashable, Sendable {
     public var x0: Double, y0: Double, x1: Double, y1: Double
+    public init(x0: Double, y0: Double, x1: Double, y1: Double) { self.x0 = x0; self.y0 = y0; self.x1 = x1; self.y1 = y1 }
     public var w: Double { x1 - x0 }
     public var d: Double { y1 - y0 }
 }
