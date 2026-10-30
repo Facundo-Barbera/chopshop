@@ -125,6 +125,7 @@ def roster(conn, profs, q, folded=None, seats=None):
                          since=occ.get("since"))
             elif not occ and e["state"] == "working":
                 e["state"] = "idle"
+            e["location"] = "desk" if e["state"] == "working" else "common"
             e["queue_len"] = q.length(r["id"])
             out.append(e)
     return out, q.snapshot([e["id"] for e in out])
