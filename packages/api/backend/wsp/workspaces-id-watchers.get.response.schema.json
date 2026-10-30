@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/backend/v2/wsp/workspaces-id-watchers.get.response.schema.json",
+  "title": "GET /v1/workspaces/{id}/watchers",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "watchers"
+  ],
+  "properties": {
+    "watchers": {
+      "type": "array",
+      "items": {
+        "$ref": "../common.schema.json#/$defs/user"
+      }
+    }
+  }
+}

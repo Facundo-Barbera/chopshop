@@ -1,0 +1,7 @@
+{
+  "name": "qa",
+  "prompt": "Revisa los PR.",
+  "wake": [
+    "pr.opened"
+  ]
+}

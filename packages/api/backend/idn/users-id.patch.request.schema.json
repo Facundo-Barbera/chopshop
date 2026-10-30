@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/backend/v2/idn/users-id.patch.request.schema.json",
+  "title": "PATCH /v1/users/{id}",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [],
+  "properties": {
+    "status": {
+      "$ref": "../common.schema.json#/$defs/user_status"
+    },
+    "display_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    }
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "v": 2,
+  "ts": "2026-10-30T14:02:11.250Z",
+  "type": "import.offer",
+  "id": "01MCB2QMBN3Q5S7V9X1Z3B5D7F",
+  "projects": [
+    {
+      "project": "awesome-gb",
+      "t3_project": "awesome-gb",
+      "office": {
+        "company": "Awesome GB",
+        "half_life": "10m",
+        "floors": [
+          {
+            "name": "Producto",
+            "rooms": [
+              {
+                "role": "triage",
+                "desks": 1,
+                "permanent": true
+              },
+              {
+                "role": "backend",
+                "desks": 2
+              }
+            ]
+          }
+        ],
+        "roles": {
+          "triage": {
+            "prompt": "Clasifica los issues nuevos.",
+            "match": {
+              "labels": [
+                "bug"
+              ]
+            }
+          }
+        }
+      },
+      "capacity": {
+        "flex_per_floor": 0,
+        "max_extra_floors": 0,
+        "outsourcing": false
+      },
+      "registry": {
+        "path": "awesome-gb",
+        "enabled": true
+      }
+    }
+  ]
+}

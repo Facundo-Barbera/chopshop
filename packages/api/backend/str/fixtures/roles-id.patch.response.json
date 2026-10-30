@@ -1,0 +1,22 @@
+{
+  "role": {
+    "id": "9a4c7e2b-5f1d-4b86-a3e9-7c2d1f8b4e65",
+    "project_id": "1f7a3c9e-8b2d-4c51-9d6e-4a2f8b1c7e03",
+    "name": "triage",
+    "prompt": "Clasifica los issues nuevos.",
+    "model": null,
+    "match_rules": {
+      "labels": [
+        "bug"
+      ]
+    },
+    "wake": [
+      "issue.opened"
+    ],
+    "settings": {},
+    "position": 0,
+    "rev": 3,
+    "created_at": "2026-10-30T12:00:00.000Z",
+    "updated_at": "2026-10-30T12:05:00.000Z"
+  }
+}

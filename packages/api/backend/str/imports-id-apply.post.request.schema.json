@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/backend/v2/str/imports-id-apply.post.request.schema.json",
+  "title": "POST /v1/imports/{id}/apply",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "projects"
+  ],
+  "properties": {
+    "projects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "$ref": "../common.schema.json#/$defs/name"
+          },
+          "workspace_id": {
+            "$ref": "../common.schema.json#/$defs/uuid"
+          },
+          "workspace_name": {
+            "$ref": "../common.schema.json#/$defs/workspace_name"
+          }
+        }
+      },
+      "minItems": 1
+    }
+  }
+}
