@@ -1,6 +1,7 @@
 import { type Pepper, isToken, newToken, pepperFromEnv, sha256Hex, timingSafeEqual } from "./crypto";
 import { now, uuid } from "./db";
 import { type HttpEnv, type Principal, errorResponse, json, readCredential, sessionCookie } from "./http";
+import { verifyMachine } from "./machines";
 import { normalizeEmail } from "./ratelimit";
 
 export type Client = "mac" | "web" | "cli";
@@ -145,11 +146,8 @@ export async function resolvePrincipal(request: Request, env: AuthEnv): Promise<
   if (isToken("session", token)) return (await resolveSession(env, token, credential.via === "cookie")) ?? denied();
   if (credential.via === "cookie") return denied();
   if (isToken("machine", token)) {
-    const m = await db(env)
-      .prepare("SELECT id, local_machine_id, paused_at FROM machines WHERE credential_hash = ? AND revoked_at IS NULL")
-      .bind(await sha256Hex(token))
-      .first<{ id: string; local_machine_id: string | null; paused_at: string | null }>();
-    return m ? { kind: "machine", machineId: m.id, localMachineId: m.local_machine_id, paused: m.paused_at !== null } : denied();
+    const m = await verifyMachine(db(env), token);
+    return m ? { kind: "machine", machineId: m.machineId, localMachineId: m.localMachineId, paused: m.paused } : denied();
   }
   if (await isOperator(env, token)) return { kind: "operator" };
   return denied();
