@@ -21,6 +21,8 @@ Schemas (JSON Schema 2020-12): `packages/api/relay/<mensaje>.schema.json`, con l
 | HTTP JSON | `DELETE /v1/tokens/<token_id>`, `DELETE /v1/pair/codes/<id>` | token de operador |
 | HTTP JSON | `GET /health` | pública (no mira la credencial) |
 
+Todo cliente envía un `User-Agent` explícito (el agente: `chopshop-agent/<versión>`): Cloudflare responde 403 al de Python por defecto (`Python-urllib/3.x`).
+
 ### Rutas por rol
 
 El rol sale de la cabecera `Authorization`: sin cabecera → `anónimo`; token de operador → `admin`; `cr1_` de scope `viewer` →
