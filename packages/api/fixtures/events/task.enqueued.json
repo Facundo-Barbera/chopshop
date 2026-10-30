@@ -1,0 +1,29 @@
+{
+  "v": 1,
+  "id": "01MCC5Y3S0F8YH6PV8TEN7BD00",
+  "seq": 100,
+  "ts": "2027-01-15T09:00:00.000Z",
+  "machine": "contabo-dev",
+  "project": "awesome-gb",
+  "type": "task.enqueued",
+  "severity": "info",
+  "needs": null,
+  "subject": {
+    "kind": "task",
+    "id": "q:01MCC5Y3S0F8YH6PV8TEN7BD00",
+    "title": "Triage #212 · login falla en Safari"
+  },
+  "cause": {
+    "id": null,
+    "depth": 0
+  },
+  "body": {
+    "task": "q:01MCC5Y3S0F8YH6PV8TEN7BD00",
+    "employee": "awesome-gb/0/triage/0",
+    "title": "Triage #212 · login falla en Safari",
+    "position": 0,
+    "by": "github.issue.opened",
+    "trigger": "github.issue.opened",
+    "enqueued_at": "2027-01-15T09:00:00.000Z"
+  }
+}
