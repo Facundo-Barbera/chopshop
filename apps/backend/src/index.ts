@@ -1,20 +1,23 @@
+import { type HttpEnv, type Principal, errorResponse, json, readCredential } from "./http";
+import { createApi, dispatchHost } from "./router";
+
 export const VERSION = "0.1.0";
 
-export interface Env {
+export interface Env extends HttpEnv {
   DB?: D1Database;
 }
 
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
-  });
+async function resolvePrincipal(request: Request): Promise<Principal | Response> {
+  const credential = readCredential(request);
+  if (credential instanceof Response) return credential;
+  if (credential.via === "none") return { kind: "anonymous" };
+  return errorResponse("unauthorized", "credencial ausente, inválida o revocada");
 }
 
+const api = createApi<Env>({ health: () => json({ ok: true, version: VERSION }) }, { resolvePrincipal });
+
 export default {
-  async fetch(request: Request, _env: Env): Promise<Response> {
-    const url = new URL(request.url);
-    if (url.pathname === "/health" && request.method === "GET") return json({ ok: true, version: VERSION });
-    return json({ code: "not_found" }, 404);
+  async fetch(request: Request, env: Env): Promise<Response> {
+    return dispatchHost(request, env, api);
   },
 } satisfies ExportedHandler<Env>;
