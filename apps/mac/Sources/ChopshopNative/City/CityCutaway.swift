@@ -161,7 +161,7 @@ struct FloorPicker: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help(r.help)
+                .accessibilityHint(r.help)
             }
             FloorStepButton(symbol: "chevron.down", enabled: i > 0) { onGo(items[max(0, i - 1)].id) }
         }
