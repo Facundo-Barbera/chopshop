@@ -167,6 +167,7 @@ public struct CityView: View {
     /// Índice (en `floors`) del piso pulsado; si no se sabe, el de escritorios más bajo, o el vestíbulo si no hay otro.
     private func floorIndex(_ project: String, floor id: String?, in all: [FloorPlan]) -> Int? {
         guard !all.isEmpty else { return nil }
+        if let id, model.floor(id: id)?.isLobby == true, let l = all.firstIndex(where: { $0.kind == .lobby }) { return l }
         let idx = id.flatMap { model.floor(id: $0) }.flatMap { $0.isLobby ? nil : $0.floorIndex }
         return idx.flatMap { i in all.firstIndex { $0.kind != .lobby && $0.floorIndex == i } }
             ?? all.firstIndex { $0.kind != .lobby } ?? 0
@@ -506,6 +507,7 @@ public struct CityView: View {
             case .active(let pt):
                 // solo con la ciudad quieta (p = 0): durante el zoom de vuelta el encuadre no es el de la ciudad
                 let h = (zoomed || p > 0 || frozenTime != nil) ? nil : box.cityFrame.flatMap { CityHit.floorID(at: pt, in: model, frame: $0) }
+                    .flatMap { id in model.floor(id: id).flatMap(project(of:)) == nil ? nil : id }
                 if h != hovered { hovered = h }
             case .ended: hovered = nil
             }
@@ -514,7 +516,7 @@ public struct CityView: View {
             guard !zoomed, p == 0, let f = box.cityFrame else { return }
             if let id = CityHit.floorID(at: e.location, in: model, frame: f), let fl = model.floor(id: id) {
                 guard let pr = project(of: fl) else { return }  // el vestíbulo compartido no entra
-                select(pr, floor: fl.isLobby ? nil : fl.id)
+                select(pr, floor: fl.id)
             } else if frozenZoom == nil, let c = CityHit.campus(at: e.location, in: model, frame: f), c != campusFocus {
                 campus = c
             }
