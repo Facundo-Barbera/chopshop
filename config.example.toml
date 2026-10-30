@@ -142,6 +142,12 @@ events_days = 90                          # eventos (y sus entregas) más viejos
 [agent.service]
 read_write_paths = []                     # rutas extra de escritura (ProtectSystem=strict); ya incluye home, db_path y general.home
 
+# Relay público (Cloudflare Worker, ver docs/relay-protocol.md). Env: CHOPSHOP_RELAY__URL
+# El token cr1_ NO va aquí: `chopshop relay pair --stdin` (o --token-file F) lo guarda en ~/.config/chopshop/relay/token (0600).
+# `chopshop relay status` muestra la URL y solo el prefijo + los últimos 4 caracteres del token; `relay unpair` lo borra.
+[relay]
+url = "wss://relay.example.invalid/v1/connect"   # endpoint WebSocket del relay (vacío = sin relay)
+
 # Servidor MCP multi-máquina (`chopshop mcp serve`): orquesta los agentes de [app] agent_url y [app.agents.*]. Solo 127.0.0.1.
 [mcp]
 port = 3797
