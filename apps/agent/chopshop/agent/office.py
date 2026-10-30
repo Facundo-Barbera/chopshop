@@ -25,7 +25,7 @@ import threading
 import time
 
 from .. import profile as profile_mod
-from . import db, envelope, events, layout, notes
+from . import db, envelope, events, layout, notes, registry
 
 log = logging.getLogger("chopshop.agent.office")
 
@@ -45,7 +45,7 @@ CLOSE_BELOW = 0.5
 
 def _load_profiles():
     out = []
-    for name in profile_mod.list_projects():
+    for name in registry.profiles():
         try:
             out.append(profile_mod.load(name))
         except profile_mod.ProfileError as e:
