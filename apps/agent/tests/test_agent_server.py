@@ -12,6 +12,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))          # para importar los falsos de otros tests
@@ -84,6 +85,9 @@ class ServerBase(unittest.TestCase):
         os.environ["CHOPSHOP_HOME"] = os.path.join(self.tmp, "home")
         self.addCleanup(lambda: os.environ.__setitem__("CHOPSHOP_HOME", old_home) if old_home is not None
                         else os.environ.pop("CHOPSHOP_HOME", None))
+        xdg = mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": os.path.join(self.tmp, "xdg")})
+        xdg.start()
+        self.addCleanup(xdg.stop)
         self.clock = Clock()
         self.ts, self.t3calls, self.posts = FakeTailscale(), FakeT3(), []
         self.token_file = os.path.join(self.tmp, "token")
@@ -525,6 +529,134 @@ class TestCpuConvention(ServerBase):
         api = self.get("/snapshot")[1]
         self.assertEqual(api["machine"]["cpu_pct"], 50.0)
         self.assertEqual(next(p for p in api["projects"] if p["name"] == "proyecto-demo")["cpu_pct"], 100.0)
+
+
+CRED = "cm1_" + "Q" * 43
+MID = "0b9c6a52-5e0d-4c3a-9f1e-2d7b8a6c4e10"
+
+
+class TestLocalRelay(ServerBase):
+    def nonce(self):
+        with open(os.path.join(self.tmp, "xdg", "chopshop", "agent", "link.nonce"), encoding="utf-8") as f:
+            return f.read().strip()
+
+    def machine_file(self):
+        return os.path.join(self.tmp, "xdg", "chopshop", "relay", "machine.json")
+
+    def link_body(self, **over):
+        return dict({"api_url": "http://127.0.0.1:9", "machine_id": MID, "local_machine_id": "host-a", "credential": CRED}, **over)
+
+    def link(self, nonce=None, **over):
+        return self.post("/local/relay/link", self.link_body(**over),
+                         headers={"X-Chopshop-Link-Nonce": self.nonce() if nonce is None else nonce})
+
+    def test_status_unlinked_without_identity_checks(self):
+        self.start(auth="tailscale+token", trust_local=False)
+        st, body, _ = self.get("/local/relay/status")
+        self.assertEqual(st, 200)
+        self.assertEqual((body["local_machine_id"], body["linked"], body["machine_id"], body["connected"]), ("host-a", False, None, False))
+        self.assertEqual(self.get("/health")[0], 403)
+
+    def test_nonce_file_is_private(self):
+        self.start()
+        p = os.path.join(self.tmp, "xdg", "chopshop", "agent", "link.nonce")
+        self.assertEqual(os.stat(p).st_mode & 0o777, 0o600)
+        self.assertEqual(os.stat(os.path.dirname(p)).st_mode & 0o777, 0o700)
+        self.assertEqual(len(self.nonce()), 43)
+
+    def test_not_found_outside_loopback(self):
+        for listen, peer in (("100.64.0.7", "127.0.0.1"), ("127.0.0.1", "100.64.0.5"), ("100.64.0.7", "100.64.0.5")):
+            with self.assertRaises(server.ApiError) as cm:
+                server.local_guard(listen, 8765, peer, {"Host": "127.0.0.1:8765", "Origin": "https://x.test"})
+            self.assertEqual(cm.exception.status, 404)
+        for host in ("127.0.0.1:8765", "localhost:8765", "[::1]:8765"):
+            server.local_guard("::1", 8765, "::1", {"Host": host})
+
+    def test_origin_and_host_rejected(self):
+        self.start()
+        n = self.nonce()
+        for path in ("/local/relay/status", "/local/relay/link"):
+            st, body, _ = self.req("GET" if path.endswith("status") else "POST", path, self.link_body(),
+                                   headers={"Origin": "https://evil.test", "X-Chopshop-Link-Nonce": n})
+            self.assertEqual(st, 403, path)
+        for host in ("evil.test:%d" % self.port, "127.0.0.1:1", "host-a:%d" % self.port):
+            self.assertEqual(self.get("/local/relay/status", headers={"Host": host})[0], 403, host)
+        self.assertFalse(os.path.exists(self.machine_file()))
+
+    def test_bad_nonce_unauthorized(self):
+        self.start()
+        self.assertEqual(self.link(nonce="x" * 43)[0], 401)
+        self.assertEqual(self.post("/local/relay/link", self.link_body())[0], 401)
+        self.assertEqual(self.req("POST", "/local/relay/unlink", headers={"X-Chopshop-Link-Nonce": "nope"})[0], 401)
+        self.assertFalse(os.path.exists(self.machine_file()))
+
+    def test_link_rotates_nonce_and_restarts_relay(self):
+        self.start()
+        old = self.nonce()
+        st, body, _ = self.link()
+        self.assertEqual((st, body), (204, None))
+        self.assertNotEqual(self.nonce(), old)
+        self.assertEqual(self.link(nonce=old)[0], 401)
+        self.assertEqual(os.stat(self.machine_file()).st_mode & 0o777, 0o600)
+        relay = self.svc.relay
+        self.assertEqual((relay.url, relay._token), ("ws://127.0.0.1:9/v1/connect", CRED))
+        st, body, _ = self.get("/local/relay/status")
+        self.assertEqual((st, body["linked"], body["machine_id"], body["api_url"]), (200, True, MID, "http://127.0.0.1:9"))
+        prev = self.nonce()
+        st, _, _ = self.req("POST", "/local/relay/unlink", headers={"X-Chopshop-Link-Nonce": prev})
+        self.assertEqual(st, 204)
+        self.assertNotEqual(self.nonce(), prev)
+        self.assertFalse(os.path.exists(self.machine_file()))
+        self.assertTrue(relay.stop.is_set())
+        self.assertIsNone(self.svc.relay)
+        self.assertEqual(self.req("POST", "/local/relay/unlink", headers={"X-Chopshop-Link-Nonce": prev})[0], 401)
+
+    def test_link_spawns_relay_thread_in_running_service(self):
+        self.start(background=True, t3_enabled=False, engine_enabled=False)
+        self.assertNotIn("chopshop-relay", [t.name for t in self.svc.threads if t.is_alive()])
+        self.assertEqual(self.link()[0], 204)
+        relay = self.svc.relay
+        t = [t for t in self.svc.threads if t.name == "chopshop-relay"][-1]
+        self.assertTrue(t.is_alive())
+        self.assertEqual(self.req("POST", "/local/relay/unlink", headers={"X-Chopshop-Link-Nonce": self.nonce()})[0], 204)
+        t.join(5)
+        self.assertFalse(t.is_alive())
+        self.assertTrue(relay.stop.is_set())
+
+    def test_conflicting_local_machine_id(self):
+        self.start()
+        n = self.nonce()
+        st, body, _ = self.link(local_machine_id="otra-maquina")
+        self.assertEqual((st, body["local_machine_id"]), (409, "host-a"))
+        self.assertFalse(os.path.exists(self.machine_file()))
+        self.assertEqual(self.nonce(), n)
+
+    def test_bad_format(self):
+        self.start()
+        for over in ({"credential": "cm1_corta"}, {"credential": "cr1_" + "Q" * 43}, {"machine_id": "x"},
+                     {"api_url": "http://evil.test"}, {"api_url": None}):
+            self.assertEqual(self.link(**over)[0], 400, over)
+        st, _, _ = self.req("POST", "/local/relay/link", raw=b"{", headers={"X-Chopshop-Link-Nonce": self.nonce()})
+        self.assertEqual(st, 400)
+        st, _, _ = self.req("POST", "/local/relay/link", raw=json.dumps(self.link_body()).encode(),
+                            headers={"X-Chopshop-Link-Nonce": self.nonce(), "Content-Type": "text/plain"})
+        self.assertEqual(st, 403)
+        self.assertFalse(os.path.exists(self.machine_file()))
+
+    def test_never_returns_credential(self):
+        self.start()
+        self.assertEqual(self.link()[0], 204)
+        self.assertEqual(self.link(local_machine_id="otra")[0], 409)
+        self.assertEqual(self.link(credential="cm1_" + "R" * 42)[0], 400)
+        st, body, _ = self.get("/local/relay/status")
+        self.assertEqual(st, 200)
+        self.assertNotIn("credential", body)
+        self.assertEqual(self.get("/local/relay/link")[0], 405)
+        self.assertEqual(self.get("/local/nada")[0], 404)
+        for text in self.responses + self.logs:
+            self.assertNotIn(CRED, text)
+            self.assertNotIn("R" * 42, text)
+            self.assertNotIn(self.nonce(), text)
 
 
 
