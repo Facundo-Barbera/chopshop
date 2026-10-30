@@ -391,6 +391,15 @@ class TestLifecycle(ServerBase):
         self.assertEqual(self.t3calls.calls, [])
         self.assertIsNone(self.get("/snapshot")[1]["agent"]["t3_ok"])
 
+    def test_dispatcher_disabled_means_no_dispatcher_thread(self):
+        self.start_bg(t3_enabled=False)
+        self.assertFalse(self.svc.dispatch_enabled)
+        self.assertNotIn("chopshop-dispatcher", {t.name for t in self.svc.threads})
+        self.svc.stop()
+        self.start_bg(t3_enabled=False, dispatcher={"enabled": True, "max_threads": 3, "interval": 0.05})
+        self.assertEqual(self.svc.max_threads, 3)
+        self.assertIn("chopshop-dispatcher", {t.name for t in self.svc.threads})
+
     def test_t3_down_emits_event_once_and_reports(self):
         self.t3calls.down = True
         self.start_bg()
