@@ -9,29 +9,32 @@ extension LiveState {
         public var slot: Int
         public var name: String?
         public var state: String
+        public var location: String
         public var threadID: String?
         public var task: String?
         public var title: String?
         public var since: String?
         public var queueLen: Int
 
+        public var inCommons: Bool { location == "common" }
+
         public init(id: String, project: String? = nil, floor: Int? = nil, role: String? = nil, slot: Int? = nil, name: String? = nil,
-                    state: String = "idle", threadID: String? = nil, task: String? = nil, title: String? = nil, since: String? = nil,
-                    queueLen: Int = 0) {
+                    state: String = "idle", location: String? = nil, threadID: String? = nil, task: String? = nil, title: String? = nil,
+                    since: String? = nil, queueLen: Int = 0) {
             let parts = id.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
             self.id = id
             self.project = project ?? parts.first ?? ""
             self.floor = floor ?? (parts.count == 4 ? Int(parts[1]) : nil) ?? 0
             self.role = role ?? (parts.count == 4 ? parts[2] : "")
             self.slot = slot ?? (parts.count == 4 ? Int(parts[3]) : nil) ?? 0
-            self.name = name; self.state = state; self.threadID = threadID; self.task = task; self.title = title; self.since = since
+            self.name = name; self.state = state; self.location = location ?? (state == "working" ? "desk" : "common"); self.threadID = threadID; self.task = task; self.title = title; self.since = since
             self.queueLen = queueLen
         }
 
         init?(json: JSONValue) {
             guard let id = json["id"]?.string else { return nil }
             self.init(id: id, project: json["project"]?.string, floor: json["floor"]?.int, role: json["role"]?.string, slot: json["slot"]?.int,
-                      name: json["name"]?.string, state: json["state"]?.string ?? "idle", threadID: json["thread_id"]?.string,
+                      name: json["name"]?.string, state: json["state"]?.string ?? "idle", location: json["location"]?.string, threadID: json["thread_id"]?.string,
                       task: json["task"]?.string, title: json["title"]?.string, since: json["since"]?.string, queueLen: json["queue_len"]?.int ?? 0)
         }
     }
@@ -93,6 +96,7 @@ extension LiveState {
             guard let id = body["employee"]?.string else { return }
             updateEmployee(id, project: env.project) { e in
                 e.state = "working"
+                e.location = "desk"
                 if let r = body["role"]?.string { e.role = r }
                 e.threadID = body["thread_id"]?.string
                 e.task = body["task"]?.string
@@ -105,6 +109,7 @@ extension LiveState {
             guard let id = body["employee"]?.string else { return }
             updateEmployee(id, project: env.project) { e in
                 e.state = "idle"
+                e.location = "common"
                 if let r = body["role"]?.string { e.role = r }
                 if body["thread_id"] != nil { e.threadID = body["thread_id"]?.string }
                 if body["name"] != nil { e.name = body["name"]?.string }
