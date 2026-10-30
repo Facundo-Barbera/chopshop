@@ -17,7 +17,7 @@ final class FakeAccountBackend: AccountSettingsBackend, @unchecked Sendable {
     func me() async throws -> BackendMeResponse {
         calls.append("me")
         if let failure { throw failure }
-        return decode(#"{"user":{"id":"u1","email":"dueno@ejemplo.com","display_name":null,"role":"\#(role)"},"session":{"id":"s1","client":"mac","expires_at":"x"}}"#)
+        return decode(#"{"user":{"id":"u1","email":"dueno@ejemplo.test","display_name":null,"role":"\#(role)"},"session":{"id":"s1","client":"mac","expires_at":"x"}}"#)
     }
 
     func sessions(userID: String?) async throws -> [BackendSessionInfo] {
@@ -29,7 +29,7 @@ final class FakeAccountBackend: AccountSettingsBackend, @unchecked Sendable {
 
     func users() async throws -> [BackendUser] {
         calls.append("users")
-        return decode(#"[{"id":"u1","email":"dueno@ejemplo.com","role":"owner"},{"id":"u2","email":"ana@ejemplo.com","display_name":"Ana","role":"watcher"}]"#)
+        return decode(#"[{"id":"u1","email":"dueno@ejemplo.test","role":"owner"},{"id":"u2","email":"ana@ejemplo.test","display_name":"Ana","role":"watcher"}]"#)
     }
 
     func revokeSession(id: String) async throws { calls.append("revoke \(id)") }
@@ -75,7 +75,7 @@ final class AccountSettingsTests: XCTestCase {
         XCTAssertEqual(fake.sessionUserIDs.last, .some(nil))
         XCTAssertEqual(m.sessions.map(\.id), ["s1", "s2", "s9"])
         XCTAssertEqual(m.owner(of: m.sessions[2]), "Ana")
-        XCTAssertEqual(m.owner(of: m.sessions[0]), "dueno@ejemplo.com")
+        XCTAssertEqual(m.owner(of: m.sessions[0]), "dueno@ejemplo.test")
     }
 
     func testWatcherSkipsAuditAndAllScope() async {
