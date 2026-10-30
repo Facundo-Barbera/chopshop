@@ -347,6 +347,7 @@ final class AppModel: ObservableObject {
     private func sessionChanged(_ phase: BackendAuth.Phase) {
         guard phase != .checking else { return }
         shell.state.role = isWatcher ? .watcher : .owner
+        shell.backend = auth.session != nil ? auth.client : nil
         pairingRevision += 1
         if case .signedIn(let s) = phase { ensureCloudSpec(s.apiURL) }
         reloadConfig()

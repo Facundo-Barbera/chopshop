@@ -10,6 +10,7 @@ public final class ShellController: ObservableObject {
     @Published public private(set) var notice: ShellNotice?
 
     @Published public var actions: AttentionActions?
+    @Published public var backend: BackendClient?
     public var refresh: (() -> Void)?
     /// Snapshot actual (lo pone la vista; los menús lo usan para ⌘J y ⌘O).
     public var snapshot = MockSnapshot(projects: [], batches: [], graphs: [], events: [], machines: [])

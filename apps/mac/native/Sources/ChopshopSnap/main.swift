@@ -71,6 +71,10 @@ if let mode = args.dropFirst().first, mode == "login" {
     MainActor.assumeIsolated { Snapshots.renderBackendLogin(to: out) }
     exit(0)
 }
+if let mode = args.dropFirst().first, mode == "watchers" {
+    MainActor.assumeIsolated { Snapshots.renderWatchers(to: out) }
+    exit(0)
+}
 if let mode = args.dropFirst().first, mode == "real-office" {
     MainActor.assumeIsolated { Snapshots.renderRealOffice(to: out) }
     exit(0)
