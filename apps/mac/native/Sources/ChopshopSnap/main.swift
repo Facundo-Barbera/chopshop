@@ -1,7 +1,7 @@
 import AppKit
 import ChopshopNative
 
-// uso: ChopshopSnap <directorio de salida> [demo|demo-keys|city-keys|city-video [vídeo.mp4]|machine-room|floor|stable-floor|city-office|real-office|shell|relay-login]
+// uso: ChopshopSnap <directorio de salida> [demo|demo-keys|city-keys|city-video [vídeo.mp4]|machine-room|floor|stable-floor|city-office|real-office|shell|relay-login|multimachine [fixture]]
 //   sin 2º argumento: capturas de proyecto/oficina
 //   demo: fotogramas clave de la demo (key-*.png) + secuencia seq/f0000.jpg a 12 fps (demo-keys: solo las claves)
 //   city-keys: claves de la ciudad (city-0N-*.png, 1400×900 @1x) desde city-fixture.jsonl
@@ -83,6 +83,12 @@ if let mode = args.dropFirst().first, mode == "employees" {
     let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../../../..").standardized
     let fixture = args.count > 2 ? args[2] : repo.appendingPathComponent("packages/api/fixtures/snapshot.office.json").path
     MainActor.assumeIsolated { Snapshots.renderEmployees(fixture: fixture, to: out) }
+    exit(0)
+}
+if let mode = args.dropFirst().first, mode == "multimachine" {
+    let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../../../..").standardized
+    let fixture = args.count > 2 ? args[2] : repo.appendingPathComponent("packages/api/fixtures/relay.multimachine.json").path
+    MainActor.assumeIsolated { Snapshots.renderMultiMachine(fixture: fixture, to: out) }
     exit(0)
 }
 if let mode = args.dropFirst().first, mode == "floor" || mode == "city-office" {
