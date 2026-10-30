@@ -144,6 +144,7 @@ public struct MockMachine: Identifiable, Hashable, Sendable {
     public var ok: Bool
     public var stale = false
     public var reason: String?
+    public var badge: String? = nil
     public var os: String
     public var role: String
     public var cpus: Int
