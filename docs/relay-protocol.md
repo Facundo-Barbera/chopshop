@@ -170,4 +170,11 @@ Nunca se registran ni se devuelven códigos, tokens ni hashes (salvo el código 
 El Worker del relay **solo se despliega por GitHub Actions**, con los secrets del repositorio `CLOUDFLARE_API_TOKEN` y
 `CLOUDFLARE_ACCOUNT_ID`, al empujar un tag de release o al hacer merge a `main`. **Nunca desde una máquina local**: nada de
 `wrangler deploy` ni `wrangler secret put` a mano; las máquinas de desarrollo no tienen esas credenciales. El token de operador
-para el primer código de pairing de una cuenta se guarda en el Worker solo como su SHA-256 y lo sube el mismo workflow.
+(admin: emite códigos con `POST /v1/pair/codes` y revoca con `DELETE /v1/tokens/<token_id>` o `DELETE /v1/pair/codes/<id>`, en
+cualquier cuenta) es el secret del Worker `RELAY_OPERATOR_TOKEN`, un binding de entorno que nunca está en el repo. Su valor se
+crea una sola vez al hacer el primer deploy (R7) y se guarda como secret del repositorio con el mismo nombre,
+`RELAY_OPERATOR_TOKEN`; el workflow `.github/workflows/relay-deploy.yml` lo carga en cada deploy con el input `secrets` de
+`wrangler-action` (equivale a `wrangler secret put RELAY_OPERATOR_TOKEN` leyendo la variable de entorno, sin imprimirla). El
+Worker lo compara por SHA-256 en tiempo constante; sin el secret, solo los tokens `agent` pueden crear códigos. Un código creado
+por el operador abre una cuenta nueva (`ac-…`) salvo que la petición lleve `?account=ac-…` para añadir a una existente.
+`POST /pair` es un alias de `POST /v1/pair`.
