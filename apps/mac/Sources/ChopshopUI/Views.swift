@@ -86,7 +86,7 @@ struct OfficeRoot: View {
     @EnvironmentObject var model: AppModel
 
     var body: some View {
-        OfficeShell(store: model.live, shell: model.shell) { context in
+        OfficeShell(store: model.live, shell: model.shell, backend: model.auth.session == nil ? nil : model.auth.client) { context in
             ShellCityWorld(store: model.live, context: context)
                 .saturation(model.live.status.isDimmed ? 0.2 : 1)
                 .opacity(model.live.status.isDimmed ? 0.55 : 1)
