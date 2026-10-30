@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/backend/v2/mch/machines-id-pause.post.response.schema.json",
+  "title": "POST /v1/machines/{id}/pause → 200",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "machine"
+  ],
+  "properties": {
+    "machine": {
+      "$ref": "../common.schema.json#/$defs/machine"
+    }
+  }
+}
