@@ -148,6 +148,8 @@ def _apply(state, env):
                 _upsert(g["nodes"], "id", node["id"], dict(next((n for n in g["nodes"] if n.get("id") == node["id"]), {}), **node))
         if typ == "task.state" or typ in OFFICE_TYPES:
             _apply_office(state, p, typ, env, body)
+        if typ in EMPLOYEE_TYPES:
+            _apply_employee(p, typ, env, body)
         key = _subject_key(env) if typ not in NO_ATTENTION else None
         if key is not None:
             old = next((a for a in p["attention"] if a["key"] == key), None)
@@ -238,6 +240,47 @@ def _apply_office(state, p, typ, env, body):
         d = _find_desk(p, body.get("desk"))
         if d is not None:
             d["notes_pending"] = body["pending"] if isinstance(body.get("pending"), int) else (d.get("notes_pending") or 0) + 1
+
+
+EMPLOYEE_TYPES = ("employee.assigned", "employee.idle", "employee.renamed", "queue.changed")
+COMMON, DESK = "common", "desk"
+
+
+def _employee(p, eid, role):
+    emps = p.setdefault("employees", [])
+    e = next((x for x in emps if x["id"] == eid), None)
+    if e is None:
+        parts = eid.rsplit("/", 3)
+        num = lambda i: int(parts[i]) if len(parts) == 4 and parts[i].isdigit() else 0
+        e = {"id": eid, "project": p["name"], "floor": num(1), "role": role or (parts[2] if len(parts) == 4 else None),
+             "slot": num(3), "name": None, "state": "idle", "location": COMMON, "thread_id": None, "task": None,
+             "title": None, "since": None, "queue_len": 0}
+        emps.append(e)
+    return e
+
+
+def _apply_employee(p, typ, env, body):
+    eid = body.get("employee")
+    if not isinstance(eid, str) or not eid:
+        return
+    e = _employee(p, eid, body.get("role"))
+    if typ == "queue.changed":
+        e["queue_len"] = len(body.get("items") or [])
+        return
+    if "name" in body:
+        e["name"] = body["name"]
+    if typ == "employee.renamed":
+        return
+    if body.get("role"):
+        e["role"] = body["role"]
+    if isinstance(body.get("queue_len"), int):
+        e["queue_len"] = body["queue_len"]
+    e["since"] = body.get("since") or env.get("ts")
+    e["thread_id"] = body.get("thread_id")
+    if typ == "employee.assigned":
+        e.update(state="working", location=DESK, task=body.get("task"), title=body.get("title"))
+    else:
+        e.update(state="idle", location=COMMON)
 
 
 def apply(state, env):
