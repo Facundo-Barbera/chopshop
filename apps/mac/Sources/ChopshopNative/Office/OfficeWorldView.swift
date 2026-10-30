@@ -10,6 +10,15 @@ import os
 /// Cámara: arrastrar = mover; rueda del ratón o pellizco del trackpad = zoom alrededor del cursor; dos dedos en el trackpad =
 /// mover; doble clic = encuadrar todo. Todo animado con suavizado y a la frecuencia de la pantalla; el estado de la cámara vive
 /// fuera de `@State` (`WorldCameraBox`), así arrastrar no reevalúa la vista ni rehace etiquetas por evento.
+public struct WorldLayers: Equatable, Sendable {
+    public var active: String
+    public var threshold: Double
+    public var inactiveOpacity: Double
+    public init(active: String, threshold: Double = 0.55, inactiveOpacity: Double = 0.18) {
+        self.active = active; self.threshold = threshold; self.inactiveOpacity = inactiveOpacity
+    }
+}
+
 @available(macOS 26.0, *)
 public struct OfficeWorldView: View {
     let floors: [FloorPlan]
@@ -20,6 +29,7 @@ public struct OfficeWorldView: View {
     var frame: FloorFrame?
     var backRequest: Int
     var fitRequest: Int
+    var layers: WorldLayers?
     var onSelect: ((String?) -> Void)?
     var onExit: (() -> Void)?
 
@@ -28,9 +38,9 @@ public struct OfficeWorldView: View {
     @Environment(\.colorScheme) private var scheme
 
     public init(floors: [FloorPlan], frozenNow: Date? = nil, focusRegion: String? = nil, selected: String? = nil,
-                frame: FloorFrame? = nil, backRequest: Int = 0, fitRequest: Int = 0,
+                frame: FloorFrame? = nil, backRequest: Int = 0, fitRequest: Int = 0, layers: WorldLayers? = nil,
                 onSelect: ((String?) -> Void)? = nil, onExit: (() -> Void)? = nil) {
-        self.floors = floors; self.frozenNow = frozenNow
+        self.floors = floors; self.frozenNow = frozenNow; self.layers = layers
         self.focusRegion = focusRegion; self.selected = selected; self.frame = frame
         self.backRequest = backRequest; self.fitRequest = fitRequest
         self.onSelect = onSelect; self.onExit = onExit
@@ -105,11 +115,14 @@ public struct OfficeWorldView: View {
         let dark = scheme == .dark
         let sel = spotID(of: selected, in: w, now: now)
         box.onExit = onExit
+        box.layers = layers
         return Canvas { ctx, size in
             let sp = FrameMeter.signposter.beginInterval("office.draw")
             let t0 = ProcessInfo.processInfo.systemUptime
-            let cam = box.camera(w, size: size, t: t, live: frozenNow == nil, focusRegion: focusRegion)
-            WorldRenderer(world: w, cam: cam, box: box, dark: dark, t: t, now: now, selected: sel, hovered: box.hovered).draw(&ctx)
+            let cam = box.camera(w, size: size, t: t, live: frozenNow == nil, focusRegion: layers?.active ?? focusRegion)
+            let lay = layers.map { (active: $0.active, opacity: $0.inactiveOpacity, stack: box.stack(cam.s)) }
+            WorldRenderer(world: w, cam: cam, box: box, dark: dark, t: t, now: now, selected: sel, hovered: box.hovered,
+                          layers: lay).draw(&ctx)
             FrameMeter.signposter.endInterval("office.draw", sp)
             FrameMeter.tick("oficina", cost: ProcessInfo.processInfo.systemUptime - t0)
         } symbols: {
@@ -146,12 +159,14 @@ struct WorldRenderer {
     let now: Date
     let selected: String?
     let hovered: String?
+    var layers: (active: String, opacity: Double, stack: Double)?
 
     private func regionCam(_ r: WorldLayout.Region) -> IsoCam {
         IsoCam(s: cam.s, cu: cam.cu - (r.ox - r.oy), cv: cam.cv - ((r.ox + r.oy) / 2 - r.oz), ax: cam.ax, ay: cam.ay)
     }
 
     func draw(_ ctx: inout GraphicsContext) {
+        if let l = layers { drawLayered(&ctx, l); return }
         box.hits.removeAll(keepingCapacity: true)
         let fbox = box.floorBox
         fbox.hits.removeAll(keepingCapacity: true); fbox.heads.removeAll(keepingCapacity: true)
@@ -186,6 +201,97 @@ struct WorldRenderer {
             ctx.draw(s, at: CGPoint(x: p.x - 12, y: p.y), anchor: .trailing)
         }
         box.hits = fbox.hits
+    }
+
+    private func drawLayered(_ ctx: inout GraphicsContext, _ l: (active: String, opacity: Double, stack: Double)) {
+        box.hits.removeAll(keepingCapacity: true)
+        let fbox = box.floorBox
+        fbox.hits.removeAll(keepingCapacity: true); fbox.heads.removeAll(keepingCapacity: true)
+        let regions = world.regions.sorted { $0.oz < $1.oz }
+        let detail = 1 - l.stack
+        if l.stack > 0.001 {
+            var c = ctx
+            c.opacity = l.stack
+            c.drawLayer { g in
+                g.drawLayer { s in
+                    s.addFilter(.blur(radius: 9 * cam.s))
+                    for r in regions { s.fill(plateShadow(r), with: .color(.black.opacity(dark ? 0.5 : 0.16))) }
+                }
+                for i in regions.indices {
+                    if i > 0 { columns(&g, regions[i - 1], regions[i]) }
+                    block(&g, regions[i], active: regions[i].id == l.active)
+                }
+                for r in regions { title(&g, r, opacity: r.id == l.active ? 1 : 0.7) }
+            }
+        }
+        if detail > 0.001, let r = regions.first(where: { $0.id == l.active }) {
+            var c = ctx
+            c.opacity = detail
+            c.drawLayer { g in
+                if l.opacity > 0.001 {
+                    for o in regions where o.id != l.active { outline(&g, o, opacity: l.opacity) }
+                }
+                let f = FloorRenderer(plan: r.plan, layout: r.layout, cam: regionCam(r), box: fbox, dark: dark, t: t, now: now,
+                                      selected: selected, hovered: hovered, prefix: "\(r.id)|")
+                let lk = f.looks()
+                g.drawLayer { s in
+                    s.addFilter(.blur(radius: 9 * cam.s))
+                    s.fill(plateShadow(r), with: .color(.black.opacity(dark ? 0.5 : 0.16)))
+                    f.slabShadows(&s)
+                }
+                plate(&g, r)
+                f.drawRooms(&g, looks: lk)
+                g.drawLayer { s in
+                    s.addFilter(.blur(radius: 2.4 * cam.s))
+                    f.contactShadows(&s, looks: lk)
+                }
+                f.drawContents(&g, looks: lk)
+                f.drawLabels(&g, looks: lk)
+                title(&g, r, opacity: 1)
+            }
+        }
+        box.hits = detail > 0.5 ? fbox.hits : []
+    }
+
+    private func title(_ ctx: inout GraphicsContext, _ r: WorldLayout.Region, opacity: Double) {
+        guard opacity > 0.001, let s = ctx.resolveSymbol(id: "\(r.id)|title") else { return }
+        let p = P(r.x0, r.y0 + r.d, r.oz)
+        var c = ctx
+        c.opacity = opacity
+        c.draw(s, at: CGPoint(x: p.x - 12, y: p.y), anchor: .trailing)
+    }
+
+    private func outline(_ ctx: inout GraphicsContext, _ r: WorldLayout.Region, opacity: Double) {
+        let s = r.layout.shell, z = r.oz + Iso.slabH
+        let ink: Color = dark ? .white : Color(red: 0.2, green: 0.18, blue: 0.15)
+        ctx.stroke(poly([P(s.x0, s.y0, z), P(s.x1, s.y0, z), P(s.x1, s.y1, z), P(s.x0, s.y1, z)]),
+                   with: .color(ink.opacity(opacity)), lineWidth: 1)
+        title(&ctx, r, opacity: opacity)
+    }
+
+    private func block(_ ctx: inout GraphicsContext, _ r: WorldLayout.Region, active: Bool) {
+        let s = r.layout.shell, z = r.oz - 1.0, h = Iso.slabH * 3
+        let a = P(s.x0, s.y0, z + h), b = P(s.x1, s.y0, z + h), c = P(s.x1, s.y1, z + h), e = P(s.x0, s.y1, z + h)
+        let c0 = P(s.x1, s.y1, z), e0 = P(s.x0, s.y1, z), b0 = P(s.x1, s.y0, z)
+        let top: Color = dark ? Color(white: 0.16) : Color(red: 0.93, green: 0.915, blue: 0.885)
+        ctx.fill(poly([e, c, c0, e0]), with: .color(dark ? Color(white: 0.11) : Color(red: 0.86, green: 0.84, blue: 0.80)))
+        ctx.fill(poly([b, c, c0, b0]), with: .color(dark ? Color(white: 0.08) : Color(red: 0.80, green: 0.78, blue: 0.74)))
+        ctx.fill(poly([a, b, c, e]), with: .color(top))
+        if active { ctx.fill(poly([a, b, c, e]), with: .color(Color.accentColor.opacity(0.35))) }
+        ctx.stroke(poly([a, b, c, e]), with: .color(active ? Color.accentColor : .primary.opacity(dark ? 0.12 : 0.14)),
+                   lineWidth: active ? 1.4 : 0.7)
+    }
+
+    private func columns(_ ctx: inout GraphicsContext, _ lo: WorldLayout.Region, _ hi: WorldLayout.Region) {
+        let s = lo.layout.shell
+        let z0 = lo.oz - 1 + Iso.slabH * 3, z1 = hi.oz - 1
+        guard z1 > z0 else { return }
+        let ink: Color = dark ? .white : Color(red: 0.2, green: 0.18, blue: 0.15)
+        var edges = Path()
+        for (x, y) in [(s.x0, s.y0), (s.x1, s.y0), (s.x0, s.y1), (s.x1, s.y1)] {
+            edges.move(to: P(x, y, z0)); edges.addLine(to: P(x, y, z1))
+        }
+        ctx.stroke(edges, with: .color(ink.opacity(dark ? 0.12 : 0.14)), style: StrokeStyle(lineWidth: 0.9, lineCap: .round, dash: [5, 4]))
     }
 
     private func P(_ x: Double, _ y: Double, _ z: Double = 0) -> CGPoint { cam.pt(x, y, z) }
@@ -246,6 +352,8 @@ final class WorldCameraBox {
     var lastTapped: String?
     var frameInWindow = CGRect.zero
     var onExit: (() -> Void)?
+    var layers: WorldLayers?
+    private var activeFrame: IsoFrame?
 
     // mundo en caché (la rejilla depende de la proporción de la vista)
     private var cacheKey: (floors: [FloorPlan], aspect: Double, frame: FloorFrame?)?
@@ -289,6 +397,7 @@ final class WorldCameraBox {
         size = sz; bounds = w.bounds
         fit = Self.fitFrame(w.bounds, size: sz)
         let regionFrame = focusRegion.flatMap { w.region($0) }.map { OfficeFraming.frame($0.bounds, size: sz) }
+        activeFrame = layers.flatMap { w.region($0.active) }.map { OfficeFraming.frame($0.bounds, size: sz) }
         if cur == nil || (resized && !touched) {
             // primer fotograma: el mundo entero, o la región pedida con el mismo encuadre que el zoom de la ciudad
             let f = regionFrame ?? fit
@@ -296,7 +405,9 @@ final class WorldCameraBox {
             touched = focusRegion != nil
         } else if focusRegion != focusedRegion {
             focusedRegion = focusRegion
-            target = regionFrame ?? fit
+            var g = regionFrame ?? fit
+            if let l = layers, let rf = regionFrame, let c = target, c.s / rf.s < l.threshold { g.s = c.s }
+            target = g
             touched = focusRegion != nil
         } else if resized, var c = cur, var g = target {
             // conservar el punto central al cambiar el tamaño
@@ -311,6 +422,12 @@ final class WorldCameraBox {
         c.cu += (g.cu - c.cu) * k; c.cv += (g.cv - c.cv) * k; c.ax += (g.ax - c.ax) * k; c.ay += (g.ay - c.ay) * k
         cur = c
         return IsoCam(s: c.s, cu: c.cu, cv: c.cv, ax: c.ax, ay: c.ay)
+    }
+
+    func stack(_ s: Double) -> Double {
+        guard let l = layers, let rf = activeFrame else { return 0 }
+        let t = max(0.05, l.threshold)
+        return 1 - isoEase((s / rf.s - t * 0.8) / (t * 0.4))
     }
 
     var showingAll: Bool {
@@ -349,6 +466,11 @@ final class WorldCameraBox {
         g.s *= factor
         clamp(&g)
         g.cu = u - (Double(p.x) - g.ax) / g.s; g.cv = v - (Double(p.y) - g.ay) / g.s
+        if factor > 1, layers != nil, let rf = activeFrame, g.s < rf.s {
+            let k = min(1, (factor - 1) * 3)
+            g.cu += (rf.cu - g.cu) * k; g.cv += (rf.cv - g.cv) * k
+            g.ax += (rf.ax - g.ax) * k; g.ay += (rf.ay - g.ay) * k
+        }
         clamp(&g)
         target = g
     }

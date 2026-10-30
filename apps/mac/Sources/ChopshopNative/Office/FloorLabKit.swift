@@ -203,19 +203,25 @@ public struct FloorLabView: View {
     let floor: Int
     let campus: String?
     let onPickCampus: ((String?) -> Void)?
+    let zoomThreshold: Double
+    let layerOpacity: Double
     @State private var anchor = Date()
 
     public init(config: FloorLabConfig, mode: FloorLabMode, floor: Int = 0, campus: String? = nil,
-                onPickCampus: ((String?) -> Void)? = nil) {
+                zoomThreshold: Double = 0.55, layerOpacity: Double = 0.18, onPickCampus: ((String?) -> Void)? = nil) {
         self.config = config; self.mode = mode; self.floor = floor; self.campus = campus; self.onPickCampus = onPickCampus
+        self.zoomThreshold = zoomThreshold; self.layerOpacity = layerOpacity
     }
+
+    private var region: String { FloorLabConfig.regionID(floor: min(max(0, floor), config.floorCount - 1)) }
 
     public var body: some View {
         switch mode {
         case .floor, .building:
             OfficeWorldView(floors: config.plans(now: anchor),
-                            focusRegion: mode == .floor ? FloorLabConfig.regionID(floor: min(max(0, floor), config.floorCount - 1)) : nil,
-                            frame: config.frame)
+                            focusRegion: mode == .floor ? region : nil,
+                            frame: config.frame,
+                            layers: mode == .building ? WorldLayers(active: region, threshold: zoomThreshold, inactiveOpacity: layerOpacity) : nil)
         case .campus:
             FloorLabCityView(model: config.city(), campus: campus, anchor: anchor, onPickCampus: onPickCampus)
         }

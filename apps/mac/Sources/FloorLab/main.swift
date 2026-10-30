@@ -21,6 +21,8 @@ struct FloorLabRoot: View {
     @State private var mode: FloorLabMode = .floor
     @State private var floor = 0
     @State private var campus: String?
+    @State private var zoomThreshold = 0.55
+    @State private var layerOpacity = 0.18
 
     var body: some View {
         NavigationSplitView {
@@ -28,7 +30,7 @@ struct FloorLabRoot: View {
                 .navigationSplitViewColumnWidth(min: 290, ideal: 330, max: 420)
         } detail: {
             FloorLabView(config: config, mode: mode, floor: min(floor, config.floorCount - 1), campus: campus,
-                         onPickCampus: { campus = $0 })
+                         zoomThreshold: zoomThreshold, layerOpacity: layerOpacity, onPickCampus: { campus = $0 })
                 .padding(12)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(nsColor: .windowBackgroundColor))
@@ -41,6 +43,22 @@ struct FloorLabRoot: View {
                         }
                         .pickerStyle(.segmented)
                     }
+                    ToolbarItemGroup {
+                        Button("Piso inferior", systemImage: "chevron.down") { step(-1) }
+                            .keyboardShortcut(.downArrow, modifiers: [])
+                            .disabled(mode == .campus || floor <= 0)
+                        Button("Piso superior", systemImage: "chevron.up") { step(1) }
+                            .keyboardShortcut(.upArrow, modifiers: [])
+                            .disabled(mode == .campus || floor >= config.floorCount - 1)
+                    }
+                }
+                .background {
+                    Group {
+                        Button("") { step(-1) }.keyboardShortcut(.pageDown, modifiers: [])
+                        Button("") { step(1) }.keyboardShortcut(.pageUp, modifiers: [])
+                    }
+                    .opacity(0)
+                    .allowsHitTesting(false)
                 }
         }
         .onChange(of: config.floors) { _, _ in floor = min(floor, config.floorCount - 1) }
@@ -49,10 +67,15 @@ struct FloorLabRoot: View {
         }
     }
 
+    private func step(_ d: Int) {
+        guard mode != .campus else { return }
+        floor = min(max(0, min(floor, config.floorCount - 1) + d), config.floorCount - 1)
+    }
+
     private var subtitle: String {
         switch mode {
         case .floor: return config.floorTitle(min(floor, config.floorCount - 1))
-        case .building: return "\(config.floorCount) pisos y vestíbulo"
+        case .building: return "\(config.floorTitle(min(floor, config.floorCount - 1))) · \(config.floorCount) pisos y vestíbulo"
         case .campus: return campus ?? "Toda la ciudad"
         }
     }
@@ -66,13 +89,18 @@ struct FloorLabRoot: View {
                 Picker("Piso", selection: $floor) {
                     ForEach(0..<config.floorCount, id: \.self) { k in Text(config.floorTitle(k)).tag(k) }
                 }
-                .disabled(mode != .floor)
+                .disabled(mode == .campus)
                 Picker("Campus", selection: $campus) {
                     Text("Toda la ciudad").tag(String?.none)
                     ForEach(config.campusNames, id: \.self) { c in Text(c).tag(String?.some(c)) }
                 }
                 .disabled(mode != .campus)
             }
+            Section("Capas") {
+                fraction("Umbral de zoom", $zoomThreshold, 0.1...1.5)
+                fraction("Opacidad inactivas", $layerOpacity, 0...1)
+            }
+            .disabled(mode != .building)
             Section("Huella") {
                 slider("Ancho", $config.width, 300...2600)
                 slider("Fondo", $config.depth, 300...2600)
@@ -111,6 +139,18 @@ struct FloorLabRoot: View {
                 Text("\(Int(value.wrappedValue))").font(.callout.monospacedDigit()).foregroundStyle(.secondary)
             }
             Slider(value: value, in: range, step: 10)
+        }
+    }
+
+    private func fraction(_ title: String, _ value: Binding<Double>, _ range: ClosedRange<Double>) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(title)
+                Spacer()
+                Text(value.wrappedValue.formatted(.number.precision(.fractionLength(2))))
+                    .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
+            }
+            Slider(value: value, in: range)
         }
     }
 
