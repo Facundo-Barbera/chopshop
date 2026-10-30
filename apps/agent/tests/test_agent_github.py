@@ -13,6 +13,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from chopshop import settings  # noqa: E402
@@ -361,6 +362,9 @@ class TestServicio(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="chopshop-gh-svc-")
         self.addCleanup(shutil.rmtree, self.tmp, True)
+        xdg = mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": os.path.join(self.tmp, "xdg")})
+        xdg.start()
+        self.addCleanup(xdg.stop)
 
     def _svc(self, cfg, **kw):
         svc = service.AgentService(cfg, maint_first=3600, gh_projects_fn=lambda: {}, **kw)
