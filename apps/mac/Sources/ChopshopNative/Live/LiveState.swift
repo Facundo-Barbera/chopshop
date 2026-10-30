@@ -126,6 +126,10 @@ public struct LiveState: Equatable, Sendable {
                 obj["severity"] = env.severity.map { .string($0) } ?? .null
                 obj["seq"] = env.seq.map { .number(Double($0)) } ?? .null
                 obj["updated"] = env.ts.map { .string($0) } ?? .null
+                if Self.nonEmpty(obj["title"]?.string) == nil {
+                    let prev = projects[pi].tasks.first { $0["id"]?.string == sid }?["title"]?.string
+                    if let t = Self.nonEmpty(prev) ?? Self.nonEmpty(env.subject?.title) { obj["title"] = .string(t) }
+                }
                 Self.upsert(&projects[pi].tasks, key: "id", value: sid, obj)
             } else if typ.hasPrefix("batch."), let bid = body["batch"]?.string, !bid.isEmpty {
                 let old = projects[pi].batches.first { $0["id"]?.string == bid } ?? [:]

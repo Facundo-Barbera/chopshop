@@ -109,9 +109,10 @@ public struct CityModel: Equatable, Sendable {
     public var buildings: [CityBuilding]
     public var groundX: Double
     public var groundY: Double
+    public var perProject: Bool
 
-    public init(buildings: [CityBuilding], groundX: Double, groundY: Double) {
-        self.buildings = buildings; self.groundX = groundX; self.groundY = groundY
+    public init(buildings: [CityBuilding], groundX: Double, groundY: Double, perProject: Bool = false) {
+        self.buildings = buildings; self.groundX = groundX; self.groundY = groundY; self.perProject = perProject
     }
 
     public var floors: [CityFloor] { buildings.flatMap(\.floors) }
@@ -218,7 +219,7 @@ public struct CityModel: Equatable, Sendable {
         let rows = max(1, (companies.count + cols - 1) / cols)
         let gx = 2 * CityGeo.margin + Double(cols - 1) * CityGeo.pitchX + CityGeo.footprintW
         let gy = 2 * CityGeo.margin + Double(rows - 1) * CityGeo.pitchY + CityGeo.footprintD
-        return CityModel(buildings: buildings, groundX: gx, groundY: gy)
+        return CityModel(buildings: buildings, groundX: gx, groundY: gy, perProject: perProject)
     }
 
     static func split(_ p: LiveState.Project, _ o: CityOffice) -> (floors: [LiveState.Project], lobby: LiveState.Project) {

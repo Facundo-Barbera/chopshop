@@ -95,7 +95,10 @@ def _apply(state, env):
     if p is not None:
         sid = (env.get("subject") or {}).get("id")
         if typ == "task.state" and sid is not None:
-            _upsert(p["tasks"], "id", sid, dict(_clean(body), id=sid, severity=env.get("severity"), seq=seq, updated=env.get("ts")))
+            prev = next((t for t in p["tasks"] if t.get("id") == sid), {})
+            task = dict(_clean(body), id=sid, severity=env.get("severity"), seq=seq, updated=env.get("ts"))
+            task["title"] = task.get("title") or prev.get("title") or (env.get("subject") or {}).get("title")
+            _upsert(p["tasks"], "id", sid, task)
         elif typ.startswith("batch.") and body.get("batch"):
             old = next((b for b in p["batches"] if b["id"] == body["batch"]), {})
             new = dict(old, **{k: v for k, v in _clean(body).items() if k != "batch"})

@@ -1,7 +1,7 @@
 {
   "name": "@chopshop/mac",
   "private": true,
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "Chopshop.app (SwiftUI + WKWebView): cliente puro de la API del agente. Solo compila en macOS: `pnpm app` desde la raíz.",
   "scripts": {
     "app": "bash build.sh",

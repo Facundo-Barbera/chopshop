@@ -79,7 +79,8 @@ public enum SnapshotMapper {
         let phase = t["phase"]?.string
         let nd = att?.needs ?? (phase == "waiting" ? Self.needs(fromAttention: t["attention"]?.string) : nil)
         let q = nd == nil ? nil : s.questions[key]
-        var m = MockTask(id: id, title: nonEmpty(t["title"]?.string) ?? id, kind: Self.kind(phase: phase, needs: nd, hasQuestion: q != nil))
+        let title = nonEmpty(t["title"]?.string) ?? nonEmpty(t["thread_id"]?.string).flatMap { s.title(ofThread: $0) } ?? s.title(ofThread: id) ?? id
+        var m = MockTask(id: id, title: title, kind: Self.kind(phase: phase, needs: nd, hasQuestion: q != nil))
         m.link = nonEmpty(t["link"]?.string).flatMap(URL.init(string:))
         m.threadID = nonEmpty(t["thread_id"]?.string)
         m.result = nonEmpty(t["result"]?.string)

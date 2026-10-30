@@ -187,7 +187,10 @@ public struct CityView: View {
         return VStack(alignment: .leading, spacing: 18) {
             ZStack(alignment: .leading) {
                 CityStatusLine(needsYou: model.needsYouCount, stuck: model.stuckCount, running: model.runningCount).opacity(CityTransition.chromeOut(ch))
-                if let pr = target, ch > 0 { CityStatusLine(summary: snapshot.summary(of: pr)).opacity(CityTransition.chromeIn(ch)) }
+                if let pr = target, ch > 0 {
+                    if let plan = targetPlan { floorStatus(plan, now: officeNow ?? Date()).opacity(CityTransition.chromeIn(ch)) }
+                    else { CityStatusLine(summary: snapshot.summary(of: pr)).opacity(CityTransition.chromeIn(ch)) }
+                }
             }
             card(p: p, t: t, office: office, chrome: ch)
         }
@@ -221,6 +224,13 @@ public struct CityView: View {
         model.floors.reduce(0) { $0 + lights.windows($1.id, t: t).filter { $0 > 0.5 }.count }
     }
 
+    private func floorStatus(_ plan: FloorPlan, now: Date) -> CityStatusLine {
+        let ids = plan.desks.map(\.id) + plan.lobby.map { "lobby:\($0.threadID)" }
+        let vs = ids.compactMap { plan.occupant(of: $0, now: now)?.visual }
+        return CityStatusLine(needsYou: vs.filter { $0 == .needsYou }.count, stuck: vs.filter { $0 == .stuck }.count,
+                              running: vs.filter { $0 == .running }.count)
+    }
+
     private func officeHeader(now: Date) -> (title: String, count: String)? {
         guard let pr = target else { return nil }
         if let plan = targetPlan {
@@ -235,7 +245,7 @@ public struct CityView: View {
         let o = ch > 0 ? officeHeader(now: officeNow ?? Date()) : nil
         return HStack(alignment: .firstTextBaseline) {
             ZStack(alignment: .leading) {
-                Text("Todas las empresas").opacity(CityTransition.chromeOut(ch))
+                Text(model.perProject ? "Todos los proyectos" : "Todas las empresas").opacity(CityTransition.chromeOut(ch))
                 if let o { Text(o.title).opacity(CityTransition.chromeIn(ch)) }
             }
             .font(.callout.weight(.medium))

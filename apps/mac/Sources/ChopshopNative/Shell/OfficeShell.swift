@@ -41,7 +41,7 @@ public struct OfficeShell<World: View, Unpaired: View>: View {
 
     private var stage: some View {
         let city = CityModel.build(store.state, perProject: true)
-        return ZStack(alignment: .bottomLeading) {
+        return ZStack(alignment: .bottomTrailing) {
             world(ShellWorldContext(focus: shell.state.focus, ownsEscape: !shell.state.paletteOpen && shell.state.inspector == nil,
                                     select: { shell.state.select($0) }))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

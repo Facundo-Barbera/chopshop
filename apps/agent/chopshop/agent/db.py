@@ -149,7 +149,6 @@ def _migrate_v6(conn):
     _add_columns(conn, V6_COLUMNS)
 
 
-# v7: `heartbeats` por suscripción (NULL/0 = no se entregan los latidos de `listener.state`).
 V7_COLUMNS = {"subscriptions": (("heartbeats", "INTEGER"),)}
 
 
