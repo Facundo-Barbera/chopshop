@@ -157,10 +157,10 @@ class TestDesks(unittest.TestCase):
         self.prof = miniyaml.load(EXAMPLE)
 
     def test_ids_and_order(self):
-        ds = L.desks(self.prof)
+        ds = [d for d in L.desks(self.prof) if d["role"] != L.FLEX_ROLE]
         self.assertEqual(len(ds), 10)
         self.assertEqual(ds[0], {"id": "awesome-gb/0/triage/0", "project": "awesome-gb", "floor": 0, "role": "triage",
-                                 "slot": 0, "permanent": True})
+                                 "slot": 0, "permanent": True, "zone": "room"})
         self.assertEqual([d["id"] for d in ds if d["role"] == "backend"],
                          ["awesome-gb/0/backend/%d" % i for i in range(4)])
         self.assertEqual(ds[-1]["id"], "awesome-gb/1/docs/1")
@@ -174,7 +174,7 @@ class TestDesks(unittest.TestCase):
         be = next(r for r in st["floors"][0]["rooms"] if r["role"] == "backend")
         self.assertEqual([(d["slot"], d["retired"]) for d in be["desks"]], [(0, False), (1, False), (2, False), (3, False),
                                                                             (5, True)])
-        self.assertEqual(st["floors"][2]["rooms"], [{"role": "qa", "permanent": False,
+        self.assertEqual(st["floors"][2]["rooms"], [{"role": "qa", "permanent": False, "flex": False,
                                                      "desks": [{"id": "awesome-gb/2/qa/0", "slot": 0, "retired": True}]}])
         self.assertTrue(st["floors"][0]["rooms"][0]["permanent"])
 

@@ -56,6 +56,11 @@
       "machine_rooms": [],
       "name": "awesome-gb",
       "office": {
+        "capacity": {
+          "flex_per_floor": 0,
+          "max_extra_floors": 0,
+          "outsourcing": false
+        },
         "company": "Awesome GB",
         "floors": [
           {
@@ -73,6 +78,7 @@
                     "slot": 0
                   }
                 ],
+                "flex": false,
                 "permanent": true,
                 "role": "triage"
               },
@@ -108,7 +114,8 @@
                       "since": "2027-01-15T08:03:00.000Z",
                       "thread_id": "mcp:b7",
                       "title": "[be] login con passkeys",
-                      "touched_at": null
+                      "touched_at": null,
+                      "zone": "room"
                     },
                     "retired": false,
                     "slot": 0
@@ -129,10 +136,12 @@
                     "slot": 1
                   }
                 ],
+                "flex": false,
                 "permanent": false,
                 "role": "backend"
               }
-            ]
+            ],
+            "temporary": false
           },
           {
             "index": 1,
@@ -154,20 +163,24 @@
                       "since": "2027-01-15T08:01:00.000Z",
                       "thread_id": "mcp:f1",
                       "title": "[fe] tema",
-                      "touched_at": null
+                      "touched_at": null,
+                      "zone": "room"
                     },
                     "retired": false,
                     "slot": 0
                   }
                 ],
+                "flex": false,
                 "permanent": false,
                 "role": "frontend"
               }
-            ]
+            ],
+            "temporary": false
           }
         ],
         "half_life_s": 600.0,
-        "machine_rooms": []
+        "machine_rooms": [],
+        "outsourced": null
       },
       "tasks": [
         {
@@ -311,7 +324,7 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCC5Y3S0F8YH6PV8TEN7BCGJ",
+      "id": "01MCC5Y3S0GH30FAC6FPVDS34H",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
@@ -336,7 +349,7 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCC5Y3S0F8YH6PV8TEN7BCGH",
+      "id": "01MCC5Y3S0GH30FAC6FPVDS34G",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
@@ -353,6 +366,11 @@
     {
       "body": {
         "by": "profile",
+        "capacity": {
+          "flex_per_floor": 0,
+          "max_extra_floors": 0,
+          "outsourcing": false
+        },
         "company": "Awesome GB",
         "diff": {
           "added": [],
@@ -374,6 +392,7 @@
                     "slot": 0
                   }
                 ],
+                "flex": false,
                 "permanent": true,
                 "role": "triage"
               },
@@ -390,10 +409,12 @@
                     "slot": 1
                   }
                 ],
+                "flex": false,
                 "permanent": false,
                 "role": "backend"
               }
-            ]
+            ],
+            "temporary": false
           },
           {
             "index": 1,
@@ -407,21 +428,24 @@
                     "slot": 0
                   }
                 ],
+                "flex": false,
                 "permanent": false,
                 "role": "frontend"
               }
-            ]
+            ],
+            "temporary": false
           }
         ],
         "half_life_s": 600.0,
         "machine_rooms": [],
+        "outsourced": null,
         "project": "awesome-gb"
       },
       "cause": {
         "depth": 0,
         "id": null
       },
-      "id": "01MCC5Y3S0F8YH6PV8TEN7BCGG",
+      "id": "01MCC5Y3S0GH30FAC6FPVDS34F",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
@@ -444,13 +468,14 @@
         "role": "backend",
         "since": "2027-01-15T08:03:00.000Z",
         "thread_id": "mcp:b8",
-        "title": "[be] segundo"
+        "title": "[be] segundo",
+        "zone": "room"
       },
       "cause": {
         "depth": 0,
         "id": null
       },
-      "id": "01MCC5Y3S0F8YH6PV8TEN7BCGF",
+      "id": "01MCC5Y3S0GH30FAC6FPVDS34E",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
@@ -492,7 +517,7 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCC5Y3S0F8YH6PV8TEN7BCGE",
+      "id": "01MCC5Y3S0GH30FAC6FPVDS34D",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
@@ -518,7 +543,7 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCC5Y3S0F8YH6PV8TEN7BCGD",
+      "id": "01MCC5Y3S0GH30FAC6FPVDS34C",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
@@ -550,13 +575,14 @@
         "role": "backend",
         "since": "2027-01-15T08:03:00.000Z",
         "thread_id": "mcp:b7",
-        "title": "[be] login con passkeys"
+        "title": "[be] login con passkeys",
+        "zone": "room"
       },
       "cause": {
         "depth": 0,
         "id": null
       },
-      "id": "01MCC5Y3S0F8YH6PV8TEN7BCGC",
+      "id": "01MCC5Y3S0GH30FAC6FPVDS34B",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
@@ -581,7 +607,7 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCC5Y3S0F8YH6PV8TEN7BCGB",
+      "id": "01MCC5Y3S0GH30FAC6FPVDS34A",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
@@ -622,7 +648,7 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCC5Y3S0F8YH6PV8TEN7BCGA",
+      "id": "01MCC5W960R9BPBTPZC1CPN0ZF",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
@@ -665,7 +691,7 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCC5Y3S0F8YH6PV8TEN7BCG9",
+      "id": "01MCC5TEK0PE7MX1RXMX3BNY4M",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
@@ -691,7 +717,7 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCC5Y3S0F8YH6PV8TEN7BCG8",
+      "id": "01MCC5TEK0PE7MX1RXMX3BNY4K",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
@@ -715,13 +741,14 @@
         "role": "frontend",
         "since": "2027-01-15T08:01:00.000Z",
         "thread_id": "mcp:f1",
-        "title": "[fe] tema"
+        "title": "[fe] tema",
+        "zone": "room"
       },
       "cause": {
         "depth": 0,
         "id": null
       },
-      "id": "01MCC5Y3S0F8YH6PV8TEN7BCG7",
+      "id": "01MCC5TEK0PE7MX1RXMX3BNY4J",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
@@ -745,13 +772,14 @@
         "role": "backend",
         "since": "2027-01-15T08:01:00.000Z",
         "thread_id": "mcp:a1",
-        "title": "[be] sesión"
+        "title": "[be] sesión",
+        "zone": "room"
       },
       "cause": {
         "depth": 0,
         "id": null
       },
-      "id": "01MCC5Y3S0F8YH6PV8TEN7BCG6",
+      "id": "01MCC5TEK0PE7MX1RXMX3BNY4H",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
@@ -793,7 +821,7 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCC5Y3S0F8YH6PV8TEN7BCG5",
+      "id": "01MCC5RM003ZW1MT41G39T4MJE",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
@@ -835,7 +863,7 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCC5Y3S0F8YH6PV8TEN7BCG4",
+      "id": "01MCC5RM003ZW1MT41G39T4MJD",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
@@ -877,7 +905,7 @@
         "depth": 0,
         "id": null
       },
-      "id": "01MCC5Y3S0F8YH6PV8TEN7BCG3",
+      "id": "01MCC5RM003ZW1MT41G39T4MJC",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
@@ -895,6 +923,11 @@
     {
       "body": {
         "by": "profile",
+        "capacity": {
+          "flex_per_floor": 0,
+          "max_extra_floors": 0,
+          "outsourcing": false
+        },
         "company": "Awesome GB",
         "diff": {
           "added": [
@@ -919,6 +952,7 @@
                     "slot": 0
                   }
                 ],
+                "flex": false,
                 "permanent": true,
                 "role": "triage"
               },
@@ -935,10 +969,12 @@
                     "slot": 1
                   }
                 ],
+                "flex": false,
                 "permanent": false,
                 "role": "backend"
               }
-            ]
+            ],
+            "temporary": false
           },
           {
             "index": 1,
@@ -952,21 +988,24 @@
                     "slot": 0
                   }
                 ],
+                "flex": false,
                 "permanent": false,
                 "role": "frontend"
               }
-            ]
+            ],
+            "temporary": false
           }
         ],
         "half_life_s": 600.0,
         "machine_rooms": [],
+        "outsourced": null,
         "project": "awesome-gb"
       },
       "cause": {
         "depth": 0,
         "id": null
       },
-      "id": "01MCC5Y3S0F8YH6PV8TEN7BCG2",
+      "id": "01MCC5RM003ZW1MT41G39T4MJB",
       "machine": "contabo-dev",
       "needs": null,
       "project": "awesome-gb",
