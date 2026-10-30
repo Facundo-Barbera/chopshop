@@ -12,7 +12,6 @@ struct PairingView: View {
 
     enum Phase: Equatable { case idle, pairing, paired, failed(String) }
     @State private var code = ""
-    @State private var token = ""
     @State private var phase: Phase = .idle
 
     private var paired: Bool { _ = model.pairingRevision; return model.isPaired(agent.name) }
@@ -28,7 +27,10 @@ struct PairingView: View {
                     Text(agent.url).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                 }
                 Spacer(minLength: 6)
-                if paired {
+                if paired && agent.isRelay {
+                    Text("Sesión iniciada").font(.caption).foregroundStyle(.secondary)
+                    Button("Cerrar sesión") { model.unpair(agent: agent.name); phase = .idle }
+                } else if paired {
                     Text("Emparejado").font(.caption).foregroundStyle(.secondary)
                     Button("Desemparejar") { model.unpair(agent: agent.name); phase = .idle }
                         .help("Borra la credencial de este Mac del Llavero. Para revocarla también en el agente: chopshop pair revoke <id>")
@@ -36,16 +38,8 @@ struct PairingView: View {
             }
             if !paired && agent.isRelay {
                 HStack(spacing: 8) {
-                    SecureField("cr1_…", text: $token)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.body.monospaced())
-                        .frame(width: 260)
-                        .onSubmit(saveToken)
-                    Button("Guardar token", action: saveToken)
-                        .disabled(!AgentClient.isRelayToken(token.trimmingCharacters(in: .whitespacesAndNewlines)))
-                }
-                if case .failed(let m) = phase {
-                    Text(m).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+                    Text("Usa tu sesión de Chopshop (correo y contraseña).").font(.caption).foregroundStyle(.secondary)
+                    Button("Iniciar sesión…") { model.showLogin() }
                 }
             } else if !paired {
                 Text("En la máquina del agente ejecuta `chopshop pair create --name \"\(model.deviceName)\"` y escribe aquí el código (caduca en 10 minutos).")
@@ -72,15 +66,6 @@ struct PairingView: View {
             } else if phase == .paired {
                 Text("Listo: la credencial quedó en el Llavero de este Mac.").font(.caption).foregroundStyle(.secondary)
             }
-        }
-    }
-
-    private func saveToken() {
-        if let err = model.saveRelayToken(agent: agent.name, token: token) {
-            phase = .failed(err)
-        } else {
-            phase = .paired
-            token = ""
         }
     }
 

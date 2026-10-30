@@ -64,12 +64,21 @@ public final class InMemoryCredentialStore: CredentialStore, @unchecked Sendable
 public final class KeychainCredentialStore: CredentialStore, @unchecked Sendable {
     public static let service = "com.chopshop.agent"
     public static let relayService = "com.chopshop.relay"
+    public static let sessionService = "com.chopshop.session"
     public let service: String
     private let lock = NSLock()
     private var cache: [String: String] = [:]
     private var cachedAccounts: [String]?
 
     public init(service: String = KeychainCredentialStore.service) { self.service = service }
+
+    private var label: String {
+        switch service {
+        case Self.relayService: return "Chopshop · relay "
+        case Self.sessionService: return "Chopshop · sesión "
+        default: return "Chopshop · agente "
+        }
+    }
 
     private func base(_ account: String? = nil) -> [String: Any] {
         var q: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
@@ -101,7 +110,7 @@ public final class KeychainCredentialStore: CredentialStore, @unchecked Sendable
         let data = Data(credential.utf8)
         let attrs: [String: Any] = [kSecValueData as String: data,
                                     kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
-                                    kSecAttrLabel as String: (service == Self.relayService ? "Chopshop · relay " : "Chopshop · agente ") + account]
+                                    kSecAttrLabel as String: label + account]
         var st = SecItemUpdate(base(account) as CFDictionary, attrs as CFDictionary)
         if st == errSecItemNotFound {
             var q = base(account)
@@ -147,6 +156,11 @@ public final class FileCredentialStore: CredentialStore, @unchecked Sendable {
     public static var devRelay: FileCredentialStore {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Chopshop Dev")
         return FileCredentialStore(url: dir.appendingPathComponent("relay-credentials.json"))
+    }
+
+    public static var devSession: FileCredentialStore {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Chopshop Dev")
+        return FileCredentialStore(url: dir.appendingPathComponent("session-credentials.json"))
     }
 
     public let url: URL
