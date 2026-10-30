@@ -1,7 +1,5 @@
 packages:
-  - "apps/ui"
-  - "apps/agent"
-  - "apps/mac"
+  - "apps/*"
   - "packages/*"
 allowBuilds:
   esbuild: true

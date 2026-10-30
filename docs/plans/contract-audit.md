@@ -27,10 +27,10 @@ Contratos auditados: **K1** = `docs/relay-protocol.md` + `packages/api/relay/` (
 | A4 | `apps/agent/chopshop/agent/relay.py` (`RelayLink`: WebSocket, `hello`→`welcome`, envío, ping) |
 | E9 | `agent/service.py` (`_employee_event`, `employees_sync`, `_emit_queue`), `agent/projection.py`, `employees.py`, `queue.py` |
 | E11 | `apps/agent/chopshop/dispatcher.py` (`close`: asentar y cerrar), `queue.finish` |
-| R3 | `packages/relay/src/pair.ts` (pairing, revocación) |
-| R4 | `packages/relay/src/agentws.ts` (WebSocket del agente) |
-| R5 | `packages/relay/src/viewer.ts` (`GET /stream` SSE, `GET /state`) |
-| R6 | `packages/relay/src/routes.ts` + `index.ts` (rutas por rol, `GET /whoami`) |
+| R3 | `apps/relay/src/pair.ts` (pairing, revocación) |
+| R4 | `apps/relay/src/agentws.ts` (WebSocket del agente) |
+| R5 | `apps/relay/src/viewer.ts` (`GET /stream` SSE, `GET /state`) |
+| R6 | `apps/relay/src/routes.ts` + `index.ts` (rutas por rol, `GET /whoami`) |
 | M2 | `apps/mac/Sources/ChopshopUI/AgentClient.swift` (`fetchRelaySnapshot`, `RelayView`) |
 | M3 | `apps/mac/Sources/ChopshopNative/Live/LiveStateEmployees.swift` |
 | M5 | `apps/mac/Sources/ChopshopUI/RelayLogin.swift` |
@@ -126,7 +126,7 @@ que no: F7). Por el relay (A2) todos salen con `subject.id` = empleado o tarea, 
   no salía `task.enqueued`, `queue.changed` ni `task.cancelled`, y la Mac (M3/M8) no se enteraba hasta recargar el estado. Ahora
   escriben en el bus con el mismo `machine_id` (el `/stream` del agente revisa la DB por si otro proceso escribió).
 - **F4** `packages/api/fixtures/snapshot.office.json`: dos `q:` con la letra `O` (no es Crockford) no validaban el schema.
-- **F5** `packages/relay/src/index.ts` + `agentws.ts`: `DELETE /v1/tokens/<id>` no cerraba el WebSocket del agente, aunque K1
+- **F5** `apps/relay/src/index.ts` + `agentws.ts`: `DELETE /v1/tokens/<id>` no cerraba el WebSocket del agente, aunque K1
   lo promete. Ahora manda `error unauthorized` con `close: true` y cierra con 4401.
 - **F6** `agent/relay.py`: margen frente a las cuotas del relay. A4 revisaba el snapshot cada 5,0 s y mandaba 50 eventos por
   tick, justo en el límite (1 snapshot cada 5 s, 50 eventos/s medidos al llegar): con jitter de red salía `rate_limited` y el
