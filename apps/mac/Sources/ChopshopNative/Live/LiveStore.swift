@@ -39,6 +39,9 @@ public final class LiveStore: ObservableObject {
     private var revoked: (() -> Void)?
     /// Sube en cada `connect`/`disconnect`: los mensajes de una conexión vieja se descartan.
     private var generation = 0
+    private var relayMode = false
+    private var relayWhy = ""
+    private var relayMachines: [String: LiveState.RelayMachine] = [:]
 
     public init(backoff: Backoff = Backoff(), coalesceInterval: Double = 0.1, clock: @escaping () -> Date = { Date() },
                 sleep: @escaping @Sendable (Double) async -> Void = { s in try? await Task.sleep(nanoseconds: UInt64(max(0, s) * 1_000_000_000)) }) {
@@ -72,6 +75,7 @@ public final class LiveStore: ObservableObject {
     public func reset() {
         disconnect()
         remotes = [:]; local = LiveState(); lastEventID = nil; machine = nil; awaitingState = false; failures = 0
+        relayMode = false; relayMachines = [:]
         status = .idle
         flush()
     }
@@ -134,7 +138,30 @@ public final class LiveStore: ObservableObject {
         }
     }
 
-    public func ingest(relaySnapshots: [JSONValue]) {
+    public func connectRelay() {
+        reset()
+        relayMode = true
+        status = .connecting
+    }
+
+    public var relayRetryDelay: Double? { relayMode && failures > 0 ? backoff.delay(attempt: failures) : nil }
+
+    public func relayRetrying() {
+        guard relayMode, failures > 0 else { return }
+        status = .reconnecting("intento \(failures + 1) · \(relayWhy)")
+    }
+
+    public func relayFailed(_ why: String, retry: Bool) {
+        guard relayMode else { return }
+        relayWhy = why
+        guard retry else { failures = 0; status = .disconnected(why); return }
+        failures += 1
+        status = .disconnected("\(why) · reintento en \(Int(backoff.delay(attempt: failures))) s")
+    }
+
+    public func ingest(relaySnapshots: [JSONValue], machines: [JSONValue]? = nil) {
+        if let machines { relayMachines = LiveState.relayMachines(machines) }
+        if relayMode { failures = 0; status = .live }
         var next: [String: LiveState] = [:]
         for j in relaySnapshots {
             guard let st = LiveState(relaySnapshot: j), let m = st.machine else { continue }
@@ -148,6 +175,7 @@ public final class LiveStore: ObservableObject {
     private func remerge() {
         let others = remotes.filter { $0.key != local.machine || local.headSeq == 0 }.sorted { $0.key < $1.key }
         state = others.reduce(local) { $0.merging($1.value) }
+        state.relayMachines = relayMachines
     }
 
     private func publish() {

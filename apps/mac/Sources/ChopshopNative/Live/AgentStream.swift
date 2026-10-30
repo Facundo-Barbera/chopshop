@@ -17,6 +17,7 @@ public enum StreamStatus: Equatable, Sendable {
     case connecting
     case live
     case reconnecting(String)
+    case disconnected(String)
     /// 401: la credencial ya no vale (revocada); hay que emparejar de nuevo.
     case unauthorized
     case noCredential
