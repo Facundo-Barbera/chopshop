@@ -269,8 +269,10 @@ final class AgentClient {
         }
         r.role = ((state["user"] as? [String: Any])?["role"] as? String) == "watcher" ? .viewer : .admin
         let snaps = (state["snapshots"] as? [[String: Any]] ?? []).map(RelayView.machineSnapshot)
+        let keys = (try? JSONSerialization.data(withJSONObject: state))
+            .flatMap { try? JSONDecoder().decode(BackendState.self, from: $0) }?.machineKeys() ?? [:]
         let info: [[String: Any]] = (state["machines"] as? [[String: Any]] ?? []).map { m in
-            var o: [String: Any] = ["machine_id": m["name"] ?? m["id"] ?? "", "online": (m["online"] as? Bool ?? false) && (m["paused"] as? Bool) != true,
+            var o: [String: Any] = ["machine_id": (m["id"] as? String).flatMap { keys[$0] } ?? m["name"] ?? m["id"] ?? "", "online": (m["online"] as? Bool ?? false) && (m["paused"] as? Bool) != true,
                                     "stale": m["stale"] as? Bool ?? true]
             for k in ["seq", "snapshot_age_s"] { if let v = m[k] { o[k] = v } }
             return o
