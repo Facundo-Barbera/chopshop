@@ -369,6 +369,30 @@ Notas (`agent/notes.py`, tabla `desk_notes`): el escritorio debe estar declarado
 consumir y sin caducar. Las consume el hilo que despierta en el escritorio (`notes.consume` + `notes.prompt_block` para su
 prompt); el mantenimiento borra las consumidas o caducadas con más de 7 días.
 
+### Colas de empleados y despachador (`[agent.dispatcher]`, opt-in)
+
+Las colas de los empleados (`docs/employees.md`) las llena también el proceso MCP (`task_enqueue`/`task_cancel`), que escribe
+en la misma SQLite sin emitir sobres. El hilo `dispatcher` del agente (solo si `[agent.dispatcher] enabled = true`, apagado por
+defecto porque **lanza hilos de T3**, y solo si algún perfil declara escritorios permanentes), cada `interval` s (5):
+
+1. **anuncia** lo que otro proceso cambió: `task.enqueued` (mismo id que la tarea, `q:<id>`) de cada tarea en cola que aún no
+   tiene su sobre y `task.cancelled phase: queued` de cada cancelación de la última hora sin el suyo, cada uno seguido de su
+   `queue.changed` (con `cause`). Es idempotente (mira el bus), así que también recupera lo encolado con el agente parado;
+2. **cierra** los hilos de escritorio terminados (`dispatcher.Dispatcher.close`: settle en T3, la tarea de cola pasa a
+   `done`/`failed`) y libera su escritorio (`desk.released reason: manual` → `employee.idle reason: done|failed`; si el hilo
+   nunca llegó a sentarse, `employee.idle` sale directo);
+3. **despacha**: mientras haya menos de `max_threads` (2) hilos de escritorio vivos en total, saca la primera tarea de la cola de
+   cada empleado libre (`queue.changed reason: dequeued`) y la lanza como lote de una tarea del motor (`role`, `desk`, `qtask`);
+4. cuando la tarea tiene `threadId`, la oficina sienta el hilo en el escritorio (`desk.assigned reason: wake`, mismo reintento
+   que los roles) y sale `employee.assigned {reason: queue, task: <tarea de cola>}`.
+
+Sin el despachador habilitado o sin empleados declarados el agente no hace nada de esto (la cola se ve igual en `/state` y
+`/snapshot`).
+
+| Método y ruta | Descripción |
+|---|---|
+| `POST /queue/cancel` | `{employee, task, by?, note?}` (`by` por defecto `human`) → cancela una tarea **en cola** (`task.cancelled {phase: queued, reason: manual}` + `queue.changed reason: cancelled`) → `{ok, task, employee, state: "cancelled", queue_len}`. 404 si la tarea no existe, es de otro empleado o ya salió de la cola; 400 si el cuerpo es inválido. Exige permiso de escritura. Funciona aunque el despachador esté apagado |
+
 ## Suscripciones (webhooks v2)
 
 Cada suscripción es **un webhook** (la URL vive en `webhook_file`, primera línea, 0600) que recibe el **sobre completo** (§2.1 del
