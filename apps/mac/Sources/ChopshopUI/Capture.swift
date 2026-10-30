@@ -5,6 +5,7 @@ import Foundation
 /// Captura de pantalla desde dentro de la app (para documentación/iteración de diseño).
 /// `screencapture` por ssh no tiene permiso de grabación de pantalla; una app sí puede
 /// leer sus propias ventanas. Protocolo: escribir "<sección> <ruta.png>" en /tmp/chopshop-shot.req.
+/// `settings` abre la hoja de ajustes y captura la hoja; cualquier otra sección la cierra.
 @MainActor
 enum Capture {
     static let requestPath = "/tmp/chopshop-shot.req"
@@ -48,7 +49,11 @@ enum Capture {
             if v.count == 4 { drag(x: v[0], y: v[1], dx: v[2], dy: v[3], report: parts[1]) }
             return
         }
-        if parts[0].hasPrefix("project:") { model.nav = .project(String(parts[0].dropFirst(8))) }
+        let sheet = parts[0] == "settings"
+        model.showSettings = sheet
+        if sheet {
+            // la hoja se abre encima de la sección actual
+        } else if parts[0].hasPrefix("project:") { model.nav = .project(String(parts[0].dropFirst(8))) }
         else if parts[0].hasPrefix("machine:") { model.nav = .machine(String(parts[0].dropFirst(8))) }
         else if let s = Section(rawValue: parts[0]) { model.nav = s == .machines ? .machines : .section(s) }
         let out = parts[1]
@@ -60,7 +65,7 @@ enum Capture {
             delay = 2.0
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-            let ok = snap(to: out)
+            let ok = snap(to: out, sheet: sheet)
             try? (ok ? "ok" : "fail").write(toFile: out + ".done", atomically: true, encoding: .utf8)
         }
     }
@@ -102,7 +107,10 @@ enum Capture {
         }
     }
 
-    private static var mainWindow: NSWindow? { NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }) }
+    /// Ventana principal (con título y que no sea una hoja).
+    private static var mainWindow: NSWindow? {
+        NSApp.windows.first(where: { $0.isVisible && $0.styleMask.contains(.titled) && $0.sheetParent == nil })
+    }
 
     /// Clic dentro del proceso (sin permiso de Accesibilidad): mouseDown/mouseUp entregados a la ventana principal.
     static func click(x: Double, y: Double) {
@@ -116,8 +124,8 @@ enum Capture {
         }
     }
 
-    static func snap(to path: String) -> Bool {
-        guard let win = mainWindow else { return false }
+    static func snap(to path: String, sheet: Bool = false) -> Bool {
+        guard let main = mainWindow, let win = sheet ? main.attachedSheet : main else { return false }
         typealias Fn = @convention(c) (CGRect, UInt32, UInt32, UInt32) -> Unmanaged<CGImage>?
         guard let sym = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "CGWindowListCreateImage") else { return false }
         let fn = unsafeBitCast(sym, to: Fn.self)
