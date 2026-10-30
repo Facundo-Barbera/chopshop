@@ -26,7 +26,12 @@ public struct OfficeShell<World: View, Unpaired: View>: View {
             case .noCredential, .unauthorized:
                 unpaired.frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(nsColor: .windowBackgroundColor))
             default:
-                stage
+                NavigationSplitView {
+                    ShellSidebarView(sections: shell.state.sections, selection: shell.state.section) { shell.state.open($0) }
+                        .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 280)
+                } detail: {
+                    stage
+                }
             }
         }
         .toolbar {
@@ -57,12 +62,16 @@ public struct OfficeShell<World: View, Unpaired: View>: View {
     private var stage: some View {
         let city = CityModel.build(store.state, perProject: true)
         return ZStack(alignment: .bottomTrailing) {
-            world(ShellWorldContext(focus: shell.state.focus, ownsEscape: !shell.state.paletteOpen && shell.state.inspector == nil,
-                                    back: shell.state.backToken, select: { shell.state.select($0) }))
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            if shell.state.minimap, !city.buildings.isEmpty {
-                ShellMinimapView(model: city, focused: shell.state.focus?.target.project) { shell.state.go(.project($0)) }
-                    .padding(16)
+            if shell.state.section == .city {
+                world(ShellWorldContext(focus: shell.state.focus, ownsEscape: !shell.state.paletteOpen && shell.state.inspector == nil,
+                                        back: shell.state.backToken, select: { shell.state.select($0) }))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if shell.state.minimap, !city.buildings.isEmpty {
+                    ShellMinimapView(model: city, focused: shell.state.focus?.target.project) { shell.state.go(.project($0)) }
+                        .padding(16)
+                }
+            } else {
+                ShellSectionPlaceholder(section: shell.state.section)
             }
         }
         .overlay(alignment: .bottom) {
@@ -88,6 +97,71 @@ public struct OfficeShell<World: View, Unpaired: View>: View {
         }
         .animation(.snappy(duration: 0.18), value: shell.state.paletteOpen)
         .animation(.easeOut(duration: 0.2), value: shell.notice)
+    }
+}
+
+// MARK: - Barra lateral
+
+@available(macOS 26.0, *)
+struct ShellSidebarView: View {
+    let sections: [ShellSection]
+    let selection: ShellSection
+    var flat = false
+    let pick: (ShellSection) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(sections) { s in
+                ShellSidebarRow(section: s, on: s == selection) { pick(s) }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10).padding(.top, flat ? 12 : 6)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+}
+
+@available(macOS 26.0, *)
+struct ShellSidebarRow: View {
+    let section: ShellSection
+    let on: Bool
+    let action: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: section.symbol).font(.system(size: 13, weight: .medium)).frame(width: 18)
+                    .foregroundStyle(on ? Color.primary : Color.secondary)
+                Text(section.title).font(.system(size: 13, weight: on ? .semibold : .regular))
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10).frame(height: 30)
+            .background {
+                RoundedRectangle(cornerRadius: Chrome.rowRadius + 1, style: .continuous)
+                    .fill(on ? Color.primary.opacity(0.1) : (hover ? Chrome.wash : .clear))
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .accessibilityLabel(section.title)
+        .accessibilityAddTraits(on ? .isSelected : [])
+    }
+}
+
+@available(macOS 26.0, *)
+struct ShellSectionPlaceholder: View {
+    let section: ShellSection
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: section.symbol).font(.system(size: 30, weight: .light)).foregroundStyle(.tertiary)
+            Text(section.title).font(.title3.weight(.semibold))
+            Text(section.subtitle).font(.callout).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 }
 
