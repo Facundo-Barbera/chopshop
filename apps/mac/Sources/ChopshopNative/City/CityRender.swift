@@ -583,8 +583,9 @@ struct CityRenderer {
             let z1 = z0 + fh * r
             // losa
             var gs = g
-            box(&gs, R.x0 - so, R.y0 - so, R.x1 + so, R.y1 + so, z0, min(z1, z0 + CityGeo.slabH), band(st, tn.amber, tn.red), edge: bandEdge(st))
-            let zb = z0 + CityGeo.slabH, hh = z1 - zb
+            let sh = CityGeo.slabH * b.heightScale, sx = so * b.heightScale
+            box(&gs, R.x0 - sx, R.y0 - sx, R.x1 + sx, R.y1 + sx, z0, min(z1, z0 + sh), band(st, tn.amber, tn.red), edge: bandEdge(st))
+            let zb = z0 + sh, hh = z1 - zb
             let fade = cityClamp((r - 0.75) / 0.25)
             let windows = lights.windows(f.id, t: t)
             if hh > 0.5 {
@@ -703,7 +704,7 @@ struct CityRenderer {
 
     /// Plinto: zócalo de piedra algo más ancho que la planta baja, con un escalón delante de la puerta.
     private func drawPlinth(_ g: inout GraphicsContext, _ b: CityBuilding) {
-        let st = b.style, R = b.rect(0), po = 0.22 * CityGeo.tile, h = st.plinthH
+        let st = b.style, R = b.rect(0), po = 0.22 * CityGeo.tile, h = st.plinthH * b.heightScale
         box(&g, R.x0 - po, R.y0 - po, R.x1 + po, R.y1 + po, 0, h, pal.plinth, edge: pal.bodyEdge)
         let (a0, a1) = Self.bay(st.doorBay, CityGeo.windowsLeft)
         box(&g, R.x0 + a0 * R.w - 2, R.y1 + po, R.x0 + a1 * R.w + 2, R.y1 + po + 0.22 * CityGeo.tile, 0, h * 0.5, pal.plinth)
@@ -848,8 +849,8 @@ struct CityRenderer {
     /// Huecos de una cara. `levels[i]` = nivel de la ventana i (cara izquierda 0…5, derecha 6…10); `blinds[i]`, su persiana (solo se
     /// ve apagada); `door` = hueco de la cara izquierda con la puerta.
     private func drawWindows(_ g: inout GraphicsContext, _ R: CityRect, face: Face, _ op: Openings, zb: Double, hh: Double,
-                             levels: [Double], blinds: [Double] = [], door: Int? = nil, amber: Double, red: Double, alpha: Double) {
-        let wt = CityGeo.wallT
+                             levels: [Double], blinds: [Double] = [], door: Int? = nil, amber: Double, red: Double, alpha: Double,
+                             wt: Double = CityGeo.wallT) {
         let n: Int, off: Int, len: Double
         let pt: (Double, Double) -> CGPoint
         switch face {
@@ -935,7 +936,7 @@ struct CityRenderer {
     /// Piso elegido durante el zoom: muros del fondo, la oficina dentro, muros delanteros que bajan hasta el corte.
     private func drawHollow(_ g: inout GraphicsContext, _ b: CityBuilding, _ f: CityFloor, _ R: CityRect, zb: Double, hh: Double,
                             windows: [Double], amber: Double, red: Double, zoom z: CityZoom) {
-        let wt = CityGeo.wallT, st = b.style, wall = body(st.material), ground = f.level == 0
+        let wt = max(0.8, CityGeo.wallT * b.heightScale), st = b.style, wall = body(st.material), ground = f.level == 0
         let op = Openings(ground ? nil : st.windows)
         let hf = hh * CityTransition.frontWalls(p), hb = hh * CutawayFraming.backWall
         let cut: Faces = (pal.slabT, wall.1, wall.2)
@@ -945,8 +946,8 @@ struct CityRenderer {
         var back = poly([P(R.x0 + wt, R.y0, zb + hb), P(R.x0 + wt, R.y1, zb + hb), P(R.x0 + wt, R.y1, zb), P(R.x0 + wt, R.y0, zb)])
         back.addPath(poly([P(R.x0, R.y0 + wt, zb + hb), P(R.x1, R.y0 + wt, zb + hb), P(R.x1, R.y0 + wt, zb), P(R.x0, R.y0 + wt, zb)]))
         gb.clip(to: back)
-        drawWindows(&gb, R, face: .backX, op, zb: zb, hh: hh, levels: [], amber: 0, red: 0, alpha: 1)
-        drawWindows(&gb, R, face: .backY, op, zb: zb, hh: hh, levels: [], amber: 0, red: 0, alpha: 1)
+        drawWindows(&gb, R, face: .backX, op, zb: zb, hh: hh, levels: [], amber: 0, red: 0, alpha: 1, wt: wt)
+        drawWindows(&gb, R, face: .backY, op, zb: zb, hh: hh, levels: [], amber: 0, red: 0, alpha: 1, wt: wt)
         // la oficina, con el MISMO dibujo que la vista que se monta al final (FloorOfficeView o IsoOfficeView)
         let rr = CityTransition.roomRise(p), dp = CityTransition.deskPop(p)
         if rr > 0.001 {

@@ -68,7 +68,7 @@ public enum OfficeFraming {
 
 public enum CutawayFraming {
     public static let topMargin = 40.0, bottomMargin = 40.0, sideMargin = 70.0, maxScale = 12.0
-    public static let backWall = 0.55
+    public static let backWall = 1.0
 
     public static func bounds(_ b: CityBuilding, level: Int) -> IsoBounds {
         let r = b.rect(level), z0 = b.floorZ(level), z1 = z0 + b.floorHeight(level) * backWall
@@ -121,7 +121,7 @@ public struct OfficeEmbedding: Equatable, Sendable {
         let k = min((r.w - 2 * Self.inset) / rw, (r.d - 2 * Self.inset) / rd)
         let cx = (r.x0 + r.x1) / 2, cy = (r.y0 + r.y1) / 2
         self.init(k: k, ex: cx - k * Double(rooms.midX), ey: cy - k * Double(rooms.midY),
-                  ez: b.floorZ(level) + CityGeo.slabH)
+                  ez: b.floorZ(level) + CityGeo.slabH * b.heightScale)
     }
 
     private var eu: Double { ex - ey }

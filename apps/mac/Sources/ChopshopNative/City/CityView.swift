@@ -537,25 +537,43 @@ public struct CityView: View {
         return graph(pr).map { .graph(box.scene(graph: $0, tasks: tasks(pr))) }
     }
 
-    private func zoomData(p: Double, size: CGSize, content: CityZoom.Content?, city: IsoFrame) -> (CityZoom, IsoFrame)? {
-        guard p > 0, let pr = target, let fid = targetFloor, let content, let b = model.building(ofFloor: fid) ?? model.building(of: pr),
+    static let storeyDesks = 2.9
+
+    private func squash(_ b: CityBuilding, k: Double, amount u: Double) -> (CityModel, CityBuilding) {
+        let goal = min(1, Self.storeyDesks * Iso.deskH * k / CityGeo.floorH)
+        var nb = b
+        nb.heightScale = 1 + (goal - 1) * u
+        var m = model
+        if let i = m.buildings.firstIndex(where: { $0.index == b.index }) { m.buildings[i] = nb }
+        return (m, nb)
+    }
+
+    private func zoomData(p: Double, size: CGSize, content: CityZoom.Content?, city: IsoFrame) -> (CityZoom, IsoFrame, CityModel)? {
+        guard p > 0, let pr = target, let fid = targetFloor, let content, let b0 = model.building(ofFloor: fid) ?? model.building(of: pr),
               let f = model.floor(id: fid) else { return nil }
         let emb: OfficeEmbedding, office: IsoFrame
+        var m = model
         switch content {
         case .floor(_, let lay, _):
             let s = lay.shell
             guard s.w > 0, s.d > 0 else { return nil }
-            emb = OfficeEmbedding(rooms: CGRect(x: s.x0, y: s.y0, width: s.w, height: s.d), building: b, level: f.level)
-            office = emb.officeFrame(fromCity: box.outFrame ?? CutawayFraming.frame(CutawayFraming.bounds(b, level: f.level), size: size))
+            let rooms = CGRect(x: s.x0, y: s.y0, width: s.w, height: s.d)
+            let k = OfficeEmbedding(rooms: rooms, building: b0, level: f.level).k
+            let u = cityClamp((p - 0.2) / 0.6)
+            let (m2, b) = squash(b0, k: k, amount: u * u * (3 - 2 * u))
+            let end = squash(b0, k: k, amount: 1).1
+            m = m2
+            emb = OfficeEmbedding(rooms: rooms, building: b, level: f.level)
+            office = emb.officeFrame(fromCity: box.outFrame ?? CutawayFraming.frame(CutawayFraming.bounds(end, level: f.level), size: size))
         case .graph(let sc):
             var minX = Double.infinity, minY = Double.infinity, maxX = -Double.infinity, maxY = -Double.infinity
             for r in sc.rooms { minX = min(minX, r.x0); minY = min(minY, r.y0); maxX = max(maxX, r.x0 + r.w); maxY = max(maxY, r.y0 + r.d) }
             guard minX < maxX, minY < maxY else { return nil }  // piso sin salas: no hay a dónde acercarse
-            emb = OfficeEmbedding(rooms: CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY), building: b, level: f.level)
+            emb = OfficeEmbedding(rooms: CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY), building: b0, level: f.level)
             office = OfficeFraming.frame(IsoBounds(minU: sc.minU, maxU: sc.maxU, minV: sc.minV, maxV: sc.maxV), size: size)
         }
         let tr = CityTransition(city: city, office: office, embedding: emb)
-        return (CityZoom(project: pr, floorID: fid, p: p, transition: tr, content: content), tr.camera(p))
+        return (CityZoom(project: pr, floorID: fid, p: p, transition: tr, content: content), tr.camera(p), m)
     }
 
     private struct Cut {
@@ -563,15 +581,17 @@ public struct CityView: View {
         let floor: CityFloor
         let layout: FloorLayout
         let embedding: OfficeEmbedding
+        let model: CityModel
     }
 
     private func cut(_ pr: String, plan: FloorPlan, all: [FloorPlan]) -> Cut? {
-        guard let fid = cityFloorID(plan, project: pr), let b = model.building(ofFloor: fid), let f = model.floor(id: fid) else { return nil }
+        guard let fid = cityFloorID(plan, project: pr), let b0 = model.building(ofFloor: fid), let f = model.floor(id: fid) else { return nil }
         let lay = box.layout(plan, frame: FloorFrame.building(all))
         let s = lay.shell
         guard s.w > 0, s.d > 0 else { return nil }
-        return Cut(building: b, floor: f, layout: lay,
-                   embedding: OfficeEmbedding(rooms: CGRect(x: s.x0, y: s.y0, width: s.w, height: s.d), building: b, level: f.level))
+        let rooms = CGRect(x: s.x0, y: s.y0, width: s.w, height: s.d)
+        let (m, b) = squash(b0, k: OfficeEmbedding(rooms: rooms, building: b0, level: f.level).k, amount: 1)
+        return Cut(building: b, floor: f, layout: lay, embedding: OfficeEmbedding(rooms: rooms, building: b, level: f.level), model: m)
     }
 
     @ViewBuilder private func cutStage(_ pr: String, plan: FloorPlan) -> some View {
@@ -629,7 +649,7 @@ public struct CityView: View {
             var z = CityZoom(project: pr, floorID: c.floor.id, p: 1, transition: tr, content: .floor(plan, c.layout, now: now))
             z.floorBox = box.cut.floorBox
             z.hoveredSpot = box.cut.hovered
-            CityRenderer(model: model, lights: lights, cam: cam, dark: dark, t: t, growth: growth, hovered: nil, zoom: z, size: size,
+            CityRenderer(model: c.model, lights: lights, cam: cam, dark: dark, t: t, growth: growth, hovered: nil, zoom: z, size: size,
                          focusCampus: origin).draw(&ctx)
         } symbols: {
             FloorOfficeView.labels(plan, layout: c.layout, now: now, dark: dark)
@@ -654,7 +674,7 @@ public struct CityView: View {
                 cam = box.ease.frame(levelFrame(size, campus: goalCampus), t: t, animate: animate)
             }
             box.cityFrame = cam
-            CityRenderer(model: model, lights: lights, cam: cam, dark: dark, t: t, growth: growth,
+            CityRenderer(model: z?.2 ?? model, lights: lights, cam: cam, dark: dark, t: t, growth: growth,
                          hovered: hovered, zoom: z?.0, size: size, focusCampus: z == nil ? goalCampus : origin).draw(&ctx)
         } symbols: {
             CitySymbols(model: model, lights: lights, t: t)
