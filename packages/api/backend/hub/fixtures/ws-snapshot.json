@@ -1,0 +1,51 @@
+{
+  "v": 2,
+  "type": "snapshot",
+  "id": "01MCB2QA1B3D5F7H9K1M3P5R7T",
+  "ts": "2026-10-30T14:02:12.004Z",
+  "machine_id": "mac-mini.local",
+  "workspace_id": "7c2e9f14-3a6b-4d5e-8f17-2b9c4e6a0d31",
+  "seq": 1842,
+  "ttl_s": 120,
+  "agent_version": "0.9.0",
+  "health": {
+    "state": "ok",
+    "t3_ok": true,
+    "cpu_pct": 23.5,
+    "ram_pct": 41.0,
+    "disk_pct": 37.2,
+    "load1": 1.42
+  },
+  "counts": {
+    "running": 2,
+    "queued": 1,
+    "waiting": 0,
+    "stuck": 0,
+    "needs_human": 1,
+    "waiting_bot": 0,
+    "done": 9,
+    "failed": 0
+  },
+  "projects": [
+    {
+      "name": "awesome-gb",
+      "roles": [
+        "triage",
+        "backend"
+      ],
+      "threads_running": 2,
+      "threads_pending": 1,
+      "attention": 1
+    }
+  ],
+  "parts": [
+    {
+      "name": "state",
+      "media_type": "application/json",
+      "enc": "none",
+      "bytes": 16,
+      "sha256": "3b1c2a6e5f4d9e8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a",
+      "data": "eyJwaGFzZSI6ImRvbmUifQ=="
+    }
+  ]
+}

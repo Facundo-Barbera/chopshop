@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/backend/v2/mch/machines.post.request.schema.json",
+  "title": "POST /v1/machines (token para VPS)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "name",
+    "platform"
+  ],
+  "properties": {
+    "name": {
+      "$ref": "../common.schema.json#/$defs/machine_name"
+    },
+    "platform": {
+      "$ref": "../common.schema.json#/$defs/platform"
+    },
+    "workspace_ids": {
+      "type": "array",
+      "items": {
+        "$ref": "../common.schema.json#/$defs/uuid"
+      },
+      "uniqueItems": true
+    }
+  }
+}

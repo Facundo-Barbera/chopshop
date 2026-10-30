@@ -1,0 +1,16 @@
+{
+  "user": {
+    "id": "5e9a2d47-1b3c-4f8e-a6d2-9c0b7e4f1a23",
+    "email": "ana@chopshop.test",
+    "display_name": null,
+    "role": "watcher",
+    "status": "active",
+    "created_at": "2026-10-30T12:05:00.000Z"
+  },
+  "session": {
+    "id": "8f3a6d2c-7e1b-4c94-a5f8-3b2e9d6c1a58",
+    "client": "web",
+    "expires_at": "2026-10-31T00:05:00.000Z"
+  },
+  "csrf_token": "cx1_EXAMPLEexampleEXAMPLEexampleEXAMPLEexampleE"
+}
