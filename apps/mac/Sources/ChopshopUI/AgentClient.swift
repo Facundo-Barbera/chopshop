@@ -155,32 +155,26 @@ final class AgentClient {
     let spec: AgentSpec
     private let transport: HTTPTransport
     let credentials: CredentialStore
-    let relayCredentials: CredentialStore
+    let sessions: SessionStore
     let gate: ActGate
     private let retryLock = NSLock()
     private var retryAt: Date?
 
     init(spec: AgentSpec, transport: HTTPTransport = URLSessionTransport(),
-         credentials: CredentialStore, relayCredentials: CredentialStore = InMemoryCredentialStore(), gate: ActGate = ActGate()) {
+         credentials: CredentialStore, sessions: SessionStore = InMemorySessionStore(), gate: ActGate = ActGate()) {
         self.spec = spec
         self.gate = gate
         self.transport = transport
         self.credentials = credentials
-        self.relayCredentials = relayCredentials
+        self.sessions = sessions
     }
 
     static func relayAccount(_ url: URL) -> String { CredentialAccount.endpoint(url) }
 
-    static func isRelayToken(_ s: String) -> Bool {
-        s.hasPrefix("cr1_") && s.count > 4 && s.unicodeScalars.allSatisfy { CharacterSet.alphanumerics.contains($0) || $0 == "_" || $0 == "-" }
-    }
-
-    var relayToken: String? {
-        spec.baseURL.flatMap { relayCredentials.credential(account: Self.relayAccount($0)) }.flatMap { Self.isRelayToken($0) ? $0 : nil }
-    }
+    var sessionToken: String? { spec.baseURL.flatMap { sessions.load(apiURL: $0) } }
 
     var credential: String? {
-        if spec.isRelay { return relayToken }
+        if spec.isRelay { return sessionToken }
         return spec.baseURL.flatMap { credentials.find(baseURL: $0)?.credential }
     }
     var isPaired: Bool { credential != nil }
@@ -237,7 +231,7 @@ final class AgentClient {
         return (json?["retry_after_s"] as? NSNumber)?.intValue
     }
 
-    static let viewerMessage = "modo visualizador: este token del relay es de solo lectura"
+    static let viewerMessage = "modo visualizador: tu cuenta es de solo lectura"
 
     /// Descripción corta de un fallo de red, sin URL ni cabeceras.
     static func describe(_ error: Error) -> String {
@@ -258,53 +252,42 @@ final class AgentClient {
 
     // --- operaciones ---
 
-    func fetchRelaySnapshot() async -> AgentResult {
+    func fetchCloudState() async -> AgentResult {
         var r = AgentResult(name: spec.name, status: .error)
-        guard makeURL("/whoami") != nil else { r.error = "URL del relay inválida"; return r }
-        guard relayToken != nil else { r.status = .unauthorized; return r }
-        func fail(_ outcome: Outcome) -> AgentResult {
-            switch outcome {
+        guard makeURL("/v1/state") != nil else { r.error = "URL de la nube inválida"; return r }
+        guard sessionToken != nil else { r.status = .unauthorized; return r }
+        let st = await request("GET", "/v1/state")
+        guard case .response(200, let state?) = st else {
+            switch st {
             case .failure(let status, let message):
                 r.status = status
                 r.error = message
             case .response(let code, let json):
-                switch code {
-                case 401: r.status = .unauthorized
-                case 403 where r.role == .machine:
-                    r.error = "token de máquina: el relay solo entrega el estado a tokens de visor (viewer)"
-                case 403: r.status = .forbidden
-                default: r.error = "relay: " + Self.agentError(json, code)
-                }
+                if code == 401 { r.status = .unauthorized } else if code == 403 { r.status = .forbidden } else { r.error = "nube: " + Self.agentError(json, code) }
             }
             return r
         }
-        let who = await request("GET", "/whoami")
-        guard case .response(200, let whoami?) = who else { return fail(who) }
-        r.role = AgentRole(whoami: whoami)
-        guard r.role != nil else { r.status = .incompatible; r.error = "el relay devolvió un rol desconocido"; return r }
-        let st = await request("GET", "/state")
-        guard case .response(200, let state?) = st else { return fail(st) }
-        var latest: [String: [String: Any]] = [:]
-        for f in state["snapshots"] as? [[String: Any]] ?? [] {
-            if let m = f["machine_id"] as? String { latest[m] = RelayView.machineSnapshot(f) }
+        r.role = ((state["user"] as? [String: Any])?["role"] as? String) == "watcher" ? .viewer : .admin
+        let snaps = (state["snapshots"] as? [[String: Any]] ?? []).map(RelayView.machineSnapshot)
+        let keys = (try? JSONSerialization.data(withJSONObject: state))
+            .flatMap { try? JSONDecoder().decode(BackendState.self, from: $0) }?.machineKeys() ?? [:]
+        let info: [[String: Any]] = (state["machines"] as? [[String: Any]] ?? []).map { m in
+            var o: [String: Any] = ["machine_id": (m["id"] as? String).flatMap { keys[$0] } ?? m["name"] ?? m["id"] ?? "", "online": (m["online"] as? Bool ?? false) && (m["paused"] as? Bool) != true,
+                                    "stale": m["stale"] as? Bool ?? true]
+            for k in ["seq", "snapshot_age_s"] { if let v = m[k] { o[k] = v } }
+            return o
         }
-        let info = state["machines"] as? [[String: Any]] ?? []
-        let order = info.compactMap { $0["machine_id"] as? String }
-        let machines = order.compactMap { latest[$0] } + latest.filter { !order.contains($0.key) }.map(\.value)
-        guard var snap = latest[spec.name] ?? machines.first else {
-            r.error = "el relay no tiene ningún snapshot vivo"
-            return r
-        }
+        var snap: [String: Any] = snaps.first ?? ["source": "relay", "parts": [String: Any]()]
         snap["relay_machines"] = info
         r.status = .ok
         r.snapshot = snap
-        r.relaySnapshots = machines
+        r.relaySnapshots = snaps
         r.relayMachines = info
         return r
     }
 
     func fetchSnapshot() async -> AgentResult {
-        if spec.isRelay { return await fetchRelaySnapshot() }
+        if spec.isRelay { return await fetchCloudState() }
         var r = AgentResult(name: spec.name, status: .error)
         switch await request("GET", "/snapshot") {
         case .failure(let status, let message):
@@ -328,7 +311,7 @@ final class AgentClient {
     }
 
     func perform(_ action: AgentAction) async -> ActionResult {
-        if spec.isRelay { return ActionResult(ok: false, message: "el relay es solo lectura: las acciones van al agente por Tailscale") }
+        if spec.isRelay { return ActionResult(ok: false, message: "la nube aún no envía acciones: van al agente por Tailscale") }
         switch await request(action.method, action.path, body: action.body) {
         case .failure(.forbidden, let message):
             return ActionResult(ok: false, message: message)
@@ -354,10 +337,10 @@ final class AgentHub {
     let gate: ActGate
 
     init(specs: [AgentSpec], transport: HTTPTransport = URLSessionTransport(),
-         credentials: CredentialStore, relayCredentials: CredentialStore = InMemoryCredentialStore()) {
+         credentials: CredentialStore, sessions: SessionStore = InMemorySessionStore()) {
         let gate = ActGate()
         self.gate = gate
-        clients = specs.map { AgentClient(spec: $0, transport: transport, credentials: credentials, relayCredentials: relayCredentials, gate: gate) }
+        clients = specs.map { AgentClient(spec: $0, transport: transport, credentials: credentials, sessions: sessions, gate: gate) }
     }
 
     var isEmpty: Bool { clients.isEmpty }
