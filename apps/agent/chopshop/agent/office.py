@@ -201,8 +201,8 @@ class Office:
     def _publish(self, project, by, diff, force=False):
         prof = self.profs[project]
         gone = [r["id"] for r in self._q("SELECT id FROM desks WHERE project=? AND retired=1", (project,))]
-        struct = layout.structure(prof, gone, len(self._open_floors(project, layout.FLEX_ROLE)),
-                                  len(self._open_floors(project, layout.OUT_ROLE)), self.building.get(project))
+        struct = layout.structure(prof, gone, self._open_floors(project, layout.FLEX_ROLE),
+                                  self._open_floors(project, layout.OUT_ROLE), self.building.get(project))
         last = self._meta(STRUCT + project)
         last_seq, last_struct = (last.split(" ", 1) + [""])[:2] if last else ("0", "")
         stale = int(last_seq or 0) < self._min_seq()
@@ -400,9 +400,9 @@ class Office:
         cap = layout.capacity(prof, self.building.get(project))
         ext, out = self._open_floors(project, layout.FLEX_ROLE), self._open_floors(project, layout.OUT_ROLE)
         if len(ext) < cap["max_extra_floors"]:
-            return self._open(project, layout.FLEX_ROLE, max(ext + [self._declared(project) - 1]) + 1), None
+            return self._open(project, layout.FLEX_ROLE, layout.next_elastic_floor(layout.FLEX_ROLE, ext)), None
         if cap["outsourcing"] and len(out) < layout.MAX_OUTSOURCED_FLOORS:
-            return self._open(project, layout.OUT_ROLE, max(out + [-1]) + 1), None
+            return self._open(project, layout.OUT_ROLE, layout.next_elastic_floor(layout.OUT_ROLE, out)), None
         return None, None
 
     def _open(self, project, role, floor):
