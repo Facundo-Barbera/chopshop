@@ -9,11 +9,12 @@ public struct AttentionActions: @unchecked Sendable {
     public var answer: @MainActor (_ task: MockTask, _ option: String) async -> String?
     public var open: @MainActor (_ url: URL) -> Void
     public var settle: (@MainActor (_ threadID: String) async -> String?)?
+    public var canAct: Bool
 
     public init(answer: @escaping @MainActor (_ task: MockTask, _ option: String) async -> String?,
                 open: @escaping @MainActor (_ url: URL) -> Void,
-                settle: (@MainActor (_ threadID: String) async -> String?)? = nil) {
-        self.answer = answer; self.open = open; self.settle = settle
+                settle: (@MainActor (_ threadID: String) async -> String?)? = nil, canAct: Bool = true) {
+        self.answer = answer; self.open = open; self.settle = settle; self.canAct = canAct
     }
 }
 
@@ -44,7 +45,9 @@ struct AttentionButtons: View {
                 case .needsYou:
                     if let q = task.question {
                         ForEach(q.options, id: \.self) { o in
-                            Button(o) { send(o) }.buttonStyle(.bordered).controlSize(.small).disabled(sending != nil || sent != nil)
+                            Button(o) { send(o) }.buttonStyle(.bordered).controlSize(.small)
+                                .disabled(sending != nil || sent != nil || actions?.canAct == false)
+                                .help(actions?.canAct == false ? "Modo visualizador: solo lectura" : "")
                         }
                     } else if actions == nil {
                         Button("Permitir") {}.buttonStyle(.bordered).controlSize(.small)
@@ -88,7 +91,7 @@ struct AttentionButtons: View {
     }
 
     private func send(_ option: String) {
-        guard let actions, sending == nil else { return }
+        guard let actions, actions.canAct, sending == nil else { return }
         sending = option; error = nil
         Task { @MainActor in
             let err = await actions.answer(task, option)
