@@ -423,7 +423,7 @@ struct ShellThreadPanel: View {
                 .padding(.horizontal, 8).padding(.vertical, 3)
                 .background(Capsule().fill((t.state.attentionTint ?? .primary).opacity(t.state.attentionTint == nil ? 0.06 : 0.14)))
             }
-            if t.state == .needsYou || t.state == .stuck { AttentionRow(task: t, host: batch?.host) }
+            if t.state == .needsYou || t.state == .stuck { AttentionRow(task: t, host: batch?.host, showsTitle: false) }
             Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 8) {
                 GridRow { Text("Proyecto").foregroundStyle(.tertiary); Text(project) }
                 GridRow { Text("Hilo").foregroundStyle(.tertiary); Text(t.id).monospaced().lineLimit(1).textSelection(.enabled) }
