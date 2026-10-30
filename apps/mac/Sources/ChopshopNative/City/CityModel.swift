@@ -167,6 +167,7 @@ public struct CityModel: Equatable, Sendable {
     public var trees: [CityPoint]
     public var seed: UInt64
     public var links: [CityLink] = []
+    public var workspaceIDs: [String: String] = [:]
 
     public init(buildings: [CityBuilding], groundX: Double, groundY: Double, campuses: [CityCampus] = [], roads: [CityRoad] = [],
                 trees: [CityPoint] = [], seed: UInt64 = 0, links: [CityLink] = []) {
@@ -268,17 +269,28 @@ public struct CityModel: Equatable, Sendable {
     /// Agrupa los proyectos por empresa (orden estable: el de la tabla, luego por nombre). Un edificio con algún proyecto con `office` lleva el vestíbulo en la
     /// planta baja; los proyectos sin `office` (agente v2 o perfil sin bloque) siguen en un piso con todos sus hilos.
     public static func build(_ s: LiveState, directory: CompanyDirectory = .standard, perProject: Bool = false,
-                             seed: UInt64 = WorldSeed.current) -> CityModel {
+                             seed: UInt64 = WorldSeed.current, workspaces: CityWorkspaceMap? = nil) -> CityModel {
         var groups: [String: [LiveState.Project]] = [:]
         var offices: [String: CityOffice] = [:]
-        for p in s.projects {
+        var projects = s.projects
+        for name in workspaces?.projectNames ?? [] where !projects.contains(where: { $0.name == name }) {
+            projects.append(LiveState.Project(name: name))
+        }
+        for p in projects {
             let o = CityOffice(p.office)
             offices[p.name] = o
-            groups[o?.company ?? directory.company(of: p.name), default: []].append(p)
+            groups[workspaces?.campus(of: p.name)?.name ?? o?.company ?? directory.company(of: p.name), default: []].append(p)
         }
-        let companies = groups.keys.sorted { directory.rank($0) < directory.rank($1) }
+        let companies = groups.keys.sorted { a, b in
+            let da = directory.rank(a), db = directory.rank(b)
+            if let w = workspaces { return (w.rank(a), da.0, da.1) < (w.rank(b), db.0, db.1) }
+            return da < db
+        }
         let sorted = companies.map { c in
-            (c, groups[c]!.sorted { ($0.name.lowercased(), $0.name) < ($1.name.lowercased(), $1.name) })
+            (c, groups[c]!.sorted { a, b in
+                let ra = workspaces?.rank(project: a.name, in: c) ?? 0, rb = workspaces?.rank(project: b.name, in: c) ?? 0
+                return (ra, a.name.lowercased(), a.name) < (rb, b.name.lowercased(), b.name)
+            })
         }
         var entries: [(company: String, project: String, floors: [CityFloor])] = []
         var annexes: [String: (host: String, title: String)] = [:]
@@ -315,7 +327,9 @@ public struct CityModel: Equatable, Sendable {
                 if !contracted.isEmpty { entries.append((company: c, project: contractorKey(p.name), floors: contracted)) }
             }
         }
-        return place(entries, seed: seed, annexes: annexes)
+        var model = place(entries, seed: seed, annexes: annexes)
+        if let workspaces { model.apply(workspaces) }
+        return model
     }
 
     public static func place(_ entries: [(company: String, project: String, floors: [CityFloor])], seed: UInt64,
