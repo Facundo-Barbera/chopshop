@@ -12,6 +12,9 @@ import os
 /// fuera de `@State` (`WorldCameraBox`), así arrastrar no reevalúa la vista ni rehace etiquetas por evento.
 @available(macOS 26.0, *)
 public struct OfficeWorldView: View {
+    #if DEBUG && HOT_RELOAD
+    @ObserveInjection var inject
+    #endif
     let floors: [FloorPlan]
     var frozenNow: Date?
     /// Región con la que abrir encuadrada (p. ej. `floor:0` al entrar desde la ciudad); nil = el mundo entero.
@@ -120,6 +123,7 @@ public struct OfficeWorldView: View {
         }
         .onChange(of: fitRequest) { _, _ in box.fitAll() }
         .clipped()
+        .hotReload()
     }
 
     private func spotID(of tid: String?, in w: WorldLayout, now: Date) -> String? {

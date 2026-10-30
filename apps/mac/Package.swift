@@ -1,5 +1,11 @@
 // swift-tools-version: 6.0
 import PackageDescription
+import Foundation
+
+let hotReload = ProcessInfo.processInfo.environment["CHOPSHOP_HOT_RELOAD"] == "1"
+let injectDeps: [Target.Dependency] = hotReload ? [.product(name: "Inject", package: "Inject")] : []
+let injectSwift: [SwiftSetting] = hotReload ? [.define("HOT_RELOAD", .when(configuration: .debug))] : []
+let injectLinker: [LinkerSetting] = hotReload ? [.unsafeFlags(["-Xlinker", "-interposable"], .when(configuration: .debug))] : []
 
 let package = Package(
     name: "ChopshopUI",
@@ -7,12 +13,14 @@ let package = Package(
     dependencies: [
         // Auto-actualización. Versión EXACTA y fijada: debe coincidir con release/sparkle.version (lo comprueba un test)
         .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.1"),
-    ],
+    ] + (hotReload ? [.package(url: "https://github.com/krzysztofzablocki/Inject", exact: "1.6.0")] : []),
     targets: [
         .executableTarget(
             name: "ChopshopUI",
-            dependencies: ["ChopshopNative", .product(name: "Sparkle", package: "Sparkle")],
-            path: "Sources/ChopshopUI"
+            dependencies: ["ChopshopNative", .product(name: "Sparkle", package: "Sparkle")] + injectDeps,
+            path: "Sources/ChopshopUI",
+            swiftSettings: injectSwift,
+            linkerSettings: injectLinker
         ),
         // Lanzador del agente incrustado (Contents/MacOS/chopshop-agent): lo arranca launchd vía SMAppService; ver BundledAgent.swift
         .executableTarget(name: "ChopshopAgent", path: "Sources/ChopshopAgent"),
@@ -21,8 +29,10 @@ let package = Package(
         // solo con el SDK de macOS 26+). Sin NATIVE_PREVIEWS: los #Preview y sus recursos son del banco de pruebas (apps/mac/native).
         .target(
             name: "ChopshopNative",
+            dependencies: injectDeps,
             path: "Sources/ChopshopNative",
-            exclude: ["Resources"]
+            exclude: ["Resources"],
+            swiftSettings: injectSwift
         ),
         // Pruebas de la lógica pura (config, cliente con transporte falso, resumen): `swift test` (requiere Xcode, no solo las CLT)
         .testTarget(name: "ChopshopUITests", dependencies: ["ChopshopUI", "ChopshopNative"], path: "Tests/ChopshopUITests"),
