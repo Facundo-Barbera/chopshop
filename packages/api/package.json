@@ -1,7 +1,7 @@
 {
   "name": "@chopshop/api",
   "private": true,
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Cliente JS de la API de chopshop-agent y tipos compartidos (api_version 1).",
   "type": "module",
   "main": "src/index.js",

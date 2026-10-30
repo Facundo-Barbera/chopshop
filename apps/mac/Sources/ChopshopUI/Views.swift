@@ -299,7 +299,7 @@ struct Sidebar: View {
                         .font(.caption.weight(.medium))
                         .help("Estado de la conexión con los agentes de Chopshop (API por Tailscale). Se configuran en Ajustes… (⌘,) o en la sección [app] de ~/.config/chopshop/config.toml")
                     Spacer()
-                    Text("v0.6")
+                    Text("v0.9")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
