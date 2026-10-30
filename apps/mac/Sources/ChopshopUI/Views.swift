@@ -95,6 +95,7 @@ struct OfficeRoot: View {
             PairingScreen()
         }
         .environment(\.attentionActions, model.attentionActions)
+        .environment(\.accountSettings, model.accountSettings)
         .navigationTitle("Chopshop")
         .navigationSubtitle(model.statusLine.hasPrefix("⚠︎") ? model.statusLine : "")
         .toolbar { ToolbarItem(placement: .navigation) { LiveIndicator(store: model.live, compact: true, updated: model.statusLine) } }
