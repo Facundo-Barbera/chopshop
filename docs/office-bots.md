@@ -39,3 +39,5 @@ de Tailscale del dueño **y** una credencial de dispositivo (`chopshop pair crea
   antiguos y crea otros. Prefiere añadir al final y ampliar `desks` antes que reordenar.
 - `prompt_file` es una ruta relativa dentro de `~/.chopshop/automations/<proyecto>/`; la API no crea ni ejecuta scripts.
 - Slugs de repos y logins reales solo en el perfil local, nunca en el repo.
+- Las salas `_flex` (y los pisos `temporary` y `outsourced`) de `structure` las crea la capacidad elástica (`capacity:` del
+  perfil, ver `docs/agent-api.md`): no van en el bloque `office` del `PUT`.

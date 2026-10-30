@@ -115,6 +115,8 @@ extension CityBuilding {
 
     /// Retranqueo del piso `level`.
     public func setback(_ level: Int) -> Double {
+        if floors.indices.contains(level), floors[level].temporary,
+           let base = floors[..<level].lastIndex(where: { !$0.temporary }) { return setback(base) }
         guard let lv = style.setbackLevel, level >= lv else { return 0 }
         return style.setbackInset
     }

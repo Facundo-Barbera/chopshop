@@ -54,6 +54,18 @@ extension FloorPlan {
         return (room(ofDesk: id)?.permanent ?? false) && !d.retired ? .sleeping : (d.retired ? .retired : .free)
     }
 
+    static func roleColor(_ role: String, dark: Bool) -> Color {
+        let h = WorldSeed.hash(0, "role", role)
+        let hue = Double(h % 360) / 360
+        return Color(hue: hue, saturation: dark ? 0.55 : 0.62, brightness: dark ? 0.86 : 0.74)
+    }
+
+    func role(ofDesk id: String) -> String? {
+        if let r = desk(id)?.occupant?.role { return r }
+        guard let room = room(ofDesk: id), !room.flex else { return nil }
+        return room.role
+    }
+
     /// Ocupante visible del hueco (nil si está libre o ya se desvaneció).
     func occupant(of id: String, now: Date) -> Occupant? {
         let o = id.hasPrefix("lobby:") ? guest(String(id.dropFirst(6))) : desk(id)?.occupant
@@ -246,6 +258,7 @@ struct FloorRenderer {
             rims(&ctx, machineBox(m), needs: needs && !stuck, stuck: stuck)
         }
         drawEntrance(&ctx)
+        if plan.temporary || plan.outsourced { drawWorksite(&ctx) }
         let all = layout.rooms + layout.extras + machineBoxes
         let solids = all.filter { !isOpen($0) }
         var ws: [Wall] = []
@@ -331,8 +344,15 @@ struct FloorRenderer {
     }
 
     private func isOpen(_ r: FloorLayout.RoomBox) -> Bool {
-        r.index == FloorLayout.corridorIndex || (isLobby && r.index == 0 && r.role == "lobby")
+        r.index == FloorLayout.corridorIndex || (isLobby && r.index == 0 && r.role == "lobby") || isFlex(r)
     }
+
+    private func isFlex(_ r: FloorLayout.RoomBox) -> Bool {
+        !isLobby && r.index >= 0 && r.index < FloorLayout.grokIndex && plan.rooms.indices.contains(r.index) && plan.rooms[r.index].flex
+    }
+
+    private var flexCarpet: Color { dark ? Color(white: 0.26).opacity(0.30) : Color(red: 0.62, green: 0.60, blue: 0.56).opacity(0.13) }
+    private var hazard: Color { Color(red: 0.98, green: 0.74, blue: 0.16) }
 
     private func quad(_ x0: Double, _ y0: Double, _ x1: Double, _ y1: Double, _ z: Double) -> Path {
         poly([P(x0, y0, z), P(x1, y0, z), P(x1, y1, z), P(x0, y1, z)])
@@ -382,8 +402,22 @@ struct FloorRenderer {
         let z = floorZ + 0.05
         var tint: Color?
         if r.index == FloorLayout.grokIndex { tint = grokTint } else if let k = r.commons { tint = commonsTint(k) }
+        else if isFlex(r) { tint = flexCarpet }
+        else if !isLobby, plan.rooms.indices.contains(r.index), r.index < FloorLayout.grokIndex, r.index >= 0 {
+            tint = FloorPlan.roleColor(plan.rooms[r.index].role, dark: dark).opacity(dark ? 0.07 : 0.06)
+        }
         if let tint { ctx.fill(quad(r.x0, r.y0, r.x1, r.y1, z), with: .color(tint)) }
         guard r.commons == nil else { return }
+        if isFlex(r) {
+            let e = 10.0
+            ctx.stroke(quad(r.x0 + e, r.y0 + e, r.x1 - e, r.y1 - e, z + 0.05), with: .color(ink.opacity(dark ? 0.20 : 0.18)),
+                       style: StrokeStyle(lineWidth: 1, lineCap: .round, dash: [6, 5]))
+            var weave = Path()
+            var gx = r.x0 + e + 12
+            while gx < r.x1 - e - 1 { weave.move(to: P(gx, r.y0 + e, z)); weave.addLine(to: P(gx, r.y1 - e, z)); gx += 12 }
+            ctx.stroke(weave, with: .color((dark ? Color.white : Color.black).opacity(dark ? 0.025 : 0.035)), lineWidth: 0.5)
+            return
+        }
         var grid = Path()
         let step = isOpen(r) ? 33.0 : 22.0
         var gx = r.x0 + step
@@ -419,6 +453,17 @@ struct FloorRenderer {
         }
         if let lc = leftC { rim(P(r.x0 + 3, r.y1 - 3, z), P(r.x1 - 3, r.y1 - 3, z), lc) }
         if let rc = rightC { rim(P(r.x1 - 3, r.y1 - 3, z), P(r.x1 - 3, r.y0 + 3, z), rc) }
+    }
+
+    private func drawWorksite(_ ctx: inout GraphicsContext) {
+        let s = layout.shell, z = floorZ + 0.25, k = 4.0
+        let edge = quad(s.x0 + k, s.y0 + k, s.x1 - k, s.y1 - k, z)
+        let col = plan.temporary ? hazard : Color(red: 0.36, green: 0.58, blue: 0.86)
+        ctx.stroke(edge, with: .color(col.opacity(0.85)), style: StrokeStyle(lineWidth: max(1.6, 2.4 * cam.s), lineJoin: .round))
+        if plan.temporary {
+            ctx.stroke(edge, with: .color(Color.black.opacity(dark ? 0.55 : 0.7)),
+                       style: StrokeStyle(lineWidth: max(1.6, 2.4 * cam.s), lineJoin: .round, dash: [CGFloat(5 * cam.s), CGFloat(5 * cam.s)]))
+        }
     }
 
     private func drawEntrance(_ ctx: inout GraphicsContext) {
@@ -858,7 +903,10 @@ struct FloorRenderer {
             g.fill(sil, with: .color(.white.opacity(dark ? 0.07 : 0.10)))
             g.stroke(sil, with: .color((lk.visual?.tint ?? ink).opacity(isSel ? 0.95 : 0.7)), style: StrokeStyle(lineWidth: isSel ? 1.4 : 1.1, lineJoin: .round))
         }
-        if let v = lk.visual { figure(&ctx, id: sp.id, x: sp.cx, y: sp.cy + 13, v: v, fade: lk.fade, idx: idx) }
+        if let v = lk.visual {
+            figure(&ctx, id: sp.id, x: sp.cx, y: sp.cy + 13, v: v, fade: lk.fade, idx: idx,
+                   role: plan.role(ofDesk: sp.id).map { FloorPlan.roleColor($0, dark: dark) })
+        }
 
         let pts = [P(dx, dy, z0 + Iso.deskH + 14), P(dx + Iso.deskW, dy, z0 + Iso.deskH + 14), P(dx, dy + Iso.deskD, z0), P(dx + Iso.deskW, dy + Iso.deskD, z0),
                    P(sp.cx, sp.cy + 13, z0 + 34), P(sp.cx - 8, sp.cy + 17, z0), P(sp.cx + 8, sp.cy + 17, z0)]
@@ -961,7 +1009,8 @@ struct FloorRenderer {
 
     // Muñeco -------------------------------------------------------------------
 
-    private func figure(_ ctx: inout GraphicsContext, id: String, x: Double, y: Double, v: NodeVisual, fade: Double, idx: Double) {
+    private func figure(_ ctx: inout GraphicsContext, id: String, x: Double, y: Double, v: NodeVisual, fade: Double, idx: Double,
+                        role: Color? = nil) {
         if v == .skipped { return }
         let s = cam.s
         let foot = P(x, y, floorZ)
@@ -975,7 +1024,8 @@ struct FloorRenderer {
         let bodyTop = foot.y - bh - bob + lift
         let body = RoundedRectangle(cornerRadius: bw / 2, style: .continuous)
             .path(in: CGRect(x: foot.x - bw / 2, y: bodyTop, width: bw, height: bh))
-        f.fill(body, with: .linearGradient(Gradient(colors: [figBody, figBody.opacity(0.78)]),
+        let shirt = role ?? figBody
+        f.fill(body, with: .linearGradient(Gradient(colors: [shirt, shirt.opacity(0.78)]),
                                            startPoint: CGPoint(x: foot.x - bw / 2, y: bodyTop), endPoint: CGPoint(x: foot.x + bw / 2, y: bodyTop + bh)))
         let sheen = RoundedRectangle(cornerRadius: bw / 4, style: .continuous).path(in: CGRect(x: foot.x - bw / 2 + 1.1 * s, y: bodyTop + 2.2 * s, width: 2.2 * s, height: bh * 0.5))
         f.fill(sheen, with: .color(.white.opacity(dark ? 0.16 : 0.22)))

@@ -39,6 +39,8 @@ BATCH = 500
 RELOAD = 60                          # s entre relecturas de perfiles
 INHERIT_KEYS = ("thread_id", "title", "summary", "branch", "worktree", "pull_requests", "phase", "ended_at")
 KEEP_KEYS = ("summary", "result", "role", "branch", "worktree", "title")   # no se pierden si un task.state posterior no los trae
+CLOSE_AFTER = 180
+CLOSE_BELOW = 0.5
 
 
 def _load_profiles():
@@ -66,6 +68,9 @@ class Office:
         self.profiles_fn = profiles_fn or _load_profiles
         self.half_life = {}           # proyecto -> T½ (s)
         self.company = {}             # proyecto -> empresa
+        self.profs = {}
+        self.building = {}
+        self.empty_since = {}
         self._lock = threading.RLock()
         self._loaded = None           # instante de la última relectura de perfiles
 
@@ -112,6 +117,18 @@ class Office:
     def _role_desks(self, project, role):
         return self._q("SELECT * FROM desks WHERE project=? AND role=? AND retired=0 ORDER BY floor, slot", (project, role))
 
+    def _declared(self, project):
+        return len(layout.floors(self.profs.get(project) or {}))
+
+    def _zone(self, d):
+        return layout.zone(d["floor"], d["role"], self._declared(d["project"]))
+
+    def _open_floors(self, project, role):
+        n = self._declared(project)
+        return [r["floor"] for r in self._q("SELECT DISTINCT floor FROM desks WHERE project=? AND role=? AND retired=0"
+                                            " ORDER BY floor", (project, role))
+                if layout.is_temporary(r["floor"], role, n)]
+
     # ------------------------------------------------------------ estructura
 
     def reload(self):
@@ -119,7 +136,10 @@ class Office:
         with self._lock:
             changed = []
             known = {r["project"] for r in self._q("SELECT DISTINCT project FROM desks")}
-            for prof in self.profiles_fn():
+            profs = self.profiles_fn()
+            for prof in profs:
+                self.building[prof.get("project")] = layout.building_floors(profs, prof)
+            for prof in profs:
                 project = prof.get("project")
                 if not project or ("office" not in prof and project not in known):
                     continue
@@ -134,7 +154,10 @@ class Office:
     def sync_project(self, project, by="profile"):
         """Resincroniza un proyecto tras reescribir su perfil (`PUT /office`): `office.changed {by}` si cambió. -> sobre o None."""
         with self._lock:
-            prof = next((p for p in self.profiles_fn() if p.get("project") == project), None)
+            profs = self.profiles_fn()
+            prof = next((p for p in profs if p.get("project") == project), None)
+            if prof:
+                self.building[project] = layout.building_floors(profs, prof)
             return self._sync(prof, by=by) if prof else None
 
     def _sync(self, prof, by="profile"):
@@ -142,8 +165,11 @@ class Office:
         project, now = prof["project"], self.clock()
         self.half_life[project] = layout.half_life_s(prof)
         self.company[project] = layout.company(prof)
+        self.profs[project] = prof
+        n = len(layout.floors(prof))
         declared = {d["id"]: d for d in layout.desks(prof)}
-        have = {r["id"]: r for r in self._q("SELECT * FROM desks WHERE project=?", (project,))}
+        have = {r["id"]: r for r in self._q("SELECT * FROM desks WHERE project=?", (project,))
+                if r["id"] in declared or not layout.is_temporary(r["floor"], r["role"], n)}
         added, retired, reactivated = [], [], []
         for did, d in declared.items():
             old = have.get(did)
@@ -160,18 +186,7 @@ class Office:
             if did not in declared and not old["retired"]:
                 self._x("UPDATE desks SET retired=1 WHERE id=?", (did,))
                 retired.append(did)
-        gone = [did for did, old in have.items() if did not in declared]
-        struct = layout.structure(prof, gone)
-        last = self._meta(STRUCT + project)
-        last_seq, last_struct = (last.split(" ", 1) + [""])[:2] if last else ("0", "")
-        stale = int(last_seq or 0) < self._min_seq()
-        emitted = None
-        if db.jdump(struct) != last_struct or stale:
-            body = dict(struct, project=project, by=by,
-                        diff={"added": added, "retired": retired, "reactivated": reactivated})
-            env = self._emit("office.changed", project, body)
-            self._set_meta(STRUCT + project, "%s %s" % (env.get("seq") if env else 0, db.jdump(struct)))
-            emitted = env or {"seq": None}
+        emitted = self._publish(project, by, {"added": added, "retired": retired, "reactivated": reactivated})
         for did in retired:
             occ = self._occupant(did)
             if occ:
@@ -179,9 +194,29 @@ class Office:
                 snap = self._snap(occ["thread_id"]) or {}
                 if snap.get("phase") in ACTIVE:
                     self._decide(occ["thread_id"], project, snap)
-        for role in {declared[d]["role"] for d in added + reactivated}:
-            self._promote(project, role)
+        for role in sorted({declared[d]["role"] for d in added + reactivated}):
+            self._promote_any(project, role)
         return emitted
+
+    def _publish(self, project, by, diff, force=False):
+        prof = self.profs[project]
+        gone = [r["id"] for r in self._q("SELECT id FROM desks WHERE project=? AND retired=1", (project,))]
+        struct = layout.structure(prof, gone, len(self._open_floors(project, layout.FLEX_ROLE)),
+                                  len(self._open_floors(project, layout.OUT_ROLE)), self.building.get(project))
+        last = self._meta(STRUCT + project)
+        last_seq, last_struct = (last.split(" ", 1) + [""])[:2] if last else ("0", "")
+        stale = int(last_seq or 0) < self._min_seq()
+        if db.jdump(struct) == last_struct and not stale and not force:
+            return None
+        env = self._emit("office.changed", project, dict(struct, project=project, by=by, diff=diff))
+        self._set_meta(STRUCT + project, "%s %s" % (env.get("seq") if env else 0, db.jdump(struct)))
+        return env or {"seq": None}
+
+    def _promote_any(self, project, role):
+        if layout.is_elastic(role):
+            self._promote_elastic(project)
+        else:
+            self._promote(project, role)
 
     def _min_seq(self):
         r = self._q("SELECT COALESCE(MIN(seq),0) AS s FROM events")
@@ -211,7 +246,34 @@ class Office:
                         self._set_meta(CURSOR, cur)
                     if len(page) < BATCH:
                         break
+            for project in sorted(self.profs):
+                self._shrink(project)
             return n
+
+    def _shrink(self, project):
+        now = self.clock()
+        out, ext = self._open_floors(project, layout.OUT_ROLE), self._open_floors(project, layout.FLEX_ROLE)
+        if not out and not ext:
+            return None
+        role, floor = (layout.OUT_ROLE, out[-1]) if out else (layout.FLEX_ROLE, ext[-1])
+        key = (project, role, floor)
+        rows = self._q("SELECT d.id, d.floor, d.role, o.thread_id FROM desks d LEFT JOIN desk_occupancy o"
+                       " ON o.desk_id=d.id AND o.until IS NULL WHERE d.project=? AND d.role IN (?,?) AND d.retired=0",
+                       (project, layout.FLEX_ROLE, layout.OUT_ROLE))
+        mine = [r for r in rows if r["role"] == role and r["floor"] == floor]
+        if any(r["thread_id"] for r in mine):
+            self.empty_since.pop(key, None)
+            return None
+        since = self.empty_since.setdefault(key, now)
+        rest = [r for r in rows if not (r["role"] == role and r["floor"] == floor)]
+        if now - since < CLOSE_AFTER or (rest and sum(1 for r in rest if r["thread_id"]) >= CLOSE_BELOW * len(rest)):
+            return None
+        ids = [r["id"] for r in mine]
+        marks = ",".join("?" * len(ids))
+        self._x("DELETE FROM desk_occupancy WHERE desk_id IN (%s)" % marks, ids)
+        self._x("DELETE FROM desks WHERE id IN (%s)" % marks, ids)
+        self.empty_since.pop(key, None)
+        return self._publish(project, "capacity", {"added": [], "retired": [], "reactivated": [], "closed": ids})
 
     def _bootstrap(self):
         """Primera pasada: guarda la última `task.state` de cada hilo sin decidir nada y luego sienta a los activos."""
@@ -263,14 +325,23 @@ class Office:
         role = body.get("role")                           # un rol sin escritorios espera en el vestíbulo con su etiqueta
         seat, active = self._seat(tid), body.get("phase") in ACTIVE
         if seat:
-            if active and role and role != seat["role"]:  # cambió de rol: se traslada si hay sitio
+            elastic = layout.is_elastic(seat["role"])
+            if active and role and elastic:
+                w = self._waiting(tid)
+                if not w or w["role"] != role:
+                    self._x("INSERT OR REPLACE INTO desk_waiting(thread_id, project, role, since) VALUES(?,?,?,?)",
+                            (tid, project, role, w["since"] if w else self.clock()))
+                    self._place(tid, project, role, body)
+            elif active and role and role != seat["role"]:  # cambió de rol: se traslada si hay sitio
                 self._place(tid, project, role, body)
             elif _finished(body):
-                self._promote(project, seat["role"])      # terminó: lo hereda quien espere ese rol
+                if elastic:
+                    self._x("DELETE FROM desk_waiting WHERE thread_id=?", (tid,))
+                self._promote_any(project, seat["role"])  # terminó: lo hereda quien espere ese rol
             return
         if active and role:
             w = self._waiting(tid)
-            if not self._place(tid, project, role, body) and not (w and w["role"] == role):
+            if not self._place(tid, project, role, body, elastic=True) and not (w and w["role"] == role):
                 self._x("INSERT OR REPLACE INTO desk_waiting(thread_id, project, role, since) VALUES(?,?,?,?)",
                         (tid, project, role, w["since"] if w else self.clock()))
                 self._emit("desk.waiting", project, {"thread_id": tid, "role": role, "title": body.get("title"),
@@ -303,30 +374,83 @@ class Office:
             s["summary"] = s.get("result")
         return {k: s.get(k) for k in INHERIT_KEYS}
 
-    def _place(self, tid, project, role, body, desk=None, reason=None):
+    def _elastic_order(self, project, role):
+        n = self._declared(project)
+        home = min([d["floor"] for d in self._role_desks(project, role)] or [0])
+        rows = self._q("SELECT * FROM desks WHERE project=? AND role IN (?,?) AND retired=0",
+                       (project, layout.FLEX_ROLE, layout.OUT_ROLE))
+        tier = {"flex": 0, "extra": 1, "outsourced": 2}
+        return sorted(rows, key=lambda d: (tier[layout.zone(d["floor"], d["role"], n)],
+                                           abs(d["floor"] - home) if d["floor"] < n and d["role"] == layout.FLEX_ROLE else 0,
+                                           d["floor"], d["slot"]))
+
+    def _elastic_slot(self, project, role):
+        reclaim = []
+        for d in self._elastic_order(project, role):
+            occ = self._occupant(d["id"])
+            if occ is None:
+                return d, None
+            if _finished(self._snap(occ["thread_id"]) or {}):
+                reclaim.append((d, occ))
+        if reclaim:
+            return reclaim[0]
+        prof = self.profs.get(project)
+        if prof is None:
+            return None, None
+        cap = layout.capacity(prof, self.building.get(project))
+        ext, out = self._open_floors(project, layout.FLEX_ROLE), self._open_floors(project, layout.OUT_ROLE)
+        if len(ext) < cap["max_extra_floors"]:
+            return self._open(project, layout.FLEX_ROLE, max(ext + [self._declared(project) - 1]) + 1), None
+        if cap["outsourcing"] and len(out) < layout.MAX_OUTSOURCED_FLOORS:
+            return self._open(project, layout.OUT_ROLE, max(out + [-1]) + 1), None
+        return None, None
+
+    def _open(self, project, role, floor):
+        now, ids = self.clock(), []
+        for slot in range(layout.elastic_floor_desks(self.profs[project])):
+            did = layout.desk_id(project, floor, role, slot)
+            self._x("INSERT OR REPLACE INTO desks(id, project, floor, role, slot, permanent, retired, created)"
+                    " VALUES(?,?,?,?,?,0,0,?)", (did, project, floor, role, slot, now))
+            ids.append(did)
+        self._publish(project, "capacity", {"added": ids, "retired": [], "reactivated": []})
+        return self._q("SELECT * FROM desks WHERE id=?", (ids[0],))[0]
+
+    def _place(self, tid, project, role, body, desk=None, reason=None, elastic=False):
         """Sienta al hilo en un escritorio del rol (o en `desk`). Devuelve el id del escritorio o None si está lleno."""
         cands = [(desk, self._occupant(desk["id"]))] if desk else self._candidates(project, role)
+        if not cands and elastic:
+            d, occ = self._elastic_slot(project, role)
+            cands = [(d, occ)] if d else []
         if not cands:
             return None
         d, occ = cands[0]
         if occ and occ["thread_id"] == tid:
             return d["id"]
-        inh = self._inheritance(d["id"], occ)
+        zone = self._zone(d)
+        flex = zone != "room"
+        inh = None if flex else self._inheritance(d["id"], occ)
         if occ:
-            self._release(d["id"], occ, "inherited", promote=False)
+            self._release(d["id"], occ, "reclaimed" if flex else "inherited", promote=False)
         now = self.clock()
         old = self._seat(tid)
         if old:                                           # traslado: el escritorio anterior queda libre, sin linaje
             self._x("DELETE FROM desk_occupancy WHERE id=?", (old["id"],))
+        back = bool(old) and layout.is_elastic(old["role"]) and not flex
+        why = reason or ("overflow" if flex else "return" if back else "inherited" if occ else "start")
         self._x("INSERT INTO desk_occupancy(desk_id, thread_id, since, until, reason, inheritance) VALUES(?,?,?,NULL,?,?)",
-                (d["id"], tid, now, reason or ("inherited" if occ else "start"), db.jdump(inh) if inh else None))
-        self._x("DELETE FROM desk_waiting WHERE thread_id=?", (tid,))
+                (d["id"], tid, now, why, db.jdump(inh) if inh else None))
+        if flex:
+            w = self._waiting(tid)
+            self._x("INSERT OR REPLACE INTO desk_waiting(thread_id, project, role, since) VALUES(?,?,?,?)",
+                    (tid, project, role, w["since"] if w else now))
+        else:
+            self._x("DELETE FROM desk_waiting WHERE thread_id=?", (tid,))
         self._emit("desk.assigned", project, {
-            "desk": d["id"], "thread_id": tid, "role": d["role"], "reason": reason or ("inherited" if occ else "start"),
+            "desk": d["id"], "thread_id": tid, "role": role if flex else d["role"], "reason": why,
             "title": body.get("title"), "since": _iso(now), "inheritance": inh,
-            "notes_pending": notes.count(self.conn, d["id"], now)})
+            "notes_pending": notes.count(self.conn, d["id"], now), "zone": zone})
         if old:
-            self._promote(old["project"], old["role"])
+            self._promote_any(old["project"], old["role"])
         return d["id"]
 
     def _release(self, desk_id, occ, reason, promote=True):
@@ -339,15 +463,23 @@ class Office:
         project = d[0]["project"] if d else None
         self._emit("desk.released", project, {"desk": desk_id, "thread_id": occ["thread_id"], "reason": reason})
         if promote and d:
-            self._promote(project, d[0]["role"])
+            self._promote_any(project, d[0]["role"])
 
     def _promote(self, project, role):
         """Sube a los que esperan ese rol (los más antiguos primero) mientras haya escritorio."""
-        for w in self._q("SELECT * FROM desk_waiting WHERE project=? AND role=? ORDER BY since", (project, role)):
+        for w in self._q("SELECT * FROM desk_waiting WHERE project=? AND role=? ORDER BY since, rowid", (project, role)):
             s = self._snap(w["thread_id"]) or {}
             if s.get("phase") not in ACTIVE:
                 continue
-            if not self._place(w["thread_id"], project, role, s):
+            if not self._place(w["thread_id"], project, role, s, elastic=not self._seat(w["thread_id"])):
+                break
+
+    def _promote_elastic(self, project):
+        for w in self._q("SELECT * FROM desk_waiting WHERE project=? ORDER BY since, rowid", (project,)):
+            s = self._snap(w["thread_id"]) or {}
+            if s.get("phase") not in ACTIVE or self._seat(w["thread_id"]):
+                continue
+            if not self._place(w["thread_id"], project, w["role"], s, elastic=True):
                 break
 
     # ------------------------------------------------------------ acciones (API)
@@ -383,10 +515,14 @@ class Office:
                 s = self._snap(occ["thread_id"]) or {}
                 if not _finished(s):
                     raise OfficeError(409, "el escritorio está ocupado por un hilo activo (%s)" % occ["thread_id"])
-            snap["role"] = d["role"]
-            self._x("UPDATE office_threads SET body=? WHERE thread_id=?", (db.jdump(snap), thread_id))
-            self._x("UPDATE t3_threads SET role=? WHERE thread_id=?", (d["role"], thread_id))
-            self._place(thread_id, d["project"], d["role"], snap, desk=d, reason=reason)
+            if layout.is_elastic(d["role"]):
+                if not snap.get("role"):
+                    raise OfficeError(400, "un escritorio elástico necesita un hilo con rol")
+            else:
+                snap["role"] = d["role"]
+                self._x("UPDATE office_threads SET body=? WHERE thread_id=?", (db.jdump(snap), thread_id))
+                self._x("UPDATE t3_threads SET role=? WHERE thread_id=?", (d["role"], thread_id))
+            self._place(thread_id, d["project"], snap["role"], snap, desk=d, reason=reason)
             return desk_id
 
     def desk(self, desk_id):
@@ -400,7 +536,8 @@ class Office:
             occupant = None
             if occ:
                 s = self._snap(occ["thread_id"]) or {}
-                occupant = {"thread_id": occ["thread_id"], "title": s.get("title"), "role": d["role"],
+                occupant = {"thread_id": occ["thread_id"], "title": s.get("title"),
+                            "role": s.get("role") if layout.is_elastic(d["role"]) else d["role"], "zone": self._zone(d),
                             "phase": s.get("phase"), "attention": s.get("attention"), "since": _iso(occ["since"]),
                             "ended_at": s.get("ended_at"), "touched_at": s.get("touched_at"),
                             "half_life_s": self._hl(d["project"]),
@@ -410,7 +547,7 @@ class Office:
                        for r in self._q("SELECT * FROM desk_occupancy WHERE desk_id=? AND until IS NOT NULL"
                                         " ORDER BY until DESC, id DESC LIMIT ?", (desk_id, LINEAGE))]
             return {"desk": {"id": d["id"], "project": d["project"], "floor": d["floor"], "role": d["role"], "slot": d["slot"],
-                             "permanent": bool(d["permanent"]), "retired": bool(d["retired"])},
+                             "permanent": bool(d["permanent"]), "retired": bool(d["retired"]), "zone": self._zone(d)},
                     "occupant": occupant, "lineage": lineage}
 
 

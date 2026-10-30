@@ -41,6 +41,11 @@ def cmd_profile(a):
         print("error: " + e, file=sys.stderr)
     if a.action == "check" and not errs:
         print("ok: %s (%s)" % (prof["project"], prof["_path"]))
+    if a.action == "check" and "office" in prof:
+        from .agent import layout
+        c = layout.capacity(prof, profile.building_floors(prof["project"]))
+        print("capacidad: flex %d/piso · hasta %d pisos temporales (%d escritorios c/u) · contratista %s" % (
+            c["flex_per_floor"], c["max_extra_floors"], layout.elastic_floor_desks(prof), "sí" if c["outsourcing"] else "no"))
     return 1 if errs else 0
 
 
