@@ -206,6 +206,7 @@ struct FloorRenderer {
     static let wallFull = 30.0, wallCut = 14.0, glassFull = 28.0, glassCut = 12.0
     static let coreH = wallFull
     private var walkers: [OfficeStaff.Walker] { box.walkers(plan, layout, now: now) }
+    private var lounging: [String: OfficeStaff.Point] { OfficeStaff.commons(plan, layout) }
     private var pal: CityPalette { CityPalette(dark: dark) }
     private var style: CityBuildingStyle {
         let key = FloorFrame.key(of: [plan])
@@ -307,7 +308,7 @@ struct FloorRenderer {
             return (x < c.x0 && y < c.y1) || (y < c.y0 && x < c.x1)
         }
         enum Item {
-            case furniture(FloorLayout.RoomBox), spot(FloorLayout.Spot), walker(OfficeStaff.Walker), wall(Wall)
+            case furniture(FloorLayout.RoomBox), spot(FloorLayout.Spot), walker(OfficeStaff.Walker), wall(Wall), lounger(String, OfficeStaff.Point)
         }
         let staff = walkers
         var items: [(key: Double, x: Double, y: Double, item: Item)] = []
@@ -317,6 +318,7 @@ struct FloorRenderer {
         }
         for sp in layout.spots { items.append((sp.cx + sp.cy, sp.cx, sp.cy, .spot(sp))) }
         for w in staff where !w.seated && w.alpha > 0.01 { items.append((w.x + w.y, w.x, w.y, .walker(w))) }
+        for (id, p) in lounging { items.append((p.x + p.y, p.x, p.y, .lounger(id, p))) }
         for w in allWalls() where !(w.facade && w.side.isBack) {
             for c in chunks(w) {
                 let x = c.x + c.w / 2, y = c.y + c.d / 2
@@ -332,6 +334,7 @@ struct FloorRenderer {
                 case .spot(let sp): drawSpot(&ctx, sp, looks: looks)
                 case .walker(let w): drawWalker(&ctx, w)
                 case .wall(let w): drawWall(&ctx, w)
+                case .lounger(let id, let p): drawLounger(&ctx, id, p, looks[id] ?? nil)
                 }
             }
             if pass, let c = core { drawCore(&ctx, c, open: door) }
@@ -391,7 +394,7 @@ struct FloorRenderer {
             g.draw(s, at: CGPoint(x: p.x, y: p.y + 6), anchor: .top)
         }
         let crowded = cam.s < 0.62
-        let staff = walkers
+        let staff = walkers, commons = lounging
         for sp in layout.spots {
             guard let lk = looks[sp.id] ?? nil, let s = ctx.resolveSymbol(id: "\(prefix)d:\(sp.id)") else { continue }
             let focus = sp.id == hovered || sp.id == selected
@@ -409,6 +412,7 @@ struct FloorRenderer {
             case .retired: g.opacity = 0.35
             }
             var p = P(sp.cx, sp.cy + 25, floorZ)
+            if let q = commons[sp.id] { p = P(q.x, q.y + 12, floorZ) }
             if lk.visual != nil, let w = staff.first(where: { $0.spot == sp.id }), !w.seated {
                 guard w.alpha > 0.05 else { continue }
                 if !isLobby && w.stage == .still && !focus && cam.s < 1.15 { continue }
@@ -918,6 +922,7 @@ struct FloorRenderer {
             l.fill(ellipse(w.x + 2.5, w.y - 0.5, z, 7.5, n: 20),
                    with: .color(.black.opacity((dark ? 0.6 : 0.26) * w.occupant.opacity(at: now) * w.alpha)))
         }
+        for p in lounging.values { l.fill(ellipse(p.x + 2.5, p.y - 0.5, z, 7.5, n: 20), with: .color(.black.opacity(dark ? 0.6 : 0.26))) }
     }
 
     private func drawFloorMarks(_ ctx: inout GraphicsContext, looks: [String: FloorLook?]) {
@@ -971,7 +976,7 @@ struct FloorRenderer {
         g.opacity = lk == .retired ? 0.38 : 1
         let isHover = hovered == sp.id, isSel = selected == sp.id
         let seated = walkers.contains { $0.spot == sp.id && $0.seated }
-        let still = plan.desk(sp.id)?.employee != nil
+        let still = plan.desk(sp.id)?.employee != nil, away = plan.desk(sp.id)?.employee?.inCommons == true
 
         if lk != .retired { chair(&g, sp.cx, sp.cy + 13, back: false) }
         let sil = prism(&g, dx, dy, z0, dw, Iso.deskD, dh, top: deskTop, topEnd: deskTopEnd, left: deskL, right: deskR, edge: dark ? 0.28 : 0.95)
@@ -1038,7 +1043,7 @@ struct FloorRenderer {
         if let v = lk.visual, seated {
             figure(&ctx, id: sp.id, x: sp.cx, y: sp.cy + 13, v: v, fade: lk.fade, idx: idx,
                    role: plan.role(ofDesk: sp.id).map { FloorPlan.roleColor($0, dark: dark) }, seated: true)
-        } else if still, lk != .retired {
+        } else if still, !away, lk != .retired {
             figure(&ctx, id: sp.id, x: sp.cx, y: sp.cy + 13, v: lk.visual ?? .pending, fade: lk.fade, idx: idx,
                    role: plan.role(ofDesk: sp.id).map { FloorPlan.roleColor($0, dark: dark) }, seated: true, still: true)
         }
@@ -1126,6 +1131,14 @@ struct FloorRenderer {
         }
         box.heads[sp.id] = P(sp.cx, by, zt + bh)
         hit(sp, [P(x, y, zt + bh), P(x + w, y, zt + bh), P(x, y + dd, z0), P(x + w, y + dd, z0), P(x + w, y, z0)])
+    }
+
+    private func drawLounger(_ ctx: inout GraphicsContext, _ id: String, _ p: OfficeStaff.Point, _ lk: FloorLook?) {
+        guard lk != .retired else { return }
+        figure(&ctx, id: id, x: p.x, y: p.y, v: lk?.visual ?? .pending, fade: lk?.fade ?? 1, idx: 0,
+               role: plan.role(ofDesk: id).map { FloorPlan.roleColor($0, dark: dark) }, still: true)
+        let z0 = floorZ
+        hit(id, p.x + p.y + 0.5, [P(p.x, p.y, z0 + 38), P(p.x - 14, p.y, z0), P(p.x + 14, p.y, z0), P(p.x, p.y + 9, z0)])
     }
 
     // Invitado del vestíbulo ---------------------------------------------------

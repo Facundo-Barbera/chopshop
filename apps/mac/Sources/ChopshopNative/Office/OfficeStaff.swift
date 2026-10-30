@@ -100,6 +100,16 @@ public enum OfficeStaff {
         return out
     }
 
+    public static func commons(_ plan: FloorPlan, _ lay: FloorLayout) -> [String: Point] {
+        guard plan.kind != .lobby, plan.desks.contains(where: { $0.employee?.inCommons == true }) else { return [:] }
+        let ss = slots(lay)
+        var out: [String: Point] = [:]
+        for (i, d) in plan.desks.enumerated() where d.employee?.inCommons == true && lay.spot(d.id) != nil {
+            out[d.id] = ss[plan.desks.count <= ss.count ? i * ss.count / plan.desks.count : i % ss.count]
+        }
+        return out
+    }
+
     static func slot(_ tid: String, _ ss: [Point]) -> Int { Int(WorldSeed.hash(0, "staff", tid) % UInt64(max(1, ss.count))) }
 
     public static func homes(_ plan: FloorPlan, _ lay: FloorLayout, now: Date) -> [String: Home] {
