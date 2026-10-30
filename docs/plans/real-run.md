@@ -66,7 +66,7 @@ Con `t3_bin = "t3"` y `t3` fuera del `PATH` del shell, el agente arrancó con `t
 sobre `t3_unreachable` en el bus). Además el error real era engañoso: `[Errno 13] Permission denied: 't3'`. Ahora el agente registra
 `WARNING T3 no responde: <error>` en el primer fallo de cada caída. En la prueba se usó `t3_bin = "~/.t3/bin/t3"`.
 
-### BUG-3: un perfil sin `model` hace fallar todas las tareas de la cola (abierto)
+### BUG-3: un perfil sin `model` hace fallar todas las tareas de la cola (arreglado)
 
 El proyecto `chopshop` de T3 no tiene modelo por defecto, así que en la pasada 1, al reiniciar el agente, los 8 `t3_thread_launch` fallaron con
 `Pass modelSelection: the project has no default model`. Cada tarea quedó `launch_failed` → cola `failed` →
@@ -74,11 +74,16 @@ El proyecto `chopshop` de T3 no tiene modelo por defecto, así que en la pasada 
 `task_enqueue` avisan antes. Propuesta: que `profile check` (o el despachador antes de sacar de la cola) consulte
 `t3_project_list`, vea `defaultModelSelection: null` y exija `model` en el perfil.
 
-### BUG-4: `task_enqueue` no acepta `prompt` (abierto)
+Arreglo: `engine.model_problem` hace esa consulta; `task_enqueue` y `project_register` (MCP y `POST /projects`) fallan con
+ese mensaje antes de encolar o escribir. `profile check` y el despachador siguen sin comprobarlo.
+
+### BUG-4: `task_enqueue` no acepta `prompt` (arreglado)
 
 El despachador usa `extra.prompt` o, si falta, el título, pero la herramienta MCP solo recibe `title`. Para dar instrucciones
 («solo lectura, sin Bash, sin git») hubo que meterlas en el título, y la app lo muestra truncado en la cola. Propuesta: un parámetro
 `prompt` opcional que vaya a `extra`.
+
+Arreglo: `task_enqueue` acepta `prompt` y lo guarda en `extra.prompt`.
 
 ### BUG-5: `ChopshopSnap employees` no dice nada con un fixture de `/snapshot` (abierto, menor)
 
