@@ -276,7 +276,8 @@ public enum FloorPlanGenerator {
             if !done { _ = place(.grok, width: w, near: fr.unit() * W, prefer: [1, 0], minWidth: min(w, minRoomW)) }
         }
 
-        let needs = s.roles.map { roleNeed($0, bandDepth: min(back.depth, front.depth)) }
+        func depthNeed(_ n: Int) -> Double { Double(n <= 2 ? 1 : (n <= 8 ? 2 : 3)) * cellD + 2 * pad + aisle }
+        let needs = s.roles.map { roleNeed($0, bandDepth: min(back.depth, front.depth, depthNeed($0))) }
         let need = needs.reduce(0, +)
         var spare = back.length + front.length - need
         for c in [Commons.reception, .kitchenette, .meeting, .lounge] {
@@ -309,19 +310,43 @@ public enum FloorPlanGenerator {
             let g = groups[si]
             let len = seg.b - seg.a
             if g.isEmpty {
-                let kind: Commons = len < 60 ? .open : (lounge ? .open : .lounge)
+                let kind: Commons = len < 60 ? .open : (lounge ? (len < 150 ? .open : [Commons.cafe, .meeting, .lounge][rooms.count % 3]) : .lounge)
                 if kind == .lounge { lounge = true }
                 let rc = Rect(x0: seg.a, y0: band.y0, w: len, d: band.depth)
                 rooms.append(Room(kind: .commons(kind), rect: rc, door: len >= 60 ? door(rc, side: side, toward: core.midX) : nil))
                 continue
             }
             let total = g.reduce(0) { $0 + needs[$1] }
-            var x = seg.a
+            let rest = len - total
+            let grow = rest < 70 ? len / total : min(1.2, (len - 70) / total)
+            let used = rest < 70 ? len : (total * grow).rounded()
+            let towardCore = (seg.a + seg.b) / 2 < core.midX
+            var x = towardCore ? seg.b - used : seg.a
             for (j, k) in g.enumerated() {
-                let w = j == g.count - 1 ? seg.b - x : (len * needs[k] / total).rounded()
-                let rc = Rect(x0: x, y0: band.y0, w: w, d: band.depth)
-                rooms.append(Room(kind: .role(k), rect: rc, door: door(rc, side: side, toward: core.midX)))
+                let w = j == g.count - 1 ? (towardCore ? seg.b : seg.a + used) - x : (needs[k] * grow).rounded()
+                let dn = depthNeed(s.roles[k])
+                if band.depth - dn >= 110 {
+                    let rc = Rect(x0: x, y0: seg.band == 0 ? band.y1 - dn : band.y0, w: w, d: dn)
+                    let rd = door(rc, side: side, toward: core.midX)
+                    rooms.append(Room(kind: .role(k), rect: rc, door: rd))
+                    let bh = Rect(x0: x, y0: seg.band == 0 ? band.y0 : band.y0 + dn, w: w, d: band.depth - dn)
+                    let have = Set(rooms.compactMap { r -> Commons? in if case .commons(let c) = r.kind { return c } else { return nil } })
+                    let kind = [Commons.lounge, .kitchenette, .cafe, .meeting].first { !have.contains($0) } ?? [Commons.lounge, .cafe, .meeting][rooms.count % 3]
+                    if kind == .lounge { lounge = true }
+                    rooms.append(Room(kind: .commons(kind), rect: bh, door: Opening(side: side, from: rd.from, to: rd.to)))
+                } else {
+                    let rc = Rect(x0: x, y0: band.y0, w: w, d: band.depth)
+                    rooms.append(Room(kind: .role(k), rect: rc, door: door(rc, side: side, toward: core.midX)))
+                }
                 x += w
+            }
+            if used < len - 1 {
+                let have = Set(rooms.compactMap { r -> Commons? in if case .commons(let c) = r.kind { return c } else { return nil } })
+                let left = len - used
+                let kind = left < 60 ? Commons.open : ([Commons.lounge, .meeting, .kitchenette, .cafe].first { !have.contains($0) && commonsWidth($0) <= left + 40 } ?? (left < 150 ? .open : [Commons.lounge, .cafe, .meeting][rooms.count % 3]))
+                if kind == .lounge { lounge = true }
+                let rc = Rect(x0: towardCore ? seg.a : seg.a + used, y0: band.y0, w: left, d: band.depth)
+                rooms.append(Room(kind: .commons(kind), rect: rc, door: left >= 60 ? door(rc, side: side, toward: core.midX) : nil))
             }
         }
         return Result(footprint: F, core: core, corridor: corr, rooms: rooms, entrance: nil)
