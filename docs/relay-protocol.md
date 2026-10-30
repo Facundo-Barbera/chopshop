@@ -13,10 +13,33 @@ Schemas (JSON Schema 2020-12): `packages/api/relay/<mensaje>.schema.json`, con l
 
 | canal | ruta | auth |
 |---|---|---|
-| WebSocket | `GET /v1/connect` (upgrade) | `Authorization: Bearer cr1_…` (agente o visor) |
-| HTTP JSON | `POST /v1/pair/codes` | `Bearer cr1_…` con scope `agent`, o el token de operador (ver «Pairing») |
-| HTTP JSON | `POST /v1/pair` | sin credencial (el código es la credencial) |
-| HTTP JSON | `DELETE /v1/tokens/<token_id>` | `Bearer cr1_…` con scope `agent` de la misma cuenta |
+| WebSocket | `GET /v1/connect` (upgrade; alias exacto de `GET /agent/ws`) | `Authorization: Bearer cr1_…` con scope `agent` |
+| HTTP JSON | `GET /whoami` | `Bearer cr1_…` (`agent` o `viewer`) → `{role, machine_id}` |
+| HTTP SSE / JSON | `GET /stream`, `GET /state` | `Bearer cr1_…` con scope `viewer` |
+| HTTP JSON | `POST /v1/pair/codes` | token de operador (ver «Pairing») |
+| HTTP JSON | `POST /v1/pair` (alias `POST /pair`) | sin credencial (el código es la credencial) |
+| HTTP JSON | `DELETE /v1/tokens/<token_id>`, `DELETE /v1/pair/codes/<id>` | token de operador |
+| HTTP JSON | `GET /health` | pública (no mira la credencial) |
+
+### Rutas por rol
+
+El rol sale de la cabecera `Authorization`: sin cabecera → `anónimo`; token de operador → `admin`; `cr1_` de scope `viewer` →
+`viewer`; `cr1_` de scope `agent` → `machine`. Una cabecera mal formada o un token inválido/revocado → **401** antes de mirar la
+ruta. Un `viewer` recibe **403** en **cualquier** método que no sea `GET` (`POST`, `PUT`, `DELETE`, `PATCH`…), exista o no la ruta.
+
+| ruta | anónimo | viewer | machine | admin |
+|---|---|---|---|---|
+| `GET /health` | 200 | 200 | 200 | 200 |
+| `GET /whoami` | 401 | 200 `{role: "viewer", machine_id: null}` | 200 `{role: "machine", machine_id}` | 403 |
+| `GET /stream`, `GET /state` | 401 | 200 | 403 | 403 |
+| `GET /agent/ws`, `GET /v1/connect` | 401 | 403 | 101 (upgrade) | 403 |
+| `POST /v1/pair`, `POST /pair` | 200 | 403 | 403 | 403 |
+| `POST /v1/pair/codes` | 401 | 403 | 403 | 200 |
+| `DELETE /v1/tokens/<token_id>`, `DELETE /v1/pair/codes/<id>` | 401 | 403 | 403 | 204 |
+| cualquier otra ruta, o `PUT`/`PATCH` en las de arriba | 404 / 405 | 403 | 404 / 405 | 404 / 405 |
+
+Los 200/204/101 son el caso feliz: la ruta puede seguir respondiendo 400, 404, 410 o 429 por su propia validación. Un método
+distinto en una ruta que el rol sí puede usar → 405 con `Allow`. Los 401/403 llevan cuerpo `error` (`unauthorized`/`forbidden`).
 
 - Cada frame del WebSocket es **un** objeto JSON UTF-8 (texto, nunca binario) con la cabecera común
   `{"v": 1, "type": "...", "id": "<ULID>", "ts": "<ISO-8601 UTC con Z>"}`. Las respuestas llevan `re` = `id` del mensaje al que
@@ -135,9 +158,8 @@ Un campo nuevo solo sale cuando se añade aquí y a su schema, en el mismo cambi
 Modelo: `apps/agent/chopshop/agent/pairing.py`, con un prefijo de token propio (`cr1_`, no `cs1_`: son credenciales distintas y
 una no sirve en el otro sitio).
 
-1. **Crear código**: `POST /v1/pair/codes` con `{scope, name?, ttl_s?}` (`pair-create`). Lo pide un token `cr1_` de scope `agent`
-   de la cuenta (desde la máquina, con una CLI futura del tipo `chopshop relay pair create --scope viewer|agent`) o, para el primer agente de una cuenta, el
-   operador con el token de operador (ver «Deploy»). Respuesta (`pair-code`): `{id, code, scope, name, expires_at}`. El código
+1. **Crear código**: `POST /v1/pair/codes` con `{scope, name?, ttl_s?}` (`pair-create`). Solo lo pide el operador con el token
+   de operador (ver «Deploy»); un token `cr1_` (`agent` o `viewer`) recibe 403. Respuesta (`pair-code`): `{id, code, scope, name, expires_at}`. El código
    (`K7QM-93XD`: 8 símbolos base32 de Crockford, 40 bits) se muestra **una sola vez**; TTL por defecto 600 s, máx. 3600 s. El
    relay guarda solo `sha256(sal + ":" + código)`, la sal, el scope, la cuenta y las fechas.
 2. **Canjear**: `POST /v1/pair` con `{code, client_name?, machine_id?}` (`pair-redeem`), sin credencial. El código se normaliza como
@@ -148,8 +170,8 @@ una no sirve en el otro sitio).
 3. **Fallos**: código usado, caducado o invalidado → 410 `gone`; inválido → 401 `unauthorized`; 5 fallos por minuto por IP → 429
    `rate_limited`; cada fallo cuenta contra todos los códigos vivos de la cuenta y a los 20 se invalidan. Comparación en tiempo
    constante. Re-emparejar el mismo `machine_id` emite un token nuevo y revoca el anterior.
-4. **Uso**: `Authorization: Bearer cr1_…` en el upgrade de `/v1/connect`. Sin expiración automática; `last_seen_at` se escribe
-   como mucho una vez por minuto. **Revocar**: `DELETE /v1/tokens/<token_id>` (efecto inmediato, cierra sus WebSockets).
+4. **Uso**: `Authorization: Bearer cr1_…` en el upgrade de `/v1/connect` (agente) o en `/stream`, `/state` y `/whoami` (visor). Sin expiración automática; `last_seen_at` se escribe
+   como mucho una vez por minuto. **Revocar**: `DELETE /v1/tokens/<token_id>` con el token de operador (efecto inmediato, cierra sus WebSockets).
 
 Nunca se registran ni se devuelven códigos, tokens ni hashes (salvo el código o el token recién emitidos, a quien los pidió).
 
@@ -162,8 +184,8 @@ Nunca se registran ni se devuelven códigos, tokens ni hashes (salvo el código 
 - **El MCP despacha local, no por el relay**: lanzar, responder, asentar o asignar sigue siendo del MCP/agente en la propia
   máquina (o de la API del agente en la tailnet). El protocolo no tiene ningún mensaje de escritura hacia el agente; el relay
   nunca reenvía órdenes.
-- **El visor es solo lectura**: un token `viewer` solo puede enviar `whoami` y `ping`; cualquier otro `type` → `error`
-  `forbidden` (sin cerrar).
+- **El visor es solo lectura**: un token `viewer` no abre WebSocket; solo hace `GET /stream`, `GET /state` y `GET /whoami`, y
+  cualquier otro método → 403 `forbidden` (ver «Rutas por rol»).
 
 ## Deploy
 
@@ -175,6 +197,6 @@ cualquier cuenta) es el secret del Worker `RELAY_OPERATOR_TOKEN`, un binding de 
 crea una sola vez al hacer el primer deploy (R7) y se guarda como secret del repositorio con el mismo nombre,
 `RELAY_OPERATOR_TOKEN`; el workflow `.github/workflows/relay-deploy.yml` lo carga en cada deploy con el input `secrets` de
 `wrangler-action` (equivale a `wrangler secret put RELAY_OPERATOR_TOKEN` leyendo la variable de entorno, sin imprimirla). El
-Worker lo compara por SHA-256 en tiempo constante; sin el secret, solo los tokens `agent` pueden crear códigos. Un código creado
+Worker lo compara por SHA-256 en tiempo constante; sin el secret, nadie puede crear códigos ni revocar. Un código creado
 por el operador abre una cuenta nueva (`ac-…`) salvo que la petición lleve `?account=ac-…` para añadir a una existente.
 `POST /pair` es un alias de `POST /v1/pair`.
