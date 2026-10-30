@@ -24,7 +24,7 @@ import threading
 import time
 
 from .. import dispatcher as dispatcher_mod, employees as employees_mod, engine as engine_mod, events as legacy_events, graph, home, queue as queue_mod, \
-    settings, state
+    relaycfg, settings, state
 from . import __version__, actions as actions_mod, automations as automations_mod, collector as collector_mod, config, db, envelope, \
     events, github, halflife, listeners, notes, office as office_mod, pairing, projection, registry, relay as relay_mod, roles as roles_mod, server, t3watch
 from .forge import github as forge_github, rack as forge_rack
@@ -52,6 +52,17 @@ class ServiceError(Exception):
 
 
 # ---------------------------------------------------------------- bind
+
+def relay_config():
+    try:
+        m = relaycfg.read_machine()
+    except relaycfg.RelayCfgError as e:
+        log.warning("relay: machine.json ignorado (%s)", e)
+        m = None
+    if m:
+        return relaycfg.ws_url(m["api_url"]), m["credential"]
+    return relay_mod.configured()
+
 
 def _is_loopback(host):
     ip = server.parse_ip(host)
@@ -297,13 +308,28 @@ class AgentService:
         self.listeners = listeners.Listeners(self.emit, clock) if cfg.get("listeners", True) else None
         self.stop_event = threading.Event()
         self.servers, self.threads, self._serving = [], [], []
-        self.relay = None
-        relay_cfg = relay if relay is not None else relay_mod.configured()
-        if relay_cfg:
-            self.relay = relay_mod.RelayLink(relay_cfg[0], relay_cfg[1], self.app.machine_id, self.conn,
-                                             lambda: self.app.r_snapshot(None, {}, None), self.app.projector.current,
-                                             self.office.profiles_fn, self.stop_event)
+        self._relay_lock = threading.Lock()
+        self._relay_running = False
+        self.relay = self._make_relay(relay if relay is not None else relay_config())
+        self.app.relay_fn = lambda: self.relay
+        self.app.relay_reload = self.reload_relay
         self._stopped = False
+
+    def _make_relay(self, relay_cfg):
+        if not relay_cfg:
+            return None
+        return relay_mod.RelayLink(relay_cfg[0], relay_cfg[1], self.app.machine_id, self.conn,
+                                   lambda: self.app.r_snapshot(None, {}, None), self.app.projector.current,
+                                   self.office.profiles_fn, threading.Event())
+
+    def reload_relay(self, relay_cfg=None):
+        with self._relay_lock:
+            if self.relay is not None:
+                self.relay.stop.set()
+            self.relay = self._make_relay(relay_cfg if relay_cfg is not None else relay_config())
+            if self.relay is not None and self._relay_running and not self.stop_event.is_set():
+                self._spawn("relay", self.relay.run)
+            return self.relay
 
     WAKE_SEAT_TTL = 900.0           # s que se reintenta sentar un hilo despertado que la oficina aún no conoce
 
@@ -445,6 +471,7 @@ class AgentService:
             self._close_servers()
             raise
         self.app.listen_ips = {str(server.parse_ip(s.server_address[0])) for s in self.servers}
+        self.app.link_nonce.rotate()
         self._import_legacy()
         if background:
             self._spawn("sampler", self._run_sampler)
@@ -475,8 +502,10 @@ class AgentService:
             if self.actions is not None:
                 self._spawn("actions", self._loop, "actions", self.actions.poll_once, self.actions.next_delay)
             self._spawn("maintenance", self._maintenance)
-            if self.relay is not None:
-                self._spawn("relay", self.relay.run)
+            with self._relay_lock:
+                self._relay_running = True
+                if self.relay is not None:
+                    self._spawn("relay", self.relay.run)
         for s in self.servers:
             self._serving.append(s)
             self._spawn("http-%s" % s.server_address[0], s.serve_forever, 0.2)
@@ -674,6 +703,9 @@ class AgentService:
             return
         self._stopped = True
         self.stop_event.set()
+        with self._relay_lock:
+            if self.relay is not None:
+                self.relay.stop.set()
         self.app.stream.close()                     # corta las conexiones SSE (sus hilos son daemon)
         self._close_servers()
         end = time.monotonic() + STOP_TIMEOUT
@@ -727,7 +759,8 @@ def render_unit(cfg, exec_path=None, extra_rw=(), template=None, environ=None):
     with open(template or UNIT_TEMPLATE, encoding="utf-8") as f:
         text = f.read()
     exe = os.path.expanduser(exec_path) if exec_path else default_exec(env)
-    rw = [os.path.dirname(cfg.get("db_path") or ""), home.home()]
+    rw = [os.path.dirname(cfg.get("db_path") or ""), home.home(),
+          os.path.join(env.get("XDG_CONFIG_HOME") or os.path.join(home_dir, ".config"), "chopshop")]
     rw += list((cfg.get("service") or {}).get("read_write_paths") or []) + list(extra_rw)
     if not (cfg.get("t3") or {}).get("origin"):    # T3 local: su CLI (`t3 auth pairing create`) escribe en su carpeta de datos
         rw.append(env.get("T3CODE_HOME") or os.path.join(home_dir, ".t3"))

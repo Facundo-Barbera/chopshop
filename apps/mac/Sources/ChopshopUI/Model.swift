@@ -74,10 +74,17 @@ final class AppModel: ObservableObject {
     #if DEBUG
     let credentials: CredentialStore = FileCredentialStore.dev
     let relayCredentials: CredentialStore = FileCredentialStore.devRelay
+    let sessions: SessionStore = KeychainSessionStore(store: FileCredentialStore.devSession)
     #else
     let credentials: CredentialStore = KeychainCredentialStore()
     let relayCredentials: CredentialStore = KeychainCredentialStore(service: KeychainCredentialStore.relayService)
+    let sessions: SessionStore = KeychainSessionStore()
     #endif
+    private(set) lazy var auth: BackendAuth = {
+        let url = AppConfig.load().agents.first(where: \.isRelay).flatMap { BackendAuth.apiURL($0.url) } ?? BackendClient.defaultAPIURL
+        return BackendAuth(apiURL: url, store: sessions, deviceName: deviceName)
+    }()
+    @Published var skipLogin = false
     /// Stream en vivo (`GET /stream`) del agente principal (el primero configurado): alimenta la oficina nativa en macOS 26.
     /// En macOS < 26 no se abre: la UI web sigue con `GET /snapshot`.
     let live = LiveStore()
@@ -92,7 +99,7 @@ final class AppModel: ObservableObject {
     /// Se recarga con `reloadConfig()`. Al arrancar migra un `agent_url` suelto (un solo agente) a `[app.agents.*]`.
     private(set) lazy var config = loadConfig(migratingLegacy: true)
     /// Solo las máquinas activadas (`enabled`); las desactivadas se ven en los ajustes pero no se consultan.
-    private lazy var hub = AgentHub(specs: config.enabledAgents, credentials: credentials, relayCredentials: relayCredentials)
+    private lazy var hub = AgentHub(specs: config.enabledAgents, credentials: credentials, sessions: sessions)
     /// Última ronda de sondeo (estado de conexión de cada máquina en los ajustes).
     @Published private(set) var results: [AgentResult] = []
     private var labels: [String: String] = [:]     // agente -> último machine_id visto
@@ -116,13 +123,16 @@ final class AppModel: ObservableObject {
             else if let sec = Section(rawValue: s) { nav = sec == .machines ? .machines : .section(sec) }
         }
         if args.contains("--capture") { Capture.watch(model: self) }
+        skipLogin = loginDisabled
+        auth.onChange = { [weak self] in self?.sessionChanged($0) }
+        if !skipLogin { Task { await auth.restore() } }
         shell.actions = attentionActions
         shell.refresh = { [weak self] in _ = Task { await self?.refresh() } }
         startPolling()
         startLive()
         if !args.contains("--capture") { syncBundledAgent() }
         // Sin ningún agente configurado no hay nada que mostrar: se pide la conexión en los ajustes
-        if hub.isEmpty && !args.contains("--capture") && demoFixture == nil && ProcessInfo.processInfo.environment["CHOPSHOP_NO_SETTINGS"] != "1" { showSettings = true }
+        if hub.isEmpty && skipLogin && !args.contains("--capture") && demoFixture == nil && ProcessInfo.processInfo.environment["CHOPSHOP_NO_SETTINGS"] != "1" { showSettings = true }
     }
 
     private func startPolling() {
@@ -169,20 +179,24 @@ final class AppModel: ObservableObject {
         refreshing = true
         let gen = generation
         defer { if gen == generation { refreshing = false } }
-        live.relayRetrying()
+        let cloudPrimary = primary?.spec.isRelay == true
+        if !cloudPrimary { live.relayRetrying() }
         let fetched = await hub.fetchAll()
         guard gen == generation else { return }     // la config cambió mientras tanto: este resultado ya no vale
         for r in fetched { if let m = r.machineId { labels[r.name] = m } }
         results = fetched
         func json(_ o: [String: Any]) -> JSONValue? { (try? JSONSerialization.data(withJSONObject: o)).flatMap { try? JSONValue(data: $0) } }
         let relays = fetched.filter { hub.client(named: $0.name)?.spec.isRelay == true }
-        if let bad = relays.first(where: { !$0.isOK }) {
-            live.relayFailed(bad.status == .unreachable ? "relay no alcanzable" : bad.shortMessage, retry: bad.status == .unreachable || bad.status == .error)
-        } else {
-            live.ingest(relaySnapshots: fetched.flatMap(\.relaySnapshots).compactMap(json),
-                        machines: relays.isEmpty ? nil : relays.flatMap(\.relayMachines).compactMap(json))
+        if relays.contains(where: { $0.status == .unauthorized }), auth.session != nil { auth.expire() }
+        if !cloudPrimary {
+            if let bad = relays.first(where: { !$0.isOK }) {
+                live.relayFailed(bad.status == .unreachable ? "nube no alcanzable" : bad.shortMessage, retry: bad.status == .unreachable || bad.status == .error)
+            } else {
+                live.ingest(relaySnapshots: fetched.flatMap(\.relaySnapshots).compactMap(json),
+                            machines: relays.isEmpty ? nil : relays.flatMap(\.relayMachines).compactMap(json))
+            }
         }
-        canAct = hub.canAct
+        canAct = hub.canAct && !isWatcher
         let s = Summarizer.summarize(fetched, labels: labels, previous: machines)
         machines = s.machines
         projects = s.projects
@@ -192,7 +206,7 @@ final class AppModel: ObservableObject {
         // Con datos de algún agente no se muestra error en la barra: la UI web marca cuáles fallan.
         lastError = fetched.contains(where: { $0.isOK }) ? nil : fetched.first(where: { !$0.isOK })?.shortMessage
         // Con api_version 2 todo exige credencial: el primer 401 de la sesión abre los ajustes para emparejar.
-        if !askedPairing, fetched.contains(where: { $0.status == .unauthorized }), !args.contains("--capture") {
+        if !askedPairing, fetched.contains(where: { $0.status == .unauthorized && hub.client(named: $0.name)?.spec.isRelay != true }), !args.contains("--capture") {
             askedPairing = true
             showSettings = true
         }
@@ -208,8 +222,8 @@ final class AppModel: ObservableObject {
         pollTask = nil
         let oldPrimary = primary?.spec
         config = loadConfig()
-        hub = AgentHub(specs: config.enabledAgents, credentials: credentials, relayCredentials: relayCredentials)
-        canAct = hub.canAct
+        hub = AgentHub(specs: config.enabledAgents, credentials: credentials, sessions: sessions)
+        canAct = hub.canAct && !isWatcher
         let active = Set(hub.clients.map(\.spec.name))
         results = results.filter { active.contains($0.name) }
         labels = labels.filter { active.contains($0.key) }
@@ -256,6 +270,7 @@ final class AppModel: ObservableObject {
     private func loadConfig(migratingLegacy: Bool = false) -> AppConfig {
         var c = migratingLegacy ? AppConfig.loadMigratingLegacy() : AppConfig.load()
         c.agents = BundledAgent.merge(c.agents, local: bundled.localSpec)
+        if isWatcher { c.agents = c.agents.filter(\.isRelay) }
         return c
     }
 
@@ -301,13 +316,20 @@ final class AppModel: ObservableObject {
     /// Abre el stream del agente principal si hay URL y credencial (si no, `live.status` = `.noCredential` y se pide emparejar).
     func startLive() {
         guard #available(macOS 26.0, *) else { return }
-        live.onUnauthorized = { [weak self] in self?.pairingRevision += 1 }
+        live.onUnauthorized = { [weak self] in
+            guard let self else { return }
+            self.pairingRevision += 1
+            if self.primary?.spec.isRelay == true { self.auth.expire() }
+        }
         if let path = demoFixture {
             if let fs = try? FixtureStream(contentsOf: URL(fileURLWithPath: AppConfig.expand(path)), speed: demoSpeed) { live.connect(fs) }
             return
         }
         guard let spec = primary?.spec, let url = spec.baseURL else { live.reset(); return }
-        if spec.isRelay { live.connectRelay(); return }
+        if spec.isRelay {
+            if auth.session != nil, BackendAuth.apiURL(spec.url) == auth.apiURL { live.connect(cloud: auth.client) } else { live.reset() }
+            return
+        }
         live.connect(agent: url, credentials: credentials)
     }
 
@@ -316,41 +338,51 @@ final class AppModel: ObservableObject {
 
     func isPaired(_ agent: String) -> Bool {
         guard let s = spec(named: agent), let url = s.baseURL else { return false }
-        if s.isRelay { return relayCredentials.credential(account: AgentClient.relayAccount(url)) != nil }
+        if s.isRelay { return sessions.load(apiURL: url) != nil }
         return credentials.find(baseURL: url) != nil
     }
 
-    func saveRelayToken(agent: String, token: String) -> String? {
-        let t = token.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let s = spec(named: agent), s.isRelay, let url = s.baseURL else { return "Relay desconocido: guarda antes su URL." }
-        guard AgentClient.isRelayToken(t) else { return "El token del relay empieza por cr1_." }
-        do {
-            try relayCredentials.save(t, account: AgentClient.relayAccount(url))
-        } catch {
-            return "No pude guardar el token en el Llavero."
-        }
+    var isWatcher: Bool { auth.session?.user.role == .watcher }
+
+    private func sessionChanged(_ phase: BackendAuth.Phase) {
+        guard phase != .checking else { return }
+        shell.state.role = isWatcher ? .watcher : .owner
+        shell.machines = phase == .signedOut || isWatcher ? nil
+            : MachinesModel(client: auth.client, agentURL: URL(string: "http://127.0.0.1:\(BundledAgent.port())")!, hostName: deviceName)
+        shell.backend = auth.session != nil ? auth.client : nil
         pairingRevision += 1
-        Task { await refresh() }
-        return nil
+        if case .signedIn(let s) = phase { ensureCloudSpec(s.apiURL) }
+        reloadConfig()
+        if primary?.spec.isRelay == true { live.reset(); startLive() }
     }
 
-    func loginRelay(url raw: String, token: String) async -> RelayLoginOutcome {
-        let url = AppConfig.normalizeURL(raw)
-        let outcome = await RelayLogin.whoami(url: url, token: token)
-        guard outcome.isOK else { return outcome }
+    private func ensureCloudSpec(_ apiURL: URL) {
+        let url = AppConfig.normalizeURL(apiURL.absoluteString)
         let text = FileManager.default.contents(atPath: AppConfig.configPath()).map { String(decoding: $0, as: UTF8.self) } ?? ""
         let previous = AppConfig.parse(text).agents
-        var next = previous
-        let name: String
+        var next = previous.filter { !$0.isRelay || $0.url.caseInsensitiveCompare(url) == .orderedSame }
         if let i = next.firstIndex(where: { $0.url.caseInsensitiveCompare(url) == .orderedSame }) {
             next[i].destination = .relay
-            name = next[i].name
+            next[i].enabled = true
         } else {
-            name = (["relay"] + (2...99).map { "relay-\($0)" }).first { n in !next.contains { $0.name.caseInsensitiveCompare(n) == .orderedSame } } ?? "relay-\(next.count)"
+            let name = (["nube"] + (2...99).map { "nube-\($0)" }).first { n in !next.contains { $0.name.caseInsensitiveCompare(n) == .orderedSame } } ?? "nube-\(next.count)"
             next.append(AgentSpec(name: name, url: url, destination: .relay))
         }
-        if next != previous, let err = saveMachines(next, previous: previous) { return .failed(err) }
-        return saveRelayToken(agent: name, token: token).map { .failed($0) } ?? outcome
+        if next != previous { _ = saveMachines(next, previous: previous) }
+    }
+
+    private var loginDisabled: Bool {
+        args.contains("--capture") || demoFixture != nil || ProcessInfo.processInfo.environment["CHOPSHOP_NO_LOGIN"] == "1"
+    }
+
+    func logout() async {
+        await auth.logout()
+        skipLogin = loginDisabled
+    }
+
+    func showLogin() {
+        showSettings = false
+        skipLogin = false
     }
 
     /// Nombre de este Mac (lo que verá `chopshop pair list`).
@@ -368,7 +400,7 @@ final class AppModel: ObservableObject {
     /// Canjea un código de `chopshop pair create` y guarda la credencial en el Keychain. Devuelve el error para la UI, o nil.
     func pair(agent: String, code: String) async -> String? {
         guard let s = spec(named: agent), let url = s.baseURL else { return "Agente desconocido: guarda antes su URL." }
-        guard !s.isRelay else { return "Un relay usa un token cr1_, no un código de emparejamiento." }
+        guard !s.isRelay else { return "La nube usa tu sesión: inicia sesión con tu correo y contraseña." }
         let pc = PairingClient()
         let machine = ((try? await pc.machineID(baseURL: url)) ?? nil) ?? url.host ?? agent
         do {
@@ -389,7 +421,8 @@ final class AppModel: ObservableObject {
     /// Olvida la credencial de ese agente (el agente la sigue teniendo hasta `chopshop pair revoke`).
     func unpair(agent: String) {
         guard let s = spec(named: agent), let url = s.baseURL else { return }
-        if s.isRelay { try? relayCredentials.delete(account: AgentClient.relayAccount(url)) } else { credentials.forget(baseURL: url) }
+        if s.isRelay { Task { await logout() }; return }
+        credentials.forget(baseURL: url)
         pairingRevision += 1
         if s == primary?.spec { live.reset(); startLive() }
         Task { await refresh() }
