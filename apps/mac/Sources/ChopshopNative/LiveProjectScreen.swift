@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Detalle de un proyecto en vivo (macOS 26): la vista de proyecto (selector Oficina / Grafo, "te necesita", lista compacta)
-/// con el `snapshot` del `LiveStore`. Sin credencial (o revocada) muestra `unpaired` (la pantalla de emparejar de la app).
+/// Detalle de un proyecto en vivo (macOS 26): `ProjectWorkspace` a pantalla completa (la oficina,
+/// panel lateral con el hilo elegido, lo que te necesita y la lista) con el estado del `LiveStore`. Sin credencial (o revocada) muestra `unpaired` (la pantalla de emparejar de la app).
 @available(macOS 26.0, *)
 public struct LiveProjectScreen<Unpaired: View>: View {
     let project: String
@@ -41,20 +41,18 @@ public struct LiveProjectScreen<Unpaired: View>: View {
                 unpaired.frame(maxWidth: .infinity, maxHeight: .infinity)
             default:
                 if store.snapshot.projects.contains(project) {
-                    ScrollView {
-                        ProjectContent(project: project, snapshot: store.snapshot, frozenTime: nil)
-                            .id(project)
-                            .padding(.horizontal, 26).padding(.vertical, 22)
-                            .frame(maxWidth: 1060)
-                            .frame(maxWidth: .infinity)
-                    }
+                    // a pantalla completa: la oficina escala con la ventana; el detalle, en el panel lateral
+                    ProjectWorkspace(project: project, snapshot: store.snapshot, state: store.state)
+                        .id(project)
                 } else {
                     placeholder
                 }
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
-        .toolbar { ToolbarItem(placement: .primaryAction) { MachineStatusButton(machines: machines) } }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) { MachineStatusButton(machines: machines) }
+        }
     }
 
     @ViewBuilder private var placeholder: some View {

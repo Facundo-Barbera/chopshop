@@ -206,6 +206,17 @@ jobs:
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
         run: bash apps/mac/release/sign-app.sh "$RUNNER_TEMP/out/Chopshop.app"
 
+      - name: Comprobar el agente incrustado (firmado, hardened runtime)
+        # «Usar esta Mac como máquina»: el lanzador y el Python incrustado deben arrancar ya firmados; un release sin agente no sale
+        run: |
+          set -euo pipefail
+          app="$RUNNER_TEMP/out/Chopshop.app"
+          test -x "$app/Contents/MacOS/chopshop-agent"
+          test -f "$app/Contents/Library/LaunchAgents/chopshop-agent.plist"
+          test -x "$app/Contents/Resources/agent/python/bin/python3"
+          lipo -archs "$app/Contents/Resources/agent/python/bin/python3"
+          "$app/Contents/MacOS/chopshop-agent" pair --help >/dev/null
+
       - name: Notarizar, grapar y verificar
         if: env.DRY_RUN != 'true'
         env:

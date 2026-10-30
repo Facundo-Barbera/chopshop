@@ -3,38 +3,37 @@ import WebKit
 import ChopshopNative
 
 enum Section: String, CaseIterable, Identifiable {
-    case overview, questions, events, reactions, graph, batches, machines, project, machineRoom
+    case city, overview, questions, events, reactions, batches, machines, project
     var id: String { rawValue }
     /// Vistas fijas de la barra lateral (el proyecto y las máquinas tienen su propia sección).
+    /// La sala de máquinas no es una vista aparte: es una sala del piso de cada proyecto (oficina nativa).
     static var views: [Section] {
-        var v: [Section] = [.overview, .questions, .events, .reactions, .graph, .batches]
-        if #available(macOS 26.0, *) { v.append(.machineRoom) }      // vista nativa (no existe en la UI web)
+        var v: [Section] = [.overview, .questions, .events, .reactions, .batches]
+        if #available(macOS 26.0, *) { v.insert(.city, at: 0) }       // la flota como ciudad (vista nativa): edificios → pisos
         return v
     }
     var title: String {
         switch self {
+        case .city: return "Ciudad"
         case .overview: return "Resumen"
         case .questions: return "Preguntas"
         case .events: return "Actividad"
         case .reactions: return "Reacciones"
-        case .graph: return "Grafo"
         case .batches: return "Lotes"
         case .machines: return "Máquinas"
         case .project: return "Proyecto"
-        case .machineRoom: return "Sala de máquinas"
         }
     }
     var symbol: String {
         switch self {
+        case .city: return "building.2"
         case .overview: return "square.grid.2x2"
         case .questions: return "questionmark.bubble"
         case .events: return "waveform.path.ecg"
         case .reactions: return "bolt.horizontal"
-        case .graph: return "point.3.connected.trianglepath.dotted"
         case .batches: return "square.stack.3d.up"
         case .machines: return "gauge.with.dots.needle.50percent"
         case .project: return "folder"
-        case .machineRoom: return "server.rack"
         }
     }
 }
@@ -66,8 +65,10 @@ final class AppModel: ObservableObject {
     @Published var showSettings = false
     /// Sube cuando cambia un emparejamiento (para repintar lo que depende del Keychain).
     @Published var pairingRevision = 0
-    /// El usuario pidió la vista web para los proyectos en esta sesión (agente sin emparejamiento).
+    /// El usuario pidió la vista clásica (UI web con barra lateral) en esta sesión (agente sin emparejamiento).
     @Published var preferWeb = false
+    /// Armazón de la oficina (macOS 26): HUD, paleta, paneles y atajos del menú «Oficina».
+    let shell = ShellController()
 
     /// Credenciales de dispositivo (`cs1_…`) por agente: Keychain, nunca config.toml ni UserDefaults.
     let credentials: CredentialStore = KeychainCredentialStore()
@@ -78,10 +79,16 @@ final class AppModel: ObservableObject {
 
     weak var web: WKWebView?
 
-    /// Sección [app] de ~/.config/chopshop/config.toml (+ CHOPSHOP_APP__*). Se recarga con `reloadConfig()`.
-    private(set) var config = AppConfig.load()
-    private lazy var hub = AgentHub(specs: config.agents, credentials: credentials)
-    private var results: [AgentResult] = []
+    /// Agente incrustado en la app («Usar esta Mac como máquina», BundledAgent.swift).
+    let bundled = BundledAgent()
+
+    /// Sección [app] de ~/.config/chopshop/config.toml (+ CHOPSHOP_APP__*), más el agente de este Mac si el ajuste está activo.
+    /// Se recarga con `reloadConfig()`. Al arrancar migra un `agent_url` suelto (un solo agente) a `[app.agents.*]`.
+    private(set) lazy var config = loadConfig(migratingLegacy: true)
+    /// Solo las máquinas activadas (`enabled`); las desactivadas se ven en los ajustes pero no se consultan.
+    private lazy var hub = AgentHub(specs: config.enabledAgents, credentials: credentials)
+    /// Última ronda de sondeo (estado de conexión de cada máquina en los ajustes).
+    @Published private(set) var results: [AgentResult] = []
     private var labels: [String: String] = [:]     // agente -> último machine_id visto
     private var pollTask: Task<Void, Never>?
     private var refreshing = false
@@ -103,8 +110,11 @@ final class AppModel: ObservableObject {
             else if let sec = Section(rawValue: s) { nav = sec == .machines ? .machines : .section(sec) }
         }
         if args.contains("--capture") { Capture.watch(model: self) }
+        shell.actions = attentionActions
+        shell.refresh = { [weak self] in _ = Task { await self?.refresh() } }
         startPolling()
         startLive()
+        if !args.contains("--capture") { syncBundledAgent() }
         // Sin ningún agente configurado no hay nada que mostrar: se pide la conexión en los ajustes
         if hub.isEmpty && !args.contains("--capture") { showSettings = true }
     }
@@ -174,25 +184,77 @@ final class AppModel: ObservableObject {
     }
 
     /// Vuelve a leer la config (tras guardar los ajustes) y reinicia el sondeo con los agentes nuevos, sin reiniciar la app.
+    /// Las máquinas que siguen activas conservan su historial (minigráficas); el stream en vivo solo se reabre si cambia la principal.
     func reloadConfig() {
         generation += 1
         refreshing = false
         pollTask?.cancel()
         pollTask = nil
-        config = AppConfig.load()
-        hub = AgentHub(specs: config.agents, credentials: credentials)
-        results = []
-        labels = [:]
-        machines = []
-        projects = []
-        counts = [:]
-        lastUpdate = nil
+        let oldPrimary = primary?.spec
+        config = loadConfig()
+        hub = AgentHub(specs: config.enabledAgents, credentials: credentials)
+        let active = Set(hub.clients.map(\.spec.name))
+        results = results.filter { active.contains($0.name) }
+        labels = labels.filter { active.contains($0.key) }
+        machines = machines.filter { active.contains($0.agent) }
+        if results.isEmpty { projects = []; counts = [:]; lastUpdate = nil }
         lastError = nil
-        link = LinkState.from([], configured: hub.clients.count)
+        link = LinkState.from(results, configured: hub.clients.count)
         startPolling()
-        live.reset()
-        startLive()
+        if primary?.spec != oldPrimary {
+            live.reset()
+            startLive()
+        }
         pushAgents()      // sin agentes envía la lista vacía; con agentes espera a la primera ronda
+    }
+
+    /// Guarda la lista de máquinas de los ajustes en config.toml y reconecta. Las credenciales de los endpoints que ya no usa
+    /// ninguna máquina (quitada o con otra URL) se borran del Keychain. Devuelve el error para la UI, o nil.
+    func saveMachines(_ specs: [AgentSpec], previous: [AgentSpec]) -> String? {
+        do {
+            try ConfigWriter.save(path: AppConfig.configPath(), agents: specs)
+        } catch {
+            return "No pude guardar: \(error.localizedDescription)"
+        }
+        let orphaned = AgentSpec.orphanedEndpoints(old: previous, new: specs)
+        for spec in previous {
+            guard let url = spec.baseURL, orphaned.contains(CredentialAccount.endpoint(url)) else { continue }
+            credentials.forget(baseURL: url)
+        }
+        if !orphaned.isEmpty { pairingRevision += 1 }
+        reloadConfig()
+        if !orphaned.isEmpty { syncBundledAgent() }    // si compartía endpoint con una máquina quitada, se vuelve a emparejar
+        return nil
+    }
+
+    /// Estado de conexión de una máquina para los ajustes.
+    func connectionStatus(_ spec: AgentSpec) -> MachineConnection {
+        guard spec.enabled else { return .disabled }
+        guard hub.client(named: spec.name)?.spec == spec, let r = results.first(where: { $0.name == spec.name }) else { return .connecting }
+        return r.isOK ? .connected : .failed(r.status, r.shortMessage)
+    }
+
+    /// Config del archivo más el agente de este Mac (que nunca se escribe en config.toml).
+    private func loadConfig(migratingLegacy: Bool = false) -> AppConfig {
+        var c = migratingLegacy ? AppConfig.loadMigratingLegacy() : AppConfig.load()
+        c.agents = BundledAgent.merge(c.agents, local: bundled.localSpec)
+        return c
+    }
+
+    /// Registra o quita el agente de este Mac según el ajuste y, cuando responde, empareja la app con él.
+    func syncBundledAgent() {
+        Task { @MainActor in
+            await bundled.sync(isPaired: { [weak self] in self?.isPaired(BundledAgent.agentName) ?? true },
+                               pair: { [weak self] agent, code in await self?.pair(agent: agent, code: code) })
+        }
+    }
+
+    /// Ajuste «Usar esta Mac como máquina».
+    func setUseThisMac(_ on: Bool) {
+        guard bundled.isEnabled != on else { return }
+        bundled.isEnabled = on
+        reloadConfig()
+        syncBundledAgent()
     }
 
     /// Mensaje `agents`: resultados crudos por agente (la UI los combina). Sin agentes configurados va la lista vacía;
@@ -204,6 +266,7 @@ final class AppModel: ObservableObject {
 
     // --- stream en vivo, emparejamiento ---
 
+    /// Máquinas activas (a las que se conecta la app), en el orden de la configuración.
     var agents: [AgentSpec] { hub.clients.map(\.spec) }
     private var primary: AgentClient? { hub.clients.first }
 
@@ -212,19 +275,30 @@ final class AppModel: ObservableObject {
         value(after: "--demo-fixture") ?? ProcessInfo.processInfo.environment["CHOPSHOP_DEMO_FIXTURE"].flatMap { $0.isEmpty ? nil : $0 }
     }
 
+    /// `--demo-speed <x>` (o `CHOPSHOP_DEMO_SPEED`): aceleración del modo demo (20 por defecto; 0 = todo de golpe, sin esperas).
+    private var demoSpeed: Double {
+        (value(after: "--demo-speed") ?? ProcessInfo.processInfo.environment["CHOPSHOP_DEMO_SPEED"]).flatMap(Double.init) ?? 20
+    }
+
     /// Abre el stream del agente principal si hay URL y credencial (si no, `live.status` = `.noCredential` y se pide emparejar).
     func startLive() {
         guard #available(macOS 26.0, *) else { return }
         live.onUnauthorized = { [weak self] in self?.pairingRevision += 1 }
         if let path = demoFixture {
-            if let fs = try? FixtureStream(contentsOf: URL(fileURLWithPath: AppConfig.expand(path)), speed: 20) { live.connect(fs) }
+            if let fs = try? FixtureStream(contentsOf: URL(fileURLWithPath: AppConfig.expand(path)), speed: demoSpeed) { live.connect(fs) }
             return
         }
         guard let url = primary?.spec.baseURL else { live.reset(); return }
         live.connect(agent: url, credentials: credentials)
     }
 
-    func isPaired(_ agent: String) -> Bool { hub.client(named: agent)?.isPaired ?? false }
+    /// Configurada (activa o no) con ese nombre.
+    private func spec(named name: String) -> AgentSpec? { config.agents.first(where: { $0.name == name }) }
+
+    func isPaired(_ agent: String) -> Bool {
+        guard let url = spec(named: agent)?.baseURL else { return false }
+        return credentials.find(baseURL: url) != nil
+    }
 
     /// Nombre de este Mac (lo que verá `chopshop pair list`).
     var deviceName: String { Host.current().localizedName ?? "Mac" }
@@ -240,7 +314,7 @@ final class AppModel: ObservableObject {
 
     /// Canjea un código de `chopshop pair create` y guarda la credencial en el Keychain. Devuelve el error para la UI, o nil.
     func pair(agent: String, code: String) async -> String? {
-        guard let c = hub.client(named: agent), let url = c.spec.baseURL else { return "Agente desconocido: guarda antes su URL." }
+        guard let s = spec(named: agent), let url = s.baseURL else { return "Agente desconocido: guarda antes su URL." }
         let pc = PairingClient()
         let machine = ((try? await pc.machineID(baseURL: url)) ?? nil) ?? url.host ?? agent
         do {
@@ -253,17 +327,17 @@ final class AppModel: ObservableObject {
             return "No pude guardar la credencial en el Llavero."
         }
         pairingRevision += 1
-        if c === primary { live.reset(); startLive() }
+        if s == primary?.spec { live.reset(); startLive() }
         Task { await refresh() }
         return nil
     }
 
     /// Olvida la credencial de ese agente (el agente la sigue teniendo hasta `chopshop pair revoke`).
     func unpair(agent: String) {
-        guard let c = hub.client(named: agent), let url = c.spec.baseURL else { return }
+        guard let s = spec(named: agent), let url = s.baseURL else { return }
         credentials.forget(baseURL: url)
         pairingRevision += 1
-        if c === primary { live.reset(); startLive() }
+        if s == primary?.spec { live.reset(); startLive() }
         Task { await refresh() }
     }
 
@@ -273,7 +347,28 @@ final class AppModel: ObservableObject {
         AttentionActions(answer: { [weak self] task, option in
             guard let self else { return "la app se está cerrando" }
             return await self.answer(task, option)
-        }, open: { [weak self] url in self?.open(url) })
+        }, open: { [weak self] url in self?.open(url) }, settle: { [weak self] id in
+            guard let self else { return "la app se está cerrando" }
+            return await self.settle(id)
+        })
+    }
+
+    /// `POST /settle {thread_id}` al agente principal (cierra el hilo en T3, nunca archiva). nil = hecho.
+    func settle(_ threadID: String) async -> String? {
+        guard let c = primary else { return "no hay agente configurado" }
+        guard let action = AgentAction.route(type: "settle", payload: ["thread_id": threadID]) else { return "hilo no válido" }
+        let r = await c.perform(action)
+        if r.ok { Task { await refresh() }; return nil }
+        return r.message
+    }
+
+    /// Subtítulo de la ventana: estado de la conexión con los agentes.
+    var statusLine: String {
+        if link == .unconfigured { return "⚠︎ sin agente configurado" }
+        if let e = lastError { return "⚠︎ " + e.prefix(60) }
+        guard let d = lastUpdate else { return "cargando…" }
+        let f = DateFormatter(); f.dateFormat = "HH:mm:ss"
+        return "actualizado " + f.string(from: d)
     }
 
     /// `POST /answer {thread_id, choice, request}` al agente principal. nil = enviado.

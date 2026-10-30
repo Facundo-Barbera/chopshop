@@ -78,8 +78,12 @@ public struct CityFloor: Hashable, Sendable, Identifiable {
     /// Planta baja del edificio: el vestíbulo (`project` vacío; sus avisos llevan el proyecto del hilo).
     public var isLobby = false
     public var id: String { isLobby ? "lobby:\(company)" : floorIndex.map { "\(project)#\($0)" } ?? project }
-    /// Texto de la píldora.
-    public var label: String { isLobby ? "Vestíbulo" : floorName.map { "\(project) · \($0)" } ?? project }
+    /// Texto de la píldora (en un edificio por proyecto, el proyecto ya está en la azotea: solo el piso).
+    public var label: String {
+        if isLobby { return "Vestíbulo" }
+        if company == project { return floorName ?? project }
+        return floorName.map { "\(project) · \($0)" } ?? project
+    }
 }
 
 public struct CityBuilding: Hashable, Sendable, Identifiable {
@@ -92,11 +96,20 @@ public struct CityBuilding: Hashable, Sendable, Identifiable {
     public var d: Double
     /// De abajo arriba.
     public var floors: [CityFloor]
+    /// Aspecto (material, ventanas, azotea, alturas…): por defecto de la semilla `company`. Gancho de la personalización.
+    public var style: CityBuildingStyle
+
+    public init(company: String, index: Int, x0: Double, y0: Double, w: Double, d: Double, floors: [CityFloor],
+                style: CityBuildingStyle? = nil) {
+        self.company = company; self.index = index; self.x0 = x0; self.y0 = y0; self.w = w; self.d = d; self.floors = floors
+        self.style = style ?? CityBuildingStyle(seed: company)
+    }
+
     public var id: String { company }
     public var x1: Double { x0 + w }
     public var y1: Double { y0 + d }
-    /// Altura del techo (sin la azotea).
-    public var height: Double { Double(floors.count) * CityGeo.floorH }
+    /// Altura del techo (plinto y pisos, sin la azotea).
+    public var height: Double { floorZ(floors.count) }
     /// Profundidad para pintar de atrás hacia delante.
     public var depthKey: Double { x0 + w / 2 + y0 + d / 2 }
 }
@@ -114,7 +127,7 @@ public enum CityGeo {
     public static let slabH = 5.0
     public static let overhang = 0.14 * tile
     public static let wallT = 0.16 * tile
-    /// Azotea: losa + pretil + máquinas.
+    /// Azotea mínima: losa + pretil + máquinas (la de cada edificio, `CityBuildingStyle.roofH`).
     public static let roofH = 13.0
     /// Ventanas por piso: 6 en la cara izquierda (+y), 5 en la derecha (+x).
     public static let windowsLeft = 6
@@ -205,15 +218,18 @@ public struct CityModel: Equatable, Sendable {
     /// Agrupa los proyectos por empresa (orden estable: el de la tabla, luego por nombre; pisos por nombre de proyecto y, dentro, por
     /// índice de piso) y reparte los edificios en una cuadrícula. Un edificio con algún proyecto con `office` lleva el vestíbulo en la
     /// planta baja; los proyectos sin `office` (agente v2 o perfil sin bloque) siguen en un piso con todos sus hilos.
-    public static func build(_ s: LiveState, directory: CompanyDirectory = .standard) -> CityModel {
+    /// `perProject`: un edificio por proyecto (el nombre del proyecto en la azotea; sus pisos y su vestíbulo), como la «Ciudad»
+    /// de la barra lateral; si no, uno por empresa con un piso por proyecto.
+    public static func build(_ s: LiveState, directory: CompanyDirectory = .standard, perProject: Bool = false) -> CityModel {
         var groups: [String: [LiveState.Project]] = [:]
         var offices: [String: CityOffice] = [:]
         for p in s.projects {
             let o = CityOffice(p.office)
             offices[p.name] = o
-            groups[o?.company ?? directory.company(of: p.name), default: []].append(p)
+            groups[perProject ? p.name : (o?.company ?? directory.company(of: p.name)), default: []].append(p)
         }
-        let companies = groups.keys.sorted { directory.rank($0) < directory.rank($1) }
+        let companies = perProject ? groups.keys.sorted { ($0.lowercased(), $0) < ($1.lowercased(), $1) }
+                                   : groups.keys.sorted { directory.rank($0) < directory.rank($1) }
         let cols = max(1, Int(Double(companies.count).squareRoot().rounded(.up)))
         var buildings: [CityBuilding] = []
         for (i, c) in companies.enumerated() {
@@ -290,7 +306,7 @@ public struct CityModel: Equatable, Sendable {
         var b = IsoBounds.empty
         for (x, y) in [(0.0, 0.0), (groundX, 0.0), (0.0, groundY), (groundX, groundY)] { b.add(x, y, 0) }
         for bd in buildings {
-            let top = bd.height + CityGeo.roofH
+            let top = bd.height + bd.style.roofH
             for (x, y) in [(bd.x0, bd.y0), (bd.x1, bd.y0), (bd.x0, bd.y1), (bd.x1, bd.y1)] { b.add(x, y, top) }
         }
         return b

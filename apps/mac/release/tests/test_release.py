@@ -793,6 +793,19 @@ class TestAssemble(WorkDir):
         self.assertEqual((self.plist()["SUAutomaticallyUpdate"], self.plist()["SUScheduledCheckInterval"]), (True, 3600))
         self.assertNotEqual(self.run_sh("assemble-app.sh", env=dict(self.env, SPARKLE_AUTO_UPDATE="quizas")).returncode, 0)
 
+    def test_launch_agent_label_follows_the_release_bundle_id(self):
+        build = slurp(self.build) + (
+            "mkdir -p \"$CHOPSHOP_APP/Contents/Library/LaunchAgents\"\n"
+            "echo '{\"Label\": \"local.chopshop.ui.agent\", \"AssociatedBundleIdentifiers\": [\"local.chopshop.ui\"], "
+            "\"BundleProgram\": \"Contents/MacOS/chopshop-agent\"}' > \"$CHOPSHOP_APP/Contents/Library/LaunchAgents/chopshop-agent.plist\"\n")
+        spit(self.build, build)
+        r = self.run_sh("assemble-app.sh", env=self.env)
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        agent = json.loads(slurp(os.path.join(self.out, "Contents", "Library", "LaunchAgents", "chopshop-agent.plist")))
+        self.assertEqual(agent["Label"], "org.example.chopshop.agent")
+        self.assertEqual(agent["AssociatedBundleIdentifiers"], ["org.example.chopshop"])
+        self.assertEqual(agent["BundleProgram"], "Contents/MacOS/chopshop-agent")
+
     def test_existing_rpath_is_not_added_twice(self):
         r = self.run_sh("assemble-app.sh", env=dict(self.env, FAKE_RPATH="1"))
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -1201,6 +1214,70 @@ class TestRepoHygiene(unittest.TestCase):
         text = read(RELEASE, "Chopshop.entitlements")
         self.assertIn("<dict/>", text)
         self.assertNotIn("com.apple.security.cs.", text.split("-->", 1)[1])
+
+
+# ---------------------------------------------------------------------------
+class TestEmbedAgent(WorkDir):
+    """embed-agent.sh con un runtime de Python falso (PYTHON_RUNTIME_SRC: envuelve al python3 de las pruebas)."""
+
+    def setUp(self):
+        super().setUp()
+        self.app = os.path.join(self.tmp, "Chopshop.app")
+        os.makedirs(os.path.join(self.app, "Contents", "Resources"))
+        rt = os.path.join(self.tmp, "rt", "python")
+        for d in ("bin", "include", "share", "lib/python3.13/test", "lib/python3.13/tkinter", "lib/python3.13/json"):
+            os.makedirs(os.path.join(rt, d))
+        spit(os.path.join(rt, "lib", "python3.13", "json", "__init__.py"), "")
+        py = os.path.join(rt, "bin", "python3")
+        spit(py, "#!/bin/sh\nexec %s \"$@\"\n" % sys.executable)
+        os.chmod(py, 0o755)
+        spit(os.path.join(rt, "bin", "pip3"), "")
+        self.env = {"PYTHON_RUNTIME_SRC": os.path.dirname(rt)}
+
+    def test_embeds_agent_package_entry_point_and_trimmed_runtime(self):
+        r = self.run_sh("embed-agent.sh", [self.app], env=self.env)
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        dest = os.path.join(self.app, "Contents", "Resources", "agent")
+        self.assertTrue(os.path.isfile(os.path.join(dest, "chopshop", "agent", "pairing.py")))
+        self.assertFalse(any(d == "tests" for d in os.listdir(dest)))
+        self.assertIn("from chopshop.cli import main", slurp(os.path.join(dest, "chopshop-agent.py")))
+        self.assertIn('os.environ["SSL_CERT_FILE"] = "/etc/ssl/cert.pem"', slurp(os.path.join(dest, "chopshop-agent.py")))
+        self.assertEqual(sorted(os.listdir(os.path.join(dest, "python", "bin"))), ["python3"])
+        for gone in ("include", "share", "lib/python3.13/test", "lib/python3.13/tkinter"):
+            self.assertFalse(os.path.exists(os.path.join(dest, "python", gone)), gone)
+        self.assertTrue(os.path.isdir(os.path.join(dest, "python", "lib", "python3.13", "json")))
+        # .pyc precompilados sin comprobar mtime (el bundle firmado es de solo lectura)
+        self.assertTrue(any(f.endswith(".pyc") for _, _, fs in os.walk(os.path.join(dest, "chopshop")) for f in fs))
+
+    def test_checksum_mismatch_fails_and_drops_the_download(self):
+        cache = os.path.join(self.tmp, "cache")
+        os.makedirs(cache)
+        name = "cpython-3.13.18+20261026-aarch64-apple-darwin-install_only_stripped.tar.gz"
+        spit(os.path.join(cache, name), "no-es-el-tarball")
+        r = self.run_sh("embed-agent.sh", [self.app], env={"PYTHON_RUNTIME_CACHE": cache})
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("SHA-256 del runtime de Python", r.stderr)
+        self.assertFalse(os.path.exists(os.path.join(cache, name)))
+
+    def test_pins_are_consistent_and_build_embeds_by_default(self):
+        pins = dict(line.split("=", 1) for line in slurp(os.path.join(RELEASE, "python-runtime.version")).splitlines()
+                    if line and not line.startswith("#"))
+        self.assertRegex(pins["PYTHON_RUNTIME_RELEASE"], r"^\d{8}$")
+        self.assertRegex(pins["PYTHON_RUNTIME_VERSION"], r"^3\.\d+\.\d+$")
+        for k in ("PYTHON_RUNTIME_SHA256_ARM64", "PYTHON_RUNTIME_SHA256_X86_64"):
+            self.assertRegex(pins[k], r"^[0-9a-f]{64}$")
+        build = read(MAC, "build.sh")
+        self.assertIn("release/embed-agent.sh", build)
+        self.assertIn("<key>BundleProgram</key><string>Contents/MacOS/chopshop-agent</string>", build)
+        self.assertLess(build.index("embed-agent.sh"), build.index("codesign --force --deep"))
+        self.assertIn('SMAppService.agent(plistName: Self.plistName)', read(MAC, "Sources", "ChopshopUI", "BundledAgent.swift"))
+        self.assertTrue(os.access(os.path.join(RELEASE, "embed-agent.sh"), os.X_OK))
+        # el release comprueba el agente ya firmado, después de firmar y antes de notarizar
+        wf = read(WORKFLOWS, "release-mac.yml")
+        step = wf.index("Comprobar el agente incrustado")
+        self.assertLess(wf.index("sign-app.sh"), step)
+        self.assertLess(step, wf.index("notarize.sh"))
+        self.assertIn('"$app/Contents/MacOS/chopshop-agent" pair --help', wf)
 
 
 # ---------------------------------------------------------------------------

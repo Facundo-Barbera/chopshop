@@ -1,0 +1,88 @@
+import SwiftUI
+import AppKit
+
+/// Capturas del armazón (`ChopshopSnap <salida> shell`): la ciudad de `CityOfficeFixture` a ventana completa con el HUD en una barra
+/// de título emulada (ImageRenderer no dibuja la toolbar ni el inspector del sistema), el minimapa, el panel Atención, el detalle
+/// de un hilo y la paleta abierta: `shell-*.png`.
+@available(macOS 26.0, *)
+@MainActor
+public extension Snapshots {
+    static func renderShell(to out: String) {
+        guard let state = CityOfficeFixture.state else { print("sin CityOfficeFixture"); return }
+        let snap = SnapshotMapper.snapshot(state, now: FloorFixture.now)
+        let size = CGSize(width: 1440, height: 900)
+        func shot(_ name: String, dark: Bool = true, _ edit: (inout ShellState) -> Void) {
+            let shell = ShellController()
+            shell.snapshot = snap
+            edit(&shell.state)
+            let v = ShellSnapshotFrame(state: state, snapshot: snap, shell: shell)
+            NSApp?.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+            let r = ImageRenderer(content: v.frame(width: size.width, height: size.height).environment(\.colorScheme, dark ? .dark : .light))
+            r.scale = 1
+            guard let cg = r.cgImage, let data = NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:]) else {
+                print("sin imagen: \(name)"); return
+            }
+            let path = "\(out)/\(name).png"
+            try? data.write(to: URL(fileURLWithPath: path)); print("ok \(path)")
+        }
+        shot("shell-ciudad-dark") { _ in }
+        shot("shell-ciudad-light", dark: false) { _ in }
+        shot("shell-atencion") { $0.toggle(.attention) }
+        shot("shell-hilo") { $0.select(.thread(id: "b", project: "awesome-gb")) }
+        shot("shell-lotes") { $0.toggle(.batches) }
+        shot("shell-paleta") { $0.openPalette() }
+        shot("shell-paleta-busqueda") { $0.openPalette(); $0.query = "resp" }
+    }
+}
+
+/// Ventana del armazón dibujada a mano para las capturas: barra de título con el HUD, el mundo congelado, minimapa, paleta e
+/// inspector como columna fija.
+@available(macOS 26.0, *)
+struct ShellSnapshotFrame: View {
+    let state: LiveState
+    let snapshot: MockSnapshot
+    @ObservedObject var shell: ShellController
+
+    var body: some View {
+        let model = CityModel.build(state, perProject: true)
+        var lights = CityLights()
+        lights.observe(model, at: 0)
+        return VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Text("Chopshop").font(.headline)
+                Spacer()
+                ShellHUDView(hud: ShellHUD.from(snapshot), open: { _ in })
+                Spacer()
+                Image(systemName: "command").foregroundStyle(.secondary)
+                Image(systemName: "sidebar.trailing").foregroundStyle(.secondary)
+            }
+            .padding(.leading, 84).padding(.trailing, 18).frame(height: 44)
+            .background(Color(nsColor: .windowBackgroundColor))
+            Divider()
+            HStack(spacing: 0) {
+                ZStack(alignment: .bottomLeading) {
+                    CityView(model: model, lights: lights, snapshot: snapshot, state: state, frozenTime: 10, frozenNow: FloorFixture.now,
+                             flatChrome: true)
+                        .padding(.horizontal, 18).padding(.vertical, 14)
+                    if shell.state.minimap {
+                        ShellMinimapView(model: model, focused: shell.state.focus?.target.project, flat: true) { _ in }.padding(14)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay(alignment: .top) {
+                    if shell.state.paletteOpen {
+                        ShellPalette(shell: shell, commands: ShellCommands.all(snapshot, selected: shell.state.selectedThread), flat: true)
+                            .padding(.top, 40)
+                    }
+                }
+                if shell.state.inspector != nil {
+                    Divider()
+                    ShellInspectorView(shell: shell, snapshot: snapshot, machineRoom: MachineRoom(), flat: true)
+                        .frame(width: 380)
+                        .background(Color(nsColor: .windowBackgroundColor))
+                }
+            }
+            .background(Color(nsColor: .windowBackgroundColor))
+        }
+    }
+}

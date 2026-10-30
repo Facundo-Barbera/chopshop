@@ -87,19 +87,6 @@ struct Camera {
     }
 }
 
-/// Estado mutable de cámara/interacción: vive fuera de @State para no invalidar la vista a 30 fps.
-@available(macOS 26.0, *)
-final class GraphCameraBox {
-    var userYaw = 0.0, userPitch = 0.0      // arrastre
-    var hoverYaw = 0.0, hoverPitch = 0.0    // paralaje suavizado
-    var targetHoverYaw = 0.0, targetHoverPitch = 0.0
-    var dragStartYaw = 0.0, dragStartPitch = 0.0
-    var dragging = false
-    var fitScale = 1.0, fitOffset = CGPoint.zero, inset = 0.0
-    var quads: [(id: String, pts: [CGPoint], z: Double)] = []
-    var size = CGSize(width: 1, height: 1)
-}
-
 @available(macOS 26.0, *)
 func pointInPolygon(_ p: CGPoint, _ poly: [CGPoint]) -> Bool {
     var inside = false

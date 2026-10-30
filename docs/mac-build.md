@@ -83,19 +83,58 @@ cuenta `<máquina>@<host:puerto>`, solo este dispositivo, sin sincronizar con iC
   el detalle del proyecto ofrece «Seguir con la vista clásica».
 - Al primer arranque con un ad-hoc nuevo, macOS puede preguntar si la app puede usar el Llavero: pulsa «Permitir siempre».
 
+## Usar esta Mac como máquina
+
+Chopshop.app lleva dentro su propio agente: al instalar la app, este Mac aparece como una máquina más sin instalar nada aparte.
+**Ajustes… (⌘,) → «Usar esta Mac como máquina»** (activado por defecto):
+
+- La app registra el agente como ítem de inicio en segundo plano con `SMAppService` (LaunchAgent
+  `Contents/Library/LaunchAgents/chopshop-agent.plist`, nunca `launchctl`). Arranca al iniciar sesión aunque la app esté cerrada;
+  macOS lo muestra en **Ajustes del Sistema → General → Ítems de inicio** (si pide permiso, la app ofrece abrir esa pantalla).
+- Se añade como agente `esta-mac` en `http://127.0.0.1:<[agent] port>` (3790 por defecto), sin escribir en `config.toml`, y la app
+  se empareja sola: ejecuta `chopshop-agent pair create --json` (CLI local incrustada, código de 2 minutos) y lo canjea por `POST /pair`.
+  La credencial va al Llavero como cualquier otra.
+- Usa la misma configuración (`[agent]` de `config.toml`) y la misma base de datos que un agente instalado a mano. Si ya hay un
+  agente propio escuchando en ese puerto, la app no registra otro y usa ese.
+- Al desactivarlo se quita el ítem de inicio y el agente se detiene. Tras actualizar la app se vuelve a registrar para que corra el
+  código nuevo.
+- Log: `~/Library/Logs/Chopshop/agent.log` (rota a `agent.log.1` pasados 5 MB).
+
+Contenido del bundle (`release/embed-agent.sh`, lo llama `build.sh`): `Contents/MacOS/chopshop-agent` (lanzador Swift,
+`Sources/ChopshopAgent`) y `Contents/Resources/agent/` (paquete `apps/agent/chopshop` con `.pyc` precompilados y un Python de
+[python-build-standalone](https://github.com/astral-sh/python-build-standalone) fijado con SHA-256 en
+`release/python-runtime.version`, recortado). La primera build lo descarga a `apps/mac/.build/python-runtime`; `EMBED_AGENT=0`
+construye sin agente (el ajuste queda inactivo). Una instalación headless (VPS, Linux) no cambia: sigue con su unidad systemd
+(docs/agent-service.md).
+
 ## Oficina en vivo (macOS 26)
 
-En macOS 26 o posterior el detalle de un **proyecto** es la vista nativa `ChopshopNative` (oficina isométrica / grafo en capas,
-«necesita tu atención», lista compacta), alimentada por el stream de eventos del agente principal (el primero configurado):
+En macOS 26 o posterior la ventana entera es la **oficina** (`OfficeShell`, ver [`plans/office-first-ui.md`](plans/office-first-ui.md)):
+la ciudad a ventana completa, sin barra lateral, con el HUD en la barra de la ventana, la paleta de órdenes (⌘K), el minimapa y
+los paneles del inspector (Atención, Actividad, Lotes, Reacciones, Sala de máquinas, Máquinas; menú «Oficina», ⌘1…⌘6). La vista
+clásica (barra lateral + UI web) queda para macOS < 26, agentes sin `/stream` y «Seguir con la vista clásica». Todo se alimenta
+del stream de eventos del agente principal (el primero configurado):
 
 - `LiveStore` abre `GET /stream` (SSE) con la credencial, pliega cada sobre con la misma regla que `projection.py`
   (`LiveState.apply`; hay test de equivalencia con la proyección dorada) y reconecta con `Last-Event-ID` y backoff 3→30 s.
   El indicador de la barra dice **en vivo**, **reconectando** o **sin emparejar**.
 - Los botones de una pregunta responden por `POST /answer`; permitir/denegar y reintentar no tienen API: el botón abre el hilo en T3.
-- La vista web (`WKWebView`) sigue cargada detrás: Resumen, Preguntas, Actividad… y todo en macOS < 26 siguen con `GET /snapshot`.
+- La vista web (`WKWebView`) solo se carga en la vista clásica: en macOS < 26 todo sigue con `GET /snapshot`.
   Si el stream no responde y no hay datos (agente antiguo), se ve la vista web.
 - Modo demo sin agente: `Chopshop.app/Contents/MacOS/Chopshop --demo-fixture apps/agent/tests/fixtures/events/ui-fixture.jsonl`
-  (o `CHOPSHOP_DEMO_FIXTURE=…`): reproduce la secuencia acelerada.
+  (o `CHOPSHOP_DEMO_FIXTURE=…`): reproduce la secuencia acelerada. `--demo-speed 0` (o `CHOPSHOP_DEMO_SPEED`) la entrega de golpe.
+  Escena de muchos hilos (46, 1 corriendo; tiempos relativos a ahora):
+  `python3 apps/mac/Tests/ChopshopNativeTests/tools/make_office_layout_fixture.py /tmp/office-46.jsonl [--no-office]`.
+- **Proyecto** a pantalla completa (`ProjectWorkspace`; selector Oficina / Grafo en la barra de la ventana). La **oficina** es un
+  solo mundo (`OfficeWorldView` sobre `WorldLayout`): vestíbulo, todos los pisos de escritorios por rol (los del perfil `office`;
+  sin perfil, departamentos sintéticos por `role` de hasta 6 escritorios, ≤ 24 por piso) y la sala de máquinas (rack y listeners
+  del proyecto), sin pestañas, en filas de pantalla que siguen la proporción de la ventana. Arrastrar = mover; rueda o pellizco =
+  zoom hacia el cursor; dos dedos = mover; doble clic = encuadrar todo. Clic en un hilo → su detalle en el panel lateral (sin
+  elección: lo que te necesita y la lista). Sin tooltips ni popovers. Los terminados se desvanecen con la semivida y salen (los
+  pisos se rehacen cada 15 s; un terminado sin `ended_at` usa la hora de su último `task.state`). «Grafo» sigue siendo el grafo.
+- **Ciudad** (barra lateral, arriba): un edificio por proyecto (vestíbulo y sus pisos); clic en un piso → zoom hasta el mundo del
+  proyecto, encuadrado en ese piso.
+- Con `--capture`, `apps/mac/shot.sh <salida.png> click:<x>,<y>` hace clic en esos puntos de la ventana y captura tras el zoom.
 - Por ahora el stream es de un solo agente; los demás se ven por `/snapshot` en la vista web.
 - Requiere un agente con `api_version 2` (`/stream`, `/state`, `/pair`). Mientras el agente instalado sea anterior, el
   emparejamiento responde «agente sin emparejamiento», las acciones dan 403 con un mensaje claro y los proyectos se ven en la web.

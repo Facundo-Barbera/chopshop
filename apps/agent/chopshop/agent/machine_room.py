@@ -11,10 +11,18 @@
   crea gris); se guardan todos los no completados y los `RACK_DONE` completados más recientes (por `updated_at`; sin fecha
   cuentan como los más viejos; empate -> el que llegó después), en orden de llegada.
 `rack` se ordena por `(project, kind == main ? 0 : 1, repo)` (lo mismo que `MachineRoomModel.swift`).
-Los emisores son `forge/rack.py` (`forge.repo.state`) y `actions.py` (`forge.run.state`)."""
+Los emisores son `forge/rack.py` (`forge.repo.state`) y `actions.py` (`forge.run.state`).
+
+Salas por proyecto (cada sala de máquinas es una SALA de un piso de su proyecto, no una vista aparte): opcionales, 0..N, las
+declara el perfil local en `machine_rooms:` (`layout.machine_rooms`) y llegan con `office.changed` a `projects[].office.machine_rooms`.
+`rooms(state)` deja en cada `projects[]` `machine_rooms` = [`scope(sala, proyecto, cfg)`]: `name`, `floor` y lo que la sala aloja
+según su configuración (nombres o globs): los módulos del `rack` del proyecto por `repos` (`<dueño>/<repo>`), las `automations`
+del proyecto por nombre, los `listeners` y las `subscriptions` por nombre. Sin salas declaradas -> `[]`. `machine_room` = la
+primera o null (clientes anteriores). `projection._apply` lo recalcula tras cada sobre y `live` tras rellenar `subscriptions`."""
+import fnmatch
 import re
 
-from . import db, envelope
+from . import db, envelope, webhooks
 
 RACK_DONE = 5
 _URL = re.compile(r"(?i)\b[a-z][a-z0-9+.-]*://\S+")
@@ -107,10 +115,36 @@ def filter_project(mr, project):
                 rack=[u for u in mr.get("rack") or [] if u.get("project") == project])
 
 
+def _picks(name, pats):
+    return any(fnmatch.fnmatchcase(name or "", p) for p in pats or [])
+
+
+def scope(mr, project, cfg):
+    """Sala de máquinas `cfg` ({name, floor, repos, listeners, automations, subscriptions}) de un proyecto. No muta `mr`."""
+    mr, cfg = mr if isinstance(mr, dict) else empty(), cfg or {}
+    return {"name": cfg.get("name"), "floor": cfg.get("floor", 0),
+            "listeners": [l for l in mr.get("listeners") or [] if _picks(l.get("name"), cfg.get("listeners"))],
+            "automations": [a for a in mr.get("automations") or []
+                            if a.get("project") == project and _picks(a.get("name"), cfg.get("automations"))],
+            "subscriptions": [s for s in mr.get("subscriptions") or [] if _picks(s.get("name"), cfg.get("subscriptions"))],
+            "rack": [u for u in mr.get("rack") or [] if u.get("project") == project and _picks(u.get("repo"), cfg.get("repos"))]}
+
+
+def rooms(state):
+    """`projects[].machine_rooms` (y `machine_room` = la primera o None) desde `machine_room` y la configuración de cada
+    proyecto. En sitio; devuelve `state`."""
+    mr = state.get("machine_room")
+    for p in state.get("projects") or []:
+        cfgs = (p.get("office") or {}).get("machine_rooms") or []
+        p["machine_rooms"] = [scope(mr, p.get("name"), c) for c in cfgs]
+        p["machine_room"] = p["machine_rooms"][0] if p["machine_rooms"] else None
+    return state
+
+
 def subscriptions(conn):
-    """[{name, last_ok, last_error, signed}] desde `subscriptions` + la última entrega de cada una. Nunca la URL."""
+    """[{name, projects, last_ok, last_error, signed}] desde `subscriptions` + la última entrega de cada una. Nunca la URL."""
     with db.tx():
-        subs = db.rows(conn.execute("SELECT name, secret_file FROM subscriptions ORDER BY name"))
+        subs = db.rows(conn.execute("SELECT * FROM subscriptions ORDER BY name"))
         out = []
         for s in subs:
             ok = conn.execute("SELECT MAX(ts) FROM deliveries WHERE name=? AND ok=1", (s["name"],)).fetchone()[0]
@@ -119,15 +153,15 @@ def subscriptions(conn):
             err = None
             if bad is not None and (ok is None or bad["ts"] > ok):
                 err = _URL.sub("[url]", str(bad["detail"] or "fallo"))[:160]
-            out.append({"name": s["name"], "last_ok": envelope.iso(ok) if ok else None, "last_error": err,
+            out.append({"name": s["name"], "projects": webhooks.effective(s)["projects"], "last_ok": envelope.iso(ok) if ok else None, "last_error": err,
                         "last_error_at": envelope.iso(bad["ts"]) if err else None, "signed": bool(s.get("secret_file"))})
     return out
 
 
 def live(state, conn):
-    """Rellena `machine_room.subscriptions` (lo único que no viene de sobres). En sitio; devuelve `state`."""
+    """Rellena `machine_room.subscriptions` (lo único que no viene de sobres) y las salas por proyecto. En sitio; devuelve `state`."""
     try:
         _room(state)["subscriptions"] = subscriptions(conn)
     except Exception:  # noqa: BLE001 - una DB vieja sin columnas v4 no rompe /state
         _room(state)["subscriptions"] = []
-    return state
+    return rooms(state)
