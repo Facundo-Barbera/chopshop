@@ -2,7 +2,6 @@ import Foundation
 import ChopshopNative
 
 enum RelayLogin {
-    /// Base del relay normalizada: https, o http solo en loopback (desarrollo).
     static func baseURL(_ raw: String) -> String? {
         let base = AppConfig.normalizeURL(raw)
         guard let c = URLComponents(string: base), let scheme = c.scheme?.lowercased(), let host = c.host?.lowercased() else { return nil }
@@ -11,7 +10,6 @@ enum RelayLogin {
         return base
     }
 
-    /// `GET /whoami` (el token tiene que ser de visor) y `GET /state` para contar las máquinas visibles.
     static func whoami(url raw: String, token: String, transport: HTTPTransport = URLSessionTransport()) async -> RelayLoginOutcome {
         guard let base = baseURL(raw) else { return .invalidURL }
         guard AgentClient.isRelayToken(token) else { return .failed("El token del relay empieza por cr1_.") }
