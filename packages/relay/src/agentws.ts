@@ -243,6 +243,13 @@ export class AgentSockets {
     ws.serializeAttachment(att);
   }
 
+  revoke(tokenId: string): void {
+    for (const ws of this.ctx.getWebSockets(AGENT_TAG)) {
+      const att = ws.deserializeAttachment() as AgentAttachment | null;
+      if (att?.tokenId === tokenId) closeWith(ws, "unauthorized", "credential revoked");
+    }
+  }
+
   close(ws: WebSocket, code: number, reason: string): void {
     try {
       ws.close(code === 1005 || code === 1006 ? 1000 : code, reason);
