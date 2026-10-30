@@ -74,21 +74,24 @@ def _machine_stamp():
 
 class RelayLink:
     def __init__(self, url, token, machine_id, conn, snapshot_fn, state_fn, profiles_fn, stop_event,
-                 clock=time.monotonic, factory=None, backoff=None, jitter=None, tick=TICK):
+                 clock=time.monotonic, factory=None, backoff=None, jitter=None, tick=TICK, offer_fn=None):
         self.url, self._token, self.machine_id, self.conn = url, token, machine_id, conn
         self.snapshot_fn, self.state_fn, self.profiles_fn = snapshot_fn, state_fn, profiles_fn
         self.stop, self.clock, self.tick = stop_event, clock, tick
         self.factory = factory or self._client
+        self.offer_fn = offer_fn or relaysync.local_projects
         self.backoff = backoff or wsclient.exponential_backoff(cap=BACKOFF_CAP)
         self.jitter = jitter or wsclient.full_jitter()
         self.attempt = 0
         self.connected = False
         self.last_error = None
-        self.sent = {"snapshot": 0, "event": 0}
+        self.sent = {"snapshot": 0, "event": 0, "import.offer": 0}
         self.v = 2 if relaycfg.MACHINE_CRED_RE.match(token or "") else 1
         self.machine, self.rev = None, None
         self.workspaces, self.ws_map = [], {}
         self._synced = False
+        self._cloud_names = set()
+        self._offer_due, self._offered = False, None
 
     def _client(self):
         headers = {"Authorization": "Bearer " + self._token, "User-Agent": USER_AGENT}
@@ -178,7 +181,11 @@ class RelayLink:
         elif kind == "sync" and self.v == 2:
             self.workspaces, self.ws_map = relaysync.workspace_map(msg)
             self.rev = msg.get("rev")
+            self._cloud_names = relaysync.sync_names(msg)
             self._synced = True
+            self._offer_due = True
+        elif kind == "import.result" and self.v == 2:
+            self._import_result(msg)
         elif kind == "error":
             log.warning("relay: error %s: %s", msg.get("code"), msg.get("message"))
             retry = msg.get("retry_after_s")
@@ -186,6 +193,34 @@ class RelayLink:
                 self._hold = self.clock() + float(retry)
             if msg.get("close"):
                 raise wsclient.WSClosed(self._close_code(msg), "el relay cierra: %s" % msg.get("code"))
+
+    def _import_result(self, msg):
+        if not self._offered or msg.get("re") != self._offered[0]:
+            return
+        if msg.get("status") in ("stored", "duplicate"):
+            try:
+                relaysync.write_import_hash(self._offered[1])
+            except OSError as e:
+                log.warning("relay: no pude guardar el hash de la oferta: %s", e.strerror or type(e).__name__)
+            log.info("relay: oferta de importación %s (%s)", msg.get("status"), msg.get("import_id"))
+
+    def _offer(self, client):
+        self._offer_due = False
+        try:
+            msg, skipped = relaysync.import_offer(self.offer_fn(self._cloud_names))
+        except Exception as e:
+            log.warning("relay: no pude construir la oferta de importación: %s", e)
+            return
+        if skipped:
+            log.warning("relay: proyectos fuera de la oferta de importación por tamaño: %s", ", ".join(skipped))
+        if msg is None:
+            return
+        h = relaysync.offer_hash(msg["projects"])
+        if (self._offered and self._offered[1] == h) or relaysync.read_import_hash() == h:
+            return
+        self._send(client, msg)
+        self.sent["import.offer"] += 1
+        self._offered = (msg["id"], h)
 
     def _close_code(self, msg):
         status = REFUSED.get(msg.get("code"))
@@ -260,7 +295,7 @@ class RelayLink:
         self._projects = self._roles()
         self._hold = 0.0
         self._rx = self.clock()
-        self._synced = False
+        self._synced, self._offer_due, self._offered = False, False, None
         hello = relaysync.hello(self.machine_id, self._projects, events.last_seq(self.conn), v=self.v)
         self._send(client, hello)
         welcome = self._welcome(client, hello["id"])
@@ -284,6 +319,8 @@ class RelayLink:
             msg = self._recv(client, self.tick)
             if msg is not None:
                 self._handle(client, msg)
+            if self._offer_due:
+                self._offer(client)
             now = self.clock()
             if now - last_events >= self.tick:
                 cursor = self._events(client, cursor)
