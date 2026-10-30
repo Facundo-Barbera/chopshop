@@ -182,14 +182,10 @@ struct CityRenderer {
 
     private enum Item {
         case building(CityBuilding)
-        case tree(CityPoint, String)
-        case cafe(CityRect, String)
 
         var key: Double {
             switch self {
             case .building(let b): return b.depthKey
-            case .tree(let q, _): return q.x + q.y
-            case .cafe(let r, _): return (r.x0 + r.x1) / 2 + (r.y0 + r.y1) / 2 + 0.6 * CityGeo.tile
             }
         }
     }
@@ -200,12 +196,7 @@ struct CityRenderer {
     }
 
     private func items() -> [Item] {
-        var xs: [Item] = model.buildings.map { Item.building($0) }
-        xs += model.trees.map { Item.tree($0, "") }
-        for c in model.campuses {
-            xs += c.trees.map { Item.tree($0, c.name) }
-            for cm in c.commons where cm.kind == .cafe { xs.append(Item.cafe(cm.rect, c.name)) }
-        }
+        let xs: [Item] = model.buildings.map { Item.building($0) }
         return xs.sorted { $0.key < $1.key }
     }
 
@@ -221,17 +212,6 @@ struct CityRenderer {
                 guard a > 0.001 else { continue }
                 var g = ctx; g.opacity = a
                 drawBuilding(&g, b, glows: &glows)
-            case .tree(let q, let campus):
-                let r = 0.5 * CityGeo.tile
-                let a = (occludes(q.x - r, q.y - r, q.x + r, q.y + r) ? front : others) * dim(campus)
-                guard a > 0.001 else { continue }
-                var g = ctx; g.opacity = a
-                drawTree(&g, q)
-            case .cafe(let r, let campus):
-                let a = (occludes(r.x0, r.y0, r.x1, r.y1 + 2 * CityGeo.tile) ? front : others) * dim(campus)
-                guard a > 0.001 else { continue }
-                var g = ctx; g.opacity = a
-                drawCafe(&g, r)
             }
         }
         drawGlows(&ctx, glows)
@@ -329,16 +309,6 @@ struct CityRenderer {
         drawRoads(&g)
 
         let tile = CityGeo.tile
-        var parkShade = Path()
-        for q in model.trees { parkShade.addPath(disc(q.x + 0.22 * tile, q.y + 0.22 * tile, 0.42 * tile, n: 12)) }
-        var gp = g; gp.opacity = alpha * dim("") * 0.7
-        gp.fill(parkShade, with: .color(pal.contact.color))
-        for c in model.campuses where !c.trees.isEmpty {
-            var shade = Path()
-            for q in c.trees { shade.addPath(disc(q.x + 0.22 * tile, q.y + 0.22 * tile, 0.42 * tile, n: 12)) }
-            var gs = g; gs.opacity = alpha * dim(c.name) * 0.7
-            gs.fill(shade, with: .color(pal.contact.color))
-        }
 
         for b in model.buildings {
             let a = cityClamp(rise(b, 0) / 0.6)
@@ -350,28 +320,6 @@ struct CityRenderer {
             gc.fill(poly([P(x0, y0 - cast, 0), P(x1 + k, y0 - cast, 0), P(x1 + k, y1, 0), P(x0, y1, 0)]), with: .color(pal.contact.color))
             gs.fill(poly([P(x0 - k, y0 - k, 0), P(x1 + k, y0 - k, 0), P(x1 + k, y1 + k, 0), P(x0 - k, y1 + k, 0)]), with: .color(pal.contact.color))
         }
-
-        let ta = ambient
-        guard ta > 0.01 else { return }
-        var gt = g; gt.opacity = alpha * ta
-        let r = max(1.4, 0.13 * tile * cam.s)
-        var cars = Path()
-        for (i, rd) in model.roads.enumerated() {
-            let len = rd.length
-            guard len > 1, rd.points.count > 1 else { continue }
-            for k in 0..<2 {
-                let speed = 52.0 + Double((i * 7 + k * 3) % 5) * 6
-                let phase = Double((i * 37 + k * 53) % 100) / 100
-                var f = (t * speed / len + phase).truncatingRemainder(dividingBy: 1)
-                if f < 0 { f += 1 }
-                let fwd = k == 0
-                let at = along(rd.points, (fwd ? f : 1 - f) * len)
-                let lane = (fwd ? 1.0 : -1.0) * rd.width * 0.25
-                let q = P(at.p.x - at.dy * lane, at.p.y + at.dx * lane)
-                cars.addEllipse(in: CGRect(x: q.x - r, y: q.y - r, width: 2 * r, height: 2 * r))
-            }
-        }
-        gt.fill(cars, with: .color(pal.traffic.color.opacity(0.62)))
     }
 
     private func drawRoads(_ g: inout GraphicsContext) {
@@ -382,8 +330,8 @@ struct CityRenderer {
             curb.addPath(strip(rd.points, hw + 2.5))
             road.addPath(strip(rd.points, hw))
             for q in [rd.points[0], rd.points[rd.points.count - 1]] {
-                curb.addPath(disc(q.x, q.y, hw + 2.5, n: 20))
-                road.addPath(disc(q.x, q.y, hw, n: 20))
+                curb.addPath(rectPath(CityRect(x0: q.x, y0: q.y, x1: q.x, y1: q.y), hw + 2.5))
+                road.addPath(rectPath(CityRect(x0: q.x, y0: q.y, x1: q.x, y1: q.y), hw))
             }
             center.move(to: P(rd.points[0].x, rd.points[0].y))
             for q in rd.points.dropFirst() { center.addLine(to: P(q.x, q.y)) }
@@ -401,36 +349,6 @@ struct CityRenderer {
             g.fill(r, with: .color(pal.lot.color))
             g.stroke(r, with: .color(pal.lotEdge.color), lineWidth: 0.9)
         }
-        for cm in c.commons {
-            let q = cm.rect
-            switch cm.kind {
-            case .lawn:
-                g.fill(rectPath(q), with: .color(pal.lawn.color))
-                g.stroke(rectPath(q), with: .color(pal.lawnEdge.color), lineWidth: 0.7)
-            case .garden:
-                g.fill(rectPath(q), with: .color(pal.garden.color))
-                g.stroke(rectPath(q), with: .color(pal.lawnEdge.color), lineWidth: 0.7)
-                g.fill(disc((q.x0 + q.x1) / 2, (q.y0 + q.y1) / 2, 0.9 * tile, n: 24), with: .color(pal.walk.color))
-                g.fill(disc((q.x0 + q.x1) / 2, (q.y0 + q.y1) / 2, 0.55 * tile, n: 24), with: .color(pal.lawn.color))
-            case .plaza:
-                g.fill(rectPath(q), with: .color(pal.plaza.color))
-                var j = Path()
-                var x = q.x0 + tile
-                while x < q.x1 - 1 { j.move(to: P(x, q.y0)); j.addLine(to: P(x, q.y1)); x += tile }
-                var y = q.y0 + tile
-                while y < q.y1 - 1 { j.move(to: P(q.x0, y)); j.addLine(to: P(q.x1, y)); y += tile }
-                g.stroke(j, with: .color(pal.joint.color), lineWidth: 0.5)
-                g.stroke(rectPath(q), with: .color(pal.lotEdge.color), lineWidth: 0.8)
-            case .cafe:
-                let terrace = CityRect(x0: q.x0 - 0.3 * tile, y0: q.y0 - 0.2 * tile, x1: q.x1 + 0.3 * tile, y1: q.y1 + 1.9 * tile)
-                g.fill(rectPath(terrace), with: .color(pal.plaza.color))
-                g.stroke(rectPath(terrace), with: .color(pal.lotEdge.color), lineWidth: 0.7)
-            }
-        }
-        var walks = Path()
-        for w in c.paths where w.count > 1 { walks.addPath(segments(w, 0.24 * tile)) }
-        g.fill(walks, with: .color(pal.walk.color))
-        for cm in c.commons where cm.kind == .plaza { drawFountain(&g, cm.rect) }
     }
 
     private func drawLink(_ g: inout GraphicsContext, _ l: CityLink) {
@@ -443,74 +361,6 @@ struct CityRenderer {
         let u = CGFloat(0.25 * tile * cam.s)
         let phase = CGFloat((t * 0.6).truncatingRemainder(dividingBy: 1)) * 2 * u
         g.stroke(c, with: .color(accent.color.opacity(0.85)), style: StrokeStyle(lineWidth: max(1, 1.2 * cam.s), lineCap: .round, dash: [u, u], dashPhase: -phase))
-    }
-
-    private func drawFountain(_ g: inout GraphicsContext, _ q: CityRect) {
-        let tile = CityGeo.tile, cx = (q.x0 + q.x1) / 2, cy = (q.y0 + q.y1) / 2
-        let R = 1.0 * tile, h = 4.0, ph = 9.0
-        g.fill(disc(cx, cy, R, z: 0, n: 28), with: .color(pal.stone.1.color))
-        g.fill(disc(cx, cy, R, z: h, n: 28), with: .color(pal.stone.0.color))
-        g.fill(disc(cx, cy, R * 0.8, z: h, n: 28), with: .color(pal.water.color))
-        let pw = 0.09 * tile
-        box(&g, cx - pw, cy - pw, cx + pw, cy + pw, h, h + ph, top: pal.stone.0, left: pal.stone.0, right: pal.stone.1)
-        g.fill(disc(cx, cy, 0.34 * tile, z: h + ph, n: 20), with: .color(pal.stone.0.color))
-        g.fill(disc(cx, cy, 0.24 * tile, z: h + ph, n: 20), with: .color(pal.water.color))
-        var jet = Path()
-        jet.move(to: P(cx, cy, h + ph)); jet.addLine(to: P(cx, cy, h + ph + 6))
-        g.stroke(jet, with: .color(pal.water.mix(CityRGB(255, 255, 255), 0.5).color.opacity(0.8)), style: StrokeStyle(lineWidth: 1.4, lineCap: .round))
-    }
-
-    private func drawTree(_ g: inout GraphicsContext, _ q: CityPoint) {
-        let h = CityBuildingStyle.mix(CityLights.hash("\(Int(q.x.rounded())),\(Int(q.y.rounded()))"))
-        let u1 = Double(h & 0xffff) / 65535, u2 = Double((h >> 16) & 0xffff) / 65535
-        let tile = CityGeo.tile, k = 0.85 + 0.35 * u1
-        let trunkH = 7.0 * k, rr = 0.42 * tile * k, tw = 0.05 * tile
-        box(&g, q.x - tw, q.y - tw, q.x + tw, q.y + tw, 0, trunkH + rr * 0.3, top: pal.trunk, left: pal.trunk, right: pal.trunk.scaled(0.8))
-        let s = cam.s
-        if u2 < 0.25 {
-            let base = P(q.x, q.y, trunkH * 0.6), apex = P(q.x, q.y, trunkH * 0.6 + 2.8 * rr)
-            let hw = rr * 1.3 * s
-            g.fill(poly([CGPoint(x: base.x - hw, y: base.y), apex, CGPoint(x: base.x, y: base.y + hw * 0.35)]), with: .color(pal.leaf.0.color))
-            g.fill(poly([CGPoint(x: base.x, y: base.y + hw * 0.35), apex, CGPoint(x: base.x + hw, y: base.y)]), with: .color(pal.leaf.1.color))
-            return
-        }
-        let c = P(q.x, q.y, trunkH + rr), R = rr * s * 1.2, R2 = R * 0.7
-        g.fill(Path(ellipseIn: CGRect(x: c.x - R, y: c.y - R, width: 2 * R, height: 2 * R)), with: .color(pal.leaf.1.color))
-        g.fill(Path(ellipseIn: CGRect(x: c.x - R2 - R * 0.2, y: c.y - R2 - R * 0.22, width: 2 * R2, height: 2 * R2)), with: .color(pal.leaf.0.color))
-    }
-
-    private func drawCafe(_ g: inout GraphicsContext, _ r: CityRect) {
-        let tile = CityGeo.tile, h = 20.0
-        let wall = body(.limestone)
-        box(&g, r.x0, r.y0, r.x1, r.y1, 0, h, wall, edge: pal.bodyEdge)
-        let lit = dark ? 0.55 : 0.12
-        g.fill(poly([P(r.x0 + 0.1 * r.w, r.y1, h * 0.72), P(r.x1 - 0.1 * r.w, r.y1, h * 0.72), P(r.x1 - 0.1 * r.w, r.y1, 2),
-                     P(r.x0 + 0.1 * r.w, r.y1, 2)]), with: .color(pal.glassL.0.mix(pal.litL, lit).color))
-        g.fill(poly([P(r.x1, r.y1 - 0.15 * r.d, h * 0.72), P(r.x1, r.y0 + 0.15 * r.d, h * 0.72), P(r.x1, r.y0 + 0.15 * r.d, 6),
-                     P(r.x1, r.y1 - 0.15 * r.d, 6)]), with: .color(pal.glassR.0.mix(pal.litR, lit).color))
-        let pt = 0.12 * tile
-        box(&g, r.x0, r.y0, r.x1, r.y0 + pt, h, h + 3, pal.parapet)
-        box(&g, r.x0, r.y0, r.x0 + pt, r.y1, h, h + 3, pal.parapet)
-        box(&g, r.x0 + 0.6 * tile, r.y0 + 0.5 * tile, r.x0 + 1.2 * tile, r.y0 + 0.9 * tile, h, h + 5, pal.unit)
-        box(&g, r.x1 - pt, r.y0, r.x1, r.y1, h, h + 3, pal.parapet)
-        box(&g, r.x0, r.y1 - pt, r.x1, r.y1, h, h + 3, pal.parapet)
-        let n = 7, zt = h * 0.86, zo = h * 0.6, out = 0.55 * tile
-        for k in 0..<n {
-            let a = r.x0 + r.w * Double(k) / Double(n), b = r.x0 + r.w * Double(k + 1) / Double(n)
-            g.fill(poly([P(a, r.y1, zt), P(b, r.y1, zt), P(b, r.y1 + out, zo), P(a, r.y1 + out, zo)]),
-                   with: .color((k % 2 == 0 ? pal.awning : pal.awningLight).color))
-        }
-        g.fill(poly([P(r.x0, r.y1 + out, zo), P(r.x1, r.y1 + out, zo), P(r.x1, r.y1 + out, zo - 2.5), P(r.x0, r.y1 + out, zo - 2.5)]),
-               with: .color(pal.awning.scaled(0.85).color))
-        let ty = r.y1 + 1.2 * tile, cw = 0.12 * tile
-        for f in [0.2, 0.5, 0.8] {
-            let tx = r.x0 + f * r.w
-            box(&g, tx - 0.36 * tile - cw, ty - cw, tx - 0.36 * tile + cw, ty + cw, 0, 4, pal.plinth)
-            var leg = Path(); leg.move(to: P(tx, ty, 0)); leg.addLine(to: P(tx, ty, 6))
-            g.stroke(leg, with: .color(pal.mast.color), lineWidth: 0.8)
-            g.fill(disc(tx, ty, 0.22 * tile, z: 6, n: 14), with: .color(pal.stone.0.color))
-            box(&g, tx + 0.36 * tile - cw, ty - cw, tx + 0.36 * tile + cw, ty + cw, 0, 4, pal.plinth)
-        }
     }
 
     // Edificios ---------------------------------------------------------------
