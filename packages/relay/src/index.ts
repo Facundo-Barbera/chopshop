@@ -1,10 +1,25 @@
 import { DurableObject } from "cloudflare:workers";
+import { RelayDb } from "./db";
 
 export interface Env {
   HUB: DurableObjectNamespace<Hub>;
 }
 
 export class Hub extends DurableObject<Env> {
+  readonly db: RelayDb;
+
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    this.db = new RelayDb(ctx.storage.sql, ctx.storage);
+    this.db.migrate();
+  }
+
+  override async alarm(): Promise<void> {
+    this.db.purgeExpiredSnapshots();
+    const next = this.db.nextSnapshotExpiry();
+    if (next !== null) await this.ctx.storage.setAlarm(next);
+  }
+
   override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === "/health") {
