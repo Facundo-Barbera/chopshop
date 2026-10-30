@@ -1,0 +1,142 @@
+{
+  "v": 2,
+  "type": "state",
+  "id": "01MCB2QC3D5F7H9K1M3P5R7T9W",
+  "ts": "2026-10-30T14:02:14.000Z",
+  "rev": 42,
+  "head": "Q8XZ4M2B-57",
+  "user": {
+    "id": "0b6f3c1e-5d2a-4c7e-9a41-6f2d8e3b7c10",
+    "role": "owner"
+  },
+  "city": {
+    "workspaces": [
+      {
+        "id": "7c2e9f14-3a6b-4d5e-8f17-2b9c4e6a0d31",
+        "name": "Awesome GB",
+        "slug": "awesome-gb",
+        "position": 0,
+        "style": {},
+        "campus": {
+          "layout": {
+            "buildings": [
+              {
+                "project": "awesome-gb",
+                "x": 0,
+                "y": 0
+              }
+            ]
+          },
+          "rev": 3
+        },
+        "projects": [
+          {
+            "id": "1f7a3c9e-8b2d-4c51-9d6e-4a2f8b1c7e03",
+            "name": "awesome-gb",
+            "title": null,
+            "machine_id": "c3f8a2d1-6e4b-4a97-b2c5-8d1e7f3a9b52",
+            "disabled": false,
+            "layout": {
+              "floors": [
+                {
+                  "name": "Producto",
+                  "rooms": [
+                    {
+                      "role": "triage",
+                      "desks": 1,
+                      "permanent": true
+                    },
+                    {
+                      "role": "backend",
+                      "desks": 2
+                    }
+                  ]
+                }
+              ],
+              "half_life": "10m",
+              "capacity": {
+                "flex_per_floor": 0,
+                "max_extra_floors": 0,
+                "outsourcing": false
+              }
+            },
+            "roles": [
+              "triage",
+              "backend"
+            ],
+            "sync_errors": []
+          }
+        ],
+        "machine_ids": [
+          "c3f8a2d1-6e4b-4a97-b2c5-8d1e7f3a9b52"
+        ]
+      }
+    ]
+  },
+  "machines": [
+    {
+      "id": "c3f8a2d1-6e4b-4a97-b2c5-8d1e7f3a9b52",
+      "name": "mac-mini",
+      "platform": "macos",
+      "online": true,
+      "paused": false,
+      "stale": false,
+      "seq": 10,
+      "snapshot_age_s": 4,
+      "expires_at": "2026-10-30T14:04:12.004Z"
+    }
+  ],
+  "snapshots": [
+    {
+      "v": 2,
+      "type": "snapshot",
+      "id": "01MCB2QA1B3D5F7H9K1M3P5R7T",
+      "ts": "2026-10-30T14:02:12.004Z",
+      "machine_id": "mac-mini.local",
+      "workspace_id": "7c2e9f14-3a6b-4d5e-8f17-2b9c4e6a0d31",
+      "seq": 1842,
+      "ttl_s": 120,
+      "agent_version": "0.9.0",
+      "health": {
+        "state": "ok",
+        "t3_ok": true,
+        "cpu_pct": 23.5,
+        "ram_pct": 41.0,
+        "disk_pct": 37.2,
+        "load1": 1.42
+      },
+      "counts": {
+        "running": 2,
+        "queued": 1,
+        "waiting": 0,
+        "stuck": 0,
+        "needs_human": 1,
+        "waiting_bot": 0,
+        "done": 9,
+        "failed": 0
+      },
+      "projects": [
+        {
+          "name": "awesome-gb",
+          "roles": [
+            "triage",
+            "backend"
+          ],
+          "threads_running": 2,
+          "threads_pending": 1,
+          "attention": 1
+        }
+      ],
+      "parts": [
+        {
+          "name": "state",
+          "media_type": "application/json",
+          "enc": "none",
+          "bytes": 16,
+          "sha256": "3b1c2a6e5f4d9e8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a",
+          "data": "eyJwaGFzZSI6ImRvbmUifQ=="
+        }
+      ]
+    }
+  ]
+}

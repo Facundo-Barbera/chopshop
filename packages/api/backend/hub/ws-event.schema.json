@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/backend/v2/hub/ws-event.schema.json",
+  "title": "WS v2 event (agente → relay → visor)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "v",
+    "type",
+    "id",
+    "ts",
+    "machine_id",
+    "workspace_id",
+    "event_id",
+    "seq",
+    "event_ts",
+    "project",
+    "event_type",
+    "severity",
+    "needs",
+    "subject",
+    "body"
+  ],
+  "properties": {
+    "v": {
+      "$ref": "../common.schema.json#/$defs/v"
+    },
+    "id": {
+      "$ref": "../common.schema.json#/$defs/msg_id"
+    },
+    "ts": {
+      "$ref": "../common.schema.json#/$defs/ts"
+    },
+    "type": {
+      "const": "event"
+    },
+    "machine_id": {
+      "$ref": "../common.schema.json#/$defs/local_machine_id"
+    },
+    "workspace_id": {
+      "oneOf": [
+        {
+          "$ref": "../common.schema.json#/$defs/uuid"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "event_id": {
+      "$ref": "../common.schema.json#/$defs/msg_id"
+    },
+    "seq": {
+      "$ref": "../common.schema.json#/$defs/count"
+    },
+    "event_ts": {
+      "$ref": "../common.schema.json#/$defs/ts"
+    },
+    "project": {
+      "oneOf": [
+        {
+          "$ref": "../common.schema.json#/$defs/name"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "event_type": {
+      "$ref": "../common.schema.json#/$defs/event_type"
+    },
+    "severity": {
+      "$ref": "../common.schema.json#/$defs/severity"
+    },
+    "needs": {
+      "$ref": "../common.schema.json#/$defs/needs"
+    },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "id"
+      ],
+      "properties": {
+        "kind": {
+          "$ref": "../common.schema.json#/$defs/subject_kind"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.:#@-]([A-Za-z0-9_.:#@/-]{0,127})$"
+        }
+      }
+    },
+    "body": {
+      "$ref": "../common.schema.json#/$defs/part"
+    }
+  }
+}

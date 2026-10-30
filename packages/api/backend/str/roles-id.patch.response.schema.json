@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/backend/v2/str/roles-id.patch.response.schema.json",
+  "title": "PATCH /v1/roles/{id} → 200",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "role"
+  ],
+  "properties": {
+    "role": {
+      "$ref": "../common.schema.json#/$defs/role"
+    }
+  }
+}

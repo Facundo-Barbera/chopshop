@@ -1,0 +1,17 @@
+{
+  "v": 2,
+  "ts": "2026-10-30T14:02:11.250Z",
+  "type": "welcome",
+  "id": "01MCB2Q9A2C4E6G8J0M2P4R6T8",
+  "re": "01MCB2Q8ZK3T5W7Y9B1D3F5H7J",
+  "session_id": "ss-0123456789abcdef",
+  "protocol": 2,
+  "snapshot_ttl_s": 120,
+  "max_frame_bytes": 1048576,
+  "ping_interval_s": 25,
+  "machine": {
+    "id": "c3f8a2d1-6e4b-4a97-b2c5-8d1e7f3a9b52",
+    "name": "mac-mini"
+  },
+  "rev": 42
+}
