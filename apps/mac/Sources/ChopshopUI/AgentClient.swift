@@ -15,6 +15,8 @@ struct AgentResult {
     var snapshot: [String: Any]? = nil
     var fetchedAt = Date()
 
+    var role: AgentRole? = nil
+
     var isOK: Bool { status == .ok && snapshot != nil }
     var machineId: String? { snapshot?["machine_id"] as? String }
 
@@ -34,7 +36,29 @@ struct AgentResult {
         var o: [String: Any] = ["name": name, "status": status.rawValue, "fetched": fetchedAt.timeIntervalSince1970]
         if let error { o["error"] = error }
         if let snapshot { o["snapshot"] = snapshot }
+        if let role { o["role"] = role.rawValue }
         return o
+    }
+}
+
+enum AgentRole: String {
+    case agent, viewer
+
+    init?(whoami: [String: Any]?) {
+        guard let raw = (whoami?["role"] ?? whoami?["scope"]) as? String else { return nil }
+        self.init(rawValue: raw)
+    }
+}
+
+final class ActGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var viewer = false
+
+    var canAct: Bool { lock.withLock { !viewer } }
+
+    func update(_ results: [AgentResult]) {
+        let v = results.contains { $0.role == .viewer }
+        lock.withLock { viewer = v }
     }
 }
 
@@ -253,10 +277,12 @@ final class AgentClient {
     private let relayTransport: RelayTransport
     let credentials: CredentialStore
     let relayCredentials: CredentialStore
+    let gate: ActGate
 
     init(spec: AgentSpec, transport: HTTPTransport = URLSessionTransport(), relayTransport: RelayTransport = URLSessionRelayTransport(),
-         credentials: CredentialStore, relayCredentials: CredentialStore = InMemoryCredentialStore()) {
+         credentials: CredentialStore, relayCredentials: CredentialStore = InMemoryCredentialStore(), gate: ActGate = ActGate()) {
         self.spec = spec
+        self.gate = gate
         self.transport = transport
         self.relayTransport = relayTransport
         self.credentials = credentials
@@ -291,6 +317,7 @@ final class AgentClient {
 
     func request(_ method: String, _ path: String, body: [String: Any]? = nil) async -> Outcome {
         guard let url = makeURL(path) else { return .failure(.error, "URL del agente inválida: revisa agent_url en [app]") }
+        guard method == "GET" || gate.canAct else { return .failure(.forbidden, Self.viewerMessage) }
         var req = URLRequest(url: url)
         req.httpMethod = method
         req.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -309,6 +336,8 @@ final class AgentClient {
             return .failure(.unreachable, Self.describe(error))
         }
     }
+
+    static let viewerMessage = "modo visualizador: este token del relay es de solo lectura"
 
     /// Descripción corta de un fallo de red, sin URL ni cabeceras.
     static func describe(_ error: Error) -> String {
@@ -370,6 +399,8 @@ final class AgentClient {
             r.error = Self.describe(error)
             return r
         }
+        let who = frames.first(where: { ($0["type"] as? String) == "whoami.result" })
+        r.role = AgentRole(whoami: who)
         if let e = frames.first(where: { ($0["type"] as? String) == "error" }) {
             r.status = RelayView.status(forCode: e["code"] as? String ?? "")
             if r.status != .unauthorized && r.status != .forbidden { r.error = String((e["message"] as? String ?? "error del relay").prefix(200)) }
@@ -379,7 +410,6 @@ final class AgentClient {
         for f in frames where (f["type"] as? String) == "snapshot" {
             if let m = f["machine_id"] as? String { latest[m] = RelayView.machineSnapshot(f) }
         }
-        let who = frames.first(where: { ($0["type"] as? String) == "whoami.result" })
         let order = (who?["machines"] as? [[String: Any]] ?? []).compactMap { $0["machine_id"] as? String }
         let machines = order.compactMap { latest[$0] } + latest.filter { !order.contains($0.key) }.map(\.value)
         guard var snap = latest[spec.name] ?? machines.first else {
@@ -419,6 +449,8 @@ final class AgentClient {
     func perform(_ action: AgentAction) async -> ActionResult {
         if spec.isRelay { return ActionResult(ok: false, message: "el relay es solo lectura: las acciones van al agente por Tailscale") }
         switch await request(action.method, action.path, body: action.body) {
+        case .failure(.forbidden, let message):
+            return ActionResult(ok: false, message: message)
         case .failure(_, let message):
             return ActionResult(ok: false, message: "agente no alcanzable (\(message))")
         case .response(let code, let json):
@@ -438,14 +470,18 @@ final class AgentClient {
 /// Conjunto de agentes configurados.
 final class AgentHub {
     let clients: [AgentClient]
+    let gate: ActGate
 
     init(specs: [AgentSpec], transport: HTTPTransport = URLSessionTransport(), relayTransport: RelayTransport = URLSessionRelayTransport(),
          credentials: CredentialStore, relayCredentials: CredentialStore = InMemoryCredentialStore()) {
+        let gate = ActGate()
+        self.gate = gate
         clients = specs.map { AgentClient(spec: $0, transport: transport, relayTransport: relayTransport,
-                                          credentials: credentials, relayCredentials: relayCredentials) }
+                                          credentials: credentials, relayCredentials: relayCredentials, gate: gate) }
     }
 
     var isEmpty: Bool { clients.isEmpty }
+    var canAct: Bool { gate.canAct }
 
     /// Cliente por nombre; sin nombre (o desconocido) y con un solo agente, ese.
     func client(named name: String?) -> AgentClient? {
@@ -459,7 +495,9 @@ final class AgentHub {
             for (i, c) in clients.enumerated() { group.addTask { (i, await c.fetchSnapshot()) } }
             var out: [(Int, AgentResult)] = []
             for await r in group { out.append(r) }
-            return out.sorted { $0.0 < $1.0 }.map { $0.1 }
+            let results = out.sorted { $0.0 < $1.0 }.map { $0.1 }
+            gate.update(results)
+            return results
         }
     }
 }

@@ -77,7 +77,7 @@ public struct OfficeShell<World: View, Unpaired: View>: View {
         }
         .overlay(alignment: .top) {
             if shell.state.paletteOpen {
-                ShellPalette(shell: shell, commands: ShellCommands.all(store.snapshot, selected: shell.state.selectedThread))
+                ShellPalette(shell: shell, commands: ShellCommands.all(store.snapshot, selected: shell.state.selectedThread, canAct: shell.actions?.canAct ?? true))
                     .padding(.top, 56)
                     .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
             }

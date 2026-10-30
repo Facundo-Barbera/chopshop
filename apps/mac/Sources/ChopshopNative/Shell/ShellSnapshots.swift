@@ -11,13 +11,15 @@ public extension Snapshots {
         guard let state = CityOfficeFixture.state else { print("sin CityOfficeFixture"); return }
         let snap = SnapshotMapper.snapshot(state, now: FloorFixture.now)
         let size = CGSize(width: 1440, height: 900)
-        func shot(_ name: String, dark: Bool = true, notice: ShellNotice? = nil, _ edit: (inout ShellState) -> Void) {
+        func shot(_ name: String, dark: Bool = true, notice: ShellNotice? = nil, actions: AttentionActions? = nil, _ edit: (inout ShellState) -> Void) {
             let shell = ShellController()
             shell.snapshot = snap
+            shell.actions = actions
             edit(&shell.state)
             let v = ShellSnapshotFrame(state: state, snapshot: snap, shell: shell, notice: notice)
             NSApp?.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
-            let r = ImageRenderer(content: v.frame(width: size.width, height: size.height).environment(\.colorScheme, dark ? .dark : .light))
+            let r = ImageRenderer(content: v.frame(width: size.width, height: size.height).environment(\.colorScheme, dark ? .dark : .light)
+                .environment(\.attentionActions, actions))
             r.scale = 1
             guard let cg = r.cgImage, let data = NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:]) else {
                 print("sin imagen: \(name)"); return
@@ -34,6 +36,11 @@ public extension Snapshots {
         shot("shell-atencion-light", dark: false) { $0.toggle(.attention) }
         shot("shell-paleta") { $0.openPalette() }
         shot("shell-paleta-busqueda") { $0.openPalette(); $0.query = "resp" }
+        let viewer = AttentionActions(answer: { _, _ in nil }, open: { _ in }, settle: { _ in nil }, canAct: false)
+        let agent = AttentionActions(answer: { _, _ in nil }, open: { _ in }, settle: { _ in nil })
+        shot("shell-visor-hilo", actions: viewer) { $0.select(.thread(id: "e", project: "awesome-gb")) }
+        shot("shell-agente-hilo", actions: agent) { $0.select(.thread(id: "e", project: "awesome-gb")) }
+        shot("shell-visor-paleta", actions: viewer) { $0.openPalette() }
     }
 }
 
@@ -78,7 +85,7 @@ struct ShellSnapshotFrame: View {
                 }
                 .overlay(alignment: .top) {
                     if shell.state.paletteOpen {
-                        ShellPalette(shell: shell, commands: ShellCommands.all(snapshot, selected: shell.state.selectedThread), flat: true)
+                        ShellPalette(shell: shell, commands: ShellCommands.all(snapshot, selected: shell.state.selectedThread, canAct: shell.actions?.canAct ?? true), flat: true)
                             .padding(.top, 56)
                     }
                 }
