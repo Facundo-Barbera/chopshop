@@ -75,7 +75,7 @@ final class FloorPlanTests: XCTestCase {
         let b = FloorLayout(plan: f)
         XCTAssertEqual(a, b, "los escritorios no se mueven cuando cambia el ocupante")
         XCTAssertEqual(a.rooms.count, 2)
-        XCTAssertEqual(a.spots.filter { !$0.isMachine }.map(\.id), ["awesome-gb/0/triage/0", "awesome-gb/0/backend/0"], "ocupados más uno libre; el retirado vacío no se muestra")
+        XCTAssertEqual(a.spots.filter { !$0.isMachine }.map(\.id), ["awesome-gb/0/triage/0", "awesome-gb/0/backend/0", "awesome-gb/0/backend/1"], "se dibujan todos los escritorios declarados")
     }
 
     func testLobbyFiltersByCompanyOrProject() throws {
