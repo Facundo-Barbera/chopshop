@@ -35,19 +35,15 @@ public struct OfficeWorldView: View {
     var layers: WorldLayers?
     var onSelect: ((String?) -> Void)?
     var onExit: (() -> Void)?
-    var layered = false
-    var onActiveRegion: ((String) -> Void)?
 
     @State private var box = WorldCameraBox()
-    @State private var active: String?
     @State private var aspect = 16.0 / 10.0
     @Environment(\.colorScheme) private var scheme
 
     public init(floors: [FloorPlan], frozenNow: Date? = nil, focusRegion: String? = nil, selected: String? = nil,
                 frame: FloorFrame? = nil, backRequest: Int = 0, fitRequest: Int = 0, layers: WorldLayers? = nil,
-                onSelect: ((String?) -> Void)? = nil, onExit: (() -> Void)? = nil, layered: Bool = false,
-                onActiveRegion: ((String) -> Void)? = nil) {
-        self.floors = floors; self.frozenNow = frozenNow; self.layers = layers; self.layered = layered; self.onActiveRegion = onActiveRegion
+                onSelect: ((String?) -> Void)? = nil, onExit: (() -> Void)? = nil) {
+        self.floors = floors; self.frozenNow = frozenNow; self.layers = layers
         self.focusRegion = focusRegion; self.selected = selected; self.frame = frame
         self.backRequest = backRequest; self.fitRequest = fitRequest
         self.onSelect = onSelect; self.onExit = onExit
@@ -63,57 +59,6 @@ public struct OfficeWorldView: View {
     }
 
     private var world: WorldLayout { box.world(floors: floors, aspect: aspect, frame: frame) }
-
-    private func activeID(_ w: WorldLayout) -> String? {
-        guard layered else { return nil }
-        if let a = active, w.region(a) != nil { return a }
-        if let f = focusRegion, w.region(f) != nil { return f }
-        return (w.regions.first { $0.kind == .floor } ?? w.regions.first)?.id
-    }
-
-    private func step(_ d: Int) {
-        let w = world
-        let order = w.regions.sorted { $0.oz < $1.oz }
-        guard let cur = activeID(w), let i = order.firstIndex(where: { $0.id == cur }) else { return }
-        let j = min(max(0, i + d), order.count - 1)
-        guard j != i else { return }
-        go(order[j])
-    }
-
-    private func go(_ r: WorldLayout.Region) {
-        active = r.id
-        box.focusRegion(r)
-        onActiveRegion?(r.id)
-    }
-
-    private func floorPicker(_ w: WorldLayout) -> some View {
-        let order = w.regions.sorted { $0.oz < $1.oz }
-        let cur = activeID(w)
-        let i = order.firstIndex { $0.id == cur } ?? 0
-        return VStack(spacing: 2) {
-            FloorStepButton(symbol: "chevron.up", enabled: i < order.count - 1) { step(1) }
-            let lift = order.first?.kind == .lobby ? 0 : 1
-            ForEach(Array(order.enumerated()).reversed(), id: \.element.id) { k, r in
-                let on = r.id == cur
-                Button { go(r) } label: {
-                    Text(r.kind == .lobby ? "PB" : "\(k + lift)")
-                        .font(.system(size: 11, weight: on ? .semibold : .regular, design: .rounded))
-                        .monospacedDigit()
-                        .frame(width: 30, height: 24)
-                        .background(on ? Color.accentColor.opacity(0.9) : Color.clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                        .foregroundStyle(on ? Color.white : Color.primary.opacity(0.7))
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help(r.title.capitalized)
-            }
-            FloorStepButton(symbol: "chevron.down", enabled: i > 0) { step(-1) }
-        }
-        .padding(4)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5))
-        .padding(14)
-    }
 
     public var body: some View {
         let w = world
@@ -146,17 +91,12 @@ public struct OfficeWorldView: View {
             box.lastTapped = tid
             onSelect?(tid == selected ? nil : tid)
         })
-        .onAppear {
-            box.onExit = onExit; box.installScrollMonitor()
-            if layered { box.installKeyMonitor { step($0) } }
-        }
-        .onDisappear { box.removeScrollMonitor(); box.removeKeyMonitor() }
-        .onChange(of: focusRegion) { _, r in if let r { active = r } }
+        .onAppear { box.onExit = onExit; box.installScrollMonitor() }
+        .onDisappear { box.removeScrollMonitor() }
         .onChange(of: selected) { _, tid in
             // elegido desde fuera (la lista del panel): la cámara va a su escritorio (o armario)
             if let tid, tid != box.lastTapped, let hit = world.spot(ofMachine: tid) ?? world.spot(ofThread: tid, now: frozenNow ?? Date()) {
                 box.focus(hit.region, hit.spot)
-                if layered, hit.region.id != activeID(world) { active = hit.region.id; onActiveRegion?(hit.region.id) }
             }
             box.lastTapped = nil
         }
@@ -164,7 +104,6 @@ public struct OfficeWorldView: View {
             if box.showingAll { onExit?() } else { box.fitAll() }
         }
         .onChange(of: fitRequest) { _, _ in box.fitAll() }
-        .overlay(alignment: .trailing) { if layered, w.regions.count > 1 { floorPicker(w) } }
         .clipped()
         .hotReload()
     }
@@ -179,41 +118,20 @@ public struct OfficeWorldView: View {
     private func canvas(_ w: WorldLayout, t: Double, now: Date) -> some View {
         let dark = scheme == .dark
         let sel = spotID(of: selected, in: w, now: now)
-        let act = activeID(w)
         box.onExit = onExit
         box.layers = layers
         return Canvas { ctx, size in
             let sp = FrameMeter.signposter.beginInterval("office.draw")
             let t0 = ProcessInfo.processInfo.systemUptime
             let cam = box.camera(w, size: size, t: t, live: frozenNow == nil, focusRegion: layers?.active ?? focusRegion)
-            let far = act.flatMap { w.region($0) }.map { box.farness($0, size: size, s: cam.s) } ?? 0
             let lay = layers.map { (active: $0.active, opacity: $0.inactiveOpacity, stack: box.stack(cam.s)) }
             WorldRenderer(world: w, cam: cam, box: box, dark: dark, t: t, now: now, selected: sel, hovered: box.hovered,
-                          active: act, far: far, layers: lay).draw(&ctx)
+                          layers: lay).draw(&ctx)
             FrameMeter.signposter.endInterval("office.draw", sp)
             FrameMeter.tick("oficina", cost: ProcessInfo.processInfo.systemUptime - t0)
         } symbols: {
             WorldLabels(world: w, now: now, dark: dark)
         }
-    }
-}
-
-@available(macOS 26.0, *)
-private struct FloorStepButton: View {
-    let symbol: String
-    let enabled: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 11, weight: .semibold))
-                .frame(width: 30, height: 22)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(Color.primary.opacity(enabled ? 0.75 : 0.25))
-        .disabled(!enabled)
     }
 }
 
@@ -245,8 +163,6 @@ struct WorldRenderer {
     let now: Date
     let selected: String?
     let hovered: String?
-    var active: String? = nil
-    var far = 0.0
     var layers: (active: String, opacity: Double, stack: Double)?
 
     private func regionCam(_ r: WorldLayout.Region) -> IsoCam {
@@ -255,7 +171,6 @@ struct WorldRenderer {
 
     func draw(_ ctx: inout GraphicsContext) {
         if let l = layers { drawLayered(&ctx, l); return }
-        if active != nil { drawLayered(&ctx); return }
         box.hits.removeAll(keepingCapacity: true)
         let fbox = box.floorBox
         fbox.hits.removeAll(keepingCapacity: true); fbox.heads.removeAll(keepingCapacity: true)
@@ -290,99 +205,6 @@ struct WorldRenderer {
             ctx.draw(s, at: CGPoint(x: p.x - 12, y: p.y), anchor: .trailing)
         }
         box.hits = fbox.hits
-    }
-
-    private func drawLayered(_ ctx: inout GraphicsContext) {
-        box.hits.removeAll(keepingCapacity: true)
-        let fbox = box.floorBox
-        fbox.hits.removeAll(keepingCapacity: true); fbox.heads.removeAll(keepingCapacity: true)
-        let regions = world.regions.sorted { $0.oz < $1.oz }
-        guard let ai = regions.firstIndex(where: { $0.id == active }) else { return }
-        let near = 1 - far
-        let ar = regions[ai]
-        let f = FloorRenderer(plan: ar.plan, layout: ar.layout, cam: regionCam(ar), box: fbox, dark: dark, t: t, now: now,
-                              selected: selected, hovered: hovered, prefix: "\(ar.id)|")
-        let lk = f.looks()
-        base(&ctx, regions, below: ai)
-        if near > 0.01 {
-            ctx.drawLayer { l in
-                l.addFilter(.blur(radius: 2.4 * cam.s))
-                l.opacity = near
-                f.slabShadows(&l)
-            }
-        }
-        if far > 0.01 { slab(&ctx, ar, active: true, alpha: far) }
-        if near > 0.01 {
-            var g = ctx; g.opacity = near
-            plate(&g, ar)
-            f.drawRooms(&g, looks: lk)
-            g.drawLayer { l in
-                l.addFilter(.blur(radius: 2.4 * cam.s))
-                f.contactShadows(&l, looks: lk)
-            }
-            f.drawContents(&g, looks: lk)
-            f.drawLabels(&g, looks: lk)
-        }
-        if let s = ctx.resolveSymbol(id: "\(ar.id)|title") {
-            let p = P(ar.x0, ar.y0 + ar.d, ar.oz)
-            ctx.draw(s, at: CGPoint(x: p.x - 12, y: p.y), anchor: .trailing)
-        }
-        box.hits = far > 0.6 ? [] : fbox.hits
-    }
-
-    static let storey = 34.0
-
-    private func base(_ ctx: inout GraphicsContext, _ regions: [WorldLayout.Region], below ai: Int) {
-        guard ai > 0 else { return }
-        let r = regions[ai], top = r.oz - 1, h = Self.storey
-        let x0 = r.x0, y0 = r.y0, x1 = r.x0 + r.w, y1 = r.y0 + r.d
-        let wallL: Color = dark ? Color(white: 0.085) : Color(red: 0.86, green: 0.84, blue: 0.80)
-        let wallR: Color = dark ? Color(white: 0.06) : Color(red: 0.80, green: 0.78, blue: 0.74)
-        let glass: Color = dark ? Color(red: 0.16, green: 0.19, blue: 0.24) : Color(red: 0.62, green: 0.68, blue: 0.74)
-        let edge: Color = .primary.opacity(dark ? 0.10 : 0.12)
-        for i in 0..<ai {
-            let z0 = top - Double(ai - i) * h, z1 = z0 + h
-            ctx.fill(poly([P(x0, y1, z1), P(x1, y1, z1), P(x1, y1, z0), P(x0, y1, z0)]), with: .color(wallL))
-            ctx.fill(poly([P(x1, y0, z1), P(x1, y1, z1), P(x1, y1, z0), P(x1, y0, z0)]), with: .color(wallR))
-            let lobby = regions[i].kind == .lobby
-            let g0 = z0 + h * (lobby ? 0.12 : 0.3), g1 = z0 + h * 0.78
-            let ix = r.w * 0.04, iy = r.d * 0.04
-            ctx.fill(poly([P(x0 + ix, y1, g1), P(x1 - ix, y1, g1), P(x1 - ix, y1, g0), P(x0 + ix, y1, g0)]), with: .color(glass.opacity(lobby ? 0.9 : 0.7)))
-            ctx.fill(poly([P(x1, y0 + iy, g1), P(x1, y1 - iy, g1), P(x1, y1 - iy, g0), P(x1, y0 + iy, g0)]), with: .color(glass.opacity(lobby ? 0.75 : 0.55)))
-            if lobby {
-                let dx = (x0 + x1) / 2, dw = r.w * 0.07
-                ctx.fill(poly([P(dx - dw, y1, z0 + h * 0.7), P(dx + dw, y1, z0 + h * 0.7), P(dx + dw, y1, z0), P(dx - dw, y1, z0)]),
-                         with: .color(dark ? Color(white: 0.03) : Color(white: 0.25)))
-                ctx.fill(poly([P(dx - dw * 1.6, y1, z0 + h * 0.78), P(dx + dw * 1.6, y1, z0 + h * 0.78),
-                               P(dx + dw * 1.6, y1 + r.d * 0.08, z0 + h * 0.74), P(dx - dw * 1.6, y1 + r.d * 0.08, z0 + h * 0.74)]),
-                         with: .color(Color.accentColor.opacity(0.8)))
-            }
-            var band = Path()
-            band.move(to: P(x0, y1, z1)); band.addLine(to: P(x1, y1, z1)); band.addLine(to: P(x1, y0, z1))
-            ctx.stroke(band, with: .color(edge), lineWidth: 0.8)
-        }
-    }
-
-    private func slab(_ ctx: inout GraphicsContext, _ r: WorldLayout.Region, active: Bool, alpha: Double) {
-        let s = r.layout.shell, z = r.oz, h = Iso.slabH * 1.6
-        let a = P(s.x0, s.y0, z + h), b = P(s.x1, s.y0, z + h), c = P(s.x1, s.y1, z + h), e = P(s.x0, s.y1, z + h)
-        let c0 = P(s.x1, s.y1, z), e0 = P(s.x0, s.y1, z), b0 = P(s.x1, s.y0, z)
-        let accent = Color(red: 0.36, green: 0.58, blue: 0.92)
-        let top: Color = active ? accent.opacity(dark ? 0.55 : 0.45) : (dark ? Color(white: 0.20) : Color(red: 0.95, green: 0.94, blue: 0.91))
-        var g = ctx; g.opacity = alpha
-        g.fill(poly([e, c, c0, e0]), with: .color(dark ? Color(white: 0.13) : Color(red: 0.86, green: 0.84, blue: 0.80)))
-        g.fill(poly([b, c, c0, b0]), with: .color(dark ? Color(white: 0.09) : Color(red: 0.78, green: 0.76, blue: 0.72)))
-        if active { g.fill(poly([a, b, c, e]), with: .color(dark ? Color(white: 0.20) : Color(red: 0.95, green: 0.94, blue: 0.91))) }
-        g.fill(poly([a, b, c, e]), with: .color(top))
-        g.stroke(poly([a, b, c, e]), with: .color(.primary.opacity(active ? 0.35 : 0.12)), lineWidth: active ? 1.2 : 0.7)
-        if let co = r.layout.core {
-            let ch = FloorRenderer.coreH * 0.5
-            let ta = P(co.x0, co.y0, z + h + ch), tb = P(co.x1, co.y0, z + h + ch), tc = P(co.x1, co.y1, z + h + ch), te = P(co.x0, co.y1, z + h + ch)
-            let tc0 = P(co.x1, co.y1, z + h), te0 = P(co.x0, co.y1, z + h), tb0 = P(co.x1, co.y0, z + h)
-            g.fill(poly([te, tc, tc0, te0]), with: .color(dark ? Color(white: 0.17) : Color(red: 0.80, green: 0.79, blue: 0.77)))
-            g.fill(poly([tb, tc, tc0, tb0]), with: .color(dark ? Color(white: 0.12) : Color(red: 0.71, green: 0.70, blue: 0.68)))
-            g.fill(poly([ta, tb, tc, te]), with: .color(dark ? Color(white: 0.24) : Color(red: 0.90, green: 0.89, blue: 0.87)))
-        }
     }
 
     private func rect(_ x0: Double, _ y0: Double, _ x1: Double, _ y1: Double, _ z: Double) -> Path {
@@ -703,22 +525,6 @@ final class WorldCameraBox {
         target = g
     }
 
-    func focusRegion(_ r: WorldLayout.Region) {
-        guard size.width > 0 else { return }
-        touched = true
-        var g = OfficeFraming.frame(r.bounds, size: size)
-        clamp(&g)
-        target = g
-    }
-
-    func farness(_ r: WorldLayout.Region, size sz: CGSize, s: Double) -> Double {
-        let rs = OfficeFraming.frame(r.bounds, size: sz).s
-        guard rs > 0 else { return 0 }
-        let k = (s / rs - 0.42) / 0.3
-        let c = min(1, max(0, k))
-        return 1 - c * c * (3 - 2 * c)
-    }
-
     func hit(_ p: CGPoint) -> String? { hits.filter { $0.rect.contains(p) }.max { $0.key < $1.key }?.id }
 
     /// Lo que se elige al pulsar un hueco: su hilo, o el propio id si es un armario o la consola de una sala de máquinas.
@@ -758,27 +564,5 @@ final class WorldCameraBox {
     func removeScrollMonitor() {
         if let m = monitor { NSEvent.removeMonitor(m) }
         monitor = nil
-    }
-
-    private var keyMonitor: Any?
-
-    func installKeyMonitor(_ step: @escaping (Int) -> Void) {
-        removeKeyMonitor()
-        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
-            guard let self, let win = e.window, win.isKeyWindow, self.frameInWindow.width > 0 else { return e }
-            if win.firstResponder is NSText || win.firstResponder is NSTextView { return e }
-            let mods = e.modifierFlags.intersection([.command, .option, .control, .shift])
-            guard mods.isEmpty else { return e }
-            switch e.keyCode {
-            case 126, 116: step(1); return nil
-            case 125, 121: step(-1); return nil
-            default: return e
-            }
-        }
-    }
-
-    func removeKeyMonitor() {
-        if let m = keyMonitor { NSEvent.removeMonitor(m) }
-        keyMonitor = nil
     }
 }

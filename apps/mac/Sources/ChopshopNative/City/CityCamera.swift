@@ -66,6 +66,30 @@ public enum OfficeFraming {
     }
 }
 
+public enum CutawayFraming {
+    public static let topMargin = 40.0, bottomMargin = 40.0, sideMargin = 70.0, maxScale = 12.0
+
+    public static func bounds(_ b: CityBuilding, level: Int) -> IsoBounds {
+        let r = b.rect(level), z0 = b.floorZ(level), z1 = z0 + b.floorHeight(level)
+        var o = IsoBounds.empty
+        for (x, y) in [(r.x0, r.y0), (r.x1, r.y0), (r.x0, r.y1), (r.x1, r.y1)] { o.add(x, y, z0); o.add(x, y, z1) }
+        return o
+    }
+
+    public static func building(_ b: CityBuilding, level: Int) -> IsoBounds {
+        var o = bounds(b, level: level)
+        for (x, y) in [(b.x0, b.y0), (b.x1, b.y0), (b.x0, b.y1), (b.x1, b.y1)] { o.add(x, y, 0) }
+        return o
+    }
+
+    public static func frame(_ b: IsoBounds, size: CGSize) -> IsoFrame {
+        let W = Double(size.width), H = Double(size.height)
+        let availW = W - 2 * sideMargin, availH = H - topMargin - bottomMargin
+        let s0 = min(availW / max(1, b.maxU - b.minU), availH / max(1, b.maxV - b.minV), maxScale)
+        return IsoFrame(s: s0, cu: (b.minU + b.maxU) / 2, cv: (b.minV + b.maxV) / 2, ax: W / 2, ay: topMargin + availH / 2)
+    }
+}
+
 /// Encuadre de la ciudad entera (deja sitio arriba para la barra "Atención" y abajo para la leyenda).
 public enum CityFraming {
     public static let topMargin = 92.0, bottomMargin = 46.0, sideMargin = 34.0, maxScale = 2.2
@@ -113,8 +137,8 @@ public struct OfficeEmbedding: Equatable, Sendable {
 }
 
 /// Zoom continuo de la ciudad a un piso, con progreso `p ∈ [0, 1]` (lineal en el tiempo; la cámara lleva su propia curva).
-/// p = 0: encuadre de la ciudad. p = 1: encuadre idéntico al de IsoOfficeView para ese piso (ahí se monta la oficina de verdad).
-/// Todo lo que no es la oficina (paredes, otros pisos y edificios, suelo, losa) llega a 0 antes de p = 1.
+/// p = 0: encuadre de la ciudad. p = 1: el edificio cortado a la altura del piso (pisos de abajo enteros, nada encima, muros
+/// delanteros a `frontCut` del alto) con la oficina dentro; los demás edificios y el suelo quedan atenuados.
 public struct CityTransition: Equatable, Sendable {
     public var city: IsoFrame
     /// Encuadre de la oficina en su propio mundo (el de IsoOfficeView).
@@ -152,25 +176,23 @@ public struct CityTransition: Equatable, Sendable {
     /// Etiquetas de pisos/edificios: se van en cuanto la cámara arranca.
     public static func labels(_ p: Double) -> Double { 1 - citySmooth(p / 0.06) }
     /// Otros edificios, suelo y tráfico.
-    public static func others(_ p: Double) -> Double { 1 - citySmooth((p - 0.12) / 0.5) }
+    public static func others(_ p: Double) -> Double { 1 - (1 - othersDim) * citySmooth((p - 0.12) / 0.5) }
+    public static let othersDim = 0.45
+    public static func occluders(_ p: Double) -> Double { 1 - (1 - occluderDim) * citySmooth((p - 0.12) / 0.5) }
+    public static let occluderDim = 0.1
     /// Pisos de encima (y la azotea) del piso elegido: suben y salen de cuadro (13.0 → 15.6 s).
     public static func upperLift(_ p: Double) -> Double { cityEIO((p - 0.286) / 0.464) }
     public static func upperAlpha(_ p: Double) -> Double { 1 - citySmooth((p - 0.45) / 0.3) }
     /// Distancia (z del mundo) que suben los pisos de arriba.
     public static let liftDistance = 300.0
-    /// Pisos de debajo del elegido (se apagan).
-    public static func lowerAlpha(_ p: Double) -> Double { 1 - citySmooth((p - 0.3) / 0.4) }
     /// Brillo ámbar/rojo del piso elegido.
     public static func glow(_ p: Double) -> Double { 1 - citySmooth((p - 0.286) / 0.16) }
     /// Muros delanteros del piso elegido (14.4 → 16.6 s): altura relativa.
-    public static func frontWalls(_ p: Double) -> Double { 1 - cityEIO((p - 0.536) / 0.393) }
-    /// Muros del fondo.
-    public static func backWalls(_ p: Double) -> Double { 1 - cityEIO((p - 0.6) / 0.33) }
+    public static func frontWalls(_ p: Double) -> Double { 1 - (1 - frontCut) * cityEIO((p - 0.536) / 0.393) }
+    public static let frontCut = 0.3
     /// Salas de la oficina dentro del piso (se extruyen) y escritorios (brotan).
     public static func roomRise(_ p: Double) -> Double { citySmooth((p - 0.64) / 0.2) }
     public static func deskPop(_ p: Double) -> Double { citySmooth((p - 0.7) / 0.18) }
-    /// Losa del piso alrededor de las salas: se funde con el fondo al final (la oficina no tiene losa común).
-    public static func slab(_ p: Double) -> Double { 1 - citySmooth((p - 0.86) / 0.11) }
     /// Cabecera: "Ciudad" → proyecto (13.6 → 15.8 s).
     public static func chrome(_ p: Double) -> Double { citySmooth((p - 0.39) / 0.4) }
     /// Fundido secuencial de la cabecera (sin solapar textos): lo de la ciudad sale en la primera mitad, lo del proyecto entra en la segunda.

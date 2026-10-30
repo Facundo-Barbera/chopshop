@@ -19,6 +19,10 @@ final class CityViewBox {
     var cachedScene: IsoScene?
     var zoomGen = 0
     let ease = CityCameraEase()
+    let cut = CityCutCamera()
+    var outFrame: IsoFrame?
+    private var layoutKey: (plan: FloorPlan, frame: FloorFrame)?
+    private var cachedLayout: FloorLayout?
     var frameInWindow = CGRect.zero
     var scrollActive = false
     var onPull: ((Double, CGPoint) -> Void)?
@@ -37,6 +41,13 @@ final class CityViewBox {
         let s = IsoScene(graph: graph, tasks: tasks)
         cachedScene = s; sceneKey = k
         return s
+    }
+
+    func layout(_ plan: FloorPlan, frame: FloorFrame) -> FloorLayout {
+        if let k = layoutKey, let l = cachedLayout, k.frame == frame, k.plan == plan { return l }
+        let l = FloorLayout(plan: plan, frame: frame)
+        layoutKey = (plan, frame); cachedLayout = l
+        return l
     }
 
     func installScrollMonitor() {
@@ -75,9 +86,10 @@ final class CityViewBox {
 
 /// La flota como ciudad isométrica: un edificio por empresa, un piso por proyecto (v3: uno por piso de su `office`, ≤ 4, y el
 /// vestíbulo en la planta baja), una ventana encendida por hilo vivo.
-/// Pisos en ámbar (te necesita) o rojo (trabada), barra "Atención" y leyenda. Clic en un piso → zoom continuo hasta ese piso, que
-/// se convierte en su `FloorOfficeView` (departamentos y escritorios del `office` tipado de `LiveState`; mismo encuadre, sin
-/// fundido). Un proyecto sin `office` (agente v2) sigue abriendo la `IsoOfficeView` del grafo. Esc o "Ciudad" vuelve.
+/// Pisos en ámbar (te necesita) o rojo (trabada), barra "Atención" y leyenda. Clic en un piso → zoom continuo hasta ese piso, y la
+/// ciudad se queda: el edificio cortado a su altura con la oficina dentro (departamentos y escritorios del `office` tipado de
+/// `LiveState`, a la escala de la huella). Un proyecto sin `office` (agente v2) sigue abriendo la `IsoOfficeView` del grafo. Esc o
+/// "Ciudad" vuelve.
 @available(macOS 26.0, *)
 public struct CityView: View {
     #if DEBUG && HOT_RELOAD
@@ -115,12 +127,13 @@ public struct CityView: View {
     @State private var campus: String?
     @State private var zoomOrigin: String?
     @State private var officeAll = false
-    @State private var fitToken = 0
     @State private var officeRegion: String?
     @Environment(\.colorScheme) private var scheme
 
     /// Duración del zoom completo en la app (la cronología grabada usa 5.6 s).
     public static let zoomDuration = 2.4
+
+    static let demoTour = ProcessInfo.processInfo.environment["CHOPSHOP_DEMO_TOUR"] == "1"
 
     /// Ciudad desde una proyección viva y sus ventanas (`CityLights`, que el llamador va alimentando con `observe`).
     public init(state: LiveState, lights: CityLights, directory: CompanyDirectory = .standard, onSelectFloor: ((String) -> Void)? = nil,
@@ -189,6 +202,39 @@ public struct CityView: View {
         plan.kind == .lobby ? "lobby:\(plan.name ?? "")" : "floor:\(plan.floorIndex)"
     }
 
+    private func cityFloorID(_ plan: FloorPlan, project pr: String) -> String? {
+        if plan.kind == .lobby, let l = model.building(of: pr)?.floors.first(where: { $0.isLobby }) { return l.id }
+        return model.floors.first { $0.project == pr && !$0.isLobby && $0.floorIndex == plan.floorIndex }?.id ?? targetFloor
+    }
+
+    private func pickerItems(_ all: [FloorPlan]) -> [FloorPicker.Item] {
+        let order = all.sorted { ($0.kind == .lobby ? 0 : 1, $0.floorIndex) < ($1.kind == .lobby ? 0 : 1, $1.floorIndex) }
+        let lift = order.first?.kind == .lobby ? 0 : 1
+        return order.enumerated().map { k, p in
+            FloorPicker.Item(id: Self.regionID(p), label: p.kind == .lobby ? "PB" : "\(k + lift)", help: p.shortTitle.capitalized)
+        }
+    }
+
+    private func goFloor(_ id: String) {
+        officeRegion = id
+        officeAll = false
+    }
+
+    private func stepFloor(_ d: Int) {
+        guard let pr = target else { return }
+        let items = pickerItems(floors(pr))
+        let cur = shownPlan.map(Self.regionID)
+        guard let i = items.firstIndex(where: { $0.id == cur }) else { return }
+        let j = min(max(0, i + d), items.count - 1)
+        if j != i { goFloor(items[j].id) }
+    }
+
+    private static func selection(ofSpot id: String, in plan: FloorPlan) -> String? {
+        if FloorLayout.machinePart(id) != nil { return nil }
+        if id.hasPrefix("lobby:") { return String(id.dropFirst(6)) }
+        return plan.desk(id)?.occupant?.threadID
+    }
+
     /// Hay algo que abrir: el piso v3 o, sin `office`, el grafo.
     private func canZoom(_ project: String) -> Bool { plan(project, floor: nil) != nil || graph(project) != nil }
 
@@ -234,6 +280,8 @@ public struct CityView: View {
         campus = model.campus(of: project) ?? campus
         officeAll = false
         officeRegion = nil
+        box.outFrame = nil
+        box.cut.reset()
         focus = project; focusFloor = floor; zoomFrom = cur; zoomTo = 1; zoomAt = t; mounted = false
         box.zoomGen += 1
         let gen = box.zoomGen
@@ -248,6 +296,10 @@ public struct CityView: View {
         let t = now()
         let cur = mounted ? 1 : progress(t)
         if cur >= 0.98 { zoomOrigin = campusFocus } else { campus = zoomOrigin }
+        if officeIsWorld, let pr = target, let pl = shownPlan {
+            focusFloor = cityFloorID(pl, project: pr)
+            box.outFrame = box.cut.current
+        }
         mounted = false
         officeAll = false
         officeRegion = nil
@@ -294,7 +346,7 @@ public struct CityView: View {
     private func goBuilding() {
         guard officeIsWorld else { return }
         officeAll = true
-        fitToken += 1
+        box.cut.fitBuilding()
     }
 
     private func levelFrame(_ size: CGSize, campus c: String?) -> IsoFrame {
@@ -335,7 +387,51 @@ public struct CityView: View {
             }
         }
         .onChange(of: backRequest) { _, _ in stepOut() }
+        .task { if Self.demoTour, frozenTime == nil, frozenZoom == nil { await tour() } }
         .hotReload()
+    }
+
+    private func tourStart() -> (project: String, floor: String)? {
+        for b in model.buildings {
+            for fl in b.floors where !fl.isLobby {
+                if let pr = project(of: fl), canZoom(pr), floors(pr).count > 0 { return (pr, fl.id) }
+            }
+        }
+        return nil
+    }
+
+    private func floorPosition() -> (i: Int, n: Int)? {
+        guard let pr = target else { return nil }
+        let items = pickerItems(floors(pr))
+        let cur = shownPlan.map(Self.regionID)
+        return items.firstIndex { $0.id == cur }.map { ($0, items.count) }
+    }
+
+    private func tour() async {
+        func pause(_ s: Double) async -> Bool {
+            (try? await Task.sleep(nanoseconds: UInt64(s * 1_000_000_000))) != nil
+        }
+        while !Task.isCancelled {
+            guard await pause(2) else { return }
+            guard let start = tourStart() else { continue }
+            select(start.project, floor: start.floor)
+            var waited = 0.0
+            while !officeMounted && waited < Self.zoomDuration + 3 {
+                guard await pause(0.1) else { return }
+                waited += 0.1
+            }
+            guard await pause(2) else { return }
+            while let pos = floorPosition(), pos.i < pos.n - 1 {
+                stepFloor(1)
+                guard await pause(1.5) else { return }
+            }
+            while let pos = floorPosition(), pos.i > 0 {
+                stepFloor(-1)
+                guard await pause(1.5) else { return }
+            }
+            goCity()
+            guard await pause(Self.zoomDuration) else { return }
+        }
     }
 
     private func content(p: Double, t: Double, office: Bool) -> some View {
@@ -357,14 +453,8 @@ public struct CityView: View {
             header(t: t, chrome: ch)
                 .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 4)
             ZStack(alignment: .top) {
-                if office, let pr = target, state != nil, let plan = targetPlan {
-                    // el mundo entero del proyecto, encuadrado al principio igual que el final del zoom (el piso pulsado)
-                    let all = floors(pr)
-                    OfficeWorldView(floors: all, frozenNow: officeNow, focusRegion: officeAll ? nil : (officeRegion ?? Self.regionID(plan)),
-                                    frame: FloorFrame.building(all), fitRequest: fitToken,
-                                    onSelect: { tid in if let tid, FloorLayout.machinePart(tid) == nil { onInspect?(tid) } },
-                                    layered: true,
-                                    onActiveRegion: { officeRegion = $0; officeAll = false })
+                if office, let pr = target, state != nil, let plan = shownPlan {
+                    cutStage(pr, plan: plan)
                 } else if office, let pr = target, let g = graph(pr) {
                     IsoOfficeView(graph: g, tasks: tasks(pr), hostOf: hosts(pr), frozenTime: frozenTime, flatChrome: flatChrome)
                 } else {
@@ -438,7 +528,7 @@ public struct CityView: View {
         let all = floors(pr)
         if let i = floorIndex(pr, floor: targetFloor, in: all) {
             let plan = all[i]
-            return .floor(plan, FloorLayout(plan: plan, frame: FloorFrame.building(all)), now: now)
+            return .floor(plan, box.layout(plan, frame: FloorFrame.building(all)), now: now)
         }
         return graph(pr).map { .graph(box.scene(graph: $0, tasks: tasks(pr))) }
     }
@@ -446,22 +536,100 @@ public struct CityView: View {
     private func zoomData(p: Double, size: CGSize, content: CityZoom.Content?, city: IsoFrame) -> (CityZoom, IsoFrame)? {
         guard p > 0, let pr = target, let fid = targetFloor, let content, let b = model.building(ofFloor: fid) ?? model.building(of: pr),
               let f = model.floor(id: fid) else { return nil }
-        var minX = Double.infinity, minY = Double.infinity, maxX = -Double.infinity, maxY = -Double.infinity
-        let bounds: IsoBounds
+        let emb: OfficeEmbedding, office: IsoFrame
         switch content {
         case .floor(_, let lay, _):
             let s = lay.shell
-            minX = s.x0; minY = s.y0; maxX = s.x1; maxY = s.y1
-            bounds = IsoBounds(minU: lay.minU, maxU: lay.maxU, minV: lay.minV, maxV: lay.maxV)
+            guard s.w > 0, s.d > 0 else { return nil }
+            emb = OfficeEmbedding(rooms: CGRect(x: s.x0, y: s.y0, width: s.w, height: s.d), building: b, level: f.level)
+            office = emb.officeFrame(fromCity: box.outFrame ?? CutawayFraming.frame(CutawayFraming.bounds(b, level: f.level), size: size))
         case .graph(let sc):
+            var minX = Double.infinity, minY = Double.infinity, maxX = -Double.infinity, maxY = -Double.infinity
             for r in sc.rooms { minX = min(minX, r.x0); minY = min(minY, r.y0); maxX = max(maxX, r.x0 + r.w); maxY = max(maxY, r.y0 + r.d) }
-            bounds = IsoBounds(minU: sc.minU, maxU: sc.maxU, minV: sc.minV, maxV: sc.maxV)
+            guard minX < maxX, minY < maxY else { return nil }  // piso sin salas: no hay a dónde acercarse
+            emb = OfficeEmbedding(rooms: CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY), building: b, level: f.level)
+            office = OfficeFraming.frame(IsoBounds(minU: sc.minU, maxU: sc.maxU, minV: sc.minV, maxV: sc.maxV), size: size)
         }
-        guard minX < maxX, minY < maxY else { return nil }  // piso sin salas: no hay a dónde acercarse
-        let emb = OfficeEmbedding(rooms: CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY), building: b, level: f.level)
-        let office = OfficeFraming.frame(bounds, size: size)
         let tr = CityTransition(city: city, office: office, embedding: emb)
         return (CityZoom(project: pr, floorID: fid, p: p, transition: tr, content: content), tr.camera(p))
+    }
+
+    private struct Cut {
+        let building: CityBuilding
+        let floor: CityFloor
+        let layout: FloorLayout
+        let embedding: OfficeEmbedding
+    }
+
+    private func cut(_ pr: String, plan: FloorPlan, all: [FloorPlan]) -> Cut? {
+        guard let fid = cityFloorID(plan, project: pr), let b = model.building(ofFloor: fid), let f = model.floor(id: fid) else { return nil }
+        let lay = box.layout(plan, frame: FloorFrame.building(all))
+        let s = lay.shell
+        guard s.w > 0, s.d > 0 else { return nil }
+        return Cut(building: b, floor: f, layout: lay,
+                   embedding: OfficeEmbedding(rooms: CGRect(x: s.x0, y: s.y0, width: s.w, height: s.d), building: b, level: f.level))
+    }
+
+    @ViewBuilder private func cutStage(_ pr: String, plan: FloorPlan) -> some View {
+        let all = floors(pr)
+        let items = pickerItems(all)
+        if let c = cut(pr, plan: plan, all: all) {
+            Group {
+                if let ft = frozenTime { cutCanvas(pr, plan: plan, cut: c, t: ft, now: officeNow ?? Date()) }
+                else {
+                    TimelineView(.animation(minimumInterval: 1.0 / 60)) { cx in
+                        cutCanvas(pr, plan: plan, cut: c, t: cx.date.timeIntervalSinceReferenceDate, now: officeNow ?? cx.date)
+                    }
+                }
+            }
+            .contentShape(Rectangle())
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { box.cut.frameInWindow = $0 }
+            .onContinuousHover(coordinateSpace: .local) { phase in
+                switch phase {
+                case .active(let pt): box.cut.hovered = box.cut.dragging ? nil : box.cut.hit(pt)
+                case .ended: box.cut.hovered = nil
+                }
+            }
+            .gesture(DragGesture(minimumDistance: 2)
+                .onChanged { v in box.cut.drag(to: v.translation) }
+                .onEnded { _ in box.cut.endDrag() })
+            .simultaneousGesture(MagnifyGesture()
+                .onChanged { v in box.cut.magnify(v.magnification, at: v.startLocation) }
+                .onEnded { _ in box.cut.endMagnify() })
+            .simultaneousGesture(SpatialTapGesture(count: 2).onEnded { _ in officeAll = false; box.cut.fitFloor() })
+            .simultaneousGesture(SpatialTapGesture().onEnded { e in
+                guard let id = box.cut.hit(e.location), let tid = Self.selection(ofSpot: id, in: plan) else { return }
+                onInspect?(tid)
+            })
+            .onAppear { if frozenTime == nil { box.cut.install { stepFloor($0) } } }
+            .onDisappear { box.cut.remove() }
+            .overlay(alignment: .trailing) {
+                if items.count > 1 { FloorPicker(items: items, current: Self.regionID(plan), onGo: { goFloor($0) }) }
+            }
+            .clipped()
+        } else {
+            OfficeWorldView(floors: all, frozenNow: officeNow, focusRegion: Self.regionID(plan), frame: FloorFrame.building(all),
+                            onSelect: { tid in if let tid, FloorLayout.machinePart(tid) == nil { onInspect?(tid) } })
+        }
+    }
+
+    private func cutCanvas(_ pr: String, plan: FloorPlan, cut c: Cut, t: Double, now: Date) -> some View {
+        let dark = scheme == .dark
+        let origin = frozenZoom != nil ? nil : zoomOrigin
+        return Canvas { ctx, size in
+            let level = c.floor.level
+            let home = CutawayFraming.frame(CutawayFraming.bounds(c.building, level: level), size: size)
+            let cam = box.cut.camera(key: c.floor.id, home: home, building: CutawayFraming.building(c.building, level: level), size: size,
+                                     t: t, live: frozenTime == nil)
+            let tr = CityTransition(city: cam, office: c.embedding.officeFrame(fromCity: home), embedding: c.embedding)
+            var z = CityZoom(project: pr, floorID: c.floor.id, p: 1, transition: tr, content: .floor(plan, c.layout, now: now))
+            z.floorBox = box.cut.floorBox
+            z.hoveredSpot = box.cut.hovered
+            CityRenderer(model: model, lights: lights, cam: cam, dark: dark, t: t, growth: growth, hovered: nil, zoom: z, size: size,
+                         focusCampus: origin).draw(&ctx)
+        } symbols: {
+            FloorOfficeView.labels(plan, layout: c.layout, now: now, dark: dark)
+        }
     }
 
     private func canvas(p: Double, t: Double) -> some View {
