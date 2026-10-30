@@ -18,7 +18,6 @@ struct SettingsView: View {
     @State private var formError: String?
     @State private var message: String?
     @State private var removing: AgentSpec?
-    @State private var relayLogin = false
 
     /// Variables de entorno que pisan al archivo (para avisar de que guardar puede no cambiar nada).
     private var envOverrides: Bool {
@@ -46,19 +45,8 @@ struct SettingsView: View {
             }
             .frame(minHeight: 300, maxHeight: 460)
 
-            if relayLogin {
-                RelayLoginView(validate: { u, t in
-                    let outcome = await model.loginRelay(url: u, token: t)
-                    if outcome.isOK { load() }
-                    return outcome
-                }, onCancel: { relayLogin = false })
-                .padding(12)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
-            } else if editing == nil {
-                HStack(spacing: 10) {
-                    Button { startEditing(nil) } label: { Label("Añadir máquina", systemImage: "plus") }
-                    Button { relayLogin = true } label: { Label("Conectar relay…", systemImage: "antenna.radiowaves.left.and.right") }
-                }
+            if editing == nil {
+                Button { startEditing(nil) } label: { Label("Añadir máquina", systemImage: "plus") }
             }
 
             Text("Se guarda en \(AppConfig.configPath()) como [app.agents.<nombre>]; el resto del archivo no se toca. Las credenciales van al Llavero de este Mac.")
@@ -73,6 +61,8 @@ struct SettingsView: View {
                 Text(message).font(.callout).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
             }
 
+            Divider()
+            AccountSection(auth: model.auth)
             Divider()
             BundledAgentSection(bundled: model.bundled)
 
@@ -111,7 +101,7 @@ struct SettingsView: View {
                 .help(m.enabled ? "Desactivar: la app deja de conectarse (la credencial se conserva)" : "Activar")
                 VStack(alignment: .leading, spacing: 1) {
                     Text(m.name).font(.callout.weight(.semibold))
-                    Text((m.isRelay ? "relay · " : "") + m.url).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    Text((m.isRelay ? "nube · " : "") + m.url).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                 }
                 Spacer(minLength: 8)
                 Circle().fill(color(status)).frame(width: 7, height: 7)
@@ -153,8 +143,8 @@ struct SettingsView: View {
                     TextField("mini", text: $draftName).textFieldStyle(.roundedBorder).frame(width: 150)
                 }
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(draftDestination == .relay ? "URL del relay" : "URL del agente").font(.caption.weight(.medium))
-                    TextField(draftDestination == .relay ? "https://relay.example.com" : "http://100.64.0.10:3790", text: $draftURL)
+                    Text(draftDestination == .relay ? "URL de la API" : "URL del agente").font(.caption.weight(.medium))
+                    TextField(draftDestination == .relay ? BackendClient.defaultAPIURL.absoluteString : "http://100.64.0.10:3790", text: $draftURL)
                         .textFieldStyle(.roundedBorder)
                         .onSubmit(commit)
                 }
@@ -193,8 +183,8 @@ struct SettingsView: View {
             formError = e
             return
         }
-        if draftDestination == .relay, !url.lowercased().hasPrefix("https://") {
-            formError = "El relay va por https://."
+        if draftDestination == .relay, BackendAuth.apiURL(url) == nil {
+            formError = "La nube va por https://."
             return
         }
         if others.contains(where: { $0.url.caseInsensitiveCompare(url) == .orderedSame }) {
@@ -236,5 +226,38 @@ struct SettingsView: View {
         machines = next
         message = nil
         return true
+    }
+}
+
+private struct AccountSection: View {
+    @EnvironmentObject var model: AppModel
+    @ObservedObject var auth: BackendAuth
+    @State private var leaving = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: auth.session == nil ? "person.crop.circle.badge.questionmark" : "person.crop.circle.fill")
+                .foregroundStyle(auth.session == nil ? Color.secondary : Color.green)
+            VStack(alignment: .leading, spacing: 1) {
+                if let s = auth.session {
+                    Text(s.user.displayName ?? s.user.email).font(.callout.weight(.semibold))
+                    Text("\(s.user.email) · \(s.user.role == .owner ? "dueño" : "watcher") · \(s.apiURL.host ?? "")")
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                } else {
+                    Text("Sin sesión").font(.callout.weight(.semibold))
+                    Text("La fuente Nube necesita iniciar sesión con tu correo.").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            if auth.session != nil {
+                Button("Cerrar sesión") {
+                    leaving = true
+                    Task { await model.logout(); leaving = false }
+                }
+                .disabled(leaving)
+            } else {
+                Button("Iniciar sesión…") { model.showLogin() }
+            }
+        }
     }
 }
