@@ -48,7 +48,7 @@ enum NavItem: Hashable {
 
 /// Estado de la app + puente con React. La app es un cliente puro de la API de los agentes (docs/agent-api.md):
 /// sondea `GET /snapshot` de cada agente configurado y entrega los resultados crudos a la UI web (mensaje `agents`),
-/// que los combina. Las acciones de la UI (responder y settle de hilos pendientes) se traducen a POST de la API; el resto es de solo lectura.
+/// que los combina. Las acciones de la UI (responder, settle de hilos pendientes y cancelar de la cola) se traducen a POST de la API; el resto es de solo lectura.
 /// No ejecuta ningún proceso local ni toca T3: todo pasa por el agente.
 @MainActor
 final class AppModel: ObservableObject {
@@ -396,7 +396,20 @@ final class AppModel: ObservableObject {
         }, open: { [weak self] url in self?.open(url) }, settle: { [weak self] id in
             guard let self else { return "la app se está cerrando" }
             return await self.settle(id)
+        }, cancel: { [weak self] employee, task in
+            guard let self else { return "la app se está cerrando" }
+            return await self.cancel(employee: employee, task: task)
         }, canAct: canAct)
+    }
+
+    /// `POST /queue/cancel {employee, task}` al agente principal (quita la tarea de la cola del empleado). nil = hecho.
+    func cancel(employee: String, task: String) async -> String? {
+        guard canAct else { return AgentClient.viewerMessage }
+        guard let c = primary else { return "no hay agente configurado" }
+        guard let action = AgentAction.route(type: "cancel", payload: ["employee": employee, "task": task]) else { return "tarea no válida" }
+        let r = await c.perform(action)
+        if r.ok { Task { await refresh() }; return nil }
+        return r.message
     }
 
     /// `POST /settle {thread_id}` al agente principal (cierra el hilo en T3, nunca archiva). nil = hecho.
@@ -454,7 +467,7 @@ final class AppModel: ObservableObject {
         web?.evaluateJavaScript("window.chopshop && window.chopshop.receive(\(js))", completionHandler: nil)
     }
 
-    private static let actionTypes: Set<String> = ["answer", "settle"]
+    private static let actionTypes: Set<String> = ["answer", "settle", "cancel"]
 
     func handle(_ body: [String: Any]) {
         let type = body["type"] as? String ?? ""
