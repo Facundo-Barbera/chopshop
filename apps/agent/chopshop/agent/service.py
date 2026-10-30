@@ -24,7 +24,7 @@ import time
 
 from .. import engine as engine_mod, events as legacy_events, graph, home, settings, state
 from . import __version__, actions as actions_mod, automations as automations_mod, collector as collector_mod, config, db, envelope, \
-    events, github, halflife, listeners, notes, office as office_mod, pairing, registry, roles as roles_mod, server, t3watch
+    events, github, halflife, listeners, notes, office as office_mod, pairing, registry, relay as relay_mod, roles as roles_mod, server, t3watch
 from .forge import github as forge_github, rack as forge_rack
 
 log = logging.getLogger("chopshop.agent")
@@ -236,7 +236,7 @@ class AgentService:
                  orchestrator_fn=None, clock=time.time, maint_interval=MAINT_INTERVAL, maint_first=MAINT_FIRST, compact_every=COMPACT_EVERY,
                  engine_tick=None, stream_opts=None, automations=None,
                  gh_runner=None, gh_projects_fn=github.profile_repos, roles=None, forge_entries_fn=None,
-                 gh_profiles_fn=actions_mod.load_profiles):
+                 gh_profiles_fn=actions_mod.load_profiles, relay=None):
         self.cfg, self.clock, self.runner, self.poster = cfg, clock, runner, poster
         self.engine_tick = engine_tick or engine_mod.tick
         self.owns_conn = conn is None
@@ -282,6 +282,12 @@ class AgentService:
         self.listeners = listeners.Listeners(self.emit, clock) if cfg.get("listeners", True) else None
         self.stop_event = threading.Event()
         self.servers, self.threads, self._serving = [], [], []
+        self.relay = None
+        relay_cfg = relay if relay is not None else relay_mod.configured()
+        if relay_cfg:
+            self.relay = relay_mod.RelayLink(relay_cfg[0], relay_cfg[1], self.app.machine_id, self.conn,
+                                             lambda: self.app.r_snapshot(None, {}, None), self.app.projector.current,
+                                             self.office.profiles_fn, self.stop_event)
         self._stopped = False
 
     WAKE_SEAT_TTL = 900.0           # s que se reintenta sentar un hilo despertado que la oficina aún no conoce
@@ -398,6 +404,8 @@ class AgentService:
             if self.actions is not None:
                 self._spawn("actions", self._loop, "actions", self.actions.poll_once, self.actions.next_delay)
             self._spawn("maintenance", self._maintenance)
+            if self.relay is not None:
+                self._spawn("relay", self.relay.run)
         for s in self.servers:
             self._serving.append(s)
             self._spawn("http-%s" % s.server_address[0], s.serve_forever, 0.2)
