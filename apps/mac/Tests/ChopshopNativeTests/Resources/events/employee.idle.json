@@ -1,0 +1,30 @@
+{
+  "v": 1,
+  "id": "01MCC5Y3S0F8YH6PV8TEN7BD14",
+  "seq": 114,
+  "ts": "2027-01-15T09:14:00.000Z",
+  "machine": "contabo-dev",
+  "project": "awesome-gb",
+  "type": "employee.idle",
+  "severity": "info",
+  "needs": null,
+  "subject": {
+    "kind": "desk",
+    "id": "awesome-gb/0/triage/0",
+    "title": "Tría"
+  },
+  "cause": {
+    "id": null,
+    "depth": 0
+  },
+  "body": {
+    "employee": "awesome-gb/0/triage/0",
+    "role": "triage",
+    "reason": "done",
+    "thread_id": "mcp:c41f",
+    "since": "2027-01-15T09:14:00.000Z",
+    "name": "Tría",
+    "summary": "#212 etiquetado como bug/frontend y asignado.",
+    "queue_len": 0
+  }
+}

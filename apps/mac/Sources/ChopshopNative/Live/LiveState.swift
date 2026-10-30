@@ -42,6 +42,8 @@ public struct LiveState: Equatable, Sendable {
     public var lobby: [LobbyEntry] = []
     /// v3: listeners, automatizaciones, suscripciones y rack (LiveStateOffice.swift).
     public var machineRoom = MachineRoomState()
+    public var employees: [Employee] = []
+    public var queues: [String: EmployeeQueue] = [:]
 
     // Lo siguiente NO viene en la proyección del agente (la proyección solo guarda el resumen de la atención): el cliente lo recuerda
     // de los sobres que ve, para pintar las opciones de una pregunta, el historial de respuestas y las gráficas de la máquina.
@@ -192,6 +194,7 @@ public struct LiveState: Equatable, Sendable {
             projects[pi].counts = Self.counts(projects[pi])
         }
         applyMachineRoom(env)
+        applyEmployees(env)
         recent.insert(env, at: 0)
         if recent.count > Self.recentLimit { recent.removeLast(recent.count - Self.recentLimit) }
     }
@@ -225,7 +228,7 @@ public struct LiveState: Equatable, Sendable {
 
     /// Lee la proyección completa que manda el agente (evento `state`). Tolerante: ignora lo que no conoce.
     public init?(json: JSONValue) {
-        guard let o = json.object, o["projects"]?.array != nil else { return nil }
+        guard let o = json.object, o["projects"]?.array != nil || o["employees"]?.array != nil else { return nil }
         self.init(machine: o["machine"]?.string)
         headSeq = o["head_seq"]?.int ?? 0
         ts = o["ts"]?.string
@@ -249,6 +252,7 @@ public struct LiveState: Equatable, Sendable {
         recent = (o["recent"]?.array ?? []).compactMap(Envelope.init(json:))
         lobby = (o["lobby"]?.array ?? []).compactMap(LobbyEntry.init(json:))
         machineRoom = o["machine_room"].map(MachineRoomState.init(json:)) ?? MachineRoomState()
+        readEmployees(o)
         // Reconstruye lo que no trae la proyección con los sobres recientes (del más viejo al más nuevo).
         var replay = LiveState(machine: machine)
         for e in recent.reversed() where e.type == "question.opened" || e.type == "question.answered" || e.type == "machine.health" {
