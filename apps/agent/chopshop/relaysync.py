@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import json
+import os
 import re
 
 from .agent import __version__ as AGENT_VERSION
@@ -11,6 +12,9 @@ PROTOCOL_V2 = [2]
 TTL_DEFAULT = 120
 TTL_MIN, TTL_MAX = 30, 900
 MAX_PART_BYTES = 786432
+MAX_OFFER_BYTES = 786432
+MAX_OFFER_PROJECTS = 256
+REGISTRY_KEYS = ("company", "t3_project", "repo", "host", "enabled")
 MAX_EVENTS = 80
 MAX_QUEUE_ITEMS = 100
 TITLE_MAX, SUMMARY_MAX, TEXT_MAX = 120, 280, 120
@@ -462,3 +466,101 @@ def snapshot(snap, state=None, roles=None, machine_id=None, seq=None, ttl_s=TTL_
         parts.append(part("employees", employees))
     msg["parts"] = [p for p in parts if p is not None]
     return msg
+
+
+def _canon(obj):
+    return json.dumps(obj, ensure_ascii=False, separators=(",", ":"), sort_keys=True, default=str)
+
+
+def import_payload(prof, registry=None, prompt_fn=None):
+    prof = prof if isinstance(prof, dict) else {}
+    name = _name(prof.get("project"))
+    if not name:
+        return None
+    out = json.loads(_canon({k: v for k, v in prof.items() if not str(k).startswith("_")}))
+    office = out.get("office")
+    roles = office.get("roles") if isinstance(office, dict) else None
+    for spec in (roles.values() if isinstance(roles, dict) else ()):
+        if isinstance(spec, dict) and "prompt_file" in spec:
+            rel = spec.pop("prompt_file")
+            spec["prompt"] = (prompt_fn(name, rel) if prompt_fn and isinstance(rel, str) else None) or ""
+    if isinstance(registry, dict):
+        out["registry"] = json.loads(_canon({k: registry[k] for k in REGISTRY_KEYS if k in registry}))
+    return out
+
+
+def offer_hash(projects):
+    return hashlib.sha256(_canon(projects).encode("utf-8")).hexdigest()
+
+
+def import_offer(projects, ts=None):
+    msg = dict(_header("import.offer", ts, 2), projects=[])
+    size, skipped = len(_canon(msg).encode("utf-8")), []
+    for p in sorted((p for p in projects or () if isinstance(p, dict) and _name(p.get("project"))), key=lambda p: p["project"]):
+        n = len(_canon(p).encode("utf-8")) + 1
+        if len(msg["projects"]) >= MAX_OFFER_PROJECTS or size + n > MAX_OFFER_BYTES:
+            skipped.append(p["project"])
+            continue
+        msg["projects"].append(p)
+        size += n
+    return (msg if msg["projects"] else None), skipped
+
+
+def sync_names(sync):
+    sync = sync if isinstance(sync, dict) else {}
+    return {p["name"] for p in sync.get("projects") or () if isinstance(p, dict) and _name(p.get("name"))}
+
+
+def cloud_dir():
+    from . import home
+    return os.path.join(home.home(), "cloud")
+
+
+def import_hash_path():
+    return os.path.join(cloud_dir(), "import.sha256")
+
+
+def read_import_hash():
+    try:
+        with open(import_hash_path(), encoding="utf-8") as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
+
+
+def write_import_hash(h):
+    p = import_hash_path()
+    os.makedirs(os.path.dirname(p), mode=0o700, exist_ok=True)
+    tmp = p + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(h + "\n")
+    os.replace(tmp, p)
+
+
+def cached_sync_names():
+    try:
+        with open(os.path.join(cloud_dir(), "state.json"), encoding="utf-8") as f:
+            return sync_names(json.load(f))
+    except (OSError, ValueError):
+        return set()
+
+
+def local_projects(exclude=()):
+    from . import profile
+    from .agent import registry, roles
+    exclude = set(exclude or ())
+    reg = registry.load() if registry.exists() else {}
+    profiles = set(profile.list_projects())
+    out = []
+    for name in sorted(profiles | set(reg)):
+        if not _name(name) or name in exclude:
+            continue
+        try:
+            prof = profile.load(name) if name in profiles else {"project": name}
+        except profile.ProfileError:
+            continue
+        p = import_payload(prof, reg.get(name), lambda n, rel: roles.read_prompt(n, rel))
+        if p is not None:
+            out.append(p)
+    return out
