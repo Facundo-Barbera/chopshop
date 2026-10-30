@@ -211,7 +211,7 @@ public struct CityView: View {
         let order = all.sorted { ($0.kind == .lobby ? 0 : 1, $0.floorIndex) < ($1.kind == .lobby ? 0 : 1, $1.floorIndex) }
         let lift = order.first?.kind == .lobby ? 0 : 1
         return order.enumerated().map { k, p in
-            FloorPicker.Item(id: Self.regionID(p), label: p.kind == .lobby ? "PB" : "\(k + lift)", help: p.shortTitle.capitalized)
+            FloorPicker.Item(id: Self.regionID(p), label: p.kind == .lobby ? "PB" : "\(k + lift)")
         }
     }
 
