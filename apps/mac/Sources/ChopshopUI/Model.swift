@@ -116,7 +116,7 @@ final class AppModel: ObservableObject {
         startLive()
         if !args.contains("--capture") { syncBundledAgent() }
         // Sin ningún agente configurado no hay nada que mostrar: se pide la conexión en los ajustes
-        if hub.isEmpty && !args.contains("--capture") { showSettings = true }
+        if hub.isEmpty && !args.contains("--capture") && demoFixture == nil && ProcessInfo.processInfo.environment["CHOPSHOP_NO_SETTINGS"] != "1" { showSettings = true }
     }
 
     private func startPolling() {
