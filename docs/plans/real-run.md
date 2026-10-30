@@ -85,10 +85,12 @@ El despachador usa `extra.prompt` o, si falta, el título, pero la herramienta M
 
 Arreglo: `task_enqueue` acepta `prompt` y lo guarda en `extra.prompt`.
 
-### BUG-5: `ChopshopSnap employees` no dice nada con un fixture de `/snapshot` (abierto, menor)
+### BUG-5: `ChopshopSnap employees` no dice nada con un fixture de `/snapshot` (resuelto en E17)
 
 Con el JSON de `GET /snapshot` (que también trae `employees` y `queues`) el modo no genera ninguna imagen y no imprime nada. Solo
-funciona con la forma de `/state` (como `snapshot.office.json`). Debería decir qué falta o aceptar las dos formas.
+funciona con la forma de `/state` (como `snapshot.office.json`). Debería decir qué falta o aceptar las dos formas. E17: sin
+`office` toma `employees`/`queues` del JSON (`/snapshot`, parte `employees` del relay o sus tramas `snapshot`) sobre las oficinas
+de `snapshot.office.json` (o del 4.º argumento).
 
 ## Notas (no son fallos de Chopshop)
 
