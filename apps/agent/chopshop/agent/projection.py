@@ -18,7 +18,7 @@ Los sobres salen de `events.list_after` (contrato del bus, docs/event-envelope.m
 import copy
 import threading
 
-from . import db, events, lobby, machine_room, registry
+from . import db, envelope, events, layout, lobby, machine_room, registry
 
 API_VERSION = 3
 RECENT = 50
@@ -50,7 +50,7 @@ def min_seq(conn):
 
 def empty(machine=None):
     return {"api_version": API_VERSION, "machine": machine, "head_seq": 0, "ts": None, "machine_health": None,
-            "projects": [], "lobby": [], "recent": [], "machine_room": machine_room.empty()}
+            "projects": [], "lobby": [], "recent": [], "machine_room": machine_room.empty(), "employees": [], "queues": {}}
 
 
 def _project(state, name):
@@ -118,6 +118,8 @@ def _apply(state, env):
     if typ == "machine.health":
         state["machine_health"] = _clean(body)
     machine_room.apply(state, env)
+    if typ in envelope.EMPLOYEE_TYPES:
+        _apply_employee(state, typ, env, body)
     p = _project(state, proj) if proj else None
     if p is not None:
         sid = (env.get("subject") or {}).get("id")
@@ -148,8 +150,6 @@ def _apply(state, env):
                 _upsert(g["nodes"], "id", node["id"], dict(next((n for n in g["nodes"] if n.get("id") == node["id"]), {}), **node))
         if typ == "task.state" or typ in OFFICE_TYPES:
             _apply_office(state, p, typ, env, body)
-        if typ in EMPLOYEE_TYPES:
-            _apply_employee(p, typ, env, body)
         key = _subject_key(env) if typ not in NO_ATTENTION else None
         if key is not None:
             old = next((a for a in p["attention"] if a["key"] == key), None)
@@ -242,45 +242,61 @@ def _apply_office(state, p, typ, env, body):
             d["notes_pending"] = body["pending"] if isinstance(body.get("pending"), int) else (d.get("notes_pending") or 0) + 1
 
 
-EMPLOYEE_TYPES = ("employee.assigned", "employee.idle", "employee.renamed", "queue.changed")
-COMMON, DESK = "common", "desk"
-
-
-def _employee(p, eid, role):
-    emps = p.setdefault("employees", [])
-    e = next((x for x in emps if x["id"] == eid), None)
+def _employee(state, eid, project):
+    emps = state.setdefault("employees", [])
+    e = next((x for x in emps if x.get("id") == eid), None)
     if e is None:
-        parts = eid.rsplit("/", 3)
-        num = lambda i: int(parts[i]) if len(parts) == 4 and parts[i].isdigit() else 0
-        e = {"id": eid, "project": p["name"], "floor": num(1), "role": role or (parts[2] if len(parts) == 4 else None),
-             "slot": num(3), "name": None, "state": "idle", "location": COMMON, "thread_id": None, "task": None,
-             "title": None, "since": None, "queue_len": 0}
+        d = layout.parse_desk_id(eid) or (project, 0, None, 0)
+        e = {"id": eid, "project": d[0], "floor": d[1], "role": d[2], "slot": d[3], "name": None, "state": "idle", "thread_id": None, "task": None,
+             "title": None, "since": None, "queue_len": len(((state.get("queues") or {}).get(eid) or {}).get("items") or [])}
         emps.append(e)
     return e
 
 
-def _apply_employee(p, typ, env, body):
-    eid = body.get("employee")
+def _set_queue(state, eid, items, ts):
+    qs = state.setdefault("queues", {})
+    qs[eid] = {"items": items, "updated": ts or (qs.get(eid) or {}).get("updated")}
+    for e in state.get("employees") or []:
+        if e.get("id") == eid:
+            e["queue_len"] = len(items)
+
+
+def _apply_employee(state, typ, env, body):
+    eid, ts = body.get("employee"), env.get("ts")
     if not isinstance(eid, str) or not eid:
         return
-    e = _employee(p, eid, body.get("role"))
+    if typ in ("employee.assigned", "employee.idle", "employee.renamed"):
+        e = _employee(state, eid, env.get("project"))
+        if body.get("role"):
+            e["role"] = body["role"]
+        if typ == "employee.renamed" or "name" in body:
+            e["name"] = body.get("name")
+        if typ == "employee.assigned":
+            e.update(state="working", thread_id=body.get("thread_id"), task=body.get("task"),
+                     title=body.get("title") or e.get("title"), since=body.get("since") or ts)
+        elif typ == "employee.idle":
+            e.update(state="idle", since=body.get("since") or ts)
+            if "thread_id" in body:
+                e["thread_id"] = body["thread_id"]
+        if typ != "employee.renamed" and isinstance(body.get("queue_len"), int):
+            e["queue_len"] = body["queue_len"]
+        return
+    items = list(((state.get("queues") or {}).get(eid) or {}).get("items") or [])
     if typ == "queue.changed":
-        e["queue_len"] = len(body.get("items") or [])
-        return
-    if "name" in body:
-        e["name"] = body["name"]
-    if typ == "employee.renamed":
-        return
-    if body.get("role"):
-        e["role"] = body["role"]
-    if isinstance(body.get("queue_len"), int):
-        e["queue_len"] = body["queue_len"]
-    e["since"] = body.get("since") or env.get("ts")
-    e["thread_id"] = body.get("thread_id")
-    if typ == "employee.assigned":
-        e.update(state="working", location=DESK, task=body.get("task"), title=body.get("title"))
-    else:
-        e.update(state="idle", location=COMMON)
+        _set_queue(state, eid, copy.deepcopy(body.get("items") or []), ts)
+    elif typ == "task.enqueued" and body.get("task") and all(i.get("task") != body["task"] for i in items):
+        pos = body.get("position") if isinstance(body.get("position"), int) else len(items)
+        items.insert(min(max(pos, 0), len(items)), {"task": body["task"], "title": body.get("title"),
+                                                    "enqueued_at": body.get("enqueued_at") or ts, "by": body.get("by"),
+                                                    "trigger": body.get("trigger")})
+        _set_queue(state, eid, items, ts)
+    elif typ == "task.cancelled" and any(i.get("task") == body.get("task") for i in items):
+        _set_queue(state, eid, [i for i in items if i.get("task") != body.get("task")], ts)
+
+
+def seats(state):
+    return {d["id"]: d["occupant"] for p in state.get("projects") or [] for d in _desks(p.get("office"))
+            if d.get("id") and d.get("occupant")}
 
 
 def apply(state, env):
@@ -314,6 +330,8 @@ def filter_project(st, project):
     out["projects"] = [p for p in st["projects"] if p["name"] == project]
     out["lobby"] = [x for x in st.get("lobby") or [] if x["project"] == project]
     out["recent"] = [e for e in st["recent"] if e.get("project") == project]
+    out["employees"] = [e for e in st.get("employees") or [] if e.get("project") == project]
+    out["queues"] = {k: v for k, v in (st.get("queues") or {}).items() if k.split("/", 1)[0] == project}
     if "machine_room" in st:
         out["machine_room"] = machine_room.filter_project(st["machine_room"], project)
     return out
@@ -326,6 +344,7 @@ class Projector:
         self.conn, self.cfg = conn, cfg
         self._lock = threading.Lock()
         self._state = empty(cfg.get("machine_id"))
+        self.employees_fn = None
 
     def current(self):
         """Copia del estado al día (su `head_seq` es exactamente el último sobre incluido)."""
@@ -336,4 +355,7 @@ class Projector:
                     _apply(self._state, e)
                 if len(page) < PAGE:
                     break
-            return registry.visible(machine_room.live(copy.deepcopy(self._state), self.conn))
+            st = machine_room.live(copy.deepcopy(self._state), self.conn)
+        if self.employees_fn is not None:
+            st["employees"], st["queues"] = self.employees_fn(st)
+        return registry.visible(st)

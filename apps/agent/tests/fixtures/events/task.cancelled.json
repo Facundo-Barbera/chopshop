@@ -1,0 +1,29 @@
+{
+  "v": 1,
+  "id": "01MCC5Y3S0F8YH6PV8TEN7BD13",
+  "seq": 113,
+  "ts": "2027-01-15T09:13:00.000Z",
+  "machine": "contabo-dev",
+  "project": "awesome-gb",
+  "type": "task.cancelled",
+  "severity": "info",
+  "needs": null,
+  "subject": {
+    "kind": "task",
+    "id": "q:01MCC5Y3S0F8YH6PV8TEN7BD10",
+    "title": "Triage #213 · typo en README"
+  },
+  "cause": {
+    "id": null,
+    "depth": 0
+  },
+  "body": {
+    "task": "q:01MCC5Y3S0F8YH6PV8TEN7BD10",
+    "employee": "awesome-gb/0/triage/0",
+    "phase": "queued",
+    "by": "human",
+    "reason": "manual",
+    "thread_id": null,
+    "note": "Duplicado de #212"
+  }
+}

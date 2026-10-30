@@ -458,7 +458,8 @@ class TestStream(StreamBase):
         st, body, _ = self.get("/snapshot")
         self.assertEqual(st, 200)
         self.assertEqual(set(body), {"api_version", "machine_id", "ts", "generated", "machine", "apps", "projects", "threads",
-                                     "pending_questions", "events", "subscriptions", "orchestrator", "agent"})
+                                     "pending_questions", "events", "subscriptions", "orchestrator", "agent",
+                                     "employees", "queues"})
         self.assertEqual(body["api_version"], 1)
         old = {"seq", "ts", "machine_id", "event", "project", "body"}       # campos v1 (el bus añade los del sobre)
         self.assertLessEqual(old, set(body["events"][0]))
