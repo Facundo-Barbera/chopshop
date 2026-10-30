@@ -98,10 +98,10 @@ struct CityPalette {
     // atención (igual en claro y oscuro)
     static let amber = CityRGB(255, 159, 10)
     static let red = CityRGB(255, 69, 58)
-    static let amberLit = (CityRGB(255, 176, 36), CityRGB(236, 142, 14))
-    static let redLit = (CityRGB(255, 92, 80), CityRGB(222, 58, 48))
-    static let amberSlab = (CityRGB(255, 184, 70), CityRGB(240, 148, 12), CityRGB(176, 106, 9))
-    static let redSlab = (CityRGB(255, 110, 100), CityRGB(240, 66, 56), CityRGB(176, 46, 40))
+    static let amberLit = (CityRGB(255, 214, 150), CityRGB(232, 182, 112))
+    static let redLit = (CityRGB(246, 150, 128), CityRGB(214, 112, 96))
+    static let amberSlab = (CityRGB(214, 176, 120), CityRGB(186, 146, 92), CityRGB(138, 106, 66))
+    static let redSlab = (CityRGB(212, 132, 118), CityRGB(184, 104, 92), CityRGB(136, 76, 68))
 }
 
 /// Zoom en curso hacia un piso: la transición y lo que hay dentro (el piso v3 de FloorOfficeView, o la escena de IsoOfficeView si
@@ -246,13 +246,13 @@ struct CityRenderer {
     private func drawGlows(_ ctx: inout GraphicsContext, _ glows: [(path: Path, color: CityRGB, a: Double)]) {
         guard !glows.isEmpty else { return }
         ctx.drawLayer { l in
-            l.addFilter(.blur(radius: 9))
+            l.addFilter(.blur(radius: 10))
             for gl in glows where gl.a > 0.01 {
-                l.stroke(gl.path, with: .color(gl.color.color.opacity(0.92 * gl.a)), style: StrokeStyle(lineWidth: 9, lineJoin: .round))
+                l.stroke(gl.path, with: .color(gl.color.color.opacity(0.32 * gl.a)), style: StrokeStyle(lineWidth: 7, lineJoin: .round))
             }
         }
         for gl in glows where gl.a > 0.01 {
-            ctx.stroke(gl.path, with: .color(gl.color.color.opacity(0.55 * gl.a)), style: StrokeStyle(lineWidth: 1.2, lineJoin: .round))
+            ctx.stroke(gl.path, with: .color(gl.color.color.opacity(0.28 * gl.a)), style: StrokeStyle(lineWidth: 1, lineJoin: .round))
         }
     }
 
@@ -526,8 +526,9 @@ struct CityRenderer {
 
     private func tinted(_ c: Faces, _ amber: Double, _ red: Double) -> Faces {
         var (T, L, R) = c
-        if amber > 0 { T = T.mix(CityPalette.amberSlab.0, amber); L = L.mix(CityPalette.amberSlab.1, amber); R = R.mix(CityPalette.amberSlab.2, amber) }
-        if red > 0 { T = T.mix(CityPalette.redSlab.0, red); L = L.mix(CityPalette.redSlab.1, red); R = R.mix(CityPalette.redSlab.2, red) }
+        let a = amber * 0.3, r = red * 0.3
+        if a > 0 { T = T.mix(CityPalette.amberSlab.0, a); L = L.mix(CityPalette.amberSlab.1, a); R = R.mix(CityPalette.amberSlab.2, a) }
+        if r > 0 { T = T.mix(CityPalette.redSlab.0, r); L = L.mix(CityPalette.redSlab.1, r); R = R.mix(CityPalette.redSlab.2, r) }
         return (T, L, R)
     }
 
@@ -871,8 +872,8 @@ struct CityRenderer {
         let glass = lit ? pal.glassL : pal.glassR
         var lc1 = lit ? pal.litL : pal.litR
         var lc2 = lc1.scaled(0.86)
-        if amber > 0 { lc1 = lc1.mix(CityPalette.amberLit.0, amber); lc2 = lc2.mix(CityPalette.amberLit.1, amber) }
-        if red > 0 { lc1 = lc1.mix(CityPalette.redLit.0, red); lc2 = lc2.mix(CityPalette.redLit.1, red) }
+        if amber > 0 { lc1 = lc1.mix(CityPalette.amberLit.0, 0.75 * amber); lc2 = lc2.mix(CityPalette.amberLit.1, 0.75 * amber) }
+        if red > 0 { lc1 = lc1.mix(CityPalette.redLit.0, 0.75 * red); lc2 = lc2.mix(CityPalette.redLit.1, 0.75 * red) }
         let zm = (za + zt) / 2
         var halo: [Path] = []
         for i in 0..<n {
