@@ -5,6 +5,7 @@ import SwiftUI
 struct AttentionRow: View {
     let task: MockTask
     let host: String?
+    var showsTitle = true
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -14,10 +15,12 @@ struct AttentionRow: View {
                 .font(.title3)
                 .frame(width: 22)
             VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(task.title).font(.callout.weight(.semibold)).lineLimit(2)
-                    Spacer(minLength: 8)
-                    Text([host, task.id].compactMap { $0 }.joined(separator: " · ")).font(.caption).foregroundStyle(.tertiary)
+                if showsTitle {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(task.title).font(.callout.weight(.semibold)).lineLimit(2)
+                        Spacer(minLength: 8)
+                        Text([host, task.id].compactMap { $0 }.joined(separator: " · ")).font(.caption).foregroundStyle(.tertiary)
+                    }
                 }
                 switch task.state {
                 case .needsYou:
