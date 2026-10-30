@@ -47,6 +47,7 @@ DEFAULTS = {
         "legacy_interval": 5,
         "engine_enabled": True,        # correr engine.tick en el agente cuando hay lotes en <home>/state.json
         "engine_interval": 5,
+        "dispatcher": {"max_threads": 2},
         "service": {"read_write_paths": []},   # rutas extra de escritura para la unidad systemd (ProtectSystem=strict)
         "token_file": "~/.chopshop/agent/token",
         "db_path": "~/.chopshop/agent/agent.db",
