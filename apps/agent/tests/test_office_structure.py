@@ -92,7 +92,7 @@ class TestOfficeApi(ApiBase):
         self.assertEqual(body["office"], example()["office"])
         self.assertEqual(body["rev"], S.rev(self.text()))
         self.assertEqual(body["limits"]["floors_per_project"], 4)
-        self.assertEqual(len([d for f in body["structure"]["floors"] for r in f["rooms"] for d in r["desks"]]), 18)
+        self.assertEqual(len([d for f in body["structure"]["floors"] for r in f["rooms"] for d in r["desks"]]), 19)
         self.assertEqual(self.get("/office/no-existe")[0], 404)
         self.assertEqual(self.get("/office/..%2Fx")[0], 400)
 
@@ -131,6 +131,8 @@ class TestOfficeApi(ApiBase):
 
     def test_reactivation_requires_explicit_list(self):
         o = self.office()
+        o["floors"][1]["rooms"][0]["desks"] = 2
+        self.assertEqual(self.put({"office": o, "by": "bot"})[0], 200)
         o["floors"][1]["rooms"][0]["desks"] = 1
         self.assertEqual(self.put({"office": o, "by": "bot"})[0], 200)
         o["floors"][1]["rooms"][0]["desks"] = 2
