@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/backend/v2/hub/ws-welcome.schema.json",
+  "title": "WS v2 welcome (relay → agente)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "v",
+    "type",
+    "id",
+    "ts",
+    "re",
+    "session_id",
+    "protocol",
+    "snapshot_ttl_s",
+    "max_frame_bytes",
+    "ping_interval_s",
+    "machine",
+    "rev"
+  ],
+  "properties": {
+    "v": {
+      "$ref": "../common.schema.json#/$defs/v"
+    },
+    "id": {
+      "$ref": "../common.schema.json#/$defs/msg_id"
+    },
+    "ts": {
+      "$ref": "../common.schema.json#/$defs/ts"
+    },
+    "type": {
+      "const": "welcome"
+    },
+    "re": {
+      "$ref": "../common.schema.json#/$defs/msg_id"
+    },
+    "session_id": {
+      "type": "string",
+      "pattern": "^ss-[0-9a-f]{16}$"
+    },
+    "protocol": {
+      "const": 2
+    },
+    "snapshot_ttl_s": {
+      "type": "integer",
+      "minimum": 30,
+      "maximum": 900
+    },
+    "max_frame_bytes": {
+      "type": "integer",
+      "minimum": 1024,
+      "maximum": 1048576
+    },
+    "ping_interval_s": {
+      "type": "integer",
+      "minimum": 5,
+      "maximum": 300
+    },
+    "machine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "../common.schema.json#/$defs/uuid"
+        },
+        "name": {
+          "$ref": "../common.schema.json#/$defs/machine_name"
+        }
+      }
+    },
+    "rev": {
+      "$ref": "../common.schema.json#/$defs/count"
+    }
+  }
+}

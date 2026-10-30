@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/backend/v2/hub/ws-sync-ack.schema.json",
+  "title": "WS v2 sync.ack (agente → relay)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "v",
+    "type",
+    "id",
+    "ts",
+    "re",
+    "rev",
+    "applied",
+    "errors"
+  ],
+  "properties": {
+    "v": {
+      "$ref": "../common.schema.json#/$defs/v"
+    },
+    "id": {
+      "$ref": "../common.schema.json#/$defs/msg_id"
+    },
+    "ts": {
+      "$ref": "../common.schema.json#/$defs/ts"
+    },
+    "type": {
+      "const": "sync.ack"
+    },
+    "re": {
+      "$ref": "../common.schema.json#/$defs/msg_id"
+    },
+    "rev": {
+      "$ref": "../common.schema.json#/$defs/count"
+    },
+    "applied": {
+      "type": "array",
+      "items": {
+        "$ref": "../common.schema.json#/$defs/name"
+      },
+      "uniqueItems": true
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "project",
+          "message"
+        ],
+        "properties": {
+          "project": {
+            "$ref": "../common.schema.json#/$defs/name"
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          }
+        }
+      }
+    }
+  }
+}

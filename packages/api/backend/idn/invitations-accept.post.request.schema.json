@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/backend/v2/idn/invitations-accept.post.request.schema.json",
+  "title": "POST /v1/invitations/accept",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "token",
+    "password",
+    "device_name",
+    "client"
+  ],
+  "properties": {
+    "token": {
+      "$ref": "../common.schema.json#/$defs/invitation_token"
+    },
+    "password": {
+      "$ref": "../common.schema.json#/$defs/new_password"
+    },
+    "display_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "device_name": {
+      "$ref": "../common.schema.json#/$defs/device_name"
+    },
+    "client": {
+      "$ref": "../common.schema.json#/$defs/client"
+    }
+  }
+}

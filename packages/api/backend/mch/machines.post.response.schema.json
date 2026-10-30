@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/backend/v2/mch/machines.post.response.schema.json",
+  "title": "POST /v1/machines → 201",
+  "$ref": "../common.schema.json#/$defs/machine_issued"
+}

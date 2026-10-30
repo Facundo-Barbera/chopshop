@@ -1,0 +1,77 @@
+{
+  "v": 2,
+  "ts": "2026-10-30T14:02:11.250Z",
+  "type": "sync",
+  "id": "01MCB2QJ9K1M3P5R7T9W1Y3A5C",
+  "rev": 42,
+  "machine": {
+    "id": "c3f8a2d1-6e4b-4a97-b2c5-8d1e7f3a9b52",
+    "name": "mac-mini"
+  },
+  "workspaces": [
+    {
+      "id": "7c2e9f14-3a6b-4d5e-8f17-2b9c4e6a0d31",
+      "name": "Awesome GB",
+      "slug": "awesome-gb"
+    }
+  ],
+  "projects": [
+    {
+      "id": "1f7a3c9e-8b2d-4c51-9d6e-4a2f8b1c7e03",
+      "name": "awesome-gb",
+      "workspace_id": "7c2e9f14-3a6b-4d5e-8f17-2b9c4e6a0d31",
+      "title": "Awesome GB",
+      "t3_project": "awesome-gb",
+      "repo": "https://github.com/example/awesome-gb",
+      "runtime_mode": "approval-required",
+      "model": null,
+      "disabled": false,
+      "settings": {
+        "rack": {
+          "enabled": true
+        }
+      },
+      "layout": {
+        "floors": [
+          {
+            "name": "Producto",
+            "rooms": [
+              {
+                "role": "triage",
+                "desks": 1,
+                "permanent": true
+              },
+              {
+                "role": "backend",
+                "desks": 2
+              }
+            ]
+          }
+        ],
+        "half_life": "10m",
+        "capacity": {
+          "flex_per_floor": 0,
+          "max_extra_floors": 0,
+          "outsourcing": false
+        }
+      },
+      "roles": [
+        {
+          "name": "triage",
+          "prompt": "Clasifica los issues nuevos.",
+          "model": null,
+          "match_rules": {
+            "labels": [
+              "bug"
+            ]
+          },
+          "wake": [
+            "issue.opened"
+          ],
+          "settings": {}
+        }
+      ],
+      "rev": 4
+    }
+  ]
+}
