@@ -1,11 +1,13 @@
 name: Backend deploy
 
 on:
+  push:
+    branches: [deploy-live]
   workflow_dispatch:
     inputs:
       confirm:
         description: "Escribe DEPLOY para desplegar chopshop-api"
-        required: true
+        required: false
         type: string
 
 permissions:
@@ -21,6 +23,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Exigir confirmación
+        if: github.event_name == 'workflow_dispatch'
         env:
           CONFIRM: ${{ inputs.confirm }}
         run: |
