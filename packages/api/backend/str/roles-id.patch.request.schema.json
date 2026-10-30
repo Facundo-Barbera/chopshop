@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/backend/v2/str/roles-id.patch.request.schema.json",
+  "title": "PATCH /v1/roles/{id}",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "rev"
+  ],
+  "properties": {
+    "rev": {
+      "$ref": "../common.schema.json#/$defs/rev"
+    },
+    "name": {
+      "$ref": "../common.schema.json#/$defs/name"
+    },
+    "prompt": {
+      "type": "string",
+      "maxLength": 262144
+    },
+    "model": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "match_rules": {
+      "$ref": "../common.schema.json#/$defs/json_object"
+    },
+    "wake": {
+      "type": "array"
+    },
+    "settings": {
+      "$ref": "../common.schema.json#/$defs/json_object"
+    },
+    "position": {
+      "$ref": "../common.schema.json#/$defs/count"
+    }
+  }
+}

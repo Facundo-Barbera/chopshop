@@ -1,0 +1,10 @@
+{
+  "v": 2,
+  "type": "error",
+  "id": "01MCB2QE5F7H9K1M3P5R7T9W1Y",
+  "ts": "2026-10-30T12:05:00.000Z",
+  "re": "01MCB2QF6G8J0M2P4R6T8V0X2Z",
+  "code": "forbidden",
+  "message": "máquina pausada",
+  "close": true
+}
