@@ -113,7 +113,7 @@ public enum OfficeStaff {
         }
         var idle: [(String, FloorPlan.Occupant, Point)] = []
         for d in plan.desks {
-            guard let o = d.occupant, !o.gone(at: now), !leaving.contains(o.phase), let sp = lay.spot(d.id) else { continue }
+            guard d.employee == nil, let o = d.occupant, !o.gone(at: now), !leaving.contains(o.phase), let sp = lay.spot(d.id) else { continue }
             if atWork(o) { out[o.threadID] = Home(spot: d.id, point: chair(sp), atDesk: true, occupant: o) }
             else { idle.append((d.id, o, chair(sp))) }
         }
