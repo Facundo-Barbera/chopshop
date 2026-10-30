@@ -1,6 +1,6 @@
 import time
 
-from .agent import db, envelope
+from .agent import db, envelope, layout
 
 MAX_LEN = 20
 PREFIX = "q:"
@@ -173,7 +173,7 @@ class Queue:
     def _changed(self, employee, rows, reason, task, now, cause=None):
         return self._emit("queue.changed", employee, {
             "employee": employee, "items": [item(r) for r in rows], "reason": reason, "task": task}, now, cause=cause,
-            subj=envelope.subject("desk", employee))
+            subj=envelope.subject("desk", employee, (layout.parse_desk_id(employee) or (None,) * 4)[2]))
 
     def _emit(self, type, employee, body, now, cause=None, subj=None, id=None):
         if not self.emit_fn:
