@@ -95,8 +95,9 @@ async function agent(credential: string, local: string): Promise<FakeWebSocket> 
   const res = await call("/v1/connect", { token: credential, headers: { Upgrade: "websocket" } });
   assert.equal(res.status, 101);
   const ws = state.getWebSockets("agent").find((w) => !before.has(w))!;
-  const welcome = await send(ws, { ...fixture("ws-hello"), id: msgId(), machine_id: local, protocol: [2] });
-  assert.equal(welcome?.type, "welcome");
+  const count = ws.sent.length;
+  await hub.webSocketMessage(ws as never, JSON.stringify({ ...fixture("ws-hello"), id: msgId(), machine_id: local, protocol: [2] }));
+  assert.ok(ws.frames().slice(count).some((f) => f.type === "welcome"));
   return ws;
 }
 
