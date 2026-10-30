@@ -426,8 +426,8 @@ public struct BackendState: Codable, Equatable, Sendable {
         public let id: String
         public let name: String
         public let platform: String?
-        public let online: Bool
-        public let paused: Bool?
+        public var online: Bool
+        public var paused: Bool?
         public let stale: Bool
         public let seq: Int?
         public let snapshotAgeS: Double?
@@ -447,7 +447,7 @@ public struct BackendState: Codable, Equatable, Sendable {
     public let head: String?
     public let user: Principal
     public let city: City
-    public let machines: [MachineStatus]
+    public var machines: [MachineStatus]
     public let snapshots: [JSONValue]
 }
 
