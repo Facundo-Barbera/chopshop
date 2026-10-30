@@ -87,7 +87,7 @@ funciona con la forma de `/state` (como `snapshot.office.json`). Debería decir 
 
 ## Notas (no son fallos de Chopshop)
 
-- `workspace: root` lanza en la copia principal del proyecto de T3 (`/Volumes/Taller/projects/chopshop`, en otra rama), así que 4
+- `workspace: root` lanza en la copia principal del proyecto de T3 (`la copia principal del repositorio`, en otra rama), así que 4
   de las 8 respuestas dicen que el archivo pedido no existe (son archivos de `dev`). Para una prueba así conviene `base_ref: dev` con
   worktrees, a costa de crear ramas.
 - Con `approval-required` y Haiku, algunos hilos dijeron no tener Grep o Bash y respondieron con lo que pudieron. Chopshop cuenta
