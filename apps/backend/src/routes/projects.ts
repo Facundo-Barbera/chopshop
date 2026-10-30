@@ -23,7 +23,7 @@ import {
   unknownField,
 } from "../structure";
 
-interface ProjectRow {
+export interface ProjectRow {
   id: string;
   workspace_id: string;
   name: string;
@@ -56,17 +56,17 @@ interface RoleRow {
   updated_at: string;
 }
 
-const P_COLS = "p.id, p.workspace_id, p.name, p.title, p.t3_project, p.repo, p.machine_id, p.runtime_mode, p.model, p.settings, p.position, p.rev, p.created_at, p.updated_at, p.disabled_at";
+export const P_COLS = "p.id, p.workspace_id, p.name, p.title, p.t3_project, p.repo, p.machine_id, p.runtime_mode, p.model, p.settings, p.position, p.rev, p.created_at, p.updated_at, p.disabled_at";
 const R_COLS = "r.id, r.project_id, r.name, r.prompt, r.model, r.match_rules, r.wake, r.settings, r.position, r.rev, r.created_at, r.updated_at";
 const ACTIVE = "p.archived_at IS NULL AND w.archived_at IS NULL";
-const RUNTIME_MODES = ["approval-required", "auto-accept-edits", "auto", "full-access"];
+export const RUNTIME_MODES = ["approval-required", "auto-accept-edits", "auto", "full-access"];
 const PROJECT_FIELDS = ["name", "title", "t3_project", "repo", "machine_id", "runtime_mode", "model", "settings"];
 const ROLE_FIELDS = ["name", "prompt", "model", "match_rules", "wake", "settings", "position"];
 const PROJECT_NOT_FOUND = "proyecto no encontrado";
 const ROLE_NOT_FOUND = "rol no encontrado";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-function presentProject(r: ProjectRow): Record<string, unknown> {
+export function presentProject(r: ProjectRow): Record<string, unknown> {
   return {
     id: r.id,
     workspace_id: r.workspace_id,
