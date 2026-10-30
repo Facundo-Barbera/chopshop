@@ -141,7 +141,7 @@ public struct BackendLoginView: View {
         }
         switch mode {
         case .login:
-            field("Correo") { TextField("tu@correo.com", text: $email).textFieldStyle(.roundedBorder).autocorrectionDisabled().onSubmit(submit) }
+            field("Correo") { TextField("tu@correo.test", text: $email).textFieldStyle(.roundedBorder).autocorrectionDisabled().onSubmit(submit) }
             field("Contraseña") { SecureField("", text: $password).textFieldStyle(.roundedBorder).onSubmit(submit) }
         case .invitation:
             if let preview {
@@ -156,7 +156,7 @@ public struct BackendLoginView: View {
                 }
             }
         case .recovery:
-            field("Correo") { TextField("tu@correo.com", text: $email).textFieldStyle(.roundedBorder).autocorrectionDisabled() }
+            field("Correo") { TextField("tu@correo.test", text: $email).textFieldStyle(.roundedBorder).autocorrectionDisabled() }
             field("Código de recuperación") {
                 TextField("XXXXX-XXXXX-XXXXX-XXXXX", text: $code).textFieldStyle(.roundedBorder).autocorrectionDisabled().font(.body.monospaced())
             }
