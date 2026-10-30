@@ -21,7 +21,7 @@ public struct LiveProjectScreen<Unpaired: View>: View {
     private var showsWeb: Bool {
         switch store.status {
         case .idle: return true
-        case .reconnecting: return !store.hasData
+        case .reconnecting, .disconnected: return !store.hasData
         default: return false
         }
     }
@@ -78,16 +78,23 @@ public extension StreamStatus {
         case .connecting: return "conectando…"
         case .live: return "en vivo"
         case .reconnecting: return "reconectando"
+        case .disconnected: return "desconectado"
         case .noCredential: return "sin emparejar"
         case .unauthorized: return "credencial revocada"
         }
     }
     var detail: String? {
         switch self {
-        case .reconnecting(let why): return why
+        case .reconnecting(let why), .disconnected(let why): return why
         case .noCredential: return "Empareja este Mac en Ajustes… (⌘,) con un código de `chopshop pair create`."
         case .unauthorized: return "El agente rechazó la credencial (revocada): empareja de nuevo en Ajustes… (⌘,)."
         default: return nil
+        }
+    }
+    var isDimmed: Bool {
+        switch self {
+        case .reconnecting, .disconnected: return true
+        default: return false
         }
     }
 }

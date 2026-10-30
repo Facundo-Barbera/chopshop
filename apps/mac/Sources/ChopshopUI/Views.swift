@@ -30,7 +30,7 @@ private struct RootSwitch: View {
     private var office: Bool {
         switch store.status {
         case .idle: return false
-        case .reconnecting: return store.hasData
+        case .reconnecting, .disconnected: return store.hasData
         default: return true
         }
     }
@@ -51,6 +51,9 @@ struct OfficeRoot: View {
     var body: some View {
         OfficeShell(store: model.live, shell: model.shell) { context in
             ShellCityWorld(store: model.live, context: context)
+                .saturation(model.live.status.isDimmed ? 0.2 : 1)
+                .opacity(model.live.status.isDimmed ? 0.55 : 1)
+                .animation(.easeOut(duration: 0.3), value: model.live.status.isDimmed)
         } unpaired: {
             PairingScreen()
         }
@@ -163,7 +166,7 @@ struct LiveIndicator: View {
         case .live: return .green
         case .connecting, .idle: return .gray
         case .reconnecting: return .orange
-        case .noCredential, .unauthorized: return .red
+        case .noCredential, .unauthorized, .disconnected: return .red
         }
     }
 }
@@ -484,6 +487,8 @@ private struct LiveCityRoot: View {
             PairingScreen().frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(nsColor: .windowBackgroundColor))
         default:
             LiveCityScreen(store: store, perProject: true)
+                .saturation(store.status.isDimmed ? 0.2 : 1)
+                .opacity(store.status.isDimmed ? 0.55 : 1)
         }
     }
 }

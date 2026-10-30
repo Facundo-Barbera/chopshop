@@ -2,6 +2,38 @@ import Foundation
 import CryptoKit
 
 extension LiveState {
+    public struct RelayMachine: Equatable, Sendable {
+        public var online: Bool
+        public var stale: Bool
+        public var seq: Int?
+        public var snapshotAge: Int?
+
+        public var badge: String? {
+            if !online { return "offline" }
+            return stale ? "datos viejos" : nil
+        }
+
+        public var reason: String? {
+            guard badge != nil else { return nil }
+            let data = snapshotAge.map { "datos de hace \(Self.age($0))" } ?? "sin snapshot vivo"
+            return online ? "datos viejos · \(data)" : "offline · \(data)"
+        }
+
+        static func age(_ s: Int) -> String {
+            s < 90 ? "\(s) s" : s < 5400 ? "\(s / 60) min" : "\(s / 3600) h"
+        }
+    }
+
+    public static func relayMachines(_ json: [JSONValue]) -> [String: RelayMachine] {
+        var out: [String: RelayMachine] = [:]
+        for m in json {
+            guard let id = m["machine_id"]?.string, !id.isEmpty else { continue }
+            out[id] = RelayMachine(online: m["online"]?.bool ?? false, stale: m["stale"]?.bool ?? true,
+                                   seq: m["seq"]?.int, snapshotAge: m["snapshot_age_s"]?.int)
+        }
+        return out
+    }
+
     public init?(relaySnapshot json: JSONValue) {
         guard let machine = json["machine_id"]?.string, !machine.isEmpty else { return nil }
         self.init(machine: machine)
