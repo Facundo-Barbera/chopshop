@@ -23,6 +23,12 @@ describe("health", () => {
     assert.equal((await call("/nada")).status, 404);
     assert.equal((await call("/health", "POST")).status, 405);
   });
+
+  it("enruta operador y recuperación", async () => {
+    assert.equal((await call("/v1/operator/bootstrap", "POST")).status, 503);
+    assert.notEqual((await call("/v1/auth/recover", "POST")).status, 404);
+    assert.equal((await call("/v1/auth/recovery-code", "POST")).status, 401);
+  });
 });
 
 describe("doble de D1", () => {
