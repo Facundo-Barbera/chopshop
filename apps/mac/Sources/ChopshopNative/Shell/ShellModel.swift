@@ -15,11 +15,12 @@ public enum ShellTarget: Hashable, Sendable {
     case project(String)
     /// Un hilo (el escritorio que ocupa); `project` para que el mundo sepa a qué piso ir.
     case thread(id: String, project: String)
+    case employee(id: String, project: String)
 
     public var project: String? {
         switch self {
         case .city: return nil
-        case .project(let p), .thread(_, let p): return p
+        case .project(let p), .thread(_, let p), .employee(_, let p): return p
         }
     }
     public var threadID: String? {
