@@ -297,6 +297,16 @@ export class RelayDb {
       .map((r) => ({ machineId: r.machine_id, agentVersion: r.agent_version, lastSeenAt: r.last_seen_at }));
   }
 
+  listAgentMachines(account: string): string[] {
+    return this.sql
+      .exec<{ machine_id: string }>(
+        "SELECT DISTINCT machine_id FROM tokens WHERE account = ? AND scope = 'agent' AND revoked_at IS NULL AND machine_id IS NOT NULL ORDER BY machine_id",
+        account,
+      )
+      .toArray()
+      .map((r) => r.machine_id);
+  }
+
   putSnapshot(
     account: string,
     machineId: string,

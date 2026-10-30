@@ -66,12 +66,14 @@ function sseFrame(event: string, data: string, id?: string): string {
   return `event: ${event}\n${id === undefined ? "" : `id: ${id}\n`}data: ${data}\n\n`;
 }
 
-function machineInfo(s: StoredSnapshot, now: number) {
+function machineInfo(machineId: string, s: StoredSnapshot | undefined, online: boolean, now: number) {
   return {
-    machine_id: s.machineId,
-    seq: s.seq,
-    snapshot_age_s: Math.max(0, Math.floor((now - s.receivedAt) / 1000)),
-    expires_at: new Date(s.expiresAt).toISOString(),
+    machine_id: machineId,
+    online,
+    stale: s === undefined,
+    seq: s?.seq ?? null,
+    snapshot_age_s: s ? Math.max(0, Math.floor((now - s.receivedAt) / 1000)) : null,
+    expires_at: s ? new Date(s.expiresAt).toISOString() : null,
   };
 }
 
@@ -82,7 +84,10 @@ export class ViewerHub {
   private readonly viewers = new Set<Viewer>();
   private heartbeat: ReturnType<typeof setInterval> | null = null;
 
-  constructor(private readonly db: RelayDb) {}
+  constructor(
+    private readonly db: RelayDb,
+    private readonly online: (account: string) => Set<string> = () => new Set(),
+  ) {}
 
   get active(): number {
     return this.viewers.size;
@@ -115,13 +120,16 @@ export class ViewerHub {
 
   private snapshotBody(account: string, now: number) {
     const live = this.db.listSnapshots(account, now);
+    const byMachine = new Map(live.map((s) => [s.machineId, s]));
+    const online = this.online(account);
+    const ids = [...new Set([...byMachine.keys(), ...this.db.listAgentMachines(account), ...online])].sort();
     return {
       v: 1,
       type: "state",
       id: ulid(now),
       ts: new Date(now).toISOString(),
       head: this.eventId(this.seq),
-      machines: live.map((s) => machineInfo(s, now)),
+      machines: ids.map((id) => machineInfo(id, byMachine.get(id), online.has(id), now)),
       snapshots: live.map((s) => JSON.parse(s.frame) as unknown),
     };
   }

@@ -243,6 +243,15 @@ export class AgentSockets {
     ws.serializeAttachment(att);
   }
 
+  online(account: string): Set<string> {
+    const out = new Set<string>();
+    for (const ws of this.ctx.getWebSockets(AGENT_TAG)) {
+      const att = ws.deserializeAttachment() as AgentAttachment | null;
+      if (att?.account === account && att.sessionId !== null) out.add(att.machineId);
+    }
+    return out;
+  }
+
   revoke(tokenId: string): void {
     for (const ws of this.ctx.getWebSockets(AGENT_TAG)) {
       const att = ws.deserializeAttachment() as AgentAttachment | null;
