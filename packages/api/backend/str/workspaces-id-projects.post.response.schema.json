@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/backend/v2/str/workspaces-id-projects.post.response.schema.json",
+  "title": "POST /v1/workspaces/{id}/projects → 201",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "project"
+  ],
+  "properties": {
+    "project": {
+      "$ref": "../common.schema.json#/$defs/project"
+    }
+  }
+}

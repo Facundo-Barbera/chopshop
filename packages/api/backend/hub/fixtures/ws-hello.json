@@ -1,0 +1,22 @@
+{
+  "v": 2,
+  "ts": "2026-10-30T14:02:11.250Z",
+  "type": "hello",
+  "id": "01MCB2Q8ZK3T5W7Y9B1D3F5H7J",
+  "machine_id": "mac-mini.local",
+  "agent_version": "0.9.0",
+  "protocol": [
+    1,
+    2
+  ],
+  "last_seq": 1842,
+  "projects": [
+    {
+      "name": "awesome-gb",
+      "roles": [
+        "triage",
+        "backend"
+      ]
+    }
+  ]
+}

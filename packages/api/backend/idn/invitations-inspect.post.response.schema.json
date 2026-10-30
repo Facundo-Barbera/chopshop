@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/backend/v2/idn/invitations-inspect.post.response.schema.json",
+  "title": "POST /v1/invitations/inspect → 200",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "email",
+    "kind",
+    "role",
+    "expires_at",
+    "workspaces"
+  ],
+  "properties": {
+    "email": {
+      "$ref": "../common.schema.json#/$defs/email"
+    },
+    "kind": {
+      "$ref": "../common.schema.json#/$defs/invitation_kind"
+    },
+    "role": {
+      "$ref": "../common.schema.json#/$defs/user_role"
+    },
+    "expires_at": {
+      "$ref": "../common.schema.json#/$defs/time"
+    },
+    "workspaces": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "../common.schema.json#/$defs/uuid"
+          },
+          "name": {
+            "$ref": "../common.schema.json#/$defs/workspace_name"
+          }
+        }
+      }
+    }
+  }
+}
