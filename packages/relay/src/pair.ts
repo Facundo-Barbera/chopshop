@@ -147,7 +147,7 @@ export class Pairing {
   async handle(request: Request, path: string): Promise<Response | null> {
     const now = Date.now();
     try {
-      if (path === "/v1/pair" || path === "/pair") {
+      if (path === "/v1/pair") {
         if (request.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
         return Response.json(await this.redeem(request, now));
       }
