@@ -333,7 +333,7 @@ public struct FloorFrame: Equatable, Hashable, Sendable {
         let fixed = floors.filter { !$0.isElastic }
         let sized = outsourced || fixed.isEmpty ? floors : fixed
         let areas = sized.map { f -> Double in
-            let s = FloorLayout.spec(f, frame: FloorFrame(width: 1, depth: 1, seed: 0))
+            let s = FloorLayout.spec(f, frame: FloorFrame(width: 1, depth: 1, seed: 0), declared: true)
             return FloorPlanGenerator.requiredArea(roles: s.roles, machineRooms: s.machineRooms, grokSeats: s.grokSeats, lobbyGuests: s.lobbyGuests)
         }
         let scale = FloorPlanGenerator.fitScale(width: shape.w, depth: shape.d, areas: areas)
@@ -415,13 +415,20 @@ public struct FloorLayout: Equatable, Sendable {
         max(1, r.desks.map(\.slot).max().map { $0 + 1 } ?? 1, r.desks.count)
     }
 
-    static func spec(_ plan: FloorPlan, frame f: FloorFrame) -> FloorPlanGenerator.Spec {
+    static func shown(_ r: FloorPlan.Room) -> [FloorPlan.Desk] {
+        let ds = r.desks.sorted { $0.slot < $1.slot }
+        let busy = ds.filter { $0.occupant != nil }
+        guard let free = ds.first(where: { $0.occupant == nil && !$0.retired }) else { return busy }
+        return (busy + [free]).sorted { $0.slot < $1.slot }
+    }
+
+    static func spec(_ plan: FloorPlan, frame f: FloorFrame, declared: Bool = false) -> FloorPlanGenerator.Spec {
         if plan.kind == .lobby {
             return FloorPlanGenerator.Spec(width: f.width, depth: f.depth, seed: f.seed, salt: "lobby", lobbyGuests: plan.lobby.count,
                                            entrance: f.entrance)
         }
         return FloorPlanGenerator.Spec(width: f.width, depth: f.depth, seed: f.seed, salt: "floor\(plan.floorIndex)",
-                                       roles: plan.rooms.map(slots), machineRooms: plan.machineRooms.map(\.rack.count),
+                                       roles: plan.rooms.map { declared ? slots($0) : max(1, shown($0).count) }, machineRooms: plan.machineRooms.map(\.rack.count),
                                        grokSeats: plan.bots.count, entrance: f.entrance)
     }
 
@@ -441,8 +448,8 @@ public struct FloorLayout: Equatable, Sendable {
             case .role(let k):
                 guard plan.rooms.indices.contains(k), !room.seats.isEmpty else { continue }
                 rooms.append(box(k, plan.rooms[k].role))
-                for dk in plan.rooms[k].desks {
-                    let s = room.seats.indices.contains(dk.slot) ? room.seats[dk.slot] : room.seats[room.seats.count - 1]
+                for (i, dk) in Self.shown(plan.rooms[k]).enumerated() {
+                    let s = room.seats[min(i, room.seats.count - 1)]
                     spots.append(Spot(id: dk.id, room: k, cx: s.cx, cy: s.cy))
                 }
             case .hall:
