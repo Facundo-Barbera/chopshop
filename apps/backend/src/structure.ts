@@ -39,7 +39,6 @@ export interface SyncDoc {
 export interface StructureHub {
   structureChanged?(rev: number, machineIds: MachineIds): Promise<void>;
   viewerChanged?(userId: string): Promise<void>;
-  machineChanged?(machineId: string, change: { paused?: boolean; revoked?: boolean; workspaceIds?: string[] }): Promise<void>;
 }
 
 export const MAX_JSON_BYTES = 256 * 1024;
@@ -117,10 +116,6 @@ export function structureChanged(env: AuthEnv, rev: number, machineIds: MachineI
 
 export function viewerChanged(env: AuthEnv, userId: string): Promise<void> {
   return callHub(env, "hub_viewer_changed", (h) => h.viewerChanged?.(userId));
-}
-
-export function machineWorkspacesChanged(env: AuthEnv, machineId: string, workspaceIds: string[]): Promise<void> {
-  return callHub(env, "hub_machine_changed", (h) => h.machineChanged?.(machineId, { workspaceIds }));
 }
 
 function parse(text: string | null | undefined, fallback: unknown): unknown {

@@ -1,8 +1,9 @@
 import { assertVisible, visibleWorkspaces } from "../access";
 import { audit } from "../audit";
-import { type AuthEnv, type UserRow, db, publicUser, requireOwner, requireUser } from "../auth";
+import { type UserRow, db, publicUser, requireOwner, requireUser } from "../auth";
 import { casUpdate, isConstraintError, now, uuid } from "../db";
 import { errorResponse, json, noContent } from "../http";
+import { type MachinesEnv, machineChanged, workspaceIdsByMachine } from "../machines";
 import type { Handler } from "../router";
 import {
   type Body,
@@ -11,7 +12,6 @@ import {
   casStructure,
   count,
   jsonObject,
-  machineWorkspacesChanged,
   parseObject,
   readBody,
   revOf,
@@ -111,7 +111,7 @@ function slugTaken(err: unknown): Response {
   throw err;
 }
 
-const list: Handler<AuthEnv> = async (_request, { env, principal }) => {
+const list: Handler<MachinesEnv> = async (_request, { env, principal }) => {
   const p = requireUser(principal);
   if (p instanceof Response) return p;
   const d = db(env);
@@ -133,7 +133,7 @@ const list: Handler<AuthEnv> = async (_request, { env, principal }) => {
   return json({ workspaces: await present(d, rows, visible === "all") });
 };
 
-const create: Handler<AuthEnv> = async (request, { env, principal }) => {
+const create: Handler<MachinesEnv> = async (request, { env, principal }) => {
   const owner = requireOwner(principal);
   if (owner instanceof Response) return owner;
   const body = await readBody(request);
@@ -166,7 +166,7 @@ const create: Handler<AuthEnv> = async (request, { env, principal }) => {
   return json({ workspace: await presentOne(d, (await activeWorkspace(d, id))!, true) }, 201);
 };
 
-const get: Handler<AuthEnv> = async (_request, { env, principal, params }) => {
+const get: Handler<MachinesEnv> = async (_request, { env, principal, params }) => {
   const p = requireUser(principal);
   if (p instanceof Response) return p;
   const d = db(env);
@@ -177,7 +177,7 @@ const get: Handler<AuthEnv> = async (_request, { env, principal, params }) => {
   return json({ workspace: await presentOne(d, row, p.role === "owner") });
 };
 
-const update: Handler<AuthEnv> = async (request, { env, principal, params }) => {
+const update: Handler<MachinesEnv> = async (request, { env, principal, params }) => {
   const owner = requireOwner(principal);
   if (owner instanceof Response) return owner;
   const d = db(env);
@@ -231,7 +231,7 @@ function workspaceFields(body: Body): Record<string, string | number> | Response
   return fields;
 }
 
-const archive: Handler<AuthEnv> = async (_request, { env, principal, params }) => {
+const archive: Handler<MachinesEnv> = async (_request, { env, principal, params }) => {
   const owner = requireOwner(principal);
   if (owner instanceof Response) return owner;
   const d = db(env);
@@ -252,7 +252,7 @@ async function campusDoc(d: D1Database, workspaceId: string): Promise<{ layout: 
   return row === null ? { layout: {}, rev: 1 } : { layout: parseObject(row.layout), rev: row.rev };
 }
 
-const campusGet: Handler<AuthEnv> = async (_request, { env, principal, params }) => {
+const campusGet: Handler<MachinesEnv> = async (_request, { env, principal, params }) => {
   const p = requireUser(principal);
   if (p instanceof Response) return p;
   const d = db(env);
@@ -261,7 +261,7 @@ const campusGet: Handler<AuthEnv> = async (_request, { env, principal, params })
   return json(await campusDoc(d, params.id!));
 };
 
-const campusPut: Handler<AuthEnv> = async (request, { env, principal, params }) => {
+const campusPut: Handler<MachinesEnv> = async (request, { env, principal, params }) => {
   const owner = requireOwner(principal);
   if (owner instanceof Response) return owner;
   const d = db(env);
@@ -288,7 +288,7 @@ const campusPut: Handler<AuthEnv> = async (request, { env, principal, params }) 
   return json(await campusDoc(d, id));
 };
 
-const watchersList: Handler<AuthEnv> = async (_request, { env, principal, params }) => {
+const watchersList: Handler<MachinesEnv> = async (_request, { env, principal, params }) => {
   const owner = requireOwner(principal);
   if (owner instanceof Response) return owner;
   const d = db(env);
@@ -303,7 +303,7 @@ const watchersList: Handler<AuthEnv> = async (_request, { env, principal, params
   return json({ watchers: rows.results.map(publicUser) });
 };
 
-const watchersAdd: Handler<AuthEnv> = async (_request, { env, principal, params }) => {
+const watchersAdd: Handler<MachinesEnv> = async (_request, { env, principal, params }) => {
   const owner = requireOwner(principal);
   if (owner instanceof Response) return owner;
   const d = db(env);
@@ -332,7 +332,7 @@ const watchersAdd: Handler<AuthEnv> = async (_request, { env, principal, params 
   return noContent();
 };
 
-const watchersRemove: Handler<AuthEnv> = async (_request, { env, principal, params }) => {
+const watchersRemove: Handler<MachinesEnv> = async (_request, { env, principal, params }) => {
   const owner = requireOwner(principal);
   if (owner instanceof Response) return owner;
   const d = db(env);
@@ -354,18 +354,12 @@ const watchersRemove: Handler<AuthEnv> = async (_request, { env, principal, para
   return noContent();
 };
 
-async function machineWorkspaceIds(d: D1Database, machineId: string): Promise<string[]> {
-  const rows = await d
-    .prepare(
-      `SELECT wm.workspace_id FROM workspace_machines wm JOIN workspaces w ON w.id = wm.workspace_id AND w.archived_at IS NULL
-       WHERE wm.machine_id = ? ORDER BY wm.workspace_id`,
-    )
-    .bind(machineId)
-    .all<{ workspace_id: string }>();
-  return rows.results.map((r) => r.workspace_id);
+async function notifyMachine(env: MachinesEnv, machineId: string): Promise<void> {
+  const ids = (await workspaceIdsByMachine(db(env), [machineId])).get(machineId) ?? [];
+  await machineChanged(env, machineId, { workspaceIds: ids });
 }
 
-const machinesAdd: Handler<AuthEnv> = async (_request, { env, principal, params }) => {
+const machinesAdd: Handler<MachinesEnv> = async (_request, { env, principal, params }) => {
   const owner = requireOwner(principal);
   if (owner instanceof Response) return owner;
   const d = db(env);
@@ -381,12 +375,12 @@ const machinesAdd: Handler<AuthEnv> = async (_request, { env, principal, params 
       .prepare("INSERT INTO workspace_machines (workspace_id, machine_id, created_at) VALUES (?, ?, ?) ON CONFLICT (workspace_id, machine_id) DO NOTHING")
       .bind(id, machineId, now()),
   ]);
-  await machineWorkspacesChanged(env, machineId, await machineWorkspaceIds(d, machineId));
+  await notifyMachine(env, machineId);
   await structureChanged(env, rev, [machineId]);
   return noContent();
 };
 
-const machinesRemove: Handler<AuthEnv> = async (_request, { env, principal, params }) => {
+const machinesRemove: Handler<MachinesEnv> = async (_request, { env, principal, params }) => {
   const owner = requireOwner(principal);
   if (owner instanceof Response) return owner;
   const d = db(env);
@@ -400,12 +394,12 @@ const machinesRemove: Handler<AuthEnv> = async (_request, { env, principal, para
     .first<number>("n");
   if ((busy ?? 0) > 0) return errorResponse("conflict", "hay proyectos del workspace en esa máquina", { field: "machine_id" });
   const rev = await bumpStructure(d, [d.prepare("DELETE FROM workspace_machines WHERE workspace_id = ? AND machine_id = ?").bind(id, machineId)]);
-  await machineWorkspacesChanged(env, machineId, await machineWorkspaceIds(d, machineId));
+  await notifyMachine(env, machineId);
   await structureChanged(env, rev, [machineId]);
   return noContent();
 };
 
-export const workspaceHandlers: Record<string, Handler<AuthEnv>> = {
+export const workspaceHandlers: Record<string, Handler<MachinesEnv>> = {
   "workspaces.list": list,
   "workspaces.create": create,
   "workspaces.get": get,
