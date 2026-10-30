@@ -28,6 +28,45 @@ final class ShellModelTests: XCTestCase {
         XCTAssertTrue(ShellHUD(machinesOK: 3, machinesTotal: 3, machinesHot: 1).machinesAlert, "una saturada también")
     }
 
+    func testSidebarHasFiveSectionsForOwner() {
+        let s = ShellState()
+        XCTAssertEqual(s.role, .owner)
+        XCTAssertEqual(s.sections, [.city, .machines, .employees, .watchers, .settings])
+        XCTAssertEqual(s.sections.map(\.title), ["Ciudad", "Máquinas", "Empleados", "Watchers", "Ajustes"])
+        XCTAssertEqual(s.section, .city)
+    }
+
+    func testWatcherSeesOnlyCityAndSettings() {
+        var s = ShellState()
+        s.role = .watcher
+        XCTAssertEqual(s.sections, [.city, .settings])
+        s.open(.machines)
+        XCTAssertEqual(s.section, .city)
+        s.open(.settings)
+        XCTAssertEqual(s.section, .settings)
+    }
+
+    func testRoleChangeLeavesHiddenSection() {
+        var s = ShellState()
+        s.open(.watchers)
+        XCTAssertEqual(s.section, .watchers)
+        s.role = .watcher
+        XCTAssertEqual(s.section, .city)
+        s.open(.settings)
+        s.role = .owner
+        XCTAssertEqual(s.section, .settings)
+    }
+
+    func testGoingSomewhereReturnsToCity() {
+        var s = ShellState()
+        s.open(.employees)
+        s.go(.project("p"))
+        XCTAssertEqual(s.section, .city)
+        s.open(.machines)
+        s.go(.city)
+        XCTAssertEqual(s.section, .city)
+    }
+
     // MARK: paneles y Esc
 
     func testTogglePanelAndInspector() {

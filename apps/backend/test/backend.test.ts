@@ -4,7 +4,7 @@ import { FakeD1Database } from "./d1.ts";
 import worker, { VERSION, type Env } from "../src/index.ts";
 
 function env(): Env {
-  return { DB: new FakeD1Database().asD1() };
+  return { DB: new FakeD1Database().asD1(), API_ORIGIN: "https://api.chopshop.test" };
 }
 
 async function call(path: string, method = "GET"): Promise<Response> {
@@ -19,9 +19,9 @@ describe("health", () => {
     assert.deepEqual(await res.json(), { ok: true, version: VERSION });
   });
 
-  it("otras rutas o métodos dan 404", async () => {
+  it("otras rutas dan 404 y otros métodos 405", async () => {
     assert.equal((await call("/nada")).status, 404);
-    assert.equal((await call("/health", "POST")).status, 404);
+    assert.equal((await call("/health", "POST")).status, 405);
   });
 });
 
