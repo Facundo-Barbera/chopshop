@@ -5,7 +5,7 @@ import os
 import sqlite3
 import threading
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS machine_samples (      -- crudo (retención raw_hours)
@@ -67,6 +67,8 @@ def migrate(conn):
         _migrate_v5_office(conn)
     if v < 6:
         _migrate_v6(conn)
+    if v < 7:
+        _migrate_v7(conn)
     if v < SCHEMA_VERSION:
         conn.execute("PRAGMA user_version=%d" % SCHEMA_VERSION)
 
@@ -159,6 +161,14 @@ V6_COLUMNS = {"subscriptions": (("headers_file", "TEXT"),)}
 
 def _migrate_v6(conn):
     _add_columns(conn, V6_COLUMNS)
+
+
+# v7: `heartbeats` por suscripción (NULL/0 = no se entregan los latidos de `listener.state`).
+V7_COLUMNS = {"subscriptions": (("heartbeats", "INTEGER"),)}
+
+
+def _migrate_v7(conn):
+    _add_columns(conn, V7_COLUMNS)
 
 
 def tx():
