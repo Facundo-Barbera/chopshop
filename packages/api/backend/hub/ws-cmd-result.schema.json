@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/backend/v2/hub/ws-cmd-result.schema.json",
+  "title": "WS v2 cmd.result (agente → relay, DESPUÉS)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "v",
+    "type",
+    "id",
+    "ts",
+    "re",
+    "command_id",
+    "ok",
+    "status",
+    "body"
+  ],
+  "properties": {
+    "v": {
+      "$ref": "../common.schema.json#/$defs/v"
+    },
+    "id": {
+      "$ref": "../common.schema.json#/$defs/msg_id"
+    },
+    "ts": {
+      "$ref": "../common.schema.json#/$defs/ts"
+    },
+    "type": {
+      "const": "cmd.result"
+    },
+    "re": {
+      "$ref": "../common.schema.json#/$defs/msg_id"
+    },
+    "command_id": {
+      "$ref": "../common.schema.json#/$defs/uuid"
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "status": {
+      "type": "integer",
+      "minimum": 100,
+      "maximum": 599
+    },
+    "body": {}
+  }
+}

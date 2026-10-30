@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/backend/v2/idn/invitations-id-reissue.post.request.schema.json",
+  "title": "POST /v1/invitations/{id}/reissue",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [],
+  "properties": {
+    "ttl_h": {
+      "$ref": "../common.schema.json#/$defs/ttl_h"
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "projects": [
+    {
+      "name": "awesome-gb"
+    },
+    {
+      "name": "orchestrator",
+      "workspace_name": "Personal"
+    },
+    {
+      "name": "nuskills",
+      "workspace_id": "a41d6e8b-7c2f-4b39-9e05-3f8a1c7d2e46"
+    }
+  ]
+}
