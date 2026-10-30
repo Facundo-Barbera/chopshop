@@ -1,7 +1,7 @@
 import re
 import uuid
 
-from .. import employees, profile
+from .. import employees, profile, state, t3
 from .. import queue as equeue
 from ..agent import client as agent_client
 from ..agent import config as agent_config
@@ -111,9 +111,13 @@ class Tools:
             ("queue_show", "Colas de los empleados de un proyecto (opcionalmente de un rol), en orden de ejecución.",
              _obj({"project": {"type": "string", "description": "Nombre del proyecto (perfil)."}, "role": S},
                   ["project"]), self.queue_show),
-            ("task_cancel", "Cancela una tarea en cola (q:…) antes de que arranque.",
+            ("task_cancel", ("Cancela una tarea de cola (q:…): si aún no arrancó la saca de la cola; si ya está en marcha "
+                             "interrumpe su hilo (nunca archiva) y libera al empleado."),
              _obj({"task": S, "reason": {"type": "string", "enum": list(equeue.CANCEL_REASONS)}, "note": S, "by": S},
                   ["task"]), self.task_cancel),
+            ("employee_rename", "Renombra un empleado (id <proyecto>/<piso>/<rol>/<slot>); name null quita el nombre.",
+             _obj({"employee": S, "name": {"type": ["string", "null"]}, "by": S}, ["employee", "name"]),
+             self.employee_rename),
         ]
         self.by_name = {n: fn for n, _d, _s, fn in self.specs}
 
@@ -313,10 +317,14 @@ class Tools:
         return {"project": prof.get("project") or project, "registered": registry.counts(project),
                 "roles": list(out.values())}
 
-    def _queue(self):
+    def _db(self):
         cfg = agent_config.load()
         if self.conn is None:
             self.conn = db.connect(cfg["db_path"])
+        return cfg
+
+    def _queue(self):
+        cfg = self._db()
 
         def emit(env):
             return events.emit_envelope(self.conn, cfg, env["type"], env.get("project"), env.get("body"), env.get("subject"),
@@ -368,6 +376,48 @@ class Tools:
             raise ToolError(str(e))
         if r is None:
             cur = q.get(task)
+            if cur is not None and cur["state"] == "dequeued":
+                return self._cancel_running(q, cur, by or "human", reason or "manual", note)
             raise ToolError(f"no existe la tarea {task}" if cur is None else f"la tarea {task} ya está {cur['state']}")
         return {"task": task, "employee": r["employee"], "state": r["state"], "reason": r["cancel_reason"],
-                "queue_len": q.length(r["employee"])}
+                "phase": "queued", "thread_id": None, "queue_len": q.length(r["employee"])}
+
+    def _cancel_running(self, q, cur, by, reason, note):
+        """Tarea ya despachada: interrumpe su hilo (t3_thread_interrupt, como `engine.stop`; nunca archiva) y marca la tarea
+        del motor `done` + `cancelled`, así el empleado queda libre para el despachador, que en su próxima pasada la cierra
+        (settle) y libera el escritorio (`employee.idle reason: cancelled`)."""
+        task = cur["task"]
+        if reason not in equeue.CANCEL_REASONS:
+            raise ToolError(f"reason inválido: {reason}")
+        with state.locked() as st:
+            found = next(((b, t) for b in st.get("batches", {}).values() for t in b.get("tasks", [])
+                          if t.get("qtask") == task), None)
+            if found is None or found[1].get("done"):
+                raise ToolError(f"la tarea {task} ya terminó o no tiene hilo en el motor")
+            b, t = found
+            if t.get("status") != "launched" or not t.get("threadId"):
+                raise ToolError(f"la tarea {task} aún no tiene hilo; reintenta en unos segundos")
+            try:
+                t3.call(profile.hosts()[b["host"]], b["host"], "t3_thread_interrupt",
+                        {"threadId": t["threadId"], "reason": "chopshop: tarea %s cancelada" % task})
+            except (t3.T3Error, KeyError) as e:
+                raise ToolError(f"no pude interrumpir el hilo {t['threadId']}: {e}")
+            t.update(done=True, cancelled=True, pending=None,
+                     last_error=("cancelada por %s (%s)" % (by, reason) + (": " + note if note else ""))[:300])
+        r = q.cancel_running(task, by, reason=reason, note=note, thread_id=t["threadId"])
+        if r is None:
+            raise ToolError(f"la tarea {task} cambió de estado mientras se cancelaba")
+        return {"task": task, "employee": r["employee"], "state": r["state"], "reason": r["cancel_reason"],
+                "phase": "running", "thread_id": t["threadId"], "queue_len": q.length(r["employee"])}
+
+    def employee_rename(self, employee, name, by="human"):
+        cfg = self._db()
+        employees.ensure_schema(self.conn)
+        try:
+            body = employees.rename(self.conn, employee, name, by or "human")
+        except employees.EmployeeError as e:
+            raise ToolError(str(e))
+        emp = employees.get(self.conn, employee)
+        events.emit_envelope(self.conn, cfg, "employee.renamed", emp["project"], body, needs=None,
+                             subject=envelope.subject("desk", employee, body["name"] or body["role"]))
+        return body
