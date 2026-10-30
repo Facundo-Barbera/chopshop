@@ -56,8 +56,8 @@ struct OfficeRoot: View {
         }
         .environment(\.attentionActions, model.attentionActions)
         .navigationTitle("Chopshop")
-        .navigationSubtitle(model.statusLine)
-        .toolbar { ToolbarItem(placement: .navigation) { LiveIndicator(store: model.live) } }
+        .navigationSubtitle(model.statusLine.hasPrefix("⚠︎") ? model.statusLine : "")
+        .toolbar { ToolbarItem(placement: .navigation) { LiveIndicator(store: model.live, compact: true, updated: model.statusLine) } }
         .hotReload()
     }
 }
@@ -143,13 +143,19 @@ struct OfficeMenu: View {
 /// Estado del stream en vivo (en vivo / reconectando / sin emparejar). Sin stream (macOS < 26, sin agente) no se ve.
 struct LiveIndicator: View {
     @ObservedObject var store: LiveStore
+    var compact = false
+    var updated: String? = nil
     var body: some View {
         if let label = store.status.label {
             HStack(spacing: 6) {
                 PulseDot(color: color, live: store.status == .live)
-                Text(label).font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                if !(compact && store.status == .live) {
+                    Text(label).font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                }
             }
-            .help(store.status.detail ?? "Stream de eventos del agente (GET /stream)")
+            .padding(.horizontal, compact ? 6 : 0)
+            .help(store.status.detail ?? [label, updated].compactMap { $0 }.joined(separator: " · "))
+            .accessibilityLabel([label, updated].compactMap { $0 }.joined(separator: ", "))
         }
     }
     private var color: Color {
