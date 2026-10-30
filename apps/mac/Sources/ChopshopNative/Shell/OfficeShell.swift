@@ -100,8 +100,6 @@ public struct OfficeShell<World: View, Unpaired: View>: View {
     }
 }
 
-// MARK: - Barra lateral
-
 @available(macOS 26.0, *)
 struct ShellSidebarView: View {
     let sections: [ShellSection]
