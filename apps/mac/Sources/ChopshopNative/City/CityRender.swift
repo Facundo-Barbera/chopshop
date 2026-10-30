@@ -331,10 +331,12 @@ struct CityRenderer {
         for b in model.buildings {
             let a = cityClamp(rise(b, 0) / 0.6)
             guard a > 0 else { continue }
-            let po = 0.22 * tile, ox = 0.7 * tile, oy = 0.12 * tile
+            let po = 0.22 * tile, k = 0.05 * tile, cast = 0.55 * tile
+            let x0 = b.x0 - po, y0 = b.y0 - po, x1 = b.x1 + po, y1 = b.y1 + po
             var gs = g; gs.opacity = alpha * a * (b.company == targetBuilding ? 1 : dim(b.campus))
-            gs.fill(poly([P(b.x0 - po, b.y0 - po, 0), P(b.x1 + po + ox, b.y0 - po, 0), P(b.x1 + po + ox, b.y1 + po + oy, 0), P(b.x0 - po, b.y1 + po + oy, 0)]),
-                    with: .color(pal.contact.color))
+            var gc = gs; gc.opacity *= 0.55
+            gc.fill(poly([P(x0, y0 - cast, 0), P(x1 + k, y0 - cast, 0), P(x1 + k, y1, 0), P(x0, y1, 0)]), with: .color(pal.contact.color))
+            gs.fill(poly([P(x0 - k, y0 - k, 0), P(x1 + k, y0 - k, 0), P(x1 + k, y1 + k, 0), P(x0 - k, y1 + k, 0)]), with: .color(pal.contact.color))
         }
 
         let ta = ambient
