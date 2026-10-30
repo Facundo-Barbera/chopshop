@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/backend/v2/mch/machines-id.get.response.schema.json",
+  "title": "GET /v1/machines/{id}",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "machine"
+  ],
+  "properties": {
+    "machine": {
+      "$ref": "../common.schema.json#/$defs/machine"
+    }
+  }
+}

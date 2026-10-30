@@ -1,0 +1,12 @@
+{
+  "email": "ana@chopshop.test",
+  "kind": "watcher",
+  "role": "watcher",
+  "expires_at": "2026-11-29T12:05:00.000Z",
+  "workspaces": [
+    {
+      "id": "7c2e9f14-3a6b-4d5e-8f17-2b9c4e6a0d31",
+      "name": "Awesome GB"
+    }
+  ]
+}
