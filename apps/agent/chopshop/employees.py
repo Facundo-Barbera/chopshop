@@ -106,5 +106,5 @@ def listing(conn, prof):
 
 def entry(r):
     return {"id": r["id"], "project": r["project"], "floor": r["floor"], "role": r["role"], "slot": r["slot"],
-            "name": r["name"], "state": "idle", "thread_id": None, "task": None, "title": None, "since": None,
+            "name": r["name"], "state": "idle", "location": "common", "thread_id": None, "task": None, "title": None, "since": None,
             "queue_len": 0}
