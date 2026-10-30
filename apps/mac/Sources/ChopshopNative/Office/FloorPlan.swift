@@ -132,6 +132,7 @@ public struct FloorPlan: Equatable, Sendable {
     public var temporary = false
     public var outsourced = false
     public var outsourcedLabel: String? = nil
+    public var elasticOrdinal = 0
 
     public static let outsourcedBase = 1000
     public static func isFlexRole(_ role: String) -> Bool { role.hasPrefix("_") }
@@ -198,7 +199,16 @@ public struct FloorPlan: Equatable, Sendable {
         } else {
             rooms = pj["machine_room"]?.object.map { [MachineRoom(room: $0)] } ?? []
         }
-        return withMachineRooms(plans, rooms)
+        return withMachineRooms(numbered(plans), rooms)
+    }
+
+    static func numbered(_ floors: [FloorPlan]) -> [FloorPlan] {
+        var temporary = 0, outsourced = 0
+        return floors.map { plan -> FloorPlan in
+            var p = plan
+            if p.outsourced { outsourced += 1; p.elasticOrdinal = outsourced } else if p.temporary { temporary += 1; p.elasticOrdinal = temporary }
+            return p
+        }
     }
 
     /// Pone cada sala en su piso (las de un piso que no existe no salen).
@@ -248,7 +258,7 @@ public struct FloorPlan: Equatable, Sendable {
             return plan
         }.sorted { $0.floorIndex < $1.floorIndex }
         let machines = MachineRoom(state.machineRoom)
-        return withMachineRooms(plans, office.machineRooms.map { machines.scoped(to: project, $0) })
+        return withMachineRooms(numbered(plans), office.machineRooms.map { machines.scoped(to: project, $0) })
     }
 
     public static func floor(in state: LiveState, project: String, index: Int) -> FloorPlan? {
