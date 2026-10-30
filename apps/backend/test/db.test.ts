@@ -95,22 +95,22 @@ describe("migraciones", () => {
 describe("restricciones", () => {
   it("dos owner falla", async () => {
     const db = await fresh();
-    await addUser(db, "dueno@example.com", "owner");
-    await addUser(db, "watcher1@example.com", "watcher");
-    await addUser(db, "watcher2@example.com", "watcher");
-    await rejects(addUser(db, "otro@example.com", "owner"), "UNIQUE");
+    await addUser(db, "dueno@example.test", "owner");
+    await addUser(db, "watcher1@example.test", "watcher");
+    await addUser(db, "watcher2@example.test", "watcher");
+    await rejects(addUser(db, "otro@example.test", "owner"), "UNIQUE");
   });
 
   it("email duplicado falla", async () => {
     const db = await fresh();
-    await addUser(db, "Ana@Example.com", "owner");
-    await rejects(addUser(db, "ana@example.com ", "watcher"), "UNIQUE");
+    await addUser(db, "Ana@Example.test", "owner");
+    await rejects(addUser(db, "ana@example.test ", "watcher"), "UNIQUE");
   });
 
   it("rol y estado fuera del CHECK fallan", async () => {
     const db = await fresh();
-    await rejects(addUser(db, "x@example.com", "admin" as "owner"), "CHECK");
-    const id = await addUser(db, "y@example.com", "watcher");
+    await rejects(addUser(db, "x@example.test", "admin" as "owner"), "CHECK");
+    const id = await addUser(db, "y@example.test", "watcher");
     await rejects(run(db, "UPDATE users SET status = ? WHERE id = ?", "1", id), "CHECK");
   });
 
@@ -132,7 +132,7 @@ describe("db.ts", () => {
 
   it("rev CAS: solo la revisión actual actualiza y la sube", async () => {
     const db = await fresh();
-    const owner = await addUser(db, "dueno@example.com", "owner");
+    const owner = await addUser(db, "dueno@example.test", "owner");
     const ws = uuid();
     const t = now();
     await run(db, "INSERT INTO workspaces (id, owner_id, name, slug, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)", ws, owner, "Acme", "acme", t, t);
@@ -149,7 +149,7 @@ describe("db.ts", () => {
 
   it("batch es atómico", async () => {
     const db = await fresh();
-    const owner = await addUser(db, "dueno@example.com", "owner");
+    const owner = await addUser(db, "dueno@example.test", "owner");
     const t = now();
     const ins = (slug: string) =>
       db.prepare("INSERT INTO workspaces (id, owner_id, name, slug, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)").bind(uuid(), owner, slug, slug, t, t);
