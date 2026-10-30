@@ -1,6 +1,7 @@
 import { isConstraintError, now as isoNow } from "./db";
 import { ulid } from "./http";
 import { LOCAL_MACHINE_ID_RE, type MachineCtx } from "./machines";
+import { MAX_OFFER_BYTES, storeImportOffer, validOffer } from "./routes/imports";
 import { structureRev } from "./structure";
 
 export const MAX_FRAME_BYTES = 1_048_576;
@@ -23,6 +24,7 @@ const VERSION_RE = /^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]{1,32})?$/;
 const SNAPSHOT_KEYS: ReadonlySet<string> = new Set([
   "v", "type", "id", "ts", "machine_id", "workspace_id", "seq", "ttl_s", "agent_version", "health", "counts", "projects", "parts",
 ]);
+const OFFER_KEYS: ReadonlySet<string> = new Set(["v", "type", "id", "ts", "projects"]);
 const EVENT_KEYS: ReadonlySet<string> = new Set([
   "v", "type", "id", "ts", "machine_id", "workspace_id", "event_id", "seq", "event_ts", "project", "event_type", "severity", "needs", "subject", "body",
 ]);
@@ -426,6 +428,9 @@ export class AgentSockets {
       case "event":
         this.event(ws, att, frame, message, now);
         break;
+      case "import.offer":
+        await this.importOffer(ws, att, frame, message);
+        break;
       default:
         send(ws, errorFrame("bad_request", "tipo de mensaje desconocido", { re: frame.id }));
     }
@@ -608,6 +613,16 @@ export class AgentSockets {
     await this.touch(att, now);
     await this.scheduleAlarm(stored.expiresAt);
     this.sink.frame("snapshot", raw, att.machineId, workspaceId);
+  }
+
+  private async importOffer(ws: WebSocket, att: AgentAttachment, frame: Frame, raw: string): Promise<void> {
+    const reject = (code: WsErrorCode, message: string) => send(ws, errorFrame(code, message, { re: frame.id }));
+    if (att.sessionId === null) return reject("bad_request", "primero hace falta el hello");
+    if (new TextEncoder().encode(raw).byteLength > MAX_OFFER_BYTES) return reject("too_large", `la oferta supera ${MAX_OFFER_BYTES} bytes`);
+    if (!Object.keys(frame).every((k) => OFFER_KEYS.has(k)) || !validOffer(frame.projects)) return reject("bad_request", "import.offer no válido");
+    if (this.db === null) return reject("internal", "importación no disponible");
+    const stored = await storeImportOffer(this.db, att.machineId, frame.projects);
+    send(ws, { ...header("import.result", frame.id), import_id: stored.id, status: stored.status });
   }
 
   private event(ws: WebSocket, att: AgentAttachment, frame: Frame, raw: string, now: number): void {
