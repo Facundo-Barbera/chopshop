@@ -1,5 +1,5 @@
 import { type Pepper, isToken, newToken, pepperFromEnv, sha256Hex, timingSafeEqual } from "./crypto";
-import { now, uuid } from "./db";
+import { type SqlValue, now, uuid } from "./db";
 import { type HttpEnv, type Principal, errorResponse, json, readCredential, sessionCookie } from "./http";
 import { verifyMachine } from "./machines";
 import { normalizeEmail } from "./ratelimit";
@@ -8,6 +8,7 @@ export type Client = "mac" | "web" | "cli";
 
 export interface HubRpc {
   sessionRevoked(sessionId: string): Promise<void>;
+  viewerChanged(userId: string): Promise<void>;
 }
 
 export interface AuthEnv extends HttpEnv {
@@ -172,6 +173,7 @@ export async function newSessionStatement(
   client: Client,
   deviceName: string | null,
   userAgent: string | null,
+  guard: { sql: string; params: SqlValue[] } = { sql: "1", params: [] },
 ): Promise<{ session: NewSession; stmt: D1PreparedStatement }> {
   const t = Date.now();
   const stamp = new Date(t).toISOString();
@@ -187,7 +189,7 @@ export async function newSessionStatement(
   const stmt = d
     .prepare(
       `INSERT INTO sessions (id, user_id, token_hash, csrf_hash, client, device_name, user_agent, created_at, last_seen_at, expires_at, absolute_expires_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${guard.sql}`,
     )
     .bind(
       session.id,
@@ -201,6 +203,7 @@ export async function newSessionStatement(
       stamp,
       session.expiresAt,
       session.absoluteExpiresAt,
+      ...guard.params,
     );
   return { session, stmt };
 }
@@ -218,7 +221,7 @@ export function sessionResponse(user: UserRow, session: NewSession, status = 200
 
 export type RevokedReason = "logout" | "revoked" | "password_changed" | "user_disabled" | "recovered";
 
-async function notifyHub(env: AuthEnv, sessionIds: string[]): Promise<void> {
+export async function notifyHub(env: AuthEnv, sessionIds: string[]): Promise<void> {
   if (!env.HUB || sessionIds.length === 0) return;
   const hub = env.HUB.get(env.HUB.idFromName("owner"));
   for (const id of sessionIds) {
@@ -227,6 +230,15 @@ async function notifyHub(env: AuthEnv, sessionIds: string[]): Promise<void> {
     } catch (err) {
       console.error(JSON.stringify({ code: "hub_session_revoked", error: err instanceof Error ? err.name : "unknown" }));
     }
+  }
+}
+
+export async function notifyViewerChanged(env: AuthEnv, userId: string): Promise<void> {
+  if (!env.HUB) return;
+  try {
+    await env.HUB.get(env.HUB.idFromName("owner")).viewerChanged(userId);
+  } catch (err) {
+    console.error(JSON.stringify({ code: "hub_viewer_changed", error: err instanceof Error ? err.name : "unknown" }));
   }
 }
 
