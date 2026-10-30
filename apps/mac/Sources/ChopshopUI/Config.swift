@@ -1,14 +1,22 @@
 import Foundation
 import ChopshopNative
 
+enum AgentDestination: String, CaseIterable, Equatable {
+    case local, relay
+
+    var label: String { self == .local ? "Local (Tailscale)" : "Relay" }
+}
+
 /// Un agente remoto al que se conecta la app.
 struct AgentSpec: Equatable {
     var name: String          // clave de `[app.agents.<nombre>]` ("agente" para el `agent_url` suelto)
     var url: String           // http://100.64.0.10:3790 (sin barra final)
     var enabled = true        // `enabled = false` en su tabla: se guarda pero la app no se conecta
+    var destination: AgentDestination = .local
     // La credencial no está aquí: es del Keychain (emparejamiento por dispositivo, ver ChopshopNative/Live/Credentials.swift).
 
     var baseURL: URL? { URL(string: url) }
+    var isRelay: Bool { destination == .relay }
 
     /// Endpoints (`host:port`) cuyas credenciales ya no usa ninguna máquina de `new` (máquinas quitadas o con otra URL):
     /// al guardar los ajustes se borran del Keychain para que una credencial nunca quede apuntando a otro host.
@@ -80,12 +88,13 @@ struct AppConfig: Equatable {
         }
 
         // [app.agents.<nombre>] en el orden del archivo, con los valores del entorno por encima
-        var named: [(name: String, url: String?, enabled: Bool)] = []
+        var named: [(name: String, url: String?, enabled: Bool, destination: AgentDestination)] = []
         for t in tables where t.path.count == 3 && t.path[0] == "app" && t.path[1] == "agents" {
-            named.append((t.path[2], t.values["url"], t.values["enabled"]?.lowercased() != "false"))
+            let dest = AgentDestination(rawValue: t.values["destination"]?.lowercased() ?? "") ?? .local
+            named.append((t.path[2], t.values["url"], t.values["enabled"]?.lowercased() != "false", dest))
         }
         for (name, value) in agentEnv(env) {
-            if let i = named.firstIndex(where: { $0.name == name }) { named[i].url = value } else { named.append((name, value, true)) }
+            if let i = named.firstIndex(where: { $0.name == name }) { named[i].url = value } else { named.append((name, value, true, .local)) }
         }
         var specs: [AgentSpec] = []
         if let url = pick("agent_url") {
@@ -93,7 +102,7 @@ struct AppConfig: Equatable {
         }
         for n in named {
             guard let url = n.url, !url.isEmpty else { continue }
-            let spec = AgentSpec(name: n.name, url: normalizeURL(url), enabled: n.enabled)
+            let spec = AgentSpec(name: n.name, url: normalizeURL(url), enabled: n.enabled, destination: n.destination)
             if !specs.contains(where: { $0.url == spec.url || $0.name == spec.name }) { specs.append(spec) }
         }
         cfg.agents = specs

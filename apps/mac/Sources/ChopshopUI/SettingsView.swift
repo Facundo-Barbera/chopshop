@@ -13,6 +13,7 @@ struct SettingsView: View {
     @State private var editing: Int?            // índice en `machines`; `machines.count` = máquina nueva
     @State private var draftName = ""
     @State private var draftURL = ""
+    @State private var draftDestination: AgentDestination = .local
     @State private var formError: String?
     @State private var message: String?
     @State private var removing: AgentSpec?
@@ -97,7 +98,7 @@ struct SettingsView: View {
                 .help(m.enabled ? "Desactivar: la app deja de conectarse (la credencial se conserva)" : "Activar")
                 VStack(alignment: .leading, spacing: 1) {
                     Text(m.name).font(.callout.weight(.semibold))
-                    Text(m.url).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    Text((m.isRelay ? "relay · " : "") + m.url).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                 }
                 Spacer(minLength: 8)
                 Circle().fill(color(status)).frame(width: 7, height: 7)
@@ -128,14 +129,20 @@ struct SettingsView: View {
         let urlChanged = old.map { AppConfig.normalizeURL(draftURL) != $0.url } ?? false
         return VStack(alignment: .leading, spacing: 8) {
             Text(old == nil ? "Nueva máquina" : "Editar «\(old!.name)»").font(.headline)
+            Picker("Destino", selection: $draftDestination) {
+                ForEach(AgentDestination.allCases, id: \.self) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 300)
             HStack(alignment: .top, spacing: 10) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Nombre").font(.caption.weight(.medium))
                     TextField("mini", text: $draftName).textFieldStyle(.roundedBorder).frame(width: 150)
                 }
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("URL del agente").font(.caption.weight(.medium))
-                    TextField("http://100.64.0.10:3790", text: $draftURL).textFieldStyle(.roundedBorder)
+                    Text(draftDestination == .relay ? "URL del relay" : "URL del agente").font(.caption.weight(.medium))
+                    TextField(draftDestination == .relay ? "https://relay.example.com" : "http://100.64.0.10:3790", text: $draftURL)
+                        .textFieldStyle(.roundedBorder)
                         .onSubmit(commit)
                 }
             }
@@ -160,6 +167,7 @@ struct SettingsView: View {
         editing = idx
         draftName = idx < machines.count ? machines[idx].name : ""
         draftURL = idx < machines.count ? machines[idx].url : ""
+        draftDestination = idx < machines.count ? machines[idx].destination : .local
         formError = nil
     }
 
@@ -172,6 +180,10 @@ struct SettingsView: View {
             formError = e
             return
         }
+        if draftDestination == .relay, !url.lowercased().hasPrefix("https://") {
+            formError = "El relay va por https://."
+            return
+        }
         if others.contains(where: { $0.url.caseInsensitiveCompare(url) == .orderedSame }) {
             formError = "Ya hay una máquina con esa URL."
             return
@@ -180,8 +192,9 @@ struct SettingsView: View {
         if idx < next.count {
             next[idx].name = name
             next[idx].url = url
+            next[idx].destination = draftDestination
         } else {
-            next.append(AgentSpec(name: name, url: url))
+            next.append(AgentSpec(name: name, url: url, destination: draftDestination))
         }
         if save(next) {
             editing = nil
