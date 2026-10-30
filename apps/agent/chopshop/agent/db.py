@@ -37,10 +37,41 @@ CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 _lock = threading.RLock()
 
 
+class _Rows:
+    def __init__(self, cur):
+        self._rows, self.lastrowid, self.rowcount = cur.fetchall(), cur.lastrowid, cur.rowcount
+
+    def fetchone(self):
+        return self._rows.pop(0) if self._rows else None
+
+    def fetchall(self):
+        out, self._rows = self._rows, []
+        return out
+
+    def __iter__(self):
+        return iter(self.fetchall())
+
+
+class _Locked:
+    def __init__(self, conn):
+        self._conn = conn
+
+    def __getattr__(self, name):
+        fn = getattr(self._conn, name)
+        if name not in ("execute", "executemany", "executescript"):
+            return fn
+
+        def run(*args):
+            with _lock:
+                return _Rows(fn(*args))
+        return run
+
+
 def connect(path):
     os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
-    conn = sqlite3.connect(path, timeout=15, check_same_thread=False, isolation_level=None)  # autocommit
-    conn.row_factory = sqlite3.Row
+    raw = sqlite3.connect(path, timeout=15, check_same_thread=False, isolation_level=None)  # autocommit
+    raw.row_factory = sqlite3.Row
+    conn = _Locked(raw)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA busy_timeout=10000")
