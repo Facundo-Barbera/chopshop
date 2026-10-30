@@ -1,7 +1,7 @@
 import AppKit
 import ChopshopNative
 
-// uso: ChopshopSnap <directorio de salida> [demo|demo-keys|city-keys|city-video [vídeo.mp4]|machine-room|floor|stable-floor|city-office|real-office|shell|login|multimachine [fixture]]
+// uso: ChopshopSnap <directorio de salida> [demo|demo-keys|city-keys|city-video [vídeo.mp4]|machine-room|floor|stable-floor|city-office|real-office|shell|login|roles|settings|multimachine [fixture]]
 //   sin 2º argumento: capturas de proyecto/oficina
 //   demo: fotogramas clave de la demo (key-*.png) + secuencia seq/f0000.jpg a 12 fps (demo-keys: solo las claves)
 //   city-keys: claves de la ciudad (city-0N-*.png, 1400×900 @1x) desde city-fixture.jsonl
@@ -67,6 +67,10 @@ if let mode = args.dropFirst().first, mode == "shell" {
     MainActor.assumeIsolated { Snapshots.renderShell(to: out) }
     exit(0)
 }
+if let mode = args.dropFirst().first, mode == "settings" {
+    MainActor.assumeIsolated { Snapshots.renderAccountSettings(to: out) }
+    exit(0)
+}
 if let mode = args.dropFirst().first, mode == "login" {
     MainActor.assumeIsolated { Snapshots.renderBackendLogin(to: out) }
     exit(0)
@@ -77,6 +81,10 @@ if let mode = args.dropFirst().first, mode == "machines" {
 }
 if let mode = args.dropFirst().first, mode == "watchers" {
     MainActor.assumeIsolated { Snapshots.renderWatchers(to: out) }
+    exit(0)
+}
+if let mode = args.dropFirst().first, mode == "roles" {
+    MainActor.assumeIsolated { Snapshots.renderEmployeesScreen(to: out) }
     exit(0)
 }
 if let mode = args.dropFirst().first, mode == "real-office" {
