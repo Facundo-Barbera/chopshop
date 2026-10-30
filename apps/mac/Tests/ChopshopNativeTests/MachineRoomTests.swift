@@ -169,15 +169,53 @@ final class MachineRoomTests: XCTestCase {
 
     // MARK: LiveStore
 
+    /// La sala sale del `LiveState` del store (ya no hay una copia aparte): `state` completo y sobres encima.
     @MainActor
     func testLiveStoreFeedsMachineRoom() throws {
         let store = LiveStore()
         store.handle(.state(try Fixture.json("machine-room/state.json")), id: nil, gen: 0)
-        XCTAssertEqual(store.machineRoom.rack.count, 2)
+        XCTAssertEqual(MachineRoom(store.state.machineRoom).rack.count, 2)
         store.handle(.envelope(try env("forge.run.state")), id: nil, gen: 0)
-        XCTAssertEqual(store.machineRoom.activeRuns, 1)
-        XCTAssertEqual(store.machineRoom.rack.first?.runs.map(\.runID), ["8999", "9001"])
+        let r = MachineRoom(store.state.machineRoom)
+        XCTAssertEqual(r.activeRuns, 1)
+        XCTAssertEqual(r.rack.first?.runs.map(\.runID), ["8999", "9001"])
+        XCTAssertEqual(r.subscriptions.map(\.name), ["bots", "chat"], "los webhooks del último `state` se conservan")
         store.reset()
-        XCTAssertTrue(store.machineRoom.isEmpty)
+        XCTAssertTrue(MachineRoom(store.state.machineRoom).isEmpty)
+    }
+
+    // MARK: por proyecto
+
+    func testScopedToProjectRoom() throws {
+        let r = MachineRoom(state: try Fixture.json("machine-room/state.json"))
+        let all = MachineRoomConfig(name: "Todo", repos: ["*"], listeners: ["*"], automations: ["*"], subscriptions: ["*"])
+        let a = r.scoped(to: "awesome-gb", all)
+        XCTAssertEqual((a.name, a.floor), ("Todo", 0))
+        XCTAssertEqual(a.rack.count, 2)
+        XCTAssertEqual(a.automations.map(\.name), ["triage"], "solo las de su proyecto")
+        XCTAssertEqual(a.subscriptions.map(\.name), ["bots", "chat"])
+        XCTAssertEqual(a.listeners, r.listeners)
+        let o = r.scoped(to: "otro", all)
+        XCTAssertTrue(o.rack.isEmpty && o.automations.isEmpty)
+        XCTAssertEqual(o.listeners.count, 2)
+        // por nombre o glob; sin patrones = nada de ese tipo
+        let some = r.scoped(to: "awesome-gb", MachineRoomConfig(name: "Docs", floor: 1, repos: [a.rack[1].repo], subscriptions: ["b*"]))
+        XCTAssertEqual(some.floor, 1)
+        XCTAssertEqual(some.rack.map(\.repo), [a.rack[1].repo])
+        XCTAssertEqual(some.subscriptions.map(\.name), ["bots"])
+        XCTAssertTrue(some.listeners.isEmpty && some.automations.isEmpty)
+        XCTAssertEqual(MachineRoomConfig(json: ["name": "S", "floor": 2, "repos": ["o/*"]]),
+                       MachineRoomConfig(name: "S", floor: 2, repos: ["o/*"]))
+        XCTAssertNil(MachineRoomConfig(json: ["floor": 0]))
+    }
+
+    func testSubscriptionServesGlobs() throws {
+        func sub(_ ps: JSONValue) -> SubscriptionStatus { SubscriptionStatus(json: ["name": "s", "projects": ps])! }
+        XCTAssertTrue(sub(["*"]).serves("x"))
+        XCTAssertTrue(sub(["awesome-*"]).serves("awesome-gb"))
+        XCTAssertFalse(sub(["awesome-*"]).serves("chopshop"))
+        XCTAssertTrue(sub(["a", "chop?hop"]).serves("chopshop"))
+        XCTAssertEqual(sub([]).projects, ["*"])
+        XCTAssertEqual(SubscriptionStatus(json: ["name": "s"])?.projects, ["*"])
     }
 }

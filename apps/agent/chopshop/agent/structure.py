@@ -169,7 +169,7 @@ def read(conn, project):
     prof, text = _load(project)
     _, retired = _known(conn, project, prof)
     return {"project": project, "rev": rev(text), "office": prof.get("office"), "rack": prof.get("rack"),
-            "structure": layout.structure(prof, retired), "limits": LIMITS}
+            "machine_rooms": prof.get("machine_rooms"), "structure": layout.structure(prof, retired), "limits": LIMITS}
 
 
 def _building_errs(project, candidate):
@@ -268,4 +268,4 @@ def changed_body(res):
     """Cuerpo del sobre `office.changed` (docs/event-envelope.md) a partir del resultado de `apply`."""
     s = res["structure"]
     return {"project": res["project"], "by": res["by"], "company": s["company"], "half_life_s": s["half_life_s"],
-            "floors": s["floors"], "diff": res["diff"]}
+            "floors": s["floors"], "machine_rooms": s["machine_rooms"], "diff": res["diff"]}

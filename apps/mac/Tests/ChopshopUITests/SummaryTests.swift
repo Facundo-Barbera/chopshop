@@ -60,6 +60,14 @@ final class SummaryTests: XCTestCase {
         XCTAssertEqual(s.questions, 4)
     }
 
+    func testSameMachineIdFromTwoAgentsGetsTwoRows() {
+        let rs = [AgentResult(name: "a", status: .ok, snapshot: snapshot("host-a", cpu: 10)),
+                  AgentResult(name: "b", status: .ok, snapshot: snapshot("host-a", cpu: 70))]
+        let s = Summarizer.summarize(rs, labels: [:], previous: [])
+        XCTAssertEqual(s.machines.map(\.name), ["host-a", "host-a · b"])
+        XCTAssertEqual(s.machines.map(\.cpuNow), [10, 70])
+    }
+
     func testLinkState() {
         let ok = AgentResult(name: "a", status: .ok, snapshot: [:])
         let bad = AgentResult(name: "b", status: .forbidden)

@@ -3,7 +3,8 @@ import Foundation
 /// Un piso de la oficina v3 (docs/agent-api.md «api_version 3», docs/plans/office-redesign.md §1–3 y §7): departamentos (uno
 /// por rol) con escritorios **fijos** que declara el perfil, o el vestíbulo del edificio (planta baja). Puro (macOS 13): se lee
 /// tal cual de `GET /state` v3 (o del evento `state` del stream) y no inventa nada; los escritorios no aparecen ni desaparecen
-/// con los hilos, solo cambia su ocupante, que se desvanece con la semivida.
+/// con los hilos, solo cambia su ocupante, que se desvanece con la semivida. Un piso puede tener además **salas de máquinas**
+/// (`machineRooms`, 0..N por proyecto, las que declara su perfil: rack de sus repos con luces y runs, scripts, webhooks y listeners).
 public struct FloorPlan: Equatable, Sendable {
     /// Ocupante de un escritorio, o invitado del vestíbulo.
     public struct Occupant: Equatable, Sendable {
@@ -117,6 +118,8 @@ public struct FloorPlan: Equatable, Sendable {
     public var rooms: [Room] = []
     /// Invitados del vestíbulo (vacío en un piso de proyecto).
     public var lobby: [Occupant] = []
+    /// Salas de máquinas de este piso, en el orden del perfil (vacío si no declara ninguna aquí, y en el vestíbulo).
+    public var machineRooms: [MachineRoom] = []
 
     public static let terminal: Set<String> = ["done", "failed", "settled", "skipped"]
     public static let fadeOut = 0.1
@@ -142,7 +145,7 @@ public struct FloorPlan: Equatable, Sendable {
               let office = pj["office"], office.object != nil else { return [] }
         let company = nonEmpty(office["company"]?.string)
         let hl = office["half_life_s"]?.double ?? defaultHalfLife
-        return (office["floors"]?.array ?? []).enumerated().map { (i, f) -> FloorPlan in
+        let plans = (office["floors"]?.array ?? []).enumerated().map { (i, f) -> FloorPlan in
             var plan = FloorPlan(kind: .floor(project: project, index: f["index"]?.int ?? i), company: company,
                                  name: nonEmpty(f["name"]?.string), halfLife: hl)
             plan.rooms = (f["rooms"]?.array ?? []).compactMap { r -> Room? in
@@ -160,6 +163,27 @@ public struct FloorPlan: Equatable, Sendable {
             }
             return plan
         }.sorted { $0.floorIndex < $1.floorIndex }
+        // las salas del proyecto: las que publica el agente en `projects[].machine_rooms`; si no, las que declara `office` recortadas
+        // de la de arriba con la misma regla; si no, la única `projects[].machine_room` (agente anterior); si no, ninguna
+        let rooms: [MachineRoom]
+        if let list = pj["machine_rooms"]?.array {
+            rooms = list.compactMap { $0.object.map(MachineRoom.init(room:)) }
+        } else if let cfgs = office["machine_rooms"]?.array {
+            let all = MachineRoom(room: state["machine_room"]?.object ?? [:])
+            rooms = cfgs.compactMap(MachineRoomConfig.init(json:)).map { all.scoped(to: project, $0) }
+        } else {
+            rooms = pj["machine_room"]?.object.map { [MachineRoom(room: $0)] } ?? []
+        }
+        return withMachineRooms(plans, rooms)
+    }
+
+    /// Pone cada sala en su piso (las de un piso que no existe no salen).
+    static func withMachineRooms(_ floors: [FloorPlan], _ rooms: [MachineRoom]) -> [FloorPlan] {
+        floors.map { plan -> FloorPlan in
+            var p = plan
+            p.machineRooms = rooms.filter { $0.floor == plan.floorIndex }
+            return p
+        }
     }
 
     public static func floor(in state: JSONValue, project: String, index: Int) -> FloorPlan? {
@@ -182,7 +206,7 @@ public struct FloorPlan: Equatable, Sendable {
     public static func floors(in state: LiveState, project: String) -> [FloorPlan] {
         guard let office = state.projects.first(where: { $0.name == project })?.office else { return [] }
         let hl = office.halfLifeS
-        return office.floors.map { f -> FloorPlan in
+        let plans = office.floors.map { f -> FloorPlan in
             var plan = FloorPlan(kind: .floor(project: project, index: f.index), company: office.company, name: nonEmpty(f.name), halfLife: hl)
             plan.rooms = f.rooms.map { r in
                 let desks = r.desks.map { d in
@@ -193,6 +217,8 @@ public struct FloorPlan: Equatable, Sendable {
             }
             return plan
         }.sorted { $0.floorIndex < $1.floorIndex }
+        let all = MachineRoom(state.machineRoom)
+        return withMachineRooms(plans, office.machineRooms.map { all.scoped(to: project, $0) })
     }
 
     public static func floor(in state: LiveState, project: String, index: Int) -> FloorPlan? {
@@ -212,6 +238,10 @@ public struct FloorPlan: Equatable, Sendable {
 
     public func desk(_ id: String) -> Desk? { desks.first { $0.id == id } }
     public func room(ofDesk id: String) -> Room? { rooms.first { $0.desks.contains { $0.id == id } } }
+    /// Sala de máquinas de un hueco de la sala (consola `machine:<k>` o armario `rack:<k>:<unidad>`).
+    public func machineRoom(of id: String) -> MachineRoom? {
+        FloorLayout.machinePart(id).flatMap { machineRooms.indices.contains($0.room) ? machineRooms[$0.room] : nil }
+    }
     public func guest(_ threadID: String) -> Occupant? { lobby.first { $0.threadID == threadID } }
 
     // MARK: - utilidades
@@ -243,15 +273,41 @@ public struct FloorLayout: Equatable, Sendable {
         public var role: String
         public var x0: Double, y0: Double, w: Double, d: Double
     }
-    /// Hueco de un escritorio (id del escritorio) o de un invitado del vestíbulo (`lobby:<hilo>`).
+    /// Hueco de un escritorio (id del escritorio), de un invitado del vestíbulo (`lobby:<hilo>`) o, en la sala de máquinas k
+    /// (`room == machineRoomIndex(k)`), de un armario del rack (`rack:<k>:<proveedor>:<repo>`) o de la consola (`machine:<k>`).
     public struct Spot: Equatable, Sendable {
         public var id: String
         public var room: Int
         public var cx: Double, cy: Double
+        public var isMachine: Bool { room < 0 }
     }
+    /// Sala de máquinas k: un armario por repo del rack al fondo y la consola (listeners, scripts, webhooks) delante.
+    public struct MachineBox: Equatable, Sendable {
+        /// Posición en `FloorPlan.machineRooms`.
+        public var index: Int
+        public var x0: Double, y0: Double, w: Double, d: Double
+        /// Armarios en el orden del rack (ids `rack:<unidad>`); vacío = rack sin repos (se pinta un armario apagado).
+        public var cabinets: [Spot]
+        public var console: Spot
+    }
+
+    /// Índice de sala (negativo) de la sala de máquinas k, para `Spot.room`/`RoomBox.index`; y al revés.
+    public static func machineRoomIndex(_ k: Int) -> Int { -1 - k }
+    public static func machineSlot(_ roomIndex: Int) -> Int? { roomIndex < 0 ? -1 - roomIndex : nil }
+    public static func consoleID(_ k: Int) -> String { "machine:\(k)" }
+    public static func cabinetID(_ k: Int, _ unitID: String) -> String { "rack:\(k):\(unitID)" }
+    /// (sala k, unidad del rack o nil = consola) de un hueco de la sala de máquinas; nil si `id` no lo es.
+    public static func machinePart(_ id: String) -> (room: Int, unit: String?)? {
+        let p = id.split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false)
+        if p.count == 2, p[0] == "machine", let k = Int(p[1]) { return (k, nil) }
+        if p.count == 3, p[0] == "rack", let k = Int(p[1]) { return (k, String(p[2])) }
+        return nil
+    }
+    public static let cabW = 34.0, cabD = 26.0, cabH = 46.0, cabGap = 14.0
 
     public var rooms: [RoomBox] = []
     public var spots: [Spot] = []
+    public var machines: [MachineBox] = []
     public var minU = 0.0, maxU = 1.0, minV = 0.0, maxV = 1.0
 
     public func spot(_ id: String) -> Spot? { spots.first { $0.id == id } }
@@ -275,10 +331,20 @@ public struct FloorLayout: Equatable, Sendable {
             }
         } else {
             var y = 0.0
-            let rows = stride(from: 0, to: plan.rooms.count, by: Self.roomsPerRow).map { Array(plan.rooms.indices[$0..<min($0 + Self.roomsPerRow, plan.rooms.count)]) }
+            // las salas de máquinas ocupan los huecos siguientes al último departamento (Self.machineRoomIndex(k) en la rejilla)
+            let cells = plan.rooms.indices.map { $0 } + plan.machineRooms.indices.map(Self.machineRoomIndex)
+            let rows = stride(from: 0, to: cells.count, by: Self.roomsPerRow).map { Array(cells[$0..<min($0 + Self.roomsPerRow, cells.count)]) }
             for row in rows {
                 var x = 0.0, depth = 0.0
                 for i in row {
+                    if let k = Self.machineSlot(i) {
+                        let m = Self.machineBox(plan.machineRooms[k], index: k, x0: x, y0: y)
+                        machines.append(m)
+                        spots += m.cabinets + [m.console]
+                        x += m.w + Self.gap
+                        depth = max(depth, m.d)
+                        continue
+                    }
                     let r = plan.rooms[i]
                     // El tamaño sale de los huecos declarados (retirados incluidos): no cambia con la ocupación.
                     let n = max(1, r.desks.map(\.slot).max().map { $0 + 1 } ?? 1, r.desks.count)
@@ -298,13 +364,29 @@ public struct FloorLayout: Equatable, Sendable {
             }
         }
         var us: [Double] = [], vs: [Double] = []
-        for r in rooms {
-            for (cx, cy) in [(r.x0, r.y0), (r.x0 + r.w, r.y0), (r.x0, r.y0 + r.d), (r.x0 + r.w, r.y0 + r.d)] {
-                for z in [0.0, 52.0] { us.append(cx - cy); vs.append((cx + cy) * 0.5 - z) }
+        var boxes: [(Double, Double, Double, Double)] = rooms.map { ($0.x0, $0.y0, $0.w, $0.d) }
+        boxes += machines.map { ($0.x0, $0.y0, $0.w, $0.d) }
+        let top = machines.isEmpty ? 52.0 : 12 + Self.cabH        // los armarios son más altos que los muros
+        for r in boxes {
+            for (cx, cy) in [(r.0, r.1), (r.0 + r.2, r.1), (r.0, r.1 + r.3), (r.0 + r.2, r.1 + r.3)] {
+                for z in [0.0, top] { us.append(cx - cy); vs.append((cx + cy) * 0.5 - z) }
             }
         }
         if let a = us.min(), let b = us.max(), let c = vs.min(), let d = vs.max() {
             minU = a - 14; maxU = b + 14; minV = c - 6; maxV = d + 6
         }
+    }
+
+    /// Geometría de la sala de máquinas: depende solo de cuántos repos hay en el rack (no de sus luces ni de sus runs).
+    static func machineBox(_ mr: MachineRoom, index k: Int, x0: Double, y0: Double) -> MachineBox {
+        let row = Double(max(1, mr.rack.count)) * (cabW + cabGap) - cabGap
+        let w = max(3 * cellW, row + 40) + 2 * pad
+        let d = cellD + cabD + 2 * pad + 20
+        let cy = y0 + pad + 6 + cabD / 2, left = x0 + (w - row) / 2
+        let cabinets = mr.rack.enumerated().map { (j, u) in
+            Spot(id: cabinetID(k, u.id), room: machineRoomIndex(k), cx: left + cabW / 2 + Double(j) * (cabW + cabGap), cy: cy)
+        }
+        let console = Spot(id: consoleID(k), room: machineRoomIndex(k), cx: x0 + w / 2, cy: y0 + d - pad - cellD / 2 + 6)
+        return MachineBox(index: k, x0: x0, y0: y0, w: w, d: d, cabinets: cabinets, console: console)
     }
 }
