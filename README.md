@@ -18,7 +18,8 @@ Capa delgada entre tus bots y T3 Code. Un bot (o una persona) manda instruccione
 | `apps/agent/` | Servicio Python (solo stdlib): CLI `bin/chopshop`, motor, `chopshop/agent` (servicio headless por máquina), `tests/`, `tools/` |
 | `apps/mac/` | `Chopshop.app` (SwiftUI + WKWebView): `Package.swift`, `Sources/`, `Resources/web` (bundle React), `build.sh`, `shot.sh` |
 | `apps/ui/` | React de la app (esbuild); genera `apps/mac/Resources/web` |
-| `packages/api/` | Cliente JS de la API del agente, tipos compartidos y la combinación de snapshots de varias máquinas que usa la UI |
+| `packages/api/` | Cliente JS de la API del agente, tipos compartidos y la combinación de snapshots de varias máquinas que usa la UI; schemas del relay (`relay/`) y de empleados (`fixtures/`) |
+| `packages/relay/` | Relay en Cloudflare Workers (un Durable Object) para ver las máquinas sin Tailscale ([`docs/relay.md`](docs/relay.md)) |
 | `docs/` | Arquitectura y contrato de la API del agente |
 | `examples/` | Ejemplos (p. ej. lista de bugs de demostración) |
 | `assets/` | Capturas de pantalla |
@@ -257,7 +258,7 @@ Para regenerarlas con datos de ejemplo, ver [`docs/screenshots.md`](docs/screens
 
 `chopshop mcp serve` corre en una máquina siempre encendida y orquesta, por MCP (Streamable HTTP, JSON-RPC por `POST`), los chopshop-agent de todas las máquinas: las mismas de la app (`[app] agent_url` y `[app.agents.<nombre>]`, con `enabled`) más el agente local (`[mcp] include_local`). Habla con cada agente con el mismo cliente HTTP que la CLI.
 
-Herramientas: `machines_list`, `projects_list`, `thread_start` (sin `host` elige la máquina menos cargada que tenga el proyecto y el rol), `thread_send` (`steer: true` para inyectar en el turno en curso), `thread_show`, `threads_list`, `pending_list`, `pending_answer`, `thread_settle` (nunca archiva), `thread_interrupt`, `fanout`, `subscribe` / `unsubscribe` / `subscriptions_list` (webhooks con los eventos de todas las máquinas; `heartbeat_s` > 0 activa heartbeats periódicos, apagados por defecto).
+Herramientas: `machines_list`, `projects_list`, `thread_start` (sin `host` elige la máquina menos cargada que tenga el proyecto y el rol), `thread_send` (`steer: true` para inyectar en el turno en curso), `thread_show`, `threads_list`, `pending_list`, `pending_answer`, `thread_settle` (nunca archiva), `thread_interrupt`, `fanout`, `subscribe` / `unsubscribe` / `subscriptions_list` (webhooks con los eventos de todas las máquinas; `heartbeat_s` > 0 activa heartbeats periódicos, apagados por defecto). Proyectos, empleados y colas (sobre la máquina del MCP, ver «Empleados y colas»): `registry_list`, `project_register`, `role_list`, `task_enqueue`, `queue_show`, `task_cancel` (saca una tarea de la cola o corta su hilo en marcha, sin archivar) y `employee_rename`.
 
 ```toml
 [mcp]
@@ -288,6 +289,42 @@ tailscale funnel --https=443 --set-path=/mcp off  # retirarlo
 ```
 
 La URL queda en `https://<nombre MagicDNS de la máquina>/mcp` (el que muestra `tailscale funnel status`); el bearer sigue siendo obligatorio y no se publica nada más del host.
+
+## Empleados y colas
+
+Un **empleado** es un escritorio permanente (`permanent: true`) del perfil de un proyecto, con nombre propio y una cola FIFO de
+tareas. Cada tarea se ejecuta como un hilo corto de T3 que se asienta (settle) al terminar; si el empleado está ocupado, la tarea
+espera en su cola y el empleado libre espera en el área común. Contrato en [`docs/employees.md`](docs/employees.md); rutas y
+herramientas en [`docs/agent-api.md`](docs/agent-api.md) («Colas de empleados y despachador»).
+
+```toml
+[agent.dispatcher]
+enabled = true        # apagado por defecto: lanza hilos de T3
+max_threads = 2       # hilos de empleado vivos a la vez
+interval = 5
+```
+
+- Encargar: herramienta MCP `task_enqueue {project, role, title, key?}`; ver la cola con `queue_show`; cancelar con
+  `task_cancel {task}` (o `POST /queue/cancel` en la API del agente, solo tareas aún en cola); renombrar con `employee_rename`.
+- Proyectos: `project_register` / `registry_list` (registro `projects.toml` junto al `config.toml`) y `chopshop project list|add`.
+- La app y `GET /state` muestran los empleados en su escritorio o en el área común y la cola de cada uno.
+
+## Relay (Cloudflare)
+
+`packages/relay` es un Worker de Cloudflare con un Durable Object al que cada agente se conecta **de salida** para publicar su
+estado; la app de Mac lo lee con un token de visor, sin Tailscale. Es de solo lectura: no despacha nada. Arquitectura, roles,
+pairing, tokens, deploy y límites en [`docs/relay.md`](docs/relay.md); formato de los mensajes en
+[`docs/relay-protocol.md`](docs/relay-protocol.md).
+
+```sh
+chopshop relay pair --stdin        # guarda el token cr1_ (lee una línea de stdin) en ~/.config/chopshop/relay/token, 0600
+chopshop relay status              # URL de [relay] url y token enmascarado
+chopshop relay unpair              # borra el token local (revocarlo es DELETE /v1/tokens/<token_id> con el token de operador)
+```
+
+El Worker se despliega solo desde GitHub Actions al empujar un tag `relay-v*` (`.github/workflows/relay-deploy.yml`), con los
+secrets del repositorio `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` y `RELAY_OPERATOR_TOKEN`; nunca con `wrangler deploy`
+desde una máquina.
 
 ## Tests
 
