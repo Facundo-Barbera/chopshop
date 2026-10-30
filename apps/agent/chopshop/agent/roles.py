@@ -22,6 +22,7 @@ import logging
 import os
 import time
 
+from .. import cloudsync
 from . import automations, db, envelope, layout, notes as notes_mod
 
 log = logging.getLogger("chopshop.agent.roles")
@@ -99,7 +100,7 @@ def read_prompt(project, rel, root=None):
     """Texto del `prompt_file` (dentro de la carpeta del proyecto; nunca fuera) o None si no hay o no se puede leer."""
     if not rel:
         return None
-    base = os.path.realpath(automations.project_dir(project, root))
+    base = os.path.realpath(cloudsync.prompts_dir(project) if cloudsync.is_cloud(project) else automations.project_dir(project, root))
     path = os.path.realpath(os.path.join(base, rel))
     if not path.startswith(base + os.sep):
         log.warning("prompt_file de %s fuera de %s: se ignora", project, base)
