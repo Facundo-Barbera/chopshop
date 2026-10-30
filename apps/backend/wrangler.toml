@@ -10,7 +10,7 @@ routes = [
 [[d1_databases]]
 binding = "DB"
 database_name = "chopshop"
-database_id = "<id de la D1, lo rellena el primer despliegue>"
+database_id = "1bc9db94-c00f-446f-9d0f-103488e47bbb"
 migrations_dir = "migrations"
 
 [[durable_objects.bindings]]
