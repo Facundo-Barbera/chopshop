@@ -7,7 +7,7 @@ struct BundledAgentSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Toggle("Usar esta Mac como máquina", isOn: Binding(get: { bundled.isEnabled }, set: { model.setUseThisMac($0) }))
+            Toggle("Usar esta Mac como máquina", isOn: Binding(get: { bundled.state != .unavailable && bundled.isEnabled }, set: { model.setUseThisMac($0) }))
                 .disabled(bundled.state == .unavailable)
             Text(bundled.state.label)
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
