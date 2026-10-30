@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/backend/v2/cty/stream-hello.schema.json",
+  "title": "SSE event: hello de /v1/stream",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "v",
+    "type",
+    "ts",
+    "head",
+    "resume",
+    "rev"
+  ],
+  "properties": {
+    "v": {
+      "$ref": "../common.schema.json#/$defs/v"
+    },
+    "type": {
+      "const": "hello"
+    },
+    "ts": {
+      "$ref": "../common.schema.json#/$defs/ts"
+    },
+    "head": {
+      "$ref": "../common.schema.json#/$defs/stream_id"
+    },
+    "resume": {
+      "enum": [
+        "events",
+        "snapshot"
+      ]
+    },
+    "rev": {
+      "$ref": "../common.schema.json#/$defs/count"
+    }
+  }
+}

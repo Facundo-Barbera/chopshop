@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/backend/v2/str/workspaces-id-projects.get.response.schema.json",
+  "title": "GET /v1/workspaces/{id}/projects",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "projects"
+  ],
+  "properties": {
+    "projects": {
+      "type": "array",
+      "items": {
+        "$ref": "../common.schema.json#/$defs/project"
+      }
+    }
+  }
+}

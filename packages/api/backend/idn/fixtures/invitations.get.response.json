@@ -1,0 +1,33 @@
+{
+  "invitations": [
+    {
+      "id": "3e6b9d2a-4f8c-4b17-9a3e-6d1c8f5b2e79",
+      "email": "ana@chopshop.test",
+      "kind": "watcher",
+      "role": "watcher",
+      "workspace_ids": [
+        "7c2e9f14-3a6b-4d5e-8f17-2b9c4e6a0d31"
+      ],
+      "created_at": "2026-10-30T12:00:00.000Z",
+      "expires_at": "2026-11-06T12:00:00.000Z",
+      "used_at": null,
+      "revoked_at": null,
+      "status": "pending"
+    },
+    {
+      "id": "d5a2f8c1-6b9e-4d43-8c7a-1e4b9f2d6c80",
+      "email": "luis@chopshop.test",
+      "kind": "watcher",
+      "role": "watcher",
+      "workspace_ids": [
+        "7c2e9f14-3a6b-4d5e-8f17-2b9c4e6a0d31",
+        "a41d6e8b-7c2f-4b39-9e05-3f8a1c7d2e46"
+      ],
+      "created_at": "2026-10-30T12:00:00.000Z",
+      "expires_at": "2026-11-06T12:00:00.000Z",
+      "used_at": "2026-10-30T12:05:00.000Z",
+      "revoked_at": null,
+      "status": "used"
+    }
+  ]
+}

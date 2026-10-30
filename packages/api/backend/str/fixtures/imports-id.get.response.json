@@ -1,0 +1,42 @@
+{
+  "import": {
+    "id": "f2c9e6a3-8d1b-4a54-b7f2-4e8a3c1d9b61",
+    "machine_id": "c3f8a2d1-6e4b-4a97-b2c5-8d1e7f3a9b52",
+    "created_at": "2026-10-30T12:00:00.000Z",
+    "summary": [
+      {
+        "name": "awesome-gb",
+        "company": "Awesome GB"
+      }
+    ],
+    "applied_at": null,
+    "dismissed_at": null
+  },
+  "projects": [
+    {
+      "name": "awesome-gb",
+      "company": "Awesome GB",
+      "t3_project": "awesome-gb",
+      "repo": null,
+      "roles": [
+        "triage",
+        "backend"
+      ],
+      "floors": 1,
+      "has_prompts": true,
+      "conflicts": []
+    },
+    {
+      "name": "orchestrator",
+      "company": null,
+      "t3_project": null,
+      "repo": null,
+      "roles": [],
+      "floors": 0,
+      "has_prompts": false,
+      "conflicts": [
+        "name_taken"
+      ]
+    }
+  ]
+}
