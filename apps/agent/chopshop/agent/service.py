@@ -4,7 +4,8 @@
   hilos: muestreo (+ compactación) · sondeo de T3 · motor (`engine.tick` con el bus inyectado, solo si hay lotes en
   state.json) · importación periódica de events.jsonl (CLI externa) · automatizaciones (sobres del bus + horarios) ·
   GitHub (si `[agent.github] enabled`) · roles permanentes (si `[agent.roles] enabled`: despertar por horario/eventos y
-  seguimiento del hilo en su escritorio) · rack de repos (`forge/rack.py`) · mantenimiento (retención de eventos, checkpoint WAL).
+  seguimiento del hilo en su escritorio) · despachador de colas de empleados (si `[agent.dispatcher] enabled`) · rack de
+  repos (`forge/rack.py`) · mantenimiento (retención de eventos, checkpoint WAL).
   Un fallo en un hilo se registra (sin repetirlo cada ciclo) y el hilo sigue; `stop()` los para a todos de forma ordenada.
 `run` instala SIGTERM/SIGINT para la parada limpia. Nada aquí habla con systemd salvo `status` (solo lectura, inyectable) y
 `print-unit` solo IMPRIME la unidad: no escribe, no habilita y no arranca nada.
@@ -22,7 +23,7 @@ import sys
 import threading
 import time
 
-from .. import employees as employees_mod, engine as engine_mod, events as legacy_events, graph, home, queue as queue_mod, \
+from .. import dispatcher as dispatcher_mod, employees as employees_mod, engine as engine_mod, events as legacy_events, graph, home, queue as queue_mod, \
     settings, state
 from . import __version__, actions as actions_mod, automations as automations_mod, collector as collector_mod, config, db, envelope, \
     events, github, halflife, listeners, notes, office as office_mod, pairing, projection, registry, relay as relay_mod, roles as roles_mod, server, t3watch
@@ -43,6 +44,7 @@ STOP_TIMEOUT = 10.0               # s totales para esperar a los hilos al parar
 AUTOMATIONS_RELOAD = 60.0         # s entre relecturas de los perfiles por el hilo de automatizaciones
 AUTOMATIONS_CURSOR = "automations_cursor"
 AUTOMATIONS_BATCH = 500           # sobres por pasada
+QUEUE_ANNOUNCE_WINDOW = 3600.0    # s hacia atrás en que se buscan cancelaciones de otro proceso sin su sobre
 
 
 class ServiceError(Exception):
@@ -257,6 +259,12 @@ class AgentService:
         employees_mod.ensure_schema(self.conn)
         self.queue = queue_mod.Queue(self.conn, self._emit_queue, clock=clock, machine=self.app.machine_id)
         self.app.projector.employees_fn = self._employees
+        self.app.queue = self.queue
+        dcfg = cfg.get("dispatcher") or {}
+        self.dispatch_enabled = bool(dcfg.get("enabled", False))
+        self.max_threads = int(dcfg.get("max_threads") or dispatcher_mod.DEFAULT_MAX_THREADS)
+        self._queue_threads = {}                    # hilo lanzado desde la cola -> (tarea de cola, escritorio)
+        self._queue_idle = {}                       # hilo cerrado por el despachador -> done/failed (para employee.idle)
         self._emp_loaded = None
         self.maint_interval, self.maint_first = maint_interval, maint_first
         self.compact_every = compact_every
@@ -365,13 +373,15 @@ class AgentService:
                 "queue_len": self.queue.length(emp["id"])}
         severity = None
         if type == "employee.assigned":
-            body.update(task=None, reason=EMPLOYEE_ASSIGN.get(b.get("reason"), "manual"), title=b.get("title"),
-                        since=b.get("since") or env.get("ts"))
+            qtask, qdesk = self._queue_threads.get(b.get("thread_id")) or (None, None)
+            qtask = qtask if qdesk == emp["id"] else None
+            body.update(task=qtask, reason="queue" if qtask else EMPLOYEE_ASSIGN.get(b.get("reason"), "manual"),
+                        title=b.get("title"), since=b.get("since") or env.get("ts"))
         else:
             if b.get("reason") == "inherited":
                 return None
             snap = self.office._snap(b.get("thread_id")) or {}
-            reason = EMPLOYEE_IDLE.get(b.get("reason")) or (
+            reason = self._queue_idle.get(b.get("thread_id")) or EMPLOYEE_IDLE.get(b.get("reason")) or (
                 "cancelled" if snap.get("status") == "cancelled" else "failed" if snap.get("phase") == "failed" else "done")
             body.update(reason=reason, since=env.get("ts"), summary=snap.get("summary"))
             severity = "warn" if reason == "failed" else None
@@ -451,6 +461,9 @@ class AgentService:
             if (self.cfg.get("office") or {}).get("enabled", True):
                 self._spawn("office", self._loop, "office", self.office_once,
                             lambda: (self.cfg.get("office") or {}).get("interval") or 2)
+            if self.dispatch_enabled:
+                self._spawn("dispatcher", self._loop, "dispatcher", self.dispatcher_once,
+                            lambda: (self.cfg.get("dispatcher") or {}).get("interval") or 5)
             if self.roles.enabled:
                 self._spawn("roles", self._loop, "roles", self.roles_once, lambda: (self.cfg.get("roles") or {}).get("interval") or 5)
             if self.github is not None:
@@ -565,6 +578,57 @@ class AgentService:
                 self.conn.execute("INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)", (AUTOMATIONS_CURSOR, str(self._auto_cursor)))
         fired += self.automations.tick(now)
         return fired
+
+    def dispatcher_once(self):
+        """Una pasada del despachador de colas (`[agent.dispatcher] enabled`; nada si ningún perfil declara empleados):
+        anuncia lo que otro proceso (el MCP) cambió en las colas, cierra los hilos de empleado terminados (settle +
+        `employee.idle`), saca tareas de las colas mientras haya menos de `max_threads` hilos vivos y sienta cada hilo
+        lanzado en su escritorio (`desk.assigned` + `employee.assigned reason: queue`)."""
+        profs = [p for _k, p in sorted(self.office.profs.items()) if employees_mod.declared(p)]
+        if not profs:
+            return None
+        res = {"announced": self.queue.announce(self.clock() - QUEUE_ANNOUNCE_WINDOW), "dispatched": []}
+        res["closed"] = self._dispatcher(None).close()
+        for c in res["closed"]:
+            self._employee_closed(c)
+        for prof in profs:
+            res["dispatched"] += self._dispatcher(prof).dispatch()
+        for desk, t in dispatcher_mod.live(state.read()).items():
+            tid = t.get("threadId")
+            if t.get("qtask") and tid and tid not in self._queue_threads:
+                self._queue_threads[tid] = (t["qtask"], desk)
+                self._seat_wake(None, desk, tid, t.get("role"))
+        return res
+
+    def _dispatcher(self, prof):
+        return dispatcher_mod.Dispatcher(self.conn, self.queue, prof, slots=self.max_threads, launch_fn=self._launch)
+
+    def _launch(self, batch_id):
+        return self.engine_tick(batch_id, None, lambda m: log.info("despachador: %s", m), emit_fn=self.engine_emit)
+
+    def _employee_closed(self, c):
+        """Hilo de empleado cerrado por el despachador: libera su escritorio (`desk.released` → `employee.idle`
+        done/failed) o, si nunca llegó a sentarse, emite `employee.idle` directamente."""
+        tid, desk = c.get("thread_id"), c["employee"]
+        self._wake_seats.pop(tid, None)
+        try:
+            occ = (self.office.desk(desk) or {}).get("occupant")
+            if occ and tid and occ.get("thread_id") == tid:
+                self._queue_idle[tid] = c["state"]
+                try:
+                    self.office.release(desk, "manual")
+                finally:
+                    self._queue_idle.pop(tid, None)
+                return
+            emp = employees_mod.get(self.conn, desk)
+            if occ or not emp or emp["retired"]:
+                return
+            body = {"employee": emp["id"], "role": emp["role"], "reason": c["state"], "thread_id": tid,
+                    "since": envelope.iso(self.clock()), "name": emp["name"], "queue_len": self.queue.length(emp["id"])}
+            self.emit_office("employee.idle", emp["project"], body, severity="warn" if c["state"] == "failed" else None,
+                             needs=None, subject=envelope.subject("desk", emp["id"], emp["name"] or emp["role"]))
+        finally:
+            self._queue_threads.pop(tid, None)
 
     def roles_once(self):
         """Una pasada de los roles permanentes (sobres nuevos del bus con cursor propio, horarios y despertares vivos)."""

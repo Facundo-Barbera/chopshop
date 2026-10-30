@@ -61,7 +61,7 @@ class Dispatcher:
                         self.queue.finish(t["qtask"], st_, why)
                     t["closed"] = True
                     out.append({"employee": t["desk"], "task": t.get("qtask"), "state": st_, "reason": why,
-                                "settled": bool(t.get("settled"))})
+                                "settled": bool(t.get("settled")), "thread_id": t.get("threadId")})
         return out
 
     def free(self, busy):
@@ -69,6 +69,9 @@ class Dispatcher:
 
     def tick(self):
         self.close()
+        return self.dispatch()
+
+    def dispatch(self):
         busy = live(self.read_fn())
         free = self.free(busy)
         out = []

@@ -1,3 +1,4 @@
+import threading
 import time
 
 from .agent import db, envelope
@@ -45,6 +46,7 @@ def item(row):
 class Queue:
     def __init__(self, conn, emit_fn=None, clock=time.time, max_len=MAX_LEN, machine=None):
         self.conn, self.emit_fn, self.clock, self.max_len, self.machine = conn, emit_fn, clock, max_len, machine
+        self._lock = threading.RLock()
         ensure_schema(conn)
 
     def _rows(self, employee):
@@ -81,6 +83,10 @@ class Queue:
     def enqueue(self, employee, title, by, trigger=None, priority=0, key=None, cause=None, extra=None):
         if not employee or not title or not by:
             raise QueueError("employee, title y by son obligatorios")
+        with self._lock:
+            return self._enqueue(employee, title, by, trigger, priority, key, cause, extra)
+
+    def _enqueue(self, employee, title, by, trigger, priority, key, cause, extra):
         now = self.clock()
         with db.tx():
             if key is not None:
@@ -113,6 +119,10 @@ class Queue:
     def cancel(self, task, by, reason="manual", note=None, cause=None):
         if reason not in CANCEL_REASONS:
             raise QueueError("reason inválido: %r (%s)" % (reason, ", ".join(CANCEL_REASONS)))
+        with self._lock:
+            return self._cancel(task, by, reason, note, cause)
+
+    def _cancel(self, task, by, reason, note, cause):
         now = self.clock()
         with db.tx():
             r = self.conn.execute("SELECT * FROM employee_queue WHERE task=?", (task,)).fetchone()
@@ -132,6 +142,52 @@ class Queue:
                         subj=envelope.subject("task", task, r["title"]))
         self._changed(employee, rows, "cancelled", task, now, cause=ev or cause)
         return dict(r, state="cancelled", ended=now, cancel_by=str(by), cancel_reason=reason, note=note)
+
+    def announce(self, since):
+        """Sobres de lo que otro proceso (el MCP, sin `emit_fn`) cambió en la tabla: `task.enqueued` de cada tarea en cola sin
+        su sobre (mismo id que la tarea) y `task.cancelled` de cada cancelada desde `since` sin el suyo, cada uno seguido de
+        su `queue.changed`. Idempotente: mira el bus. -> [(tipo, tarea)]"""
+        if not self.emit_fn:
+            return []
+        out = []
+        with self._lock:
+            with db.tx():
+                rows = [r for r in db.rows(self.conn.execute(
+                    "SELECT * FROM employee_queue WHERE state='queued' OR (state='cancelled' AND ended>=?) ORDER BY seq",
+                    (since,))) if not self._announced(r)]
+            for r in rows:
+                employee, task, now = r["employee"], r["task"], self.clock()
+                with db.tx():
+                    live = self._rows(employee)
+                subj = envelope.subject("task", task, r["title"])
+                if r["state"] == "queued":
+                    pos = next((i for i, x in enumerate(live) if x["task"] == task), None)
+                    if pos is None:
+                        continue
+                    ev = self._emit("task.enqueued", employee, {
+                        "task": task, "employee": employee, "title": r["title"], "position": pos, "by": r["by_"],
+                        "trigger": r["trigger"], "enqueued_at": envelope.iso(r["enqueued"])}, now,
+                        id=task[len(PREFIX):], subj=subj)
+                    self._changed(employee, live, "enqueued", task, now, cause=ev)
+                    out.append(("task.enqueued", task))
+                    continue
+                body = {"task": task, "employee": employee, "phase": "queued", "by": r["cancel_by"] or "human",
+                        "reason": r["cancel_reason"] if r["cancel_reason"] in CANCEL_REASONS else "manual",
+                        "thread_id": None}
+                if r["note"]:
+                    body["note"] = r["note"]
+                ev = self._emit("task.cancelled", employee, body, now, subj=subj)
+                self._changed(employee, live, "cancelled", task, now, cause=ev)
+                out.append(("task.cancelled", task))
+        return out
+
+    def _announced(self, r):
+        if r["state"] == "queued":
+            q, args = "SELECT 1 FROM events WHERE id=?", (r["task"][len(PREFIX):],)
+        else:
+            q, args = ("SELECT 1 FROM events WHERE subject_kind='task' AND subject_id=? AND type='task.cancelled'",
+                       (r["task"],))
+        return self.conn.execute(q, args).fetchone() is not None
 
     def pop(self, employee, cause=None):
         now = self.clock()
