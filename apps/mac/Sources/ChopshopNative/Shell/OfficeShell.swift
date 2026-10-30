@@ -83,7 +83,7 @@ public struct OfficeShell<World: View, Unpaired: View>: View {
             }
         }
         .inspector(isPresented: inspectorShown) {
-            ShellInspectorView(shell: shell, snapshot: store.snapshot, machineRoom: MachineRoom(store.state.machineRoom))
+            ShellInspectorView(shell: shell, snapshot: store.snapshot, machineRoom: MachineRoom(store.state.machineRoom), live: store.state)
                 .inspectorColumnWidth(min: 300, ideal: shell.state.inspector == .panel(.machineRoom) ? 640 : 380, max: 920)
         }
         .background {
@@ -325,6 +325,7 @@ struct ShellPalette: View {
         case .go(.city): return "building.2"
         case .go(.project): return "square.stack"
         case .go(.thread): return "person.crop.square"
+        case .go(.employee): return "person.text.rectangle"
         case .panel(let p): return p.symbol
         case .nextAttention: return "arrow.down.circle"
         case .cliOnly: return "terminal"

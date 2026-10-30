@@ -8,6 +8,7 @@ struct ShellInspectorView: View {
     @ObservedObject var shell: ShellController
     let snapshot: MockSnapshot
     let machineRoom: MachineRoom
+    var live = LiveState()
     var flat = false
 
     var body: some View {
@@ -26,9 +27,11 @@ struct ShellInspectorView: View {
             case .panel(let p)?:
                 ShellPanelFrame(title: p.title, symbol: p.symbol, flat: flat, close: close) { panel(p, s) }
             case .target(.project(let pr))?:
-                ShellPanelFrame(title: pr, symbol: "square.stack", flat: flat, close: close) { ShellProjectPanel(shell: shell, snapshot: s, project: pr) }
+                ShellPanelFrame(title: pr, symbol: "square.stack", flat: flat, close: close) { ShellProjectPanel(shell: shell, snapshot: s, live: live, project: pr) }
             case .target(.thread(let id, let pr))?:
                 ShellPanelFrame(title: "Hilo", symbol: "person.crop.square", flat: flat, close: close) { ShellThreadPanel(shell: shell, snapshot: s, threadID: id, project: pr) }
+            case .target(.employee(let id, _))?:
+                ShellPanelFrame(title: "Empleado", symbol: "person.text.rectangle", flat: flat, close: close) { ShellEmployeePanel(shell: shell, live: live, employeeID: id) }
             case .target(.city)?, nil:
                 EmptyView()
             }
@@ -365,10 +368,12 @@ struct ShellMachinesPanel: View {
 struct ShellProjectPanel: View {
     @ObservedObject var shell: ShellController
     let snapshot: MockSnapshot
+    var live = LiveState()
     let project: String
 
     var body: some View {
         let ts = snapshot.tasks(of: project)
+        let staff = live.employees(of: project)
         let host = hostOf(snapshot)
         let attention = ts.filter { $0.state == .needsYou || $0.state == .stuck }.sorted { $0.state < $1.state }
         Text(ProjectSummaryText.line(snapshot.summary(of: project))).font(.system(size: 13)).foregroundStyle(.secondary)
@@ -386,6 +391,14 @@ struct ShellProjectPanel: View {
         group("En curso", ts.filter { $0.state == .running || $0.state == .waitingBot }, host)
         group("En cola", ts.filter { $0.state == .queued }, host)
         group("Terminados", ts.filter { $0.state == .done || $0.state == .skipped }, host)
+        if !staff.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                sectionTitle("Empleados", count: staff.count)
+                ForEach(staff, id: \.id) { e in
+                    ShellEmployeeRow(employee: e) { shell.state.select(.employee(id: e.id, project: project)) }
+                }
+            }
+        }
     }
 
     @ViewBuilder private func group(_ title: String, _ ts: [MockTask], _ host: [String: String]) -> some View {
@@ -456,5 +469,99 @@ struct ShellThreadPanel: View {
         } else {
             ShellEmpty("Este hilo ya no está en el snapshot.", threadID)
         }
+    }
+}
+
+// MARK: - Empleado elegido (su cola)
+
+@available(macOS 26.0, *)
+struct ShellEmployeeRow: View {
+    let employee: LiveState.Employee
+    let action: () -> Void
+    @State private var hover = false
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 9) {
+                Image(systemName: employee.state == "working" ? "person.fill" : "person").font(.system(size: 12))
+                    .foregroundStyle(.secondary).frame(width: 16)
+                Text(employee.name ?? employee.role).font(.system(size: 13)).lineLimit(1)
+                Text(employee.role).font(.system(size: 11.5)).foregroundStyle(.tertiary).lineLimit(1)
+                Spacer(minLength: 8)
+                if employee.queueLen > 0 {
+                    Text("\(employee.queueLen) en cola").font(.system(size: 11.5).monospacedDigit()).foregroundStyle(.tertiary)
+                }
+            }
+            .padding(.horizontal, 8).frame(height: 30)
+            .background(RoundedRectangle(cornerRadius: Chrome.rowRadius, style: .continuous).fill(hover ? Chrome.wash : .clear))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .padding(.horizontal, -8)
+    }
+}
+
+@available(macOS 26.0, *)
+struct ShellEmployeePanel: View {
+    @ObservedObject var shell: ShellController
+    let live: LiveState
+    let employeeID: String
+
+    var body: some View {
+        if let e = live.employee(employeeID) {
+            let items = live.queues[e.id]?.items ?? []
+            let working = e.state == "working"
+            VStack(alignment: .leading, spacing: 8) {
+                Text(e.name ?? e.role).font(.system(size: 17, weight: .semibold))
+                HStack(spacing: 5) {
+                    Image(systemName: working ? "play.circle" : "pause.circle").font(.system(size: 11, weight: .semibold))
+                    Text(working ? "Trabajando" : "Libre").font(.system(size: 12, weight: .medium))
+                }
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(Capsule().fill(Color.primary.opacity(0.06)))
+            }
+            Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 8) {
+                GridRow { Text("Proyecto").foregroundStyle(.tertiary); Text(e.project) }
+                GridRow { Text("Puesto").foregroundStyle(.tertiary); Text("\(e.role) · piso \(e.floor) · \(e.slot)") }
+                if working, let t = e.title ?? e.task { GridRow { Text("Ahora").foregroundStyle(.tertiary); Text(t).lineLimit(2) } }
+                if let h = e.threadID { GridRow { Text("Hilo").foregroundStyle(.tertiary); Text(h).monospaced().lineLimit(1).textSelection(.enabled) } }
+            }
+            .font(.system(size: 12.5))
+            VStack(alignment: .leading, spacing: 0) {
+                sectionTitle("Cola pendiente", count: items.count)
+                if items.isEmpty {
+                    ShellEmpty("Sin tareas en cola.")
+                } else {
+                    ForEach(Array(items.enumerated()), id: \.element.task) { i, it in
+                        ShellQueueRow(position: i + 1, item: it, cancel: shell.canCancel ? { shell.cancelQueued(employee: e.id, task: it.task) } : nil)
+                        if i < items.count - 1 { Rectangle().fill(Chrome.hairline).frame(height: 1) }
+                    }
+                }
+            }
+        } else {
+            ShellEmpty("Este empleado ya no está en el snapshot.", employeeID)
+        }
+    }
+}
+
+@available(macOS 26.0, *)
+struct ShellQueueRow: View {
+    let position: Int
+    let item: LiveState.QueueItem
+    let cancel: (() -> Void)?
+    var body: some View {
+        HStack(spacing: 9) {
+            Text("\(position)").font(.system(size: 12, weight: .semibold).monospacedDigit()).foregroundStyle(.secondary).frame(width: 18, alignment: .trailing)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(item.title ?? item.task).font(.system(size: 13)).lineLimit(1)
+                if let by = item.by ?? item.trigger { Text(by).font(.system(size: 11)).foregroundStyle(.tertiary).lineLimit(1) }
+            }
+            Spacer(minLength: 8)
+            if let cancel {
+                Button("Cancelar", action: cancel).controlSize(.small)
+            }
+        }
+        .padding(.vertical, 6)
     }
 }

@@ -8,12 +8,21 @@ import AppKit
 @MainActor
 public extension Snapshots {
     static func renderShell(to out: String) {
-        guard let state = CityOfficeFixture.state else { print("sin CityOfficeFixture"); return }
+        guard var state = CityOfficeFixture.state else { print("sin CityOfficeFixture"); return }
+        let k2 = URL(fileURLWithPath: #filePath).resolvingSymlinksInPath()
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("packages/api/fixtures/snapshot.queue5.json")
+        if let o = (try? String(contentsOf: k2, encoding: .utf8)).flatMap({ try? JSONValue(text: $0) })?.object { state.readEmployees(o) }
+        else { print("sin \(k2.path)") }
         let snap = SnapshotMapper.snapshot(state, now: FloorFixture.now)
         let size = CGSize(width: 1440, height: 900)
-        func shot(_ name: String, dark: Bool = true, notice: ShellNotice? = nil, _ edit: (inout ShellState) -> Void) {
+        func shot(_ name: String, dark: Bool = true, notice: ShellNotice? = nil, viewer: Bool? = nil, _ edit: (inout ShellState) -> Void) {
             let shell = ShellController()
             shell.snapshot = snap
+            if let viewer {
+                shell.viewer = viewer
+                shell.actions = AttentionActions(answer: { _, _ in nil }, open: { _ in }, cancel: { _, _ in nil })
+            }
             edit(&shell.state)
             let v = ShellSnapshotFrame(state: state, snapshot: snap, shell: shell, notice: notice)
             NSApp?.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
@@ -31,6 +40,8 @@ public extension Snapshots {
         shot("shell-hilo") { $0.select(.thread(id: "b", project: "awesome-gb")) }
         shot("shell-lotes") { $0.toggle(.batches) }
         shot("shell-piso") { $0.inspector = .target(.project("awesome-gb")) }
+        shot("shell-empleado-cola", viewer: false) { $0.select(.employee(id: "awesome-gb/0/backend/0", project: "awesome-gb")) }
+        shot("shell-empleado-visor", viewer: true) { $0.select(.employee(id: "awesome-gb/0/backend/0", project: "awesome-gb")) }
         shot("shell-atencion-light", dark: false) { $0.toggle(.attention) }
         shot("shell-paleta") { $0.openPalette() }
         shot("shell-paleta-busqueda") { $0.openPalette(); $0.query = "resp" }
@@ -84,7 +95,7 @@ struct ShellSnapshotFrame: View {
                 }
                 if shell.state.inspector != nil {
                     Divider()
-                    ShellInspectorView(shell: shell, snapshot: snapshot, machineRoom: MachineRoom(), flat: true)
+                    ShellInspectorView(shell: shell, snapshot: snapshot, machineRoom: MachineRoom(), live: state, flat: true)
                         .frame(width: 380)
                         .background(Color(nsColor: .windowBackgroundColor))
                 }

@@ -10,6 +10,7 @@ public final class ShellController: ObservableObject {
     @Published public private(set) var notice: ShellNotice?
 
     public var actions: AttentionActions?
+    public var viewer = false
     public var refresh: (() -> Void)?
     /// Snapshot actual (lo pone la vista; los menús lo usan para ⌘J y ⌘O).
     public var snapshot = MockSnapshot(projects: [], batches: [], graphs: [], events: [], machines: [])
@@ -63,6 +64,17 @@ public final class ShellController: ObservableObject {
                 let err = await settle(id)
                 say(err.map { "No se pudo cerrar: \($0)" } ?? "Hilo cerrado en T3 (settle)", error: err != nil)
             }
+        }
+    }
+
+    public var canCancel: Bool { !viewer && actions?.cancel != nil }
+
+    public func cancelQueued(employee: String, task: String) {
+        guard canCancel, let cancel = actions?.cancel else { say("No se puede cancelar desde aquí."); return }
+        say("Cancelando…")
+        Task { @MainActor in
+            let err = await cancel(employee, task)
+            say(err.map { "No se pudo cancelar: \($0)" } ?? "Tarea cancelada", error: err != nil)
         }
     }
 

@@ -1,0 +1,44 @@
+{
+  "employees": [
+    {
+      "id": "awesome-gb/0/backend/0",
+      "project": "awesome-gb",
+      "floor": 0,
+      "role": "backend",
+      "slot": 0,
+      "name": "Bruno",
+      "state": "working",
+      "thread_id": "th-a",
+      "task": "q:01MCC5Y3S0F8YH6PV8TEN7BD20",
+      "title": "Webhooks de pago · reintentos con backoff",
+      "since": "2027-01-15T09:20:00.000Z",
+      "queue_len": 5
+    },
+    {
+      "id": "awesome-gb/0/triage/0",
+      "project": "awesome-gb",
+      "floor": 0,
+      "role": "triage",
+      "slot": 0,
+      "name": "Tría",
+      "state": "idle",
+      "thread_id": null,
+      "task": null,
+      "title": null,
+      "since": "2027-01-15T09:18:00.000Z",
+      "queue_len": 0
+    }
+  ],
+  "queues": {
+    "awesome-gb/0/backend/0": {
+      "items": [
+        {"task": "q:01MCC5Y3S0F8YH6PV8TEN7BD21", "title": "Paginar /v1/invoices", "enqueued_at": "2027-01-15T09:21:00.000Z", "by": "triage-bot", "trigger": "desk.note"},
+        {"task": "q:01MCC5Y3S0F8YH6PV8TEN7BD22", "title": "Índice en orders.customer_id", "enqueued_at": "2027-01-15T09:23:00.000Z", "by": "facundo", "trigger": "manual"},
+        {"task": "q:01MCC5Y3S0F8YH6PV8TEN7BD23", "title": "Migrar cron de facturas a la cola", "enqueued_at": "2027-01-15T09:26:00.000Z", "by": "triage-bot", "trigger": "desk.note"},
+        {"task": "q:01MCC5Y3S0F8YH6PV8TEN7BD24", "title": "Quitar endpoint /v0/legacy-login", "enqueued_at": "2027-01-15T09:30:00.000Z", "by": "facundo", "trigger": "manual"},
+        {"task": "q:01MCC5Y3S0F8YH6PV8TEN7BD25", "title": "Rate limit por API key", "enqueued_at": "2027-01-15T09:34:00.000Z", "by": "triage-bot", "trigger": "issue.labeled"}
+      ],
+      "updated": "2027-01-15T09:34:00.000Z"
+    }
+  }
+}
