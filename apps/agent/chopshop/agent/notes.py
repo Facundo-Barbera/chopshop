@@ -139,6 +139,9 @@ def declared_desk(desk):
     if not p:
         return None
     from .. import profile  # noqa: PLC0415
+    from . import registry
+    if not registry.counts(p[0]):
+        return None
     try:
         prof = profile.load(p[0])
     except profile.ProfileError:
