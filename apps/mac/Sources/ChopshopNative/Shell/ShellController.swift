@@ -9,7 +9,7 @@ public final class ShellController: ObservableObject {
     /// Resultado de la última orden («Respondido: Sí», un error, «Copiado…»). Se borra solo a los pocos segundos.
     @Published public private(set) var notice: ShellNotice?
 
-    public var actions: AttentionActions?
+    @Published public var actions: AttentionActions?
     public var refresh: (() -> Void)?
     /// Snapshot actual (lo pone la vista; los menús lo usan para ⌘J y ⌘O).
     public var snapshot = MockSnapshot(projects: [], batches: [], graphs: [], events: [], machines: [])
@@ -50,6 +50,7 @@ public final class ShellController: ObservableObject {
             say("Copiado: \(cmd)")
         case .answer(let id, let project, let option):
             guard let actions, let t = task(id) else { say("No hay agente para responder."); return }
+            guard actions.canAct else { say("Modo visualizador: solo lectura.", error: true); return }
             state.select(.thread(id: id, project: project))
             say("Enviando «\(option)»…")
             Task { @MainActor in
@@ -57,7 +58,8 @@ public final class ShellController: ObservableObject {
                 say(err.map { "No se pudo responder: \($0)" } ?? "Respondido: \(option)", error: err != nil)
             }
         case .settle(let id, _):
-            guard let settle = actions?.settle else { say("No hay agente para settle."); return }
+            guard let actions, let settle = actions.settle else { say("No hay agente para settle."); return }
+            guard actions.canAct else { say("Modo visualizador: solo lectura.", error: true); return }
             say("Cerrando el hilo…")
             Task { @MainActor in
                 let err = await settle(id)

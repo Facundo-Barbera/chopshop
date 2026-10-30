@@ -446,7 +446,7 @@ struct ShellThreadPanel: View {
                     Button { shell.actions?.open(u) } label: { Label("Abrir en T3", systemImage: "arrow.up.forward.square") }
                         .controlSize(.small)
                 }
-                if (t.state == .done || t.state == .stuck), shell.actions?.settle != nil {
+                if (t.state == .done || t.state == .stuck), shell.actions?.settle != nil, shell.actions?.canAct == true {
                     Button("Cerrar hilo (settle)") {
                         shell.run(ShellCommand(id: "settle:\(t.id)", title: "", kind: .settle(threadID: t.id, project: project)))
                     }
