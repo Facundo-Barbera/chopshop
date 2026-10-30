@@ -107,6 +107,9 @@ interval = 2                              # s entre pasadas (sobres nuevos del b
 enabled = true                            # false = el hilo `office` no asigna escritorios
 interval = 2                              # s entre pasadas (task.state nuevos del bus)
 
+[agent.dispatcher]
+max_threads = 2
+
 # Roles permanentes de la oficina (office.roles.<rol>.wake del perfil; ver docs/agent-api.md «Roles permanentes»).
 # Despertar un rol LANZA un hilo de T3 (lote de una tarea por el motor): por eso está apagado por defecto.
 [agent.roles]
