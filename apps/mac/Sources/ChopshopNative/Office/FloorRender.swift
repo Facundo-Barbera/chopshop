@@ -133,6 +133,7 @@ struct FloorRenderer {
     let hovered: String?
     /// Prefijo de los símbolos de etiquetas (el mundo pinta varios pisos en un mismo lienzo).
     var prefix = ""
+    var embedded = false
 
     // MARK: paleta (la de IsoRenderer)
 
@@ -265,6 +266,7 @@ struct FloorRenderer {
     }
 
     func slabShadows(_ l: inout GraphicsContext) {
+        guard !embedded else { return }
         let s = layout.shell
         l.fill(castShadow(s.x0 - 2, s.y0 - 2, s.w + 4, s.d + 4, Iso.slabH + 14, z: 0), with: .color(.black.opacity(dark ? 0.55 : 0.20)))
     }
@@ -341,7 +343,7 @@ struct FloorRenderer {
         let solids = all.filter { !isOpen($0) }
         var ws: [Wall] = []
         for r in all where r.index != FloorLayout.coreIndex { ws += walls(r, solids: solids) }
-        return ws
+        return embedded ? ws.filter { !$0.facade } : ws
     }
 
     private func chunks(_ w: Wall) -> [Wall] {

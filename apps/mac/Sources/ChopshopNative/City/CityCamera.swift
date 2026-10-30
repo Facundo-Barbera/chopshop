@@ -68,9 +68,10 @@ public enum OfficeFraming {
 
 public enum CutawayFraming {
     public static let topMargin = 40.0, bottomMargin = 40.0, sideMargin = 70.0, maxScale = 12.0
+    public static let backWall = 0.55
 
     public static func bounds(_ b: CityBuilding, level: Int) -> IsoBounds {
-        let r = b.rect(level), z0 = b.floorZ(level), z1 = z0 + b.floorHeight(level)
+        let r = b.rect(level), z0 = b.floorZ(level), z1 = z0 + b.floorHeight(level) * backWall
         var o = IsoBounds.empty
         for (x, y) in [(r.x0, r.y0), (r.x1, r.y0), (r.x0, r.y1), (r.x1, r.y1)] { o.add(x, y, z0); o.add(x, y, z1) }
         return o
@@ -110,7 +111,7 @@ public struct OfficeEmbedding: Equatable, Sendable {
     public init(k: Double, ex: Double, ey: Double, ez: Double) { self.k = k; self.ex = ex; self.ey = ey; self.ez = ez }
 
     /// Margen dentro del piso (muro + un poco de suelo alrededor de las salas).
-    public static let inset = 0.32 * CityGeo.tile
+    public static let inset = 0.2 * CityGeo.tile
 
     /// `rooms` = rectángulo (x0, y0, x1, y1) que ocupan las salas de la oficina (mundo de la oficina).
     /// Las salas quedan centradas sobre la losa del piso `level` del edificio (con su retranqueo), lo más grandes que quepan.
