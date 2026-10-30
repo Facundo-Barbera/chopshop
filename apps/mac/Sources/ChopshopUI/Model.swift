@@ -91,6 +91,9 @@ final class AppModel: ObservableObject {
         return m
     }()
     @Published var skipLogin = false
+    private(set) lazy var workspaces = CityWorkspacesModel(
+        client: { [weak self] in self?.auth.session == nil ? nil : self?.auth.client },
+        canEdit: { [weak self] in self?.auth.session?.user.role == .owner })
     /// Stream en vivo (`GET /stream`) del agente principal (el primero configurado): alimenta la oficina nativa en macOS 26.
     /// En macOS < 26 no se abre: la UI web sigue con `GET /snapshot`.
     let live = LiveStore()
