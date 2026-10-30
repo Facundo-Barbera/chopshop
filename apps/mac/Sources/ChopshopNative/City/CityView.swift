@@ -326,7 +326,7 @@ public struct CityView: View {
             ForEach(model.floors) { f in
                 CityFloorPill(name: f.label, tint: lights.tint(f.id, t: t)).tag("cf:\(f.id)")
             }
-            ForEach(model.buildings) { b in
+            ForEach(model.buildings, id: \.index) { b in
                 CityCompanyTag(name: b.company, threads: b.floors.reduce(0) { $0 + $1.activeThreads.count }).tag("cb:\(b.company)")
             }
             // mismas etiquetas que la oficina que se monta al final (el piso acaba siendo esa vista)
