@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/backend/v2/idn/operator-recover.post.response.schema.json",
+  "title": "POST /v1/operator/recover → 201",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "invitation",
+    "link"
+  ],
+  "properties": {
+    "invitation": {
+      "$ref": "../common.schema.json#/$defs/invitation_brief"
+    },
+    "link": {
+      "$ref": "../common.schema.json#/$defs/invitation_link"
+    }
+  }
+}

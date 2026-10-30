@@ -1,0 +1,13 @@
+{
+  "v": 2,
+  "ts": "2026-10-30T14:02:11.250Z",
+  "type": "cmd.result",
+  "id": "01MCB2QQER6T8V0X2Z4B6D8G0J",
+  "re": "01MCB2QPDQ5S7V9X1Z3B5D7F9H",
+  "command_id": "b6e3a9f2-1c5d-4e87-9b4a-8f2c6e1d3a92",
+  "ok": true,
+  "status": 200,
+  "body": {
+    "ok": true
+  }
+}

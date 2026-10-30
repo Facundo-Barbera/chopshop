@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/backend/v2/wsp/workspaces.post.request.schema.json",
+  "title": "POST /v1/workspaces",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "name"
+  ],
+  "properties": {
+    "name": {
+      "$ref": "../common.schema.json#/$defs/workspace_name"
+    },
+    "slug": {
+      "$ref": "../common.schema.json#/$defs/slug"
+    },
+    "position": {
+      "$ref": "../common.schema.json#/$defs/count"
+    },
+    "style": {
+      "$ref": "../common.schema.json#/$defs/json_object"
+    }
+  }
+}
