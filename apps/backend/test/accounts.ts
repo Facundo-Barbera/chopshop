@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from "node:fs";
-import { hashPassword, sha256Hex } from "../src/crypto.ts";
+import { hashPassword, pepperFromEnv, sha256Hex } from "../src/crypto.ts";
 import { applyMigrations, now, one, run, uuid } from "../src/db.ts";
 import { type HttpEnv, type Principal, errorResponse, readCredential } from "../src/http.ts";
 import { createApi } from "../src/router.ts";
@@ -9,10 +9,13 @@ import { FakeD1Database } from "./d1.ts";
 
 export const API = "https://api.chopshop.novarix.online";
 export const OPERATOR_SECRET = "operador-secreto-de-prueba-0123456789";
+export const PEPPER_SECRET = "pepper-de-prueba-0123456789abcdefghij";
+export const PEPPER = pepperFromEnv({ PASSWORD_PEPPER: PEPPER_SECRET });
 
 export interface TestEnv extends HttpEnv {
   DB: D1Database;
   RELAY_OPERATOR_TOKEN?: string;
+  PASSWORD_PEPPER?: string;
 }
 
 const DIR = new URL("../migrations/", import.meta.url);
@@ -21,7 +24,7 @@ export async function freshEnv(): Promise<TestEnv> {
   const db = new FakeD1Database().asD1();
   const files = readdirSync(DIR).filter((f) => /^\d{4}_.+\.sql$/.test(f)).sort();
   await applyMigrations(db, files.map((f) => readFileSync(new URL(f, DIR), "utf8")));
-  return { DB: db, RELAY_OPERATOR_TOKEN: OPERATOR_SECRET };
+  return { DB: db, RELAY_OPERATOR_TOKEN: OPERATOR_SECRET, PASSWORD_PEPPER: PEPPER_SECRET };
 }
 
 async function resolvePrincipal(request: Request, env: TestEnv): Promise<Principal | Response> {
@@ -68,7 +71,7 @@ export async function addUser(
     id,
     email,
     email.toLowerCase(),
-    await hashPassword(opts.password ?? "contraseña-inicial-larga"),
+    await hashPassword(opts.password ?? "contraseña-inicial-larga", PEPPER),
     role,
     recovery,
     t,
