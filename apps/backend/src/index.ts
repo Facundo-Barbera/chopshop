@@ -1,7 +1,8 @@
 import { csrfHash, resolvePrincipal } from "./auth";
 import { json } from "./http";
-import type { MachinesEnv } from "./machines";
+import type { LiveEnv } from "./hub";
 import { authHandlers } from "./routes/auth";
+import { liveHandlers } from "./routes/live";
 import { machineHandlers } from "./routes/machines";
 import { projectHandlers } from "./routes/projects";
 import { sessionHandlers } from "./routes/sessions";
@@ -10,7 +11,9 @@ import { createApi, dispatchHost } from "./router";
 
 export const VERSION = "0.1.0";
 
-export interface Env extends MachinesEnv {}
+export { Hub } from "./hub";
+
+export interface Env extends LiveEnv {}
 
 const api = createApi<Env>(
   {
@@ -20,6 +23,7 @@ const api = createApi<Env>(
     ...machineHandlers,
     ...workspaceHandlers,
     ...projectHandlers,
+    ...liveHandlers,
   },
   { resolvePrincipal, csrfHash },
 );
