@@ -189,6 +189,8 @@ final class AgentClient {
     let credentials: CredentialStore
     let relayCredentials: CredentialStore
     let gate: ActGate
+    private let retryLock = NSLock()
+    private var retryAt: Date?
 
     init(spec: AgentSpec, transport: HTTPTransport = URLSessionTransport(),
          credentials: CredentialStore, relayCredentials: CredentialStore = InMemoryCredentialStore(), gate: ActGate = ActGate()) {
@@ -229,6 +231,9 @@ final class AgentClient {
     func request(_ method: String, _ path: String, body: [String: Any]? = nil) async -> Outcome {
         guard let url = makeURL(path) else { return .failure(.error, "URL del agente inválida: revisa agent_url en [app]") }
         guard method == "GET" || gate.canAct else { return .failure(.forbidden, Self.viewerMessage) }
+        if let wait = retryLock.withLock({ retryAt?.timeIntervalSinceNow }), wait > 0 {
+            return .failure(.error, (spec.isRelay ? "el relay" : "el agente") + " pide esperar \(Int(wait.rounded(.up))) s")
+        }
         var req = URLRequest(url: url)
         req.httpMethod = method
         req.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -242,10 +247,26 @@ final class AgentClient {
         }
         do {
             let (data, http) = try await transport.send(req)
-            return .response(code: http.statusCode, json: (try? JSONSerialization.jsonObject(with: data)) as? [String: Any])
+            let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            if http.statusCode == 429 || http.statusCode == 503, let s = Self.retryAfter(http, json), s > 0 {
+                retryLock.withLock { retryAt = Date().addingTimeInterval(TimeInterval(s)) }
+            }
+            return .response(code: http.statusCode, json: json)
         } catch {
             return .failure(.unreachable, Self.describe(error))
         }
+    }
+
+    static func retryAfter(_ http: HTTPURLResponse, _ json: [String: Any]?, now: Date = Date()) -> Int? {
+        if let v = http.value(forHTTPHeaderField: "Retry-After")?.trimmingCharacters(in: .whitespaces) {
+            if let s = Int(v) { return max(0, s) }
+            let f = DateFormatter()
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.timeZone = TimeZone(identifier: "GMT")
+            f.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+            if let d = f.date(from: v) { return max(0, Int(d.timeIntervalSince(now).rounded(.up))) }
+        }
+        return (json?["retry_after_s"] as? NSNumber)?.intValue
     }
 
     static let viewerMessage = "modo visualizador: este token del relay es de solo lectura"

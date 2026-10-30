@@ -259,7 +259,8 @@ capacity:
 ```
 
 - Ids: flex `<proyecto>/<piso>/_flex/<n>` (también en los pisos temporales), contratista `<proyecto>/<piso>/_out/<n>` (pisos
-  del contratista desde 0). Los roles nunca empiezan por `_`.
+  temporales desde 4 y del contratista desde 8, fijos aunque cambien los declarados; la app los rotula por orden: «En obra · 1»,
+  «Contratista · 1»). Los roles nunca empiezan por `_`.
 - `office` gana `capacity` (efectiva) y `outsourced: null | {label: "Contratista", floors: [...]}`; cada piso gana `temporary`
   (`true` en los pisos en obra, índices ≥ pisos declarados) y cada sala `flex` (`true` en `_flex`/`_out`). Los pisos declarados
   llevan al final una sala `_flex`; un piso temporal o del contratista lleva solo una sala elástica de N escritorios

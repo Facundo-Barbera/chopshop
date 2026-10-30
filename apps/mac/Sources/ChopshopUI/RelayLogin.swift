@@ -25,7 +25,8 @@ enum RelayLogin {
                 case 200: return json.map { ($0, nil) } ?? (nil, .failed("El relay no respondió JSON."))
                 case 401: return (nil, .unauthorized)
                 case 403: return (nil, .forbidden)
-                case 429: return (nil, .rateLimited(retryAfter: http.value(forHTTPHeaderField: "Retry-After").flatMap { Int($0) }))
+                case 429: return (nil, .rateLimited(retryAfter: AgentClient.retryAfter(http, json)))
+                case 503: return (nil, .unavailable(retryAfter: AgentClient.retryAfter(http, json)))
                 default: return (nil, .failed("El relay respondió HTTP \(http.statusCode)."))
                 }
             } catch {
