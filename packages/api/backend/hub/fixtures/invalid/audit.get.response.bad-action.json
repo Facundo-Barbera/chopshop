@@ -1,0 +1,19 @@
+{
+  "entries": [
+    {
+      "id": "7e4b1d8a-2f6c-4b39-a8d1-5c3f9e2b7a14",
+      "at": "2026-10-30T12:05:00.000Z",
+      "actor_kind": "user",
+      "actor_user_id": "0b6f3c1e-5d2a-4c7e-9a41-6f2d8e3b7c10",
+      "session_id": "4b7e1a9c-3d6f-4a28-8e5b-2c9f6a1d7e37",
+      "machine_id": "c3f8a2d1-6e4b-4a97-b2c5-8d1e7f3a9b52",
+      "action": "machine.deleted",
+      "target_kind": "machine",
+      "target_id": "c3f8a2d1-6e4b-4a97-b2c5-8d1e7f3a9b52",
+      "command": null,
+      "result": "ok",
+      "status": 200,
+      "detail": {}
+    }
+  ]
+}

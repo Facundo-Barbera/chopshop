@@ -1,0 +1,17 @@
+{
+  "workspace": {
+    "id": "a41d6e8b-7c2f-4b39-9e05-3f8a1c7d2e46",
+    "name": "Personal",
+    "slug": "personal",
+    "position": 1,
+    "style": {},
+    "rev": 1,
+    "project_count": 0,
+    "machine_ids": [
+      "c3f8a2d1-6e4b-4a97-b2c5-8d1e7f3a9b52"
+    ],
+    "watcher_count": 0,
+    "created_at": "2026-10-30T12:00:00.000Z",
+    "updated_at": "2026-10-30T12:00:00.000Z"
+  }
+}

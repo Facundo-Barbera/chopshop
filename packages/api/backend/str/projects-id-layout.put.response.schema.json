@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/backend/v2/str/projects-id-layout.put.response.schema.json",
+  "title": "PUT /v1/projects/{id}/layout → 200",
+  "$ref": "../common.schema.json#/$defs/project_layout_doc"
+}

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/backend/v2/idn/auth-recovery-code.post.response.schema.json",
+  "title": "POST /v1/auth/recovery-code → 200",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "recovery_code"
+  ],
+  "properties": {
+    "recovery_code": {
+      "$ref": "../common.schema.json#/$defs/recovery_code"
+    }
+  }
+}
