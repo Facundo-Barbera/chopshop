@@ -144,14 +144,16 @@ que no: F7). Por el relay (A2) todos salen con `subject.id` = empleado o tarea, 
   `GET /whoami` para M5 y `GET /state` (o `GET /stream`) para M2, y unificar la convención de URL con el agente (base o
   endpoint).
 - **BUG-2** (conocido, lo cubre otra tarea) M6 `AgentRole` = `agent | viewer`; `GET /whoami` devuelve `role: machine | viewer`.
-- **BUG-3** Las respuestas del visor no tienen contrato: `GET /whoami` (`{role, machine_id}`), `GET /state`
+- **BUG-3** *(resuelto en A6: schemas `whoami-http`, `state`, `stream-hello` y sección «Visor (HTTP)» de K1; `online`/`stale`
+  pasa a BUG-10)* Las respuestas del visor no tienen contrato: `GET /whoami` (`{role, machine_id}`), `GET /state`
   (`{v, type: "state", id, ts, head, machines[{machine_id, seq, snapshot_age_s, expires_at}], snapshots[]}`) y el SSE de
   `/stream` (`retry`, `event: hello` con `{v, type: "hello", ts, head, resume}`, que se llama como el `hello` del agente pero
   tiene otra forma y no lleva `id`; luego `event: snapshot|event` con `id: <época>-<n>`; latido `: ping`). Tampoco hay forma de
   ver `online`/`stale` de cada máquina desde un visor (solo `whoami.result`, que es del agente). *Tarea chica (K1b)*:
   `whoami-http`, `state` y `stream-hello` `.schema.json` con sus ejemplos, una sección «Visor (HTTP)» en K1 y `online`/`stale`
   en `state.machines[]`. Conviene hacerla antes que M2/M5, que van a decodificar esto.
-- **BUG-4** K2 no cruza el relay: el `snapshot` de A2 no tiene parte de empleados ni colas (su parte `queue` son los hilos
+- **BUG-4** *(resuelto en A6: parte `employees` y campos K2 en el `body`)* K2 no cruza el relay: el `snapshot` de A2 no
+  tiene parte de empleados ni colas (su parte `queue` son los hilos
   T3 en fase `queued`, no la cola de K2), y la lista blanca del cuerpo (`relaysync.BODY_KEYS`) descarta `employee`, `task`,
   `thread_id`, `name`, `items`, `position`, `queue_len`, `since`, `by` y `trigger`. Un visor por relay no puede pintar empleados
   ni colas. *Tarea chica (A5)*: parte opaca `employees` (`employees[]` sin `thread_id`, o con `key(thread_id)`, más `queues{}`)
@@ -170,3 +172,8 @@ que no: F7). Por el relay (A2) todos salen con `subject.id` = empleado o tarea, 
 - **BUG-9** (decisión; **resuelto en R9**: se retiró el alias, el relay responde 404 a `POST /pair`) El alias `POST /pair`
   del relay comparte nombre con `POST /pair` de la API del agente (`cs1_`, `device_id`). Un cliente que apunte al host equivocado recibe `400 campos desconocidos` en vez de un error claro. *Sugerencia*:
   retirar el alias (no lo usa nadie) o documentar la diferencia en los dos contratos.
+- **BUG-10** Un visor no ve `online`/`stale` por máquina: `GET /state` solo lista las máquinas con snapshot vivo
+  (`listSnapshots` purga los caducados) y el `ViewerHub` no sabe qué agentes tienen el WebSocket abierto. Añadirlo cambia el
+  Worker. *Tarea chica (R)*: que `machineInfo` reciba el estado de conexión de `AgentSockets` (`online`) y que `/state` liste también
+  las máquinas con token de agente de la cuenta sin snapshot vivo (`stale: true`, `seq`/`expires_at` `null`); luego, añadir los
+  dos campos a `state.schema.json` y a «Visor (HTTP)» de K1.
