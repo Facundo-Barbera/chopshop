@@ -1,7 +1,7 @@
 import { isConstraintError, now as isoNow } from "./db";
 import { ulid } from "./http";
 import { LOCAL_MACHINE_ID_RE, type MachineCtx } from "./machines";
-import { structureRev } from "./structure";
+import { structureRev, syncDocFor } from "./structure";
 
 export const MAX_FRAME_BYTES = 1_048_576;
 export const PING_INTERVAL_S = 30;
@@ -23,6 +23,9 @@ const VERSION_RE = /^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]{1,32})?$/;
 const SNAPSHOT_KEYS: ReadonlySet<string> = new Set([
   "v", "type", "id", "ts", "machine_id", "workspace_id", "seq", "ttl_s", "agent_version", "health", "counts", "projects", "parts",
 ]);
+const SYNC_ACK_KEYS: ReadonlySet<string> = new Set(["v", "type", "id", "ts", "re", "rev", "applied", "errors"]);
+const MAX_SYNC_ERRORS = 256;
+const MAX_SYNC_MESSAGE = 512;
 const EVENT_KEYS: ReadonlySet<string> = new Set([
   "v", "type", "id", "ts", "machine_id", "workspace_id", "event_id", "seq", "event_ts", "project", "event_type", "severity", "needs", "subject", "body",
 ]);
@@ -68,6 +71,25 @@ export interface CachedMachine {
   revoked: boolean;
 }
 
+export interface SyncError {
+  project: string;
+  message: string;
+}
+
+export interface SyncStatus {
+  machineId: string;
+  rev: number;
+  errors: SyncError[];
+  ackedAt: number;
+}
+
+type SyncStatusRow = {
+  machine_id: string;
+  rev: number;
+  errors: string;
+  acked_at: number;
+};
+
 type SnapshotRow = {
   machine_id: string;
   workspace_key: string;
@@ -106,6 +128,12 @@ const MIGRATIONS: readonly string[] = [
      revoked INTEGER NOT NULL DEFAULT 0,
      updated_at INTEGER NOT NULL
    );`,
+  `CREATE TABLE sync_status (
+     machine_id TEXT PRIMARY KEY,
+     rev INTEGER NOT NULL,
+     errors TEXT NOT NULL DEFAULT '[]',
+     acked_at INTEGER NOT NULL
+   );`,
 ];
 
 export function clampTtl(ttlS: number | null | undefined): number {
@@ -123,6 +151,10 @@ function toSnapshot(r: SnapshotRow): StoredSnapshot {
     receivedAt: r.received_at,
     expiresAt: r.expires_at,
   };
+}
+
+function toSyncStatus(r: SyncStatusRow): SyncStatus {
+  return { machineId: r.machine_id, rev: r.rev, errors: JSON.parse(r.errors) as SyncError[], ackedAt: r.acked_at };
 }
 
 function toCached(r: CacheRow): CachedMachine {
@@ -200,6 +232,31 @@ export class LiveDb {
     return row?.at ?? null;
   }
 
+  putSyncStatus(machineId: string, rev: number, errors: SyncError[], now: number = Date.now()): boolean {
+    return (
+      this.sql.exec(
+        `INSERT INTO sync_status (machine_id, rev, errors, acked_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT (machine_id) DO UPDATE SET rev = excluded.rev, errors = excluded.errors, acked_at = excluded.acked_at
+         WHERE excluded.rev >= sync_status.rev`,
+        machineId,
+        rev,
+        JSON.stringify(errors),
+        now,
+      ).rowsWritten > 0
+    );
+  }
+
+  listSyncStatus(): SyncStatus[] {
+    return this.sql
+      .exec<SyncStatusRow>("SELECT machine_id, rev, errors, acked_at FROM sync_status ORDER BY machine_id")
+      .toArray()
+      .map(toSyncStatus);
+  }
+
+  deleteSyncStatus(machineId: string): void {
+    this.sql.exec("DELETE FROM sync_status WHERE machine_id = ?", machineId);
+  }
+
   cached(machineId: string): CachedMachine | null {
     const row = this.sql
       .exec<CacheRow>("SELECT machine_id, name, workspace_ids, paused, revoked FROM machine_cache WHERE machine_id = ?", machineId)
@@ -259,6 +316,7 @@ interface AgentAttachment {
   eventWindowStart: number;
   eventCount: number;
   touchedAt: number;
+  syncRev: number | null;
 }
 
 type Frame = Record<string, unknown> & { type: string; id: string };
@@ -373,6 +431,7 @@ export class AgentSockets {
       eventWindowStart: 0,
       eventCount: 0,
       touchedAt: 0,
+      syncRev: null,
     };
     server.serializeAttachment(attachment);
     await this.scheduleAlarm(now + HELLO_TIMEOUT_MS);
@@ -426,6 +485,9 @@ export class AgentSockets {
       case "event":
         this.event(ws, att, frame, message, now);
         break;
+      case "sync.ack":
+        this.syncAck(ws, att, frame, now);
+        break;
       default:
         send(ws, errorFrame("bad_request", "tipo de mensaje desconocido", { re: frame.id }));
     }
@@ -439,6 +501,18 @@ export class AgentSockets {
       if (att?.sessionId != null) out.add(att.machineId);
     }
     return out;
+  }
+
+  async structureChanged(machineIds: string[] | "all"): Promise<number> {
+    let sent = 0;
+    for (const ws of this.ctx.getWebSockets(AGENT_TAG)) {
+      const att = ws.deserializeAttachment() as AgentAttachment | null;
+      if (!att || att.sessionId === null) continue;
+      if (machineIds !== "all" && !machineIds.includes(att.machineId)) continue;
+      if (await this.pushSync(ws, att, false)) sent++;
+      ws.serializeAttachment(att);
+    }
+    return sent;
   }
 
   disconnect(machineId: string, code: WsErrorCode, message: string): number {
@@ -567,11 +641,60 @@ export class AgentSockets {
       machine: { id: att.machineId, name: att.name },
       rev: this.db === null ? 0 : await structureRev(this.db),
     });
+    await this.pushSync(ws, att, true);
     if (first) {
       ws.serializeAttachment(att);
       this.sink.presence(att.machineId);
     }
     return true;
+  }
+
+  private async pushSync(ws: WebSocket, att: AgentAttachment, force: boolean): Promise<boolean> {
+    if (this.db === null) return false;
+    let doc;
+    try {
+      doc = await syncDocFor(this.db, att.machineId);
+    } catch (err) {
+      console.error(JSON.stringify({ code: "hub_sync", error: err instanceof Error ? err.name : "unknown" }));
+      return false;
+    }
+    if (att.syncRev !== null && (doc.rev < att.syncRev || (!force && doc.rev === att.syncRev))) return false;
+    att.syncRev = doc.rev;
+    send(ws, { ...header("sync"), ...doc });
+    return true;
+  }
+
+  private syncAck(ws: WebSocket, att: AgentAttachment, frame: Frame, now: number): void {
+    const reject = (message: string) => send(ws, errorFrame("bad_request", message, { re: frame.id }));
+    if (att.sessionId === null) return reject("primero hace falta el hello");
+    if (!Object.keys(frame).every((k) => SYNC_ACK_KEYS.has(k))) return reject("campo fuera de la lista blanca");
+    if (typeof frame.re !== "string" || !MSG_ID_RE.test(frame.re)) return reject("re debe ser un id de mensaje");
+    if (!isCount(frame.rev)) return reject("rev debe ser un entero no negativo");
+    const applied = frame.applied;
+    if (!Array.isArray(applied) || applied.length > MAX_SYNC_ERRORS || !applied.every((n) => typeof n === "string" && NAME_RE.test(n))) {
+      return reject("applied no válido");
+    }
+    const errors = frame.errors;
+    if (
+      !Array.isArray(errors) ||
+      errors.length > MAX_SYNC_ERRORS ||
+      !errors.every((e) => {
+        if (typeof e !== "object" || e === null || Array.isArray(e)) return false;
+        const { project, message, ...rest } = e as Record<string, unknown>;
+        return (
+          Object.keys(rest).length === 0 &&
+          typeof project === "string" &&
+          NAME_RE.test(project) &&
+          typeof message === "string" &&
+          message.length >= 1 &&
+          message.length <= MAX_SYNC_MESSAGE
+        );
+      })
+    ) {
+      return reject("errors no válido");
+    }
+    const clean = (errors as SyncError[]).map((e) => ({ project: e.project, message: e.message }));
+    this.live.putSyncStatus(att.machineId, frame.rev, clean, now);
   }
 
   private ready(ws: WebSocket, att: AgentAttachment, frame: Frame, keys: ReadonlySet<string>): string | null | false {
