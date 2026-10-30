@@ -5,7 +5,7 @@ Toma el bundle estático de la UI (apps/mac/Resources/web), genera un HTML en un
 temporal que emula el puente nativo (window.webkit.messageHandlers.chopshop) alimentándolo con
 el fixture (lo que devolverían los agentes en GET /snapshot), y lo captura con Chromium headless vía file:// (playwright, solo como librería).
 
-    python3 tools/screenshots/shoot.py [--out assets] [--only overview,graph] [--build]
+    python3 tools/screenshots/shoot.py [--out assets] [--only overview,events] [--build]
 
 Requisitos: `pip install playwright && playwright install chromium` y alguna fuente del sistema.
 """
@@ -29,14 +29,13 @@ SCENES = {
     "machines": "machines:host-b",
     "project": "project:proyecto-demo",
     "questions": "questions",
-    "graph": "graph",
     "reactions": "reactions",
     "events": "events",
     "batches": "batches",
 }
 
-# Escenas que necesitan otro tamaño (el grafo es ancho).
-SIZES = {"graph": "1440x800"}
+# Escenas que necesitan otro tamaño.
+SIZES = {}
 
 # Fondo que en la app pone el shell SwiftUI (la web es transparente sobre vidrio nativo).
 BACKDROP = """<style>

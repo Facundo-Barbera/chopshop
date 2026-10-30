@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Vista de proyecto: una frase de estado, el grafo vivo como protagonista, "te necesita" y una lista compacta.
+/// Vista de proyecto: una frase de estado, la oficina viva como protagonista, "te necesita" y una lista compacta.
 /// Se ve como app nativa de macOS: grises del sistema, tipografía SF, color solo para atención.
 @available(macOS 26.0, *)
 public struct ProjectView: View {
@@ -30,37 +30,6 @@ public struct ProjectView: View {
     }
 }
 
-@available(macOS 26.0, *)
-public enum GraphMode: String, CaseIterable, Identifiable {
-    case office = "Oficina", graph = "Grafo"
-    public var id: String { rawValue }
-}
-
-/// Selector Oficina / Grafo. En capturas headless (ImageRenderer no dibuja controles de AppKit) se pinta a mano.
-@available(macOS 26.0, *)
-struct ModeSwitch: View {
-    @Binding var mode: GraphMode
-    let flat: Bool
-    @Environment(\.colorScheme) private var scheme
-    var body: some View {
-        if flat {
-            HStack(spacing: 0) {
-                ForEach(GraphMode.allCases) { m in
-                    Text(m.rawValue).font(.system(size: 11.5, weight: m == mode ? .semibold : .regular))
-                        .padding(.horizontal, 11).padding(.vertical, 3)
-                        .background { if m == mode { RoundedRectangle(cornerRadius: 5, style: .continuous).fill(scheme == .dark ? Color.white.opacity(0.16) : Color.white.opacity(0.95)).shadow(color: .black.opacity(0.15), radius: 1, y: 0.5) } }
-                        .foregroundStyle(m == mode ? Color.primary : Color.secondary)
-                }
-            }
-            .padding(2)
-            .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.primary.opacity(0.08)))
-        } else {
-            Picker("Vista", selection: $mode) { ForEach(GraphMode.allCases) { Text($0.rawValue).tag($0) } }
-                .pickerStyle(.segmented).labelsHidden().fixedSize()
-        }
-    }
-}
-
 /// Contenido sin ScrollView ni toolbar (lo reutilizan las capturas).
 @available(macOS 26.0, *)
 public struct ProjectContent: View {
@@ -68,10 +37,8 @@ public struct ProjectContent: View {
     let snapshot: MockSnapshot
     var frozenTime: Double?
     var selectedNode: String?
-    @State private var mode: GraphMode
-    public init(project: String, snapshot: MockSnapshot, frozenTime: Double?, selectedNode: String? = nil, mode: GraphMode = .office) {
+    public init(project: String, snapshot: MockSnapshot, frozenTime: Double?, selectedNode: String? = nil) {
         self.project = project; self.snapshot = snapshot; self.frozenTime = frozenTime; self.selectedNode = selectedNode
-        _mode = State(initialValue: mode)
     }
 
     private var summary: ProjectSummary { snapshot.summary(of: project) }
@@ -128,26 +95,17 @@ public struct ProjectContent: View {
                     Text(g.goal).font(.callout.weight(.medium))
                     Spacer()
                     Text("\(g.threads) de \(g.threadBudget) hilos").font(.caption).foregroundStyle(.secondary).padding(.trailing, 6)
-                    ModeSwitch(mode: $mode, flat: frozenTime != nil)
                 }
                 .padding(.horizontal, 16).padding(.top, 10)
-                Group {
-                    switch mode {
-                    case .office:
-                        IsoOfficeView(graph: g, tasks: taskByID, hostOf: hostOf, frozenTime: frozenTime, selected: selectedNode, flatChrome: frozenTime != nil)
-                            .frame(height: g.nodes.count > 8 ? 600 : 460)
-                    case .graph:
-                        GraphView(graph: g, tasks: taskByID, hostOf: hostOf, frozenTime: frozenTime, selected: selectedNode, flatChrome: frozenTime != nil)
-                            .frame(height: g.nodes.count > 8 ? 560 : 360)
-                    }
-                }
+                IsoOfficeView(graph: g, tasks: taskByID, hostOf: hostOf, frozenTime: frozenTime, selected: selectedNode, flatChrome: frozenTime != nil)
+                    .frame(height: g.nodes.count > 8 ? 600 : 460)
                 HStack {
                     legend
-                    Text(frozenTime == nil ? (mode == .office ? "clic en un escritorio · arrastra para mover la vista" : "arrastra para orbitar · clic en un nodo") : "").font(.caption).foregroundStyle(.tertiary)
+                    Text(frozenTime == nil ? "clic en un escritorio · arrastra para mover la vista" : "").font(.caption).foregroundStyle(.tertiary)
                 }
                 .padding(.horizontal, 16).padding(.bottom, 11)
             }
-            .background { if mode == .office { IsoBackdrop() } else { GraphBackdrop() } }
+            .background(IsoBackdrop())
             .clipShape(shape)
             .overlay(shape.strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5))
         }

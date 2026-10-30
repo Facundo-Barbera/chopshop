@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Proyecto en vivo a pantalla completa: el mundo de la oficina (o el grafo) ocupa todo el área y escala con la ventana; a la
+/// Proyecto en vivo a pantalla completa: el mundo de la oficina ocupa todo el área y escala con la ventana; a la
 /// derecha, un panel lateral con el detalle del hilo elegido (o del armario o la consola de una sala de máquinas) o, sin elección,
 /// lo que te necesita y la lista de hilos. La oficina
 /// no lleva nada encima: el detalle vive aquí.
@@ -10,13 +10,11 @@ public struct ProjectWorkspace: View {
     let snapshot: MockSnapshot
     let state: LiveState
     var frozenNow: Date?
-    @Binding var mode: GraphMode
     @State private var selected: String?
 
-    public init(project: String, snapshot: MockSnapshot, state: LiveState, mode: Binding<GraphMode>, frozenNow: Date? = nil,
-                selected: String? = nil) {
+    public init(project: String, snapshot: MockSnapshot, state: LiveState, frozenNow: Date? = nil, selected: String? = nil) {
         self.project = project; self.snapshot = snapshot; self.state = state; self.frozenNow = frozenNow
-        _mode = mode; _selected = State(initialValue: selected)
+        _selected = State(initialValue: selected)
     }
 
     public var body: some View {
@@ -42,22 +40,11 @@ public struct ProjectWorkspace: View {
     }
 
     @ViewBuilder private var stage: some View {
-        switch mode {
-        case .office:
-            if frozenNow != nil { office(now: frozenNow) }
-            else {
-                // los pisos se rehacen cada `refresh` s aunque no llegue nada del stream: lo que la semivida ya desvaneció sale
-                // del mundo (sin dejar el hueco del invitado ni el escritorio «ocupado» por alguien invisible)
-                TimelineView(.periodic(from: .now, by: Self.refresh)) { _ in office(now: nil) }
-            }
-        case .graph:
-            if let g = snapshot.graph(for: project) {
-                let tasks = Dictionary(snapshot.tasks(of: project).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-                GraphView(graph: g, tasks: tasks, frozenTime: frozenNow.map { _ in 2 }, flatChrome: frozenNow != nil)
-                    .background(GraphBackdrop())
-            } else {
-                Text("Sin grafo todavía").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
+        if frozenNow != nil { office(now: frozenNow) }
+        else {
+            // los pisos se rehacen cada `refresh` s aunque no llegue nada del stream: lo que la semivida ya desvaneció sale
+            // del mundo (sin dejar el hueco del invitado ni el escritorio «ocupado» por alguien invisible)
+            TimelineView(.periodic(from: .now, by: Self.refresh)) { _ in office(now: nil) }
         }
     }
 }
@@ -101,7 +88,9 @@ struct ThreadPanel: View {
                         MachineRoomDetail(room: m.room, title: m.title, unit: FloorLayout.machinePart(tid)?.unit, frozenNow: now,
                                           width: width)
                     } else {
-                        ThreadDetail(threadID: tid, task: tasks.first { $0.id == tid }, host: hostOf[tid], project: project, state: state,
+                        // el mundo elige por hilo de T3 (`MockTask.threadID`); el snapshot y los hosts van por tarea
+                        let task = tasks.first { $0.threadID == tid || $0.id == tid }
+                        ThreadDetail(threadID: tid, task: task, host: hostOf[task?.id ?? tid], project: project, state: state,
                                      now: now ?? Date())
                     }
                 } else {
@@ -138,7 +127,7 @@ struct ThreadPanel: View {
                 Label("Nada te necesita ahora.", systemImage: "checkmark.circle").font(.callout).foregroundStyle(.secondary).padding(.vertical, 6)
             } else {
                 ForEach(items) { t in
-                    AttentionRow(task: t, host: hostOf[t.id]).contentShape(Rectangle()).onTapGesture { selected = t.id }
+                    AttentionRow(task: t, host: hostOf[t.id]).contentShape(Rectangle()).onTapGesture { selected = t.threadID ?? t.id }
                     if t.id != items.last?.id { Divider() }
                 }
             }
@@ -156,7 +145,7 @@ struct ThreadPanel: View {
 
     private func row(_ t: MockTask) -> some View {
         CompactTaskRow(task: t, host: hostOf[t.id]).contentShape(Rectangle())
-            .onTapGesture { withAnimation(.snappy(duration: 0.2)) { selected = t.id } }
+            .onTapGesture { withAnimation(.snappy(duration: 0.2)) { selected = t.threadID ?? t.id } }
     }
 }
 
