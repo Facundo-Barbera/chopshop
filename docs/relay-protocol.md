@@ -91,9 +91,14 @@ mucho cada 5 s) y, aunque no cambie, al menos cada `ttl_s / 2`.
   `additionalProperties: false`.
 - **`parts`**: sobres opacos `{name, media_type, enc, bytes, sha256, data}`. `data` es base64 de un JSON (`media_type`
   `application/json`); `bytes` y `sha256` son del contenido decodificado (el visor descarta la parte si no coinciden).
-  `name` ∈ `state` (hilos y atención), `queue` (cola de tareas, ver «Puntos de contacto con #1»), `events` (últimos eventos),
-  `office` (pisos y escritorios). `enc`: `none` en v1; `e2e-v1` queda reservado para cifrado extremo a extremo entre agente y
+  `name` ∈ `state` (hilos y atención), `queue` (hilos T3 en fase `queued`, ver «Puntos de contacto con #1»), `events`
+  (últimos eventos), `office` (pisos y escritorios), `employees` (empleados y sus colas de K2, ver abajo). `enc`: `none` en v1; `e2e-v1` queda reservado para cifrado extremo a extremo entre agente y
   visor (el relay no cambia: ya hoy no decodifica `data`).
+- **Parte `employees`**: `{employees[], queues{}}` con la forma de `GET /snapshot` de la API del agente
+  (`docs/employees.md`, `packages/api/fixtures/schemas/snapshot.schema.json`), filtrada por la lista blanca: `thread_id` sale
+  como `key` opaca (la misma que `occupant_key` de `office` y `key` de `state`), `location` siempre presente, y `title`, `name`,
+  `by` o `trigger` pueden llegar `null` si el filtro los vacía. Cada cola, máx. 100 tareas. Sin perfiles con escritorios
+  permanentes la parte va con listas vacías; un agente sin K2 no la manda.
 - **TTL**: el relay guarda **solo el último snapshot por máquina**, durante `ttl_s` (el agente propone; el relay lo recorta a
   30–900 s y por defecto usa 120). Pasado el TTL sin otro snapshot, la máquina sale como `stale: true` en `whoami.result` y el
   snapshot se borra; al reconectar un visor recibe el último snapshot vivo de cada máquina de su cuenta. No hay historial.
@@ -126,6 +131,33 @@ agente, solo la suya). Nunca devuelve el token ni su hash.
 `close: true` avisa que el relay cierra a continuación (código de cierre `4000 + estado HTTP`, p. ej. 4401, 4403). `message` es
 legible y nunca incluye tokens, códigos, hashes ni contenido de partes opacas.
 
+## Visor (HTTP)
+
+Un visor (token `viewer`) no abre WebSocket: lee por HTTP. Ninguna de estas respuestas lleva tokens, hashes ni IPs.
+
+| ruta | respuesta | schema / fixture |
+|---|---|---|
+| `GET /whoami` | `{role, machine_id}`: `role` ∈ `viewer` (con `machine_id: null`) \| `machine` (con el `machine_id` atado al token de agente). Es el rol de «Rutas por rol», no el `scope` de `whoami.result` | `whoami-http` |
+| `GET /state` | `{v, type: "state", id, ts, head, machines[], snapshots[]}` | `state` |
+| `GET /stream` | SSE (`text/event-stream`), ver abajo | `stream-hello` (primer frame) |
+
+- **`GET /state`**: `machines[]` = `{machine_id, seq, snapshot_age_s, expires_at}` de cada máquina de la cuenta con snapshot
+  vivo (dentro de su TTL), ordenadas por `machine_id`; `snapshots[]` = esos snapshots tal como los mandó el agente (schema
+  `snapshot`). `head` es la posición actual del stream (`<época>-<n>`, ver abajo): un visor puede pedir `GET /state` y luego abrir
+  `GET /stream` con `Last-Event-ID: <head>` para seguir sin huecos. Una máquina con el snapshot caducado no aparece. `/state` no
+  dice si una máquina está conectada (`online`) ni distingue «caducada» de «nunca vista» (BUG-10 en `docs/plans/contract-audit.md`).
+- **`GET /stream`**: SSE de la cuenta del token. Empieza con `retry: 3000` y un `event: hello` cuyo `data` es
+  `{v, type: "hello", ts, head, resume}` (schema `stream-hello`; se llama como el `hello` del agente pero es otro mensaje y no
+  lleva `id`). Después:
+  - `resume: "events"` si el visor mandó `Last-Event-ID` (o `?after=`) de esta misma época y el relay aún retiene lo que siguió
+    (máx. 512 frames o 5 min): se reenvían esos frames con su `id`.
+  - `resume: "snapshot"` en otro caso: un `event: snapshot` por máquina con snapshot vivo, todos con `id: <head>`.
+  - En vivo: `event: snapshot` o `event: event`, con `id: <época>-<n>` y `data` = el frame del agente tal cual (schemas
+    `snapshot` y `event`).
+  - Latido `: ping` (comentario SSE) cada 15 s. La época (8 símbolos Crockford) cambia cuando se reinicia el relay; un `id` de
+    otra época cuenta como desconocido y da `resume: "snapshot"`.
+  - Máx. 64 visores por relay; más → 429 `rate_limited` con `Retry-After`.
+
 ## Lista blanca: lo que sale de la máquina
 
 Regla: **todo lo que no está en esta lista se descarta en el agente antes de serializar** (deny por defecto), tanto en la
@@ -140,8 +172,9 @@ las partes pueden acabar en cualquier visor de la cuenta.
 | parte `queue` | `items[].{key, project, role, title, phase, position}` |
 | parte `events` | hasta 80 eventos con la forma de `event` (cabecera + `body` filtrado como abajo) |
 | parte `office` | `floors[].{name, desks[].{id, role, zone, occupant_key}}`, `company` |
+| parte `employees` | `employees[].{id, project, floor, role, slot, name, state, location, thread_id, task, title, since, queue_len}`; `queues.<id empleado>.{items[].{task, title, enqueued_at, by, trigger}, updated}` (`thread_id` = `key`) |
 | `event` (visible) | `machine_id`, `event_id`, `seq`, `event_ts`, `project`, `event_type`, `severity`, `needs`, `subject.{kind, id}` |
-| parte `body` de `event` | `phase`, `attention`, `settled`, `title`, `role`, `summary` (resumen final, máx. 280 caracteres), `state`, `light`, `status`, `conclusion`, `count`, `desk`, `reason`, `zone` |
+| parte `body` de `event` | `phase`, `attention`, `settled`, `title`, `role`, `summary` (resumen final, máx. 280 caracteres), `state`, `light`, `status`, `conclusion`, `count`, `desk`, `reason`, `zone`; de K2: `employee`, `task`, `thread_id` (como `key`), `name`, `items[].{task, title, enqueued_at, by, trigger}`, `position`, `queue_len`, `since`, `by`, `trigger` |
 
 `key` es un identificador opaco y estable por máquina (no el `thread_id` de T3 ni su URL). `title` y `summary` se truncan a
 120 y 280 caracteres. Nunca salen, aunque un tipo nuevo los traiga:
@@ -183,7 +216,9 @@ Nunca se registran ni se devuelven códigos, tokens ni hashes (salvo el código 
 - **`hello` lleva proyectos y roles**: la lista `projects[].roles` es la de `office.roles` de cada perfil; el relay solo la usa
   para mostrar qué hay en cada máquina. Cambiar los roles de un proyecto = el agente reconecta o manda otro `hello` en la misma
   conexión (el relay acepta un `hello` repetido con el mismo `machine_id` y actualiza la lista).
-- **La cola viaja como parte opaca del snapshot** (`parts[name=queue]`): el relay no conoce su forma ni la ordena; la pinta el visor.
+- **Las colas viajan como partes opacas del snapshot**: `parts[name=queue]` son los hilos T3 en fase `queued`;
+  `parts[name=employees]` lleva las colas de K2 por empleado (`queues{}`) y los eventos `employee.*`, `queue.changed` y `task.*`
+  conservan sus campos K2 en el `body`. El relay no conoce su forma ni las ordena; las pinta el visor.
 - **El MCP despacha local, no por el relay**: lanzar, responder, asentar o asignar sigue siendo del MCP/agente en la propia
   máquina (o de la API del agente en la tailnet). El protocolo no tiene ningún mensaje de escritura hacia el agente; el relay
   nunca reenvía órdenes.
