@@ -1,0 +1,69 @@
+{
+  "v": 1,
+  "type": "snapshot",
+  "id": "01M6A2QA1B3D5F7H9K1M3P5R7T",
+  "ts": "2026-10-30T14:02:12.004Z",
+  "machine_id": "contabo-dev",
+  "seq": 1842,
+  "ttl_s": 120,
+  "agent_version": "0.9.0",
+  "health": {
+    "state": "ok",
+    "t3_ok": true,
+    "cpu_pct": 23.5,
+    "ram_pct": 41.0,
+    "disk_pct": 37.2,
+    "load1": 1.42
+  },
+  "counts": {
+    "running": 2,
+    "queued": 1,
+    "waiting": 0,
+    "stuck": 0,
+    "needs_human": 1,
+    "waiting_bot": 0,
+    "done": 9,
+    "failed": 0
+  },
+  "projects": [
+    {
+      "name": "nuskills",
+      "roles": [
+        "backend",
+        "frontend",
+        "qa"
+      ],
+      "threads_running": 2,
+      "threads_pending": 1,
+      "attention": 1
+    },
+    {
+      "name": "chopshop",
+      "roles": [
+        "relay",
+        "mac"
+      ],
+      "threads_running": 0,
+      "threads_pending": 0,
+      "attention": 0
+    }
+  ],
+  "parts": [
+    {
+      "name": "state",
+      "media_type": "application/json",
+      "enc": "none",
+      "bytes": 320,
+      "sha256": "50b33e3825911f3f6b47280318dad666045b1f523dff98ffb382a48325713719",
+      "data": "eyJ0aHJlYWRzIjpbeyJrZXkiOiJ0LTAxIiwicHJvamVjdCI6Im51c2tpbGxzIiwidGl0bGUiOiJCVUctMyDCtyBSYWNoYSBzZSByZWluaWNpYSIsInBoYXNlIjoicnVubmluZyIsImF0dGVudGlvbiI6bnVsbCwicm9sZSI6ImJhY2tlbmQiLCJkZXNrIjoibnVza2lsbHMvYmFja2VuZC0xIiwidXBkYXRlZCI6IjIwMjYtMTAtMzBUMTQ6MDE6NTguMDAwWiJ9XSwiYXR0ZW50aW9uIjpbeyJrZXkiOiJ0YXNrOm1jcDphMDM2OTRlNSIsInByb2plY3QiOiJudXNraWxscyIsIm5lZWRzIjoiaHVtYW4iLCJzdW1tYXJ5Ijoiwr9NaWdybyBsYSB0YWJsYSBzdHJlYWtzPyJ9XX0="
+    },
+    {
+      "name": "queue",
+      "media_type": "application/json",
+      "enc": "none",
+      "bytes": 124,
+      "sha256": "37b4a9847394db94ffb520760844b085d3b8736c049e445a31bf1a4d27eb2173",
+      "data": "eyJpdGVtcyI6W3sia2V5IjoicS03IiwicHJvamVjdCI6ImNob3BzaG9wIiwicm9sZSI6InJlbGF5IiwidGl0bGUiOiJLMiDCtyBXb3JrZXIgZGVsIHJlbGF5IiwicGhhc2UiOiJxdWV1ZWQiLCJwb3NpdGlvbiI6MX1dfQ=="
+    }
+  ]
+}
