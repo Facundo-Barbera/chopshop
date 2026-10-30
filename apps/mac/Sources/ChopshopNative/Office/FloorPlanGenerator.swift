@@ -279,17 +279,15 @@ public enum FloorPlanGenerator {
         let needs = s.roles.map { roleNeed($0, bandDepth: min(back.depth, front.depth)) }
         let need = needs.reduce(0, +)
         var spare = back.length + front.length - need
-        var commons = [Commons.kitchenette, .meeting, .lounge]
-        commons.shuffle(using: &fr)
-        if let i = commons.firstIndex(of: .kitchenette), fr.unit() < 0.7 { commons.swapAt(0, i) }
-        for c in commons {
+        for c in [Commons.reception, .kitchenette, .meeting, .lounge] {
             let w = commonsWidth(c)
-            guard spare - w > max(120, need * 0.12) else { continue }
+            guard spare - w > (c == .lounge ? max(120, need * 0.12) : 60) else { continue }
             let near: Double
             let prefer: [Int]
             switch c {
+            case .reception: near = core.midX; prefer = [1, 0]
             case .kitchenette: near = fr.unit() < 0.5 ? core.x0 - w / 2 : core.x1 + w / 2; prefer = [0, 1]
-            case .meeting: near = core.midX + (fr.unit() - 0.5) * W * 0.4; prefer = [1, 0]
+            case .meeting: near = core.midX + (fr.unit() < 0.5 ? -1 : 1) * W * 0.3; prefer = [1, 0]
             default: near = fr.unit() < 0.5 ? 0 : W; prefer = fr.unit() < 0.5 ? [1, 0] : [0, 1]
             }
             if place(.commons(c), width: w, near: near, prefer: prefer) { spare -= w }
@@ -451,7 +449,7 @@ public enum FloorPlanGenerator {
     public static func requiredArea(roles: [Int], machineRooms: [Int], grokSeats: Int, lobbyGuests: Int?) -> Double {
         let bandD = 2 * pad + aisle + 2 * cellD
         if let g = lobbyGuests { return Double(max(4, g)) * cellW * cellD * 0.8 * 1.5 + coreW * bandD * 2 }
-        var a = coreW * bandD
+        var a = coreW * bandD + (commonsWidth(.reception) + commonsWidth(.kitchenette) + commonsWidth(.meeting)) * bandD
         a += roles.reduce(0) { $0 + roleNeed($1, bandDepth: bandD) * bandD }
         a += machineRooms.reduce(0) { $0 + machineWidth($1) * bandD }
         if grokSeats > 0 { a += max(200, roleNeed(grokSeats, bandDepth: bandD)) * bandD }
