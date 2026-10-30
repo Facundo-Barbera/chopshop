@@ -73,8 +73,10 @@ final class AppModel: ObservableObject {
     /// Credenciales de dispositivo (`cs1_…`) por agente: Keychain, nunca config.toml ni UserDefaults.
     #if DEBUG
     let credentials: CredentialStore = FileCredentialStore.dev
+    let relayCredentials: CredentialStore = FileCredentialStore.devRelay
     #else
     let credentials: CredentialStore = KeychainCredentialStore()
+    let relayCredentials: CredentialStore = KeychainCredentialStore(service: KeychainCredentialStore.relayService)
     #endif
     /// Stream en vivo (`GET /stream`) del agente principal (el primero configurado): alimenta la oficina nativa en macOS 26.
     /// En macOS < 26 no se abre: la UI web sigue con `GET /snapshot`.
@@ -90,7 +92,7 @@ final class AppModel: ObservableObject {
     /// Se recarga con `reloadConfig()`. Al arrancar migra un `agent_url` suelto (un solo agente) a `[app.agents.*]`.
     private(set) lazy var config = loadConfig(migratingLegacy: true)
     /// Solo las máquinas activadas (`enabled`); las desactivadas se ven en los ajustes pero no se consultan.
-    private lazy var hub = AgentHub(specs: config.enabledAgents, credentials: credentials)
+    private lazy var hub = AgentHub(specs: config.enabledAgents, credentials: credentials, relayCredentials: relayCredentials)
     /// Última ronda de sondeo (estado de conexión de cada máquina en los ajustes).
     @Published private(set) var results: [AgentResult] = []
     private var labels: [String: String] = [:]     // agente -> último machine_id visto
@@ -196,7 +198,7 @@ final class AppModel: ObservableObject {
         pollTask = nil
         let oldPrimary = primary?.spec
         config = loadConfig()
-        hub = AgentHub(specs: config.enabledAgents, credentials: credentials)
+        hub = AgentHub(specs: config.enabledAgents, credentials: credentials, relayCredentials: relayCredentials)
         let active = Set(hub.clients.map(\.spec.name))
         results = results.filter { active.contains($0.name) }
         labels = labels.filter { active.contains($0.key) }
@@ -224,6 +226,7 @@ final class AppModel: ObservableObject {
         for spec in previous {
             guard let url = spec.baseURL, orphaned.contains(CredentialAccount.endpoint(url)) else { continue }
             credentials.forget(baseURL: url)
+            try? relayCredentials.delete(account: AgentClient.relayAccount(url))
         }
         if !orphaned.isEmpty { pairingRevision += 1 }
         reloadConfig()
@@ -292,7 +295,7 @@ final class AppModel: ObservableObject {
             if let fs = try? FixtureStream(contentsOf: URL(fileURLWithPath: AppConfig.expand(path)), speed: demoSpeed) { live.connect(fs) }
             return
         }
-        guard let url = primary?.spec.baseURL else { live.reset(); return }
+        guard let spec = primary?.spec, !spec.isRelay, let url = spec.baseURL else { live.reset(); return }
         live.connect(agent: url, credentials: credentials)
     }
 
@@ -300,8 +303,23 @@ final class AppModel: ObservableObject {
     private func spec(named name: String) -> AgentSpec? { config.agents.first(where: { $0.name == name }) }
 
     func isPaired(_ agent: String) -> Bool {
-        guard let url = spec(named: agent)?.baseURL else { return false }
+        guard let s = spec(named: agent), let url = s.baseURL else { return false }
+        if s.isRelay { return relayCredentials.credential(account: AgentClient.relayAccount(url)) != nil }
         return credentials.find(baseURL: url) != nil
+    }
+
+    func saveRelayToken(agent: String, token: String) -> String? {
+        let t = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let s = spec(named: agent), s.isRelay, let url = s.baseURL else { return "Relay desconocido: guarda antes su URL." }
+        guard AgentClient.isRelayToken(t) else { return "El token del relay empieza por cr1_." }
+        do {
+            try relayCredentials.save(t, account: AgentClient.relayAccount(url))
+        } catch {
+            return "No pude guardar el token en el Llavero."
+        }
+        pairingRevision += 1
+        Task { await refresh() }
+        return nil
     }
 
     /// Nombre de este Mac (lo que verá `chopshop pair list`).
@@ -319,6 +337,7 @@ final class AppModel: ObservableObject {
     /// Canjea un código de `chopshop pair create` y guarda la credencial en el Keychain. Devuelve el error para la UI, o nil.
     func pair(agent: String, code: String) async -> String? {
         guard let s = spec(named: agent), let url = s.baseURL else { return "Agente desconocido: guarda antes su URL." }
+        guard !s.isRelay else { return "Un relay usa un token cr1_, no un código de emparejamiento." }
         let pc = PairingClient()
         let machine = ((try? await pc.machineID(baseURL: url)) ?? nil) ?? url.host ?? agent
         do {
@@ -339,7 +358,7 @@ final class AppModel: ObservableObject {
     /// Olvida la credencial de ese agente (el agente la sigue teniendo hasta `chopshop pair revoke`).
     func unpair(agent: String) {
         guard let s = spec(named: agent), let url = s.baseURL else { return }
-        credentials.forget(baseURL: url)
+        if s.isRelay { try? relayCredentials.delete(account: AgentClient.relayAccount(url)) } else { credentials.forget(baseURL: url) }
         pairingRevision += 1
         if s == primary?.spec { live.reset(); startLive() }
         Task { await refresh() }
