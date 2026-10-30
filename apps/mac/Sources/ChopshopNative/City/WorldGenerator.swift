@@ -73,8 +73,8 @@ public enum WorldGenerator {
     public static let tile = CityGeo.tile
     public static let cell = 31.0 * tile
     public static let road = 1.5 * tile
-    public static let jitter = 0.07
-    public static let bulge = 0.06
+    public static let jitter = 0.0
+    public static let bulge = 0.0
     public static let grid = 12
     public static let side = 3
     public static let capacity = 5
