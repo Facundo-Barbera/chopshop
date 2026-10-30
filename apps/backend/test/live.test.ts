@@ -127,9 +127,16 @@ function hello(local: string): Json {
   return { ...fixture("ws-hello"), id: msgId(), machine_id: local, protocol: [2] };
 }
 
+async function greet(ws: FakeWebSocket, local: string): Promise<Json | undefined> {
+  const count = ws.sent.length;
+  await hub.webSocketMessage(ws as never, JSON.stringify(hello(local)));
+  const frames = ws.frames().slice(count);
+  return frames.find((f) => f.type === "welcome") ?? frames.at(-1);
+}
+
 async function agent(credential: string, local: string): Promise<FakeWebSocket> {
   const ws = await connect(credential);
-  const reply = await send(ws, hello(local));
+  const reply = await greet(ws, local);
   assert.equal(reply?.type, "welcome");
   return ws;
 }
@@ -280,7 +287,7 @@ describe("conexión del agente v2", () => {
     const m = await machine({ local_machine_id: "mac-mini.local", name: "mac-mini", platform: "macos" });
     const ws = await connect(m.credential);
     assert.deepEqual(await hub.online(), []);
-    const welcome = await send(ws, hello("mac-mini.local"));
+    const welcome = await greet(ws, "mac-mini.local");
     assert.equal(welcome?.type, "welcome");
     assert.equal(welcome?.v, 2);
     assert.equal(welcome?.protocol, 2);
@@ -376,5 +383,154 @@ describe("conexión del agente v2", () => {
     assert.deepEqual((s.snapshots as Json[]).map((x) => x.workspace_id), [w1]);
     const reply = await send(ws, snapshot("mac-mini.local", w2, 2));
     assert.equal(reply?.code, "forbidden");
+  });
+});
+
+describe("sync de estructura (H2)", () => {
+  function syncs(ws: FakeWebSocket, from = 0): Json[] {
+    return ws.frames().slice(from).filter((f) => f.type === "sync");
+  }
+
+  async function project(workspaceId: string, name: string, machineId: string | null): Promise<Json> {
+    const res = await call(`/v1/workspaces/${workspaceId}/projects`, { method: "POST", token: ownerToken, body: { name, machine_id: machineId } });
+    assert.equal(res.status, 201);
+    return (await json(res)).project as Json;
+  }
+
+  async function patch(p: Json, body: Json): Promise<Json> {
+    const res = await call(`/v1/projects/${p.id as string}`, { method: "PATCH", token: ownerToken, body: { rev: p.rev, ...body } });
+    assert.equal(res.status, 200);
+    return (await json(res)).project as Json;
+  }
+
+  function ack(sync: Json, errors: Json[] = [], applied: string[] = []): Json {
+    return { v: 2, type: "sync.ack", id: msgId(), ts: new Date().toISOString(), re: sync.id, rev: sync.rev, applied, errors };
+  }
+
+  it("manda sync justo después del welcome con los proyectos de la máquina", async () => {
+    const m = await machine({ local_machine_id: "mac-mini.local", name: "mac-mini", platform: "macos", workspace_ids: [w1] });
+    const p = await project(w1, "awesome-gb", m.id);
+    await project(w1, "sin-maquina", null);
+    const ws = await agent(m.credential, "mac-mini.local");
+    const frames = ws.frames();
+    const i = frames.findIndex((f) => f.type === "welcome");
+    const sync = frames[i + 1]!;
+    assert.equal(sync.type, "sync");
+    assert.equal(sync.v, 2);
+    assert.equal(sync.rev, frames[i]!.rev);
+    assert.deepEqual(sync.machine, { id: m.id, name: "mac-mini" });
+    assert.deepEqual(sync.workspaces, [{ id: w1, name: "compartido", slug: "compartido" }]);
+    assert.deepEqual((sync.projects as Json[]).map((x) => [x.id, x.name, x.workspace_id]), [[p.id, "awesome-gb", w1]]);
+  });
+
+  it("un cambio de proyecto manda sync solo a las máquinas afectadas, antes y después", async () => {
+    const a = await machine({ local_machine_id: "mac-mini.local", name: "mac-mini", platform: "macos", workspace_ids: [w1] });
+    const b = await machine({ local_machine_id: "air.local", name: "air", platform: "macos", workspace_ids: [w1] });
+    const c = await machine({ local_machine_id: "contabo-dev", name: "contabo", platform: "linux", workspace_ids: [w2] });
+    let p = await project(w1, "awesome-gb", a.id);
+    const wa = await agent(a.credential, "mac-mini.local");
+    const wb = await agent(b.credential, "air.local");
+    const wc = await agent(c.credential, "contabo-dev");
+    const [na, nb, nc] = [wa.sent.length, wb.sent.length, wc.sent.length];
+
+    p = await patch(p, { machine_id: b.id });
+    const [sa] = syncs(wa, na);
+    const [sb] = syncs(wb, nb);
+    assert.equal(syncs(wa, na).length, 1);
+    assert.equal(syncs(wb, nb).length, 1);
+    assert.deepEqual(syncs(wc, nc), []);
+    assert.deepEqual(sa!.projects, []);
+    assert.deepEqual((sb!.projects as Json[]).map((x) => x.name), ["awesome-gb"]);
+    assert.equal(sa!.rev, sb!.rev);
+
+    const [ma, mb] = [wa.sent.length, wb.sent.length];
+    p = await patch(p, { title: "Awesome GB" });
+    assert.deepEqual(syncs(wa, ma), []);
+    const [again] = syncs(wb, mb);
+    assert.equal((again!.projects as Json[])[0]!.title, "Awesome GB");
+    assert.ok((again!.rev as number) > (sb!.rev as number));
+    assert.deepEqual(syncs(wc, nc), []);
+  });
+
+  it("rev monótono: un structureChanged viejo o repetido no reenvía ni retrocede", async () => {
+    const m = await machine({ local_machine_id: "mac-mini.local", name: "mac-mini", platform: "macos", workspace_ids: [w1] });
+    let p = await project(w1, "awesome-gb", m.id);
+    const ws = await agent(m.credential, "mac-mini.local");
+    const first = syncs(ws).at(-1)!.rev as number;
+    const n = ws.sent.length;
+    await hub.structureChanged(first - 1, [m.id]);
+    await hub.structureChanged(first, "all");
+    assert.deepEqual(syncs(ws, n), []);
+    p = await patch(p, { title: "uno" });
+    await patch(p, { title: "dos" });
+    await hub.structureChanged(first, [m.id]);
+    const revs = syncs(ws).map((s) => s.rev as number);
+    assert.equal(revs.length, 3);
+    for (let i = 1; i < revs.length; i++) assert.ok(revs[i]! > revs[i - 1]!);
+    assert.equal(revs.at(-1), (await json(await call("/v1/state", { token: ownerToken }))).rev);
+  });
+
+  it("los visores reciben el evento structure con el rev nuevo", async () => {
+    const m = await machine({ local_machine_id: "mac-mini.local", name: "mac-mini", platform: "macos", workspace_ids: [w1] });
+    const stream = await call("/v1/stream", { token: watcherToken });
+    await readSse(stream, (s) => s.includes("event: hello"));
+    await project(w1, "awesome-gb", m.id);
+    const rev = (await json(await call("/v1/state", { token: ownerToken }))).rev;
+    const seen = await readSse(stream, (s) => s.includes("event: structure"));
+    assert.match(seen.text, new RegExp(`event: structure\nid: [^\n]+\ndata: \\{"rev":${rev}\\}`));
+  });
+
+  it("sync.ack con errores aparece en /v1/state como projects[].sync_errors", async () => {
+    const m = await machine({ local_machine_id: "mac-mini.local", name: "mac-mini", platform: "macos", workspace_ids: [w1, w2] });
+    await project(w1, "awesome-gb", m.id);
+    await project(w2, "privado-gb", m.id);
+    const ws = await agent(m.credential, "mac-mini.local");
+    const sync = syncs(ws).at(-1)!;
+    const errors = [
+      { project: "awesome-gb", message: "rol desconocido: qa" },
+      { project: "privado-gb", message: "floors vacío" },
+    ];
+    assert.equal(await send(ws, ack(sync, errors)), undefined);
+
+    const projects = (s: Json) => (s.city as { workspaces: { projects: Json[] }[] }).workspaces.flatMap((w) => w.projects);
+    const owner = await json(await call("/v1/state", { token: ownerToken }));
+    assert.deepEqual(
+      projects(owner).map((p) => [p.name, p.sync_errors]),
+      [
+        ["awesome-gb", [{ message: "rol desconocido: qa", rev: sync.rev }]],
+        ["privado-gb", [{ message: "floors vacío", rev: sync.rev }]],
+      ],
+    );
+    const watcher = await json(await call("/v1/state", { token: watcherToken }));
+    assert.deepEqual(projects(watcher).map((p) => [p.name, p.sync_errors]), [["awesome-gb", [{ message: "rol desconocido: qa", rev: sync.rev }]]]);
+
+    assert.equal(await send(ws, { ...ack(sync, [], ["awesome-gb"]), rev: (sync.rev as number) - 1 }), undefined);
+    const stale = await json(await call("/v1/state", { token: ownerToken }));
+    assert.equal((projects(stale)[0]!.sync_errors as Json[]).length, 1);
+
+    assert.equal(await send(ws, ack(sync, [], ["awesome-gb", "privado-gb"])), undefined);
+    const clean = await json(await call("/v1/state", { token: ownerToken }));
+    assert.deepEqual(projects(clean).map((p) => p.sync_errors), [[], []]);
+  });
+
+  it("sync.ack mal formado se rechaza sin tocar el estado", async () => {
+    const m = await machine({ local_machine_id: "mac-mini.local", name: "mac-mini", platform: "macos", workspace_ids: [w1] });
+    await project(w1, "awesome-gb", m.id);
+    const ws = await connect(m.credential);
+    const early = await send(ws, ack({ id: msgId(), rev: 1 }));
+    assert.equal(early?.code, "bad_request");
+    await send(ws, hello("mac-mini.local"));
+    const sync = syncs(ws).at(-1)!;
+    for (const bad of [
+      { ...ack(sync), errors: ["texto"] },
+      { ...ack(sync), errors: [{ project: "awesome-gb", message: "" }] },
+      { ...ack(sync), errors: [{ project: "awesome-gb", message: "x", path: "/home" }] },
+      { ...ack(sync), rev: -1 },
+      { ...ack(sync), extra: true },
+    ]) {
+      assert.equal((await send(ws, bad))?.code, "bad_request");
+    }
+    const s = await json(await call("/v1/state", { token: ownerToken }));
+    assert.deepEqual((s.city as { workspaces: { projects: Json[] }[] }).workspaces[0]!.projects[0]!.sync_errors, []);
   });
 });
