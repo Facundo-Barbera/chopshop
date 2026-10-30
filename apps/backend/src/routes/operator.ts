@@ -2,18 +2,8 @@ import { newToken, sha256Hex, timingSafeEqual } from "../crypto";
 import { batch, now, one, uuid } from "../db";
 import { type Principal, errorResponse, json, readJson, webOrigin } from "../http";
 import type { Handler } from "../router";
-import {
-  LIMITS,
-  type RecoveryEnv,
-  auditStmt,
-  clientIp,
-  database,
-  limitKey,
-  lockedFor,
-  normalizeEmail,
-  rateLimited,
-  recordFailure,
-} from "./recovery";
+import { limitKey, recordFailure, retryAfter } from "../ratelimit";
+import { type RecoveryEnv, auditStmt, clientIp, database, parseEmail, rateLimited } from "./recovery";
 
 export interface OperatorEnv extends RecoveryEnv {
   RELAY_OPERATOR_TOKEN?: string;
@@ -32,12 +22,12 @@ export async function operatorPrincipal(request: Request, env: OperatorEnv): Pro
   const secret = env.RELAY_OPERATOR_TOKEN;
   if (!secret) return errorResponse("internal", "operador deshabilitado", { status: 503 });
   const db = database(env);
-  const key = await limitKey(LIMITS.operator, clientIp(request));
-  const wait = await lockedFor(db, [key]);
+  const key = await limitKey("op", clientIp(request));
+  const wait = await retryAfter(db, [key]);
   if (wait > 0) return rateLimited(wait);
   const bearer = /^Bearer\s+(\S+)$/i.exec(request.headers.get("Authorization") ?? "")?.[1] ?? "";
   if (timingSafeEqual(await sha256Hex(bearer), await sha256Hex(secret))) return { kind: "operator" };
-  await recordFailure(db, LIMITS.operator, key);
+  await recordFailure(db, [key]);
   return errorResponse("unauthorized", "credencial ausente, inválida o revocada");
 }
 
@@ -71,7 +61,7 @@ export const bootstrap: Handler<OperatorEnv> = async (request, { env }) => {
   const body = await readJson(request);
   if (body instanceof Response) return body;
   const raw = body !== null && typeof body === "object" ? (body as Record<string, unknown>).email : undefined;
-  const emailNormalized = normalizeEmail(raw);
+  const emailNormalized = parseEmail(raw);
   if (emailNormalized === null) return errorResponse("bad_request", "correo inválido", { field: "email" });
   const owner = await one<{ id: string }>(db, "SELECT id FROM users WHERE role = 'owner'");
   if (owner) return ownerConflict(db, "operator.bootstrap", "ya existe un dueño");

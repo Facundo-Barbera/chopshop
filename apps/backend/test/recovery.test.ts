@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { normalizeRecoveryCode, sha256Hex, verifyPassword } from "../src/crypto.ts";
-import { addSession, addUser, call, freshEnv, row, rows, type TestEnv } from "./accounts.ts";
+import { PEPPER, addSession, addUser, call, freshEnv, row, rows, type TestEnv } from "./accounts.ts";
 
 const CODE = "7K3MQ-0AB1C-XYZ12-34567";
 const NEW_PASSWORD = "una-contraseña-nueva-y-larga";
@@ -25,7 +25,7 @@ describe("POST /v1/auth/recover", () => {
     const { recovery_code } = (await res.json()) as { recovery_code: string };
     assert.match(recovery_code, /^[0-9A-HJKMNP-TV-Z]{5}(-[0-9A-HJKMNP-TV-Z]{5}){3}$/);
     const user = await row(env, "SELECT password_hash, recovery_hash FROM users WHERE id = ?", id);
-    assert.equal(await verifyPassword(NEW_PASSWORD, String(user?.password_hash)), true);
+    assert.equal(await verifyPassword(NEW_PASSWORD, String(user?.password_hash), PEPPER), true);
     assert.equal(user?.recovery_hash, await sha256Hex(normalizeRecoveryCode(recovery_code)!));
     const sessions = await rows(env, "SELECT revoked_at, revoked_reason FROM sessions WHERE user_id = ?", id);
     assert.equal(sessions.length, 2);
@@ -39,7 +39,7 @@ describe("POST /v1/auth/recover", () => {
 
     const reused = await recover(env, { new_password: "otra-contraseña-distinta" });
     assert.equal(reused.status, 401);
-    assert.equal(await verifyPassword(NEW_PASSWORD, String((await row(env, "SELECT password_hash FROM users WHERE id = ?", id))?.password_hash)), true);
+    assert.equal(await verifyPassword(NEW_PASSWORD, String((await row(env, "SELECT password_hash FROM users WHERE id = ?", id))?.password_hash), PEPPER), true);
     assert.equal((await recover(env, { recovery_code: recovery_code, new_password: "otra-contraseña-distinta" })).status, 200);
   });
 
@@ -54,6 +54,18 @@ describe("POST /v1/auth/recover", () => {
       assert.equal(((await res.json()) as { message: string }).message, "correo o código de recuperación incorrectos");
     }
     assert.deepEqual(await row(env, "SELECT password_hash FROM users WHERE id = ?", id), before);
+  });
+
+  it("sin PASSWORD_PEPPER responde 503 sin tocar al dueño", async () => {
+    const env = await freshEnv();
+    const id = await owner(env);
+    const s = await addSession(env, id);
+    const { PASSWORD_PEPPER: _, ...off } = env;
+    const res = await recover(off, {});
+    assert.equal(res.status, 503);
+    assert.equal(((await res.json()) as { message: string }).message, "contraseñas deshabilitadas");
+    assert.equal((await call(off, "POST", "/v1/auth/recovery-code", { auth: `Bearer ${s.token}`, body: { password: "contraseña-del-dueño-1" } })).status, 503);
+    assert.equal((await recover(env, {})).status, 200);
   });
 
   it("aplica la política de contraseña y valida el cuerpo", async () => {

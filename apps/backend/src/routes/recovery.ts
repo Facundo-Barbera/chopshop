@@ -1,45 +1,27 @@
 import {
+  type Pepper,
   generateRecoveryCode,
   hashPassword,
   needsRehash,
   normalizeRecoveryCode,
+  pepperFromEnv,
   sha256Hex,
   timingSafeEqual,
   verifyPassword,
 } from "../crypto";
-import { batch, now, one, run, uuid, type SqlValue } from "../db";
+import { batch, now, one, uuid, type SqlValue } from "../db";
 import { type HttpEnv, errorResponse, json, readJson } from "../http";
+import { RATE_LIMITED_MESSAGE, limitKey, loginKeys, normalizeEmail, recordFailure, retryAfter } from "../ratelimit";
 import type { Handler } from "../router";
 
 export interface RecoveryEnv extends HttpEnv {
   DB?: D1Database;
+  PASSWORD_PEPPER?: string;
+  PASSWORD_PEPPER_VERSION?: string;
 }
-
-export interface LimitRule {
-  prefix: string;
-  max: number;
-  windowMs: number;
-  lockMs: number;
-}
-
-const MIN = 60_000;
-const HOUR = 60 * MIN;
-
-export const LIMITS = {
-  email: { prefix: "e:", max: 20, windowMs: HOUR, lockMs: 15 * MIN },
-  ip: { prefix: "ip:", max: 100, windowMs: HOUR, lockMs: HOUR },
-  recover: { prefix: "rc:", max: 5, windowMs: HOUR, lockMs: HOUR },
-  operator: { prefix: "op:", max: 5, windowMs: 10 * MIN, lockMs: HOUR },
-} as const satisfies Record<string, LimitRule>;
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const GENERIC_RECOVER = "correo o código de recuperación incorrectos";
-
-interface AttemptRow {
-  failures: number;
-  window_start: string;
-  locked_until: string | null;
-}
 
 interface OwnerRow {
   id: string;
@@ -57,9 +39,9 @@ export function clientIp(request: Request): string {
   return request.headers.get("CF-Connecting-IP") ?? "";
 }
 
-export function normalizeEmail(raw: unknown): string | null {
+export function parseEmail(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
-  const email = raw.trim().normalize("NFC").toLowerCase();
+  const email = normalizeEmail(raw);
   return email.length <= 254 && EMAIL_RE.test(email) ? email : null;
 }
 
@@ -77,48 +59,21 @@ export function passwordPolicyError(password: unknown, emailNormalized: string):
   return null;
 }
 
-export async function checkPassword(_env: RecoveryEnv, password: string, stored: string): Promise<{ ok: boolean; rehash: string | null }> {
-  const ok = await verifyPassword(password, stored);
-  return { ok, rehash: ok && needsRehash(stored) ? await hashPassword(password) : null };
-}
-
-export async function newPasswordHash(_env: RecoveryEnv, password: string): Promise<string> {
-  return hashPassword(password);
-}
-
-export async function limitKey(rule: LimitRule, value: string): Promise<string> {
-  return rule.prefix + (await sha256Hex(value));
-}
-
-export async function lockedFor(db: D1Database, keys: string[], at = Date.now()): Promise<number> {
-  let wait = 0;
-  for (const key of keys) {
-    const row = await one<AttemptRow>(db, "SELECT failures, window_start, locked_until FROM auth_attempts WHERE key_hash = ?", key);
-    if (row?.locked_until) wait = Math.max(wait, Math.ceil((Date.parse(row.locked_until) - at) / 1000));
+export function pepperOf(env: RecoveryEnv): Pepper | Response {
+  try {
+    return pepperFromEnv(env as Record<string, unknown>);
+  } catch {
+    return errorResponse("internal", "contraseñas deshabilitadas", { status: 503 });
   }
-  return wait;
 }
 
-export async function recordFailure(db: D1Database, rule: LimitRule, key: string, at = Date.now()): Promise<void> {
-  const row = await one<AttemptRow>(db, "SELECT failures, window_start, locked_until FROM auth_attempts WHERE key_hash = ?", key);
-  const fresh = !row || at - Date.parse(row.window_start) >= rule.windowMs;
-  const failures = fresh ? 1 : row.failures + 1;
-  const windowStart = fresh ? new Date(at).toISOString() : row.window_start;
-  const lockedUntil = failures >= rule.max ? new Date(at + rule.lockMs).toISOString() : null;
-  const t = new Date(at).toISOString();
-  await run(
-    db,
-    "INSERT INTO auth_attempts (key_hash, failures, window_start, locked_until, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (key_hash) DO UPDATE SET failures = excluded.failures, window_start = excluded.window_start, locked_until = excluded.locked_until, updated_at = excluded.updated_at",
-    key,
-    failures,
-    windowStart,
-    lockedUntil,
-    t,
-  );
+export async function checkPassword(pepper: Pepper, password: string, stored: string): Promise<{ ok: boolean; rehash: string | null }> {
+  const ok = await verifyPassword(password, stored, pepper);
+  return { ok, rehash: ok && needsRehash(stored, pepper) ? await hashPassword(password, pepper) : null };
 }
 
 export function rateLimited(retryAfterS: number): Response {
-  return errorResponse("rate_limited", "demasiados intentos; espera antes de reintentar", { retryAfterS });
+  return errorResponse("rate_limited", RATE_LIMITED_MESSAGE, { retryAfterS });
 }
 
 export interface AuditInput {
@@ -161,19 +116,17 @@ export const recover: Handler<RecoveryEnv> = async (request, { env }) => {
   const db = database(env);
   const body = await readJson(request);
   if (body instanceof Response) return body;
-  const email = normalizeEmail(field(body, "email"));
+  const email = parseEmail(field(body, "email"));
   if (email === null) return errorResponse("bad_request", "correo inválido", { field: "email" });
   const code = field(body, "recovery_code");
   if (typeof code !== "string") return errorResponse("bad_request", "falta el código de recuperación", { field: "recovery_code" });
   const password = field(body, "new_password");
+  const pepper = pepperOf(env);
+  if (pepper instanceof Response) return pepper;
 
   const ip = clientIp(request);
-  const keys = {
-    recover: await limitKey(LIMITS.recover, ip),
-    email: await limitKey(LIMITS.email, email),
-    ip: await limitKey(LIMITS.ip, ip),
-  };
-  const wait = await lockedFor(db, Object.values(keys));
+  const keys = await Promise.all([limitKey("rc", ip), limitKey("e", email), limitKey("ip", ip)]);
+  const wait = await retryAfter(db, keys);
   if (wait > 0) return rateLimited(wait);
 
   const policy = passwordPolicyError(password, email);
@@ -189,16 +142,14 @@ export const recover: Handler<RecoveryEnv> = async (request, { env }) => {
   const matches = owner?.recovery_hash != null && given !== null && timingSafeEqual(given, owner.recovery_hash);
 
   const fail = async () => {
-    await recordFailure(db, LIMITS.recover, keys.recover);
-    await recordFailure(db, LIMITS.email, keys.email);
-    await recordFailure(db, LIMITS.ip, keys.ip);
+    await recordFailure(db, keys);
     return errorResponse("unauthorized", GENERIC_RECOVER);
   };
   if (!owner || !matches) return fail();
 
   const fresh = generateRecoveryCode();
   const freshHash = await sha256Hex(normalizeRecoveryCode(fresh)!);
-  const passwordHash = await newPasswordHash(env, password as string);
+  const passwordHash = await hashPassword(password as string, pepper);
   const t = now();
   const consumed = "EXISTS (SELECT 1 FROM users WHERE id = ? AND recovery_hash = ?)";
   const results = await batch(db, [
@@ -233,15 +184,16 @@ export const recoveryCode: Handler<RecoveryEnv> = async (request, { env, princip
   );
   if (!user) return errorResponse("unauthorized", "credencial ausente, inválida o revocada");
 
-  const ip = clientIp(request);
-  const keys = { email: await limitKey(LIMITS.email, user.email_normalized), ip: await limitKey(LIMITS.ip, ip) };
-  const wait = await lockedFor(db, Object.values(keys));
+  const pepper = pepperOf(env);
+  if (pepper instanceof Response) return pepper;
+
+  const keys = await loginKeys(user.email_normalized, clientIp(request));
+  const wait = await retryAfter(db, keys);
   if (wait > 0) return rateLimited(wait);
 
-  const check = await checkPassword(env, password, user.password_hash);
+  const check = await checkPassword(pepper, password, user.password_hash);
   if (!check.ok) {
-    await recordFailure(db, LIMITS.email, keys.email);
-    await recordFailure(db, LIMITS.ip, keys.ip);
+    await recordFailure(db, keys);
     return errorResponse("unauthorized", "contraseña incorrecta");
   }
 
