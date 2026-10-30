@@ -8,11 +8,13 @@ struct RootView: View {
     @EnvironmentObject var model: AppModel
 
     var body: some View {
-        Group {
-            if #available(macOS 26.0, *) {
-                if model.preferWeb { ClassicRoot() } else { RootSwitch(store: model.live) }
-            } else {
-                ClassicRoot()
+        SessionGate(auth: model.auth) {
+            Group {
+                if #available(macOS 26.0, *) {
+                    if model.preferWeb { ClassicRoot() } else { RootSwitch(store: model.live) }
+                } else {
+                    ClassicRoot()
+                }
             }
         }
         .sheet(isPresented: $model.showSettings) {
@@ -20,6 +22,41 @@ struct RootView: View {
         }
     }
 }
+
+private struct SessionGate<Content: View>: View {
+    @EnvironmentObject var model: AppModel
+    @ObservedObject var auth: BackendAuth
+    @ViewBuilder var content: () -> Content
+
+    private var hasLocal: Bool { model.config.agents.contains { !$0.isRelay } }
+
+    var body: some View {
+        Group {
+            if model.skipLogin || auth.session != nil {
+                content()
+            } else if auth.phase == .checking {
+                VStack(spacing: 10) {
+                    ProgressView()
+                    Text("Comprobando la sesión…").font(.callout).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    BackendLoginView(auth: auth, onSkip: hasLocal ? { model.skipLogin = true } : nil)
+                        .padding(40)
+                        .frame(maxWidth: .infinity)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(GlassBackdrop())
+            }
+        }
+        .sheet(item: Binding(get: { auth.recoveryCode.map(RecoveryCode.init) }, set: { if $0 == nil { auth.recoveryCode = nil } })) { c in
+            RecoveryCodeSheet(code: c.id) { auth.recoveryCode = nil }
+        }
+    }
+}
+
+private struct RecoveryCode: Identifiable { let id: String }
 
 /// Oficina mientras el stream en vivo tenga algo que enseñar; si no (sin agente, o un agente anterior a api_version 2 sin
 /// `/stream`), la vista clásica.
