@@ -44,6 +44,9 @@ SNAPSHOT_EVENTS = 80
 SNAPSHOT_THREADS = 200
 ORCHESTRATOR_TTL = 5.0            # s de cache del snapshot del orquestador
 _ID = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
+RUNTIME_MODES = ("approval-required", "auto-accept-edits", "auto", "full-access")
+SEND_MODES = ("auto", "queue", "steer", "restart")
+MAX_MESSAGE = 60000
 PUBLIC = {("GET", "/health"), ("POST", "/pair")}       # sin credencial (pero sí con identidad de Tailscale en ese modo)
 
 
@@ -320,6 +323,8 @@ class AgentApp:
         ("GET", "/subscriptions"): "subscriptions", ("POST", "/answer"): "answer", ("POST", "/settle"): "settle",
         ("POST", "/subscriptions"): "subscribe", ("POST", "/touch"): "touch",
         ("GET", "/state"): "state", ("GET", "/stream"): "stream", ("POST", "/pair"): "pair",
+        ("GET", "/t3/projects"): "t3_projects", ("GET", "/thread"): "thread_read", ("POST", "/threads"): "thread_launch",
+        ("POST", "/threads/send"): "thread_send", ("POST", "/threads/interrupt"): "thread_interrupt",
     }
 
     def __init__(self, cfg, conn, collector, t3, auth, runtime=None, emit_fn=None, orchestrator_fn=None,
@@ -541,6 +546,76 @@ class AgentApp:
         self._t3(t3watch.settle, thread)
         log.info("hilo %s settled por %s", thread, ident.login or ident.via)
         return {"ok": True, "thread_id": thread}
+
+    def r_t3_projects(self, ident, q, body):
+        projects = self._t3(lambda t3: t3.projects())
+        return {"projects": [{"id": p.get("id"), "title": p.get("title"), "workspace_root": p.get("workspaceRoot")}
+                             for p in projects]}
+
+    def _project_id(self, name):
+        conf = (self.cfg.get("projects") or {}).get(name) or {}
+        if conf.get("t3_project_id"):
+            return conf["t3_project_id"]
+        for p in self._t3(lambda t3: t3.projects()):
+            root = (p.get("workspaceRoot") or "").rstrip("/")
+            if name in (p.get("id"), p.get("title")) or (root and os.path.basename(root) == name):
+                return p.get("id")
+        raise ApiError(404, f"proyecto desconocido en el T3 de esta máquina: {name}")
+
+    def r_thread_read(self, ident, q, body):
+        thread = _ident(q, "thread_id", True)
+        args = {"threadId": thread, "limit": _int(q, "limit", 10, 1), "maxCharsPerItem": _int(q, "chars", 2000, 1)}
+        if q.get("view") in ("messages", "activity"):
+            args["view"] = q["view"]
+        return self._t3(lambda t3: t3.call("t3_thread_read", args))
+
+    def r_thread_launch(self, ident, q, body):
+        title = _text(body, "title", True, 120)
+        args = {"title": title, "runtimeMode": _text(body, "runtime_mode", False, 32) or "approval-required"}
+        if args["runtimeMode"] not in RUNTIME_MODES:
+            raise ApiError(400, f"runtime_mode debe ser uno de {', '.join(RUNTIME_MODES)}")
+        message = _text(body, "message", False, MAX_MESSAGE)
+        if message:
+            args["message"] = message
+        project = _text(body, "project", False, 128)
+        if project:
+            args["projectId"] = self._project_id(project)
+            branch = _text(body, "branch", False, 200)
+            if branch:
+                args["workspaceStrategy"] = {"type": "worktree", "branch": branch,
+                                             "baseRef": _text(body, "base_ref", False, 200) or "main"}
+        else:
+            args["scratch"] = True
+        model = _text(body, "model", False, 200)
+        if model:
+            inst, _, name = model.partition("/")
+            args["modelSelection"] = {"instanceId": inst, "model": name} if name else {"model": inst}
+        if body.get("interaction_mode") in ("default", "plan"):
+            args["interactionMode"] = body["interaction_mode"]
+        rid = _ident(body, "client_request_id")
+        if rid:
+            args["clientRequestId"] = rid
+        res = self._t3(lambda t3: t3.call("t3_thread_launch", args))
+        log.info("hilo lanzado en %s por %s", project or "scratch", ident.login or ident.via)
+        return dict(res if isinstance(res, dict) else {"result": res}, ok=True)
+
+    def r_thread_send(self, ident, q, body):
+        thread = _ident(body, "thread_id", True)
+        mode = _text(body, "mode", False, 16) or "auto"
+        if mode not in SEND_MODES:
+            raise ApiError(400, f"mode debe ser uno de {', '.join(SEND_MODES)}")
+        args = {"threadId": thread, "message": _text(body, "message", True, MAX_MESSAGE), "mode": mode}
+        res = self._t3(lambda t3: t3.call("t3_thread_send", args))
+        log.info("mensaje (%s) al hilo %s por %s", mode, thread, ident.login or ident.via)
+        halflife.touch(self.conn, thread, self.clock())
+        return dict(res if isinstance(res, dict) else {"result": res}, ok=True, thread_id=thread)
+
+    def r_thread_interrupt(self, ident, q, body):
+        thread = _ident(body, "thread_id", True)
+        args = {"threadId": thread, "reason": _text(body, "reason", False, 2000) or "chopshop"}
+        res = self._t3(lambda t3: t3.call("t3_thread_interrupt", args))
+        log.info("hilo %s interrumpido por %s", thread, ident.login or ident.via)
+        return dict(res if isinstance(res, dict) else {"result": res}, ok=True, thread_id=thread)
 
     # -- oficina (api_version 3)
     def _office(self):

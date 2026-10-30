@@ -1,0 +1,38 @@
+# chopshop-mcp: servidor MCP multi-máquina (Streamable HTTP en 127.0.0.1:<[mcp] port>), unidad de usuario de systemd.
+#
+# No se instala ni se habilita desde el repo. Ajusta ExecStart a la ruta de tu checkout, cópiala a ~/.config/systemd/user/ y:
+#   systemctl --user daemon-reload ; systemctl --user start chopshop-mcp ; systemctl --user status chopshop-mcp
+# Guía: README.md, «Servidor MCP multi-máquina».
+[Unit]
+Description=Chopshop MCP (orquesta los agentes de Chopshop de todas las máquinas)
+Documentation=https://github.com/Facundo-Barbera/chopshop/blob/main/README.md
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=20
+
+[Service]
+Type=simple
+ExecStart=%h/projects/chopshop/apps/agent/bin/chopshop mcp serve
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=20
+Environment=PYTHONUNBUFFERED=1
+SyslogIdentifier=chopshop-mcp
+
+Slice=chopshop.slice
+Nice=10
+CPUQuota=20%
+MemoryHigh=256M
+MemoryMax=512M
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=%h/.config/chopshop %h/.chopshop
+RestrictSUIDSGID=yes
+LockPersonality=yes
+UMask=0077
+
+[Install]
+WantedBy=default.target
