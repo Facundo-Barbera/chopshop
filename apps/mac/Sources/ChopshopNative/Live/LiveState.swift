@@ -71,6 +71,7 @@ public struct LiveState: Equatable, Sendable {
     public var answered: [String: [Answered]] = [:]
     /// Últimas muestras de `machine.health` por máquina (tope 40).
     public var series: [String: Series] = [:]
+    public var relayMachines: [String: RelayMachine] = [:]
 
     public init(machine: String? = nil) { self.machine = machine }
 
