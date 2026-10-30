@@ -4,6 +4,7 @@ import ChopshopNative
 
 @available(macOS 26.0, *)
 struct FloorLabApp: App {
+    @NSApplicationDelegateAdaptor(FloorLabDelegate.self) private var delegate
     var body: some Scene {
         WindowGroup("Chopshop · FloorLab") {
             FloorLabRoot()
@@ -124,8 +125,7 @@ final class FloorLabDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ s: NSApplication) -> Bool { true }
 }
 
-let delegate = FloorLabDelegate()
-NSApplication.shared.delegate = delegate
+NSApplication.shared.setActivationPolicy(.regular)
 if #available(macOS 26.0, *) {
     FloorLabApp.main()
 } else {
