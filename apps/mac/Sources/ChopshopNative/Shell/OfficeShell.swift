@@ -41,6 +41,9 @@ public struct OfficeShell<World: View, Unpaired: View>: View {
         }
         .onAppear { shell.snapshot = store.snapshot }
         .onReceive(store.$snapshot) { shell.snapshot = $0 }
+        .onChange(of: ShellAttention.items(store.snapshot).count) { was, now in
+            if was == 0, now > 0 { shell.state.attentionArrived() }
+        }
         .hotReload()
     }
 
