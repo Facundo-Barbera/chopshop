@@ -355,3 +355,80 @@ private func assertLevels(_ a: [Double], _ b: [Double], accuracy: Double, file: 
     XCTAssertEqual(a.count, b.count, file: file, line: line)
     for (x, y) in zip(a, b) { XCTAssertEqual(x, y, accuracy: accuracy, file: file, line: line) }
 }
+
+extension CityTests {
+    func cloudState(_ workspaces: String) throws -> BackendState {
+        try JSONDecoder().decode(BackendState.self, from: Data(#"""
+        {"v":2,"type":"state","id":"x","ts":"t","rev":7,"head":"e-1","user":{"id":"u1","role":"owner"},
+         "city":{"workspaces":[\#(workspaces)]},"machines":[],"snapshots":[]}
+        """#.utf8))
+    }
+
+    func workspace(_ id: String, _ name: String, position: Int, projects: [String], order: [String] = [], style: String = "{}") -> String {
+        let ps = projects.map { #"{"id":"p-\#($0)","name":"\#($0)","title":null,"machine_id":null,"disabled":false,"layout":{},"roles":[],"sync_errors":[]}"# }
+        let bs = order.enumerated().map { #"{"project":"\#($0.element)","x":\#($0.offset),"y":0}"# }
+        return #"{"id":"\#(id)","name":"\#(name)","slug":"\#(id)","position":\#(position),"style":\#(style),"campus":{"layout":{"buildings":[\#(bs.joined(separator: ","))]},"rev":1},"projects":[\#(ps.joined(separator: ","))],"machine_ids":[]}"#
+    }
+
+    func liveState(_ projects: [String]) -> LiveState {
+        var s = LiveState(machine: "mini")
+        for p in projects { _ = s.projectIndex(p) }
+        return s
+    }
+
+    func testCloudCampusIsWorkspaceOrderedByPosition() throws {
+        let cloud = try cloudState([
+            workspace("w-beta", "Beta", position: 1, projects: ["chopshop", "b-lab"]),
+            workspace("w-awe", "Awesome GB", position: 0, projects: ["awesome-gb", "a-docs"], order: ["awesome-gb", "a-docs"],
+                      style: #"{"material":"brick","color":"azul"}"#),
+        ].joined(separator: ","))
+        let m = CityModel.build(liveState(["awesome-gb", "chopshop", "suelto"]), cloud: cloud, seed: 7)
+        XCTAssertEqual(m.campuses.map(\.name), ["Awesome GB", "Beta", CompanyDirectory.others])
+        XCTAssertEqual(m.campus(of: "chopshop"), "Beta", "el workspace manda sobre la tabla de empresas")
+        XCTAssertEqual(m.campus(of: "b-lab"), "Beta", "un proyecto del state sin snapshot también es edificio")
+        XCTAssertEqual(m.campus(of: "suelto"), CompanyDirectory.others)
+        XCTAssertEqual(m.buildings.filter { $0.campus == "Awesome GB" }.map(\.company), ["awesome-gb", "a-docs"], "orden del layout del campus")
+        XCTAssertEqual(m.workspaceID(ofCampus: "Awesome GB"), "w-awe")
+        XCTAssertEqual(m.workspaceID(ofCampus: "Beta"), "w-beta")
+        XCTAssertTrue(m.buildings.filter { $0.campus == "Awesome GB" }.allSatisfy { $0.style.material == .brick })
+        XCTAssertEqual(m.projectCount, 5)
+    }
+
+    func testCloudCampusWithoutCloudIsUnchanged() {
+        let s = liveState(["chopshop", "nuskills"])
+        XCTAssertEqual(CityModel.build(s, cloud: nil, seed: 3), CityModel.build(s, seed: 3))
+    }
+
+    func testCloudCampusDisambiguatesRepeatedNames() throws {
+        let cloud = try cloudState([workspace("w1", "Acme", position: 0, projects: ["uno"]),
+                                    workspace("w2", "Acme", position: 1, projects: ["dos"])].joined(separator: ","))
+        let m = CityModel.build(liveState([]), cloud: cloud, seed: 1)
+        XCTAssertEqual(m.campuses.map(\.name), ["Acme", "Acme · w2"])
+        XCTAssertEqual(m.workspaceID(ofCampus: "Acme · w2"), "w2")
+    }
+
+    func testCloudCampusFromBackendFixture() throws {
+        let dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../../../packages/api/backend/cty/fixtures")
+        for name in ["state.get.response.json", "state.get.response.watcher.json"] {
+            let st = try JSONDecoder().decode(BackendState.self, from: Data(contentsOf: dir.appendingPathComponent(name)))
+            let live = st.snapshots.compactMap { LiveState(relaySnapshot: $0) }.reduce(LiveState()) { $0.merging($1) }
+            let m = CityModel.build(live, cloud: st, seed: 5)
+            for w in st.city.workspaces {
+                XCTAssertEqual(m.workspaceID(ofCampus: w.name), w.id, name)
+                for p in w.projects { XCTAssertEqual(m.campus(of: p.name), w.name, "\(name): \(p.name)") }
+            }
+        }
+    }
+
+    func testCampusLayoutOrderAndMove() {
+        let layout: JSONValue = ["buildings": [["project": "b", "x": 1, "y": 0], ["project": "a", "x": 0, "y": 1], ["project": "c", "x": 0, "y": 0]],
+                                 "streets": "keep"]
+        XCTAssertEqual(CampusLayout.order(layout), ["c", "b", "a"])
+        XCTAssertEqual(CampusLayout.ordered(["a", "b", "z", "Y"], layout), ["b", "a", "Y", "z"])
+        let moved = CampusLayout.moving("a", by: -1, projects: ["a", "b", "c"], layout)
+        XCTAssertEqual(CampusLayout.order(moved), ["c", "a", "b"])
+        XCTAssertEqual(moved?["streets"]?.string, "keep")
+        XCTAssertNil(CampusLayout.moving("c", by: -1, projects: ["a", "b", "c"], layout))
+        XCTAssertNil(CampusLayout.moving("nope", by: 1, projects: ["a"], layout))
+    }
+}
