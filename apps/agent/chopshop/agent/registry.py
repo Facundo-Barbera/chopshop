@@ -1,5 +1,3 @@
-"""Registro de proyectos de Chopshop: archivo local projects.toml (nunca en el repo; ruta en [agent] projects_file o junto a
-config.toml). Es la fuente de verdad de qué proyectos sigue Chopshop; ver docs/agent-api.md «Registro de proyectos»."""
 import json
 import os
 import threading
