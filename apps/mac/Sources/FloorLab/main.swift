@@ -169,6 +169,34 @@ final class FloorLabDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ s: NSApplication) -> Bool { true }
 }
 
+func relaunchAsBundle() -> Bool {
+    guard Bundle.main.bundleURL.pathExtension != "app", let exe = Bundle.main.executableURL?.resolvingSymlinksInPath(),
+          let info = Bundle.main.infoDictionary else { return false }
+    let fm = FileManager.default
+    let app = exe.deletingLastPathComponent().appendingPathComponent("FloorLab.app")
+    let macos = app.appendingPathComponent("Contents/MacOS")
+    do {
+        try? fm.removeItem(at: app)
+        try fm.createDirectory(at: macos, withIntermediateDirectories: true)
+        try fm.copyItem(at: exe, to: macos.appendingPathComponent("FloorLab"))
+        let plist = info.filter { $0.key.hasPrefix("CF") || $0.key.hasPrefix("NS") }
+        try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+            .write(to: app.appendingPathComponent("Contents/Info.plist"))
+    } catch {
+        return false
+    }
+    let cfg = NSWorkspace.OpenConfiguration()
+    cfg.activates = true
+    cfg.createsNewApplicationInstance = true
+    NSWorkspace.shared.openApplication(at: app, configuration: cfg) { _, err in
+        if let err { print("FloorLab: \(err.localizedDescription)") }
+        exit(err == nil ? 0 : 1)
+    }
+    RunLoop.main.run()
+    return true
+}
+
+if relaunchAsBundle() { exit(0) }
 NSApplication.shared.setActivationPolicy(.regular)
 if #available(macOS 26.0, *) {
     FloorLabApp.main()
