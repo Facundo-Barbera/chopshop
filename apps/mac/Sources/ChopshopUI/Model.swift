@@ -71,7 +71,11 @@ final class AppModel: ObservableObject {
     let shell = ShellController()
 
     /// Credenciales de dispositivo (`cs1_…`) por agente: Keychain, nunca config.toml ni UserDefaults.
+    #if DEBUG
+    let credentials: CredentialStore = FileCredentialStore.dev
+    #else
     let credentials: CredentialStore = KeychainCredentialStore()
+    #endif
     /// Stream en vivo (`GET /stream`) del agente principal (el primero configurado): alimenta la oficina nativa en macOS 26.
     /// En macOS < 26 no se abre: la UI web sigue con `GET /snapshot`.
     let live = LiveStore()
