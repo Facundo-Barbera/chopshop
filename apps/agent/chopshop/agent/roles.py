@@ -188,8 +188,9 @@ class MetaStore:
 
 def _load_profiles():
     from .. import profile  # noqa: PLC0415
+    from . import registry
     out = []
-    for p in profile.list_projects():
+    for p in registry.profiles():
         try:
             prof = profile.load(p)
         except profile.ProfileError as e:

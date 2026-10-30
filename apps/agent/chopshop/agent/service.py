@@ -24,7 +24,7 @@ import time
 
 from .. import engine as engine_mod, events as legacy_events, graph, home, settings, state
 from . import __version__, actions as actions_mod, automations as automations_mod, collector as collector_mod, config, db, envelope, \
-    events, github, halflife, listeners, notes, office as office_mod, pairing, roles as roles_mod, server, t3watch
+    events, github, halflife, listeners, notes, office as office_mod, pairing, registry, roles as roles_mod, server, t3watch
 from .forge import github as forge_github, rack as forge_rack
 
 log = logging.getLogger("chopshop.agent")
@@ -470,7 +470,7 @@ class AgentService:
         self.collector.run_forever(self.stop_event, compact_every=self.compact_every)
 
     def _poll_once(self):
-        res = t3watch.poll(self.conn, self.cfg, self.t3, self.emit)
+        res = t3watch.poll(self.conn, self.cfg, self.t3, self.emit, project_fn=registry.t3_matcher())
         if not res.get("skipped"):
             self.runtime.last_poll = self.clock()
         return res
@@ -666,6 +666,11 @@ def cmd_run(a, out, err, runner):
         for e in errs:
             print("error: %s" % e, file=err)
         return 2
+    try:
+        if registry.migrate():
+            log.info("registro de proyectos creado con los perfiles locales: %s", registry.path())
+    except (OSError, registry.RegistryError) as e:
+        log.warning("no pude crear el registro de proyectos: %s", e)
     try:
         svc = AgentService(cfg, runner=runner)
     except (ServiceError, ValueError) as e:

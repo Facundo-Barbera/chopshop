@@ -18,7 +18,7 @@ Los sobres salen de `events.list_after` (contrato del bus, docs/event-envelope.m
 import copy
 import threading
 
-from . import db, events, lobby, machine_room
+from . import db, events, lobby, machine_room, registry
 
 API_VERSION = 3
 RECENT = 50
@@ -293,4 +293,4 @@ class Projector:
                     _apply(self._state, e)
                 if len(page) < PAGE:
                     break
-            return machine_room.live(copy.deepcopy(self._state), self.conn)
+            return registry.visible(machine_room.live(copy.deepcopy(self._state), self.conn))
