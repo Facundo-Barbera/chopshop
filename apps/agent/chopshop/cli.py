@@ -7,7 +7,7 @@ import time
 
 from . import engine, events, graph, home, inbox, integrate, metrics, miniyaml, profile, state, t3
 
-HELP_EPILOG = """comandos: profile list|show|check | fanout | run | poll | watch | status | snapshot | metrics | wait | gather | answer [--queue] | stop | settle | integrate | subscribe | graph new|run|status | automation list|check|run|logs|add | agent run|status|token|check-config|print-unit | pair create|list|revoke|prune | mcp serve|token|pair"""
+HELP_EPILOG = """comandos: profile list|show|check | project list|add|disable|enable | fanout | run | poll | watch | status | snapshot | metrics | wait | gather | answer [--queue] | stop | settle | integrate | subscribe | graph new|run|status | automation list|check|run|logs|add | agent run|status|token|check-config|print-unit | pair create|list|revoke|prune | mcp serve|token|pair"""
 
 
 def _load_tasks(args):
@@ -47,6 +47,32 @@ def cmd_profile(a):
         print("capacidad: flex %d/piso · hasta %d pisos temporales (%d escritorios c/u) · contratista %s" % (
             c["flex_per_floor"], c["max_extra_floors"], layout.elastic_floor_desks(prof), "sí" if c["outsourcing"] else "no"))
     return 1 if errs else 0
+
+
+def cmd_project(a):
+    from .agent import registry
+    try:
+        if a.action == "list":
+            for e in registry.listing():
+                print("%s  empresa=%s  t3=%s  host=%s  %s  roles=%s" % (e["name"], e["company"], e["t3_project"], e["host"],
+                      "activo" if e["enabled"] else "desactivado", ",".join(e["roles"]) or "-"))
+            if not registry.exists():
+                print("aviso: %s no existe aún (se crea al arrancar el agente o con `project add`)" % registry.path(), file=sys.stderr)
+            return 0
+        if not a.name:
+            print("falta el nombre del proyecto", file=sys.stderr)
+            return 2
+        if a.action == "add":
+            e, created, made = registry.register(a.name, a.company, a.t3_project, a.repo, a.host)
+            print("%s %s (empresa %s)" % ("registrado" if created else "actualizado", e["name"], e["company"]))
+            print("perfil mínimo creado: %s" % profile.profile_path(e["name"]) if made else "perfil existente sin cambios")
+            return 0
+        e = registry.set_enabled(a.name, a.action == "enable")
+        print("%s %s" % ("activado" if e["enabled"] else "desactivado", e["name"]))
+        return 0
+    except registry.RegistryError as e:
+        print("error: %s" % e.message, file=sys.stderr)
+        return 1
 
 
 def cmd_fanout(a):
@@ -340,6 +366,9 @@ def build():
         x.add_argument("--webhook-file", action="append", help="archivo local con la URL del webhook (no se imprime)")
 
     x = sp.add_parser("profile"); x.add_argument("action", choices=["list", "show", "check"]); x.add_argument("project", nargs="?"); x.set_defaults(f=cmd_profile)
+    x = sp.add_parser("project", help="registro de proyectos que sigue Chopshop (projects.toml)")
+    x.add_argument("action", choices=["list", "add", "disable", "enable"]); x.add_argument("name", nargs="?")
+    x.add_argument("--company"); x.add_argument("--t3-project"); x.add_argument("--repo"); x.add_argument("--host"); x.set_defaults(f=cmd_project)
     x = sp.add_parser("fanout"); x.add_argument("project"); x.add_argument("--task", action="append"); x.add_argument("--from", dest="from_file")
     x.add_argument("--max-parallel", type=int); x.add_argument("--host"); x.add_argument("--dry-run", action="store_true")
     x.add_argument("--wait", action="store_true"); x.add_argument("--timeout", type=int, default=900); x.add_argument("--interval", type=int, default=10); hook(x); x.set_defaults(f=cmd_fanout)

@@ -29,7 +29,7 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import API_VERSION, __version__, collector as collector_mod, db, envelope, events, halflife, layout, notes as notes_mod, office as office_mod, pairing as pairing_mod, projection, stream, \
+from . import API_VERSION, __version__, collector as collector_mod, db, envelope, events, halflife, layout, notes as notes_mod, office as office_mod, pairing as pairing_mod, projection, registry, stream, \
     structure as structure_mod, t3watch, webhooks
 
 log = logging.getLogger("chopshop.agent")
@@ -325,6 +325,7 @@ class AgentApp:
         ("GET", "/state"): "state", ("GET", "/stream"): "stream", ("POST", "/pair"): "pair",
         ("GET", "/t3/projects"): "t3_projects", ("GET", "/thread"): "thread_read", ("POST", "/threads"): "thread_launch",
         ("POST", "/threads/send"): "thread_send", ("POST", "/threads/interrupt"): "thread_interrupt",
+        ("GET", "/projects"): "projects", ("POST", "/projects"): "project_register",
     }
 
     def __init__(self, cfg, conn, collector, t3, auth, runtime=None, emit_fn=None, orchestrator_fn=None,
@@ -372,6 +373,10 @@ class AgentApp:
                 if method == "POST":
                     return "desk_assign", {"desk_id": head}
                 raise ApiError(405, "método no permitido")
+        if path.startswith("/projects/") and path.endswith("/disable") and len(path) > len("/projects//disable"):
+            if method == "POST":
+                return "project_disable", {"name": urllib.parse.unquote(path[len("/projects/"):-len("/disable")])}
+            raise ApiError(405, "método no permitido")
         if path.startswith("/office/") and len(path) > len("/office/"):
             if method in ("GET", "PUT"):
                 return ("office_put" if method == "PUT" else "office_get"), {"project": urllib.parse.unquote(path[len("/office/"):])}
@@ -722,6 +727,15 @@ class AgentApp:
             raise ApiError(404, "suscripción desconocida")
         return {"ok": True, "name": name}
 
+    def r_projects(self, ident, q, body):
+        return _registry(registry.api_list)
+
+    def r_project_register(self, ident, q, body):
+        return _registry(registry.api_register, body)
+
+    def r_project_disable(self, ident, q, body, name):
+        return _registry(registry.api_disable, name)
+
     # -- estructura de la oficina (bots; docs/agent-api.md «api_version 3»)
     def r_office_get(self, ident, q, body, project):
         try:
@@ -753,6 +767,13 @@ class AgentApp:
                  ident.login or ident.via)
         return {"ok": True, "project": project, "rev": res["rev"], "changed": res["changed"], "seq": seq,
                 "office": res["structure"], "diff": res["diff"]}
+
+
+def _registry(fn, *args):
+    try:
+        return fn(*args)
+    except registry.RegistryError as e:
+        raise ApiError(e.status, e.message)
 
 
 def _thread(r):
