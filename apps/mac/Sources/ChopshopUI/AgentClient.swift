@@ -16,6 +16,7 @@ struct AgentResult {
     var fetchedAt = Date()
 
     var role: AgentRole? = nil
+    var relaySnapshots: [[String: Any]] = []
 
     var isOK: Bool { status == .ok && snapshot != nil }
     var machineId: String? { snapshot?["machine_id"] as? String }
@@ -419,6 +420,7 @@ final class AgentClient {
         snap["relay_machines"] = who?["machines"] ?? []
         r.status = .ok
         r.snapshot = snap
+        r.relaySnapshots = machines
         return r
     }
 
