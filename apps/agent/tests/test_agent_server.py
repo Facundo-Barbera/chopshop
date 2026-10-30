@@ -187,7 +187,7 @@ class TestRoutes(ServerBase):
         self.assertEqual(st, 200)
         self.assertEqual(sorted(snap), sorted([
             "api_version", "machine_id", "ts", "generated", "machine", "apps", "projects", "threads", "pending_questions",
-            "events", "subscriptions", "orchestrator", "agent"]))
+            "events", "subscriptions", "orchestrator", "agent", "employees", "queues"]))
         self.assertEqual((snap["api_version"], snap["machine_id"]), (1, "host-a"))
         self.assertTrue({"cpus", "load", "cpu_pct", "ram_total_mb", "ram_avail_mb", "ram_pct", "swap_used_mb", "disk_used_gb",
                          "disk_total_gb", "disk_pct", "os", "uptime"} <= set(snap["machine"]))

@@ -22,12 +22,15 @@ import sys
 import threading
 import time
 
-from .. import engine as engine_mod, events as legacy_events, graph, home, settings, state
+from .. import employees as employees_mod, engine as engine_mod, events as legacy_events, graph, home, queue as queue_mod, \
+    settings, state
 from . import __version__, actions as actions_mod, automations as automations_mod, collector as collector_mod, config, db, envelope, \
-    events, github, halflife, listeners, notes, office as office_mod, pairing, registry, roles as roles_mod, server, t3watch
+    events, github, halflife, listeners, notes, office as office_mod, pairing, projection, registry, roles as roles_mod, server, t3watch
 from .forge import github as forge_github, rack as forge_rack
 
 log = logging.getLogger("chopshop.agent")
+EMPLOYEE_ASSIGN = {"wake": "wake", "manual": "manual", "inherited": "inherited"}
+EMPLOYEE_IDLE = {"retired": "retired", "manual": "released", "reclaimed": "released"}
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))   # raíz del repo
 AGENT_DIR = os.path.join(ROOT, "apps", "agent")
@@ -251,6 +254,10 @@ class AgentService:
         self.engine_emit = engine_emitter(self.conn, cfg, poster, self.app.stream.bus.publish)
         self.office = office_mod.Office(self.conn, cfg, self.emit_office, clock=clock)
         self.app.office = self.office
+        employees_mod.ensure_schema(self.conn)
+        self.queue = queue_mod.Queue(self.conn, self._emit_queue, clock=clock, machine=self.app.machine_id)
+        self.app.projector.employees_fn = self._employees
+        self._emp_loaded = None
         self.maint_interval, self.maint_first = maint_interval, maint_first
         self.compact_every = compact_every
         acfg = cfg.get("automations") or {}
@@ -304,6 +311,9 @@ class AgentService:
 
     def office_once(self):
         r = self.office.tick()
+        if self._emp_loaded != self.office._loaded:
+            self._emp_loaded = self.office._loaded
+            self.employees_sync()
         if self._wake_seats:
             self._retry_wake_seats()
         return r
@@ -319,6 +329,49 @@ class AgentService:
             return None
         return self.emit(event, project, body)
 
+    def employees_sync(self):
+        for prof in list(self.office.profs.values()):
+            try:
+                for b in employees_mod.sync(self.conn, prof, employees_mod.local_pool(prof.get("project")), self.clock()):
+                    self.emit_office("employee.renamed", prof.get("project"), b, needs=None,
+                                     subject=envelope.subject("desk", b["employee"], b["name"] or b["role"]))
+            except Exception:  # noqa: BLE001
+                log.exception("empleados de %s", prof.get("project"))
+
+    def _employees(self, st):
+        return employees_mod.roster(self.conn, list(self.office.profs.values()), self.queue,
+                                    st.get("employees"), projection.seats(st))
+
+    def _emit_queue(self, env):
+        stored = events.emit_envelope(self.conn, self.cfg, env["type"], env.get("project"), env.get("body"),
+                                      env.get("subject"), env.get("severity"), env.get("needs"), env.get("cause"),
+                                      poster=self.poster, ts=envelope.epoch(env["ts"]), id=env.get("id"))
+        if stored:
+            self.app.stream.bus.publish(stored["seq"])
+        return stored
+
+    def _employee_event(self, type, env):
+        b = env.get("body") or {}
+        emp = employees_mod.get(self.conn, b.get("desk")) if b.get("desk") else None
+        if not emp or emp["retired"]:
+            return None
+        body = {"employee": emp["id"], "role": emp["role"], "thread_id": b.get("thread_id"), "name": emp["name"],
+                "queue_len": self.queue.length(emp["id"])}
+        severity = None
+        if type == "employee.assigned":
+            body.update(task=None, reason=EMPLOYEE_ASSIGN.get(b.get("reason"), "manual"), title=b.get("title"),
+                        since=b.get("since") or env.get("ts"))
+        else:
+            if b.get("reason") == "inherited":
+                return None
+            snap = self.office._snap(b.get("thread_id")) or {}
+            reason = EMPLOYEE_IDLE.get(b.get("reason")) or (
+                "cancelled" if snap.get("status") == "cancelled" else "failed" if snap.get("phase") == "failed" else "done")
+            body.update(reason=reason, since=env.get("ts"), summary=snap.get("summary"))
+            severity = "warn" if reason == "failed" else None
+        return self.emit_office(type, env.get("project"), body, severity=severity, needs=None, cause=env,
+                                subject=envelope.subject("desk", emp["id"], emp["name"] or emp["role"]))
+
     # -- API común de los módulos
     def emit(self, event, project, body=None):
         body = halflife.stamp(self.conn, event, body)   # el `touched_at` de un toque viaja en cada `task.state` del hilo
@@ -331,6 +384,11 @@ class AgentService:
         env = events.emit_envelope(self.conn, self.cfg, type, project, body, poster=self.poster, ts=self.clock(), **kw)
         if env:
             self.app.stream.bus.publish(env["seq"])
+            if type in ("desk.assigned", "desk.released"):
+                try:
+                    self._employee_event("employee.assigned" if type == "desk.assigned" else "employee.idle", env)
+                except Exception:  # noqa: BLE001
+                    log.exception("no pude emitir el evento de empleado de %s", type)
         return env
 
     def emit_envelope(self, env):

@@ -90,7 +90,7 @@ def _store(conn, machine, items, project, ts, cause):
     with db.tx():
         for event, f in items:
             env = envelope.build(f["type"], project, f["body"], f["severity"], f["needs"], f["subject"], cause,
-                                 machine, ts)
+                                 machine, ts, id=f.get("id"))
             out.append((event, _insert(conn, env, event, ts)))
     return out
 
@@ -133,7 +133,7 @@ def emit(conn, cfg, event, project, body=None, poster=None, timeout=TIMEOUT, wai
 
 
 def emit_envelope(conn, cfg, type, project=None, body=None, subject=None, severity=None, needs=envelope.DEFAULT,
-                  cause=None, poster=None, timeout=TIMEOUT, wait=False, ts=None):
+                  cause=None, poster=None, timeout=TIMEOUT, wait=False, ts=None, id=None):
     """Emite un tipo nuevo. `cause` = sobre padre (el hijo va un nivel más hondo) o {"id","depth"}. Valida el sobre
     (`EnvelopeError` si no cuadra) y lo devuelve con `seq`; None si `cause.depth` > MAX_DEPTH (anti-bucles)."""
     ts = time.time() if ts is None else float(ts)
@@ -143,7 +143,7 @@ def emit_envelope(conn, cfg, type, project=None, body=None, subject=None, severi
         return None
     envelope.validate(env)
     f = {k: env[k] for k in ("type", "severity", "needs", "subject", "body")}
-    stored = _store(conn, machine, [(type, f)], project, ts, env["cause"])
+    stored = _store(conn, machine, [(type, dict(f, id=id))], project, ts, env["cause"])
     _publish(conn, cfg, stored, poster, timeout, wait)
     return stored[0][1]
 
