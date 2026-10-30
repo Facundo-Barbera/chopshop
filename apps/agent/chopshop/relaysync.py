@@ -7,6 +7,7 @@ from .agent import __version__ as AGENT_VERSION
 from .agent import envelope, layout
 
 PROTOCOL = [1]
+PROTOCOL_V2 = [2]
 TTL_DEFAULT = 120
 TTL_MIN, TTL_MAX = 30, 900
 MAX_PART_BYTES = 786432
@@ -27,9 +28,10 @@ _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 _TYPE = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*){1,3}$")
 _ULID = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$")
 _SUBJECT = re.compile(r"^[A-Za-z0-9_.:#@-]([A-Za-z0-9_.:#@/-]{0,127})$")
-_SECRETISH = re.compile(r"(cs1_|cr1_|t3-thread:|://|^[/~]|\\)")
+_SECRETISH = re.compile(r"(cs1_|cr1_|cm1_|t3-thread:|://|^[/~]|\\)")
 _EMPLOYEE = re.compile(r"^[^/\s]+/[0-9]+/[a-z0-9][a-z0-9_-]{0,31}/[0-9]+$")
 _TASK = re.compile(r"^q:[0-7][0-9A-HJKMNP-TV-Z]{25}$")
+_UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
 
 def _name(v):
@@ -84,8 +86,8 @@ def decode(p):
     return json.loads(base64.b64decode(p["data"]).decode("utf-8"))
 
 
-def _header(type, ts=None):
-    return {"v": 1, "type": type, "id": envelope.new_id(ts), "ts": envelope.iso(ts)}
+def _header(type, ts=None, v=1):
+    return {"v": v, "type": type, "id": envelope.new_id(ts), "ts": envelope.iso(ts)}
 
 
 def _machine(machine_id):
@@ -111,8 +113,32 @@ def roles_from_profiles(profiles):
     return out
 
 
-def hello(machine_id, projects, last_seq=None, ts=None, version=AGENT_VERSION):
-    msg = dict(_header("hello", ts), machine_id=_machine(machine_id), agent_version=version, protocol=list(PROTOCOL))
+def workspace_id(v):
+    return v if isinstance(v, str) and _UUID.match(v) else None
+
+
+def workspace_map(sync):
+    sync = sync if isinstance(sync, dict) else {}
+    ids = []
+    for w in sync.get("workspaces") or ():
+        wid = workspace_id((w or {}).get("id")) if isinstance(w, dict) else None
+        if wid and wid not in ids:
+            ids.append(wid)
+    projects = {}
+    for p in sync.get("projects") or ():
+        if not isinstance(p, dict):
+            continue
+        name, wid = _name(p.get("name")), workspace_id(p.get("workspace_id"))
+        if name and wid:
+            projects[name] = wid
+            if wid not in ids:
+                ids.append(wid)
+    return ids, projects
+
+
+def hello(machine_id, projects, last_seq=None, ts=None, version=AGENT_VERSION, v=1):
+    msg = dict(_header("hello", ts, v), machine_id=_machine(machine_id), agent_version=version,
+               protocol=list(PROTOCOL_V2 if v == 2 else PROTOCOL))
     if isinstance(last_seq, int) and last_seq >= 0:
         msg["last_seq"] = last_seq
     msg["projects"] = [{"name": n, "roles": _roles(r)} for n, r in sorted((projects or {}).items()) if _name(n)][:256]
@@ -191,11 +217,14 @@ def event_fields(env, machine_id=None):
             "subject": _subject(mid, env.get("subject"))}
 
 
-def event(env, machine_id=None, ts=None):
+def event(env, machine_id=None, ts=None, v=1, workspaces=None):
     fields = event_fields(env, machine_id)
     if fields is None:
         return None
-    return dict(_header("event", ts), **fields, body=part("body", body(env.get("body"), fields["machine_id"])))
+    msg = dict(_header("event", ts, v), **fields, body=part("body", body(env.get("body"), fields["machine_id"])))
+    if v == 2:
+        msg["workspace_id"] = (workspaces or {}).get(fields["project"]) if fields["project"] else None
+    return msg
 
 
 def events_from_bus(conn, after=0, limit=200, machine_id=None, ts=None):
@@ -379,14 +408,44 @@ def _projects(snap, state, roles, attention):
             for n, r in sorted(rows.items())][:256]
 
 
-def snapshot(snap, state=None, roles=None, machine_id=None, seq=None, ttl_s=TTL_DEFAULT, ts=None, version=AGENT_VERSION):
+def _keep(names, unscoped, project):
+    return project in names if project else unscoped
+
+
+def _only(rows, names, unscoped, field="project"):
+    return [r for r in rows or () if isinstance(r, dict) and _keep(names, unscoped, r.get(field))]
+
+
+def scope(snap, state, roles, projects, unscoped=False):
+    names = set(projects)
+    snap, state = dict(snap or {}), dict(state or {})
+    for k in ("threads", "pending_questions", "events", "employees"):
+        if k in snap:
+            snap[k] = _only(snap[k], names, unscoped)
+    if "projects" in snap:
+        snap["projects"] = _only(snap["projects"], names, False, "name")
+    if isinstance(snap.get("queues"), dict):
+        snap["queues"] = {e: q for e, q in snap["queues"].items() if isinstance(e, str) and e.split("/", 1)[0] in names}
+    if "projects" in state:
+        state["projects"] = _only(state["projects"], names, False, "name")
+    if "recent" in state:
+        state["recent"] = _only(state["recent"], names, unscoped)
+    return snap, state, {n: r for n, r in (roles or {}).items() if n in names}
+
+
+def snapshot(snap, state=None, roles=None, machine_id=None, seq=None, ttl_s=TTL_DEFAULT, ts=None, version=AGENT_VERSION,
+             v=1, workspace_id=None, projects=None):
     snap = snap or {}
     mid = _machine(machine_id or snap.get("machine_id") or (state or {}).get("machine"))
     if seq is None:
         seq = (state or {}).get("head_seq") or max([e.get("seq") or 0 for e in snap.get("events") or []] or [0])
-    msg = dict(_header("snapshot", ts), machine_id=mid, seq=_count(seq),
+    if projects is not None:
+        snap, state, roles = scope(snap, state, roles, projects, unscoped=workspace_id is None)
+    msg = dict(_header("snapshot", ts, v), machine_id=mid, seq=_count(seq),
                ttl_s=max(TTL_MIN, min(TTL_MAX, int(ttl_s or TTL_DEFAULT))), agent_version=version,
                health=_health(snap, state), counts=_counts(snap, state))
+    if v == 2:
+        msg["workspace_id"] = workspace_id
     st = _state_part(mid, snap, state)
     attention = {}
     for a in st["attention"]:
