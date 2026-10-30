@@ -7,7 +7,7 @@ import time
 
 from . import engine, events, graph, home, inbox, integrate, metrics, miniyaml, names, profile, state, t3
 
-HELP_EPILOG = """comandos: profile list|show|check | project list|add|disable|enable | fanout | run | poll | watch | status | snapshot | metrics | wait | gather | answer [--queue] | stop | settle | integrate | subscribe | graph new|run|status | automation list|check|run|logs|add | agent run|status|token|check-config|print-unit | pair create|list|revoke|prune | mcp serve|token|pair | relay pair|status|unpair"""
+HELP_EPILOG = """comandos: profile list|show|check | project list|add|disable|enable | fanout | run | poll | watch | status | snapshot | metrics | wait | gather | answer [--queue] | stop | settle | integrate | subscribe | graph new|run|status | automation list|check|run|logs|add | agent run|status|token|check-config|print-unit | pair create|list|revoke|prune | mcp serve|token|pair | relay link|status|unlink|pair|unpair | relay admin bootstrap|recover"""
 
 
 def _load_tasks(args):
@@ -441,6 +441,9 @@ def main(argv):
     if argv and argv[0] == "mcp":
         from . import mcp
         return mcp.main(argv[1:])
+    if list(argv[:2]) == ["relay", "admin"]:
+        from . import relayadmin
+        return relayadmin.main(argv[2:])
     if argv and argv[0] == "relay":
         from . import relaycfg
         return relaycfg.main(argv[1:])
