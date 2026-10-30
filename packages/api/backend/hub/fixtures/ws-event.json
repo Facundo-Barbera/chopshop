@@ -1,0 +1,27 @@
+{
+  "v": 2,
+  "type": "event",
+  "id": "01MCB2QB2C4E6G8J0M2P4R6T8V",
+  "ts": "2026-10-30T14:02:13.120Z",
+  "machine_id": "mac-mini.local",
+  "workspace_id": "7c2e9f14-3a6b-4d5e-8f17-2b9c4e6a0d31",
+  "event_id": "01MCB46XHEM0W40J2GB1G6GW3R",
+  "seq": 1843,
+  "event_ts": "2026-10-30T14:02:13.077Z",
+  "project": "awesome-gb",
+  "event_type": "task.state",
+  "severity": "info",
+  "needs": null,
+  "subject": {
+    "kind": "task",
+    "id": "mcp:a03694e5"
+  },
+  "body": {
+    "name": "body",
+    "media_type": "application/json",
+    "enc": "none",
+    "bytes": 16,
+    "sha256": "3b1c2a6e5f4d9e8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a",
+    "data": "eyJwaGFzZSI6ImRvbmUifQ=="
+  }
+}

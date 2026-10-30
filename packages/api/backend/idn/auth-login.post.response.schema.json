@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/backend/v2/idn/auth-login.post.response.schema.json",
+  "title": "POST /v1/auth/login → 200 (mac/cli con token; web con csrf_token y cookie)",
+  "oneOf": [
+    {
+      "$ref": "../common.schema.json#/$defs/login_mac"
+    },
+    {
+      "$ref": "../common.schema.json#/$defs/login_web"
+    }
+  ]
+}

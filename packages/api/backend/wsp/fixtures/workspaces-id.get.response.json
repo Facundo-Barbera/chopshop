@@ -1,0 +1,20 @@
+{
+  "workspace": {
+    "id": "7c2e9f14-3a6b-4d5e-8f17-2b9c4e6a0d31",
+    "name": "Awesome GB",
+    "slug": "awesome-gb",
+    "position": 0,
+    "style": {
+      "color": "#3a7bd5"
+    },
+    "rev": 3,
+    "project_count": 2,
+    "machine_ids": [
+      "c3f8a2d1-6e4b-4a97-b2c5-8d1e7f3a9b52",
+      "e8b1c4f7-2d9a-4e63-a1f8-5c7b3d2e6a94"
+    ],
+    "watcher_count": 1,
+    "created_at": "2026-10-30T12:00:00.000Z",
+    "updated_at": "2026-10-30T12:05:00.000Z"
+  }
+}
