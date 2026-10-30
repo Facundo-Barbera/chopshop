@@ -329,9 +329,9 @@ desde una máquina.
 ## Tests
 
 ```sh
-pnpm test      # python unittest (apps/agent) + node --test (apps/ui, apps/relay, packages/api) + chequeos
+pnpm test      # python unittest (apps/agent) + node --test (apps/ui, apps/relay, apps/backend, packages/api) + chequeos
 pnpm build     # bundle de la UI (apps/ui -> apps/mac/Resources/web)
-pnpm check     # compileall, node --check, tsc --noEmit (apps/relay) y bash -n
+pnpm check     # compileall, node --check, tsc --noEmit (apps/relay, apps/backend) y bash -n
 ```
 
 Sin pnpm, solo el motor: `cd apps/agent && python3 -m unittest discover -s tests`. Los tests no arrancan servicios ni tocan tu configuración real.
