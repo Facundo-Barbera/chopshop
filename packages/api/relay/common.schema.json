@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/relay/v1/common.schema.json",
+  "title": "Definiciones comunes del protocolo del relay (v1)",
+  "$defs": {
+    "v": {"const": 1},
+    "msg_id": {"type": "string", "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"},
+    "ts": {"type": "string", "format": "date-time", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$"},
+    "machine_id": {"type": "string", "pattern": "^[A-Za-z0-9_.:-]{1,128}$"},
+    "name": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"},
+    "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+([-+][0-9A-Za-z.-]{1,32})?$"},
+    "token": {"type": "string", "pattern": "^cr1_[A-Za-z0-9_-]{43}$"},
+    "token_id": {"type": "string", "pattern": "^tk-[0-9a-f]{8}$"},
+    "code_id": {"type": "string", "pattern": "^rc-[0-9a-f]{8}$"},
+    "pair_code": {"type": "string", "pattern": "^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$"},
+    "scope": {"enum": ["agent", "viewer"]},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "pct": {"type": "number", "minimum": 0, "maximum": 100},
+    "count": {"type": "integer", "minimum": 0},
+    "severity": {"enum": ["info", "notice", "warn", "error"]},
+    "needs": {"enum": [null, "human", "bot", "approval"]},
+    "subject_kind": {"enum": ["task", "batch", "node", "graph", "thread", "machine", "pr", "issue", "automation", "agent", "desk", "office", "repo", "run", "listener"]},
+    "event_type": {"type": "string", "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*){1,3}$"},
+    "part": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "media_type", "enc", "bytes", "sha256", "data"],
+      "properties": {
+        "name": {"enum": ["state", "queue", "events", "office", "body"]},
+        "media_type": {"const": "application/json"},
+        "enc": {"enum": ["none", "e2e-v1"]},
+        "bytes": {"type": "integer", "minimum": 0, "maximum": 786432},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "data": {"type": "string", "pattern": "^[A-Za-z0-9+/]*={0,2}$", "maxLength": 1048576}
+      }
+    }
+  }
+}

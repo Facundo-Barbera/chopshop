@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/relay/v1/whoami.schema.json",
+  "title": "whoami: pregunta quién soy y qué veo (agente o visor -> relay)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "v",
+    "type",
+    "id",
+    "ts"
+  ],
+  "properties": {
+    "v": {
+      "$ref": "common.schema.json#/$defs/v"
+    },
+    "type": {
+      "const": "whoami"
+    },
+    "id": {
+      "$ref": "common.schema.json#/$defs/msg_id"
+    },
+    "ts": {
+      "$ref": "common.schema.json#/$defs/ts"
+    }
+  }
+}

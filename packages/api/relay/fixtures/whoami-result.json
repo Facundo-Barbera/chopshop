@@ -1,0 +1,26 @@
+{
+  "v": 1,
+  "type": "whoami.result",
+  "id": "01M6A2QD4F7H9K1N3Q5T7W9Y1Z",
+  "ts": "2026-10-30T14:03:00.031Z",
+  "re": "01M6A2QD4E6G8J0M2P4S6V8X0Y",
+  "token_id": "tk-9b2e41c7",
+  "scope": "viewer",
+  "account": "ac-51d0e8a2",
+  "token_name": "MacBook",
+  "machine_id": null,
+  "machines": [
+    {
+      "machine_id": "contabo-dev",
+      "online": true,
+      "snapshot_age_s": 48.0,
+      "stale": false
+    },
+    {
+      "machine_id": "host-b",
+      "online": false,
+      "snapshot_age_s": null,
+      "stale": true
+    }
+  ]
+}

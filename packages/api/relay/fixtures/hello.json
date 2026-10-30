@@ -1,0 +1,33 @@
+{
+  "v": 1,
+  "type": "hello",
+  "id": "01M6A2Q8ZK3T5W7Y9B1D3F5H7J",
+  "ts": "2026-10-30T14:02:11.250Z",
+  "machine_id": "contabo-dev",
+  "agent_version": "0.9.0",
+  "protocol": [
+    1
+  ],
+  "last_seq": 1842,
+  "projects": [
+    {
+      "name": "nuskills",
+      "roles": [
+        "backend",
+        "frontend",
+        "qa"
+      ]
+    },
+    {
+      "name": "chopshop",
+      "roles": [
+        "relay",
+        "mac"
+      ]
+    },
+    {
+      "name": "orchestrator",
+      "roles": []
+    }
+  ]
+}

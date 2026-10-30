@@ -1,0 +1,163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/relay/v1/snapshot.schema.json",
+  "title": "snapshot: estado de la máquina; cabecera en lista blanca + partes opacas (agente -> relay -> visor)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "v",
+    "type",
+    "id",
+    "ts",
+    "machine_id",
+    "seq",
+    "ttl_s",
+    "agent_version",
+    "health",
+    "counts",
+    "projects",
+    "parts"
+  ],
+  "properties": {
+    "v": {
+      "$ref": "common.schema.json#/$defs/v"
+    },
+    "type": {
+      "const": "snapshot"
+    },
+    "id": {
+      "$ref": "common.schema.json#/$defs/msg_id"
+    },
+    "ts": {
+      "$ref": "common.schema.json#/$defs/ts"
+    },
+    "machine_id": {
+      "$ref": "common.schema.json#/$defs/machine_id"
+    },
+    "seq": {
+      "$ref": "common.schema.json#/$defs/count"
+    },
+    "ttl_s": {
+      "type": "integer",
+      "minimum": 30,
+      "maximum": 900
+    },
+    "agent_version": {
+      "$ref": "common.schema.json#/$defs/version"
+    },
+    "health": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "t3_ok",
+        "cpu_pct",
+        "ram_pct",
+        "disk_pct",
+        "load1"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "ok",
+            "degraded",
+            "down"
+          ]
+        },
+        "t3_ok": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "cpu_pct": {
+          "$ref": "common.schema.json#/$defs/pct"
+        },
+        "ram_pct": {
+          "$ref": "common.schema.json#/$defs/pct"
+        },
+        "disk_pct": {
+          "$ref": "common.schema.json#/$defs/pct"
+        },
+        "load1": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "running": {
+          "$ref": "common.schema.json#/$defs/count"
+        },
+        "queued": {
+          "$ref": "common.schema.json#/$defs/count"
+        },
+        "waiting": {
+          "$ref": "common.schema.json#/$defs/count"
+        },
+        "stuck": {
+          "$ref": "common.schema.json#/$defs/count"
+        },
+        "needs_human": {
+          "$ref": "common.schema.json#/$defs/count"
+        },
+        "waiting_bot": {
+          "$ref": "common.schema.json#/$defs/count"
+        },
+        "done": {
+          "$ref": "common.schema.json#/$defs/count"
+        },
+        "failed": {
+          "$ref": "common.schema.json#/$defs/count"
+        }
+      }
+    },
+    "projects": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "roles",
+          "threads_running",
+          "threads_pending",
+          "attention"
+        ],
+        "properties": {
+          "name": {
+            "$ref": "common.schema.json#/$defs/name"
+          },
+          "roles": {
+            "type": "array",
+            "maxItems": 64,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "common.schema.json#/$defs/name"
+            }
+          },
+          "threads_running": {
+            "$ref": "common.schema.json#/$defs/count"
+          },
+          "threads_pending": {
+            "$ref": "common.schema.json#/$defs/count"
+          },
+          "attention": {
+            "$ref": "common.schema.json#/$defs/count"
+          }
+        }
+      }
+    },
+    "parts": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "$ref": "common.schema.json#/$defs/part"
+      }
+    }
+  }
+}
