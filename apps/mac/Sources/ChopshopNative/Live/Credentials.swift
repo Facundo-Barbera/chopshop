@@ -158,6 +158,11 @@ public final class FileCredentialStore: CredentialStore, @unchecked Sendable {
         return FileCredentialStore(url: dir.appendingPathComponent("relay-credentials.json"))
     }
 
+    public static var devSession: FileCredentialStore {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Chopshop Dev")
+        return FileCredentialStore(url: dir.appendingPathComponent("session-credentials.json"))
+    }
+
     public let url: URL
     private let lock = NSLock()
     private var items: [String: String]?
