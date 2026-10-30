@@ -79,9 +79,12 @@ final class AppModel: ObservableObject {
 
     weak var web: WKWebView?
 
-    /// Sección [app] de ~/.config/chopshop/config.toml (+ CHOPSHOP_APP__*). Se recarga con `reloadConfig()`.
-    /// Al arrancar migra un `agent_url` suelto (un solo agente) a `[app.agents.*]`.
-    private(set) var config = AppConfig.loadMigratingLegacy()
+    /// Agente incrustado en la app («Usar esta Mac como máquina», BundledAgent.swift).
+    let bundled = BundledAgent()
+
+    /// Sección [app] de ~/.config/chopshop/config.toml (+ CHOPSHOP_APP__*), más el agente de este Mac si el ajuste está activo.
+    /// Se recarga con `reloadConfig()`. Al arrancar migra un `agent_url` suelto (un solo agente) a `[app.agents.*]`.
+    private(set) lazy var config = loadConfig(migratingLegacy: true)
     /// Solo las máquinas activadas (`enabled`); las desactivadas se ven en los ajustes pero no se consultan.
     private lazy var hub = AgentHub(specs: config.enabledAgents, credentials: credentials)
     /// Última ronda de sondeo (estado de conexión de cada máquina en los ajustes).
@@ -111,6 +114,7 @@ final class AppModel: ObservableObject {
         shell.refresh = { [weak self] in _ = Task { await self?.refresh() } }
         startPolling()
         startLive()
+        if !args.contains("--capture") { syncBundledAgent() }
         // Sin ningún agente configurado no hay nada que mostrar: se pide la conexión en los ajustes
         if hub.isEmpty && !args.contains("--capture") { showSettings = true }
     }
@@ -187,7 +191,7 @@ final class AppModel: ObservableObject {
         pollTask?.cancel()
         pollTask = nil
         let oldPrimary = primary?.spec
-        config = AppConfig.load()
+        config = loadConfig()
         hub = AgentHub(specs: config.enabledAgents, credentials: credentials)
         let active = Set(hub.clients.map(\.spec.name))
         results = results.filter { active.contains($0.name) }
@@ -219,6 +223,7 @@ final class AppModel: ObservableObject {
         }
         if !orphaned.isEmpty { pairingRevision += 1 }
         reloadConfig()
+        if !orphaned.isEmpty { syncBundledAgent() }    // si compartía endpoint con una máquina quitada, se vuelve a emparejar
         return nil
     }
 
@@ -227,6 +232,29 @@ final class AppModel: ObservableObject {
         guard spec.enabled else { return .disabled }
         guard hub.client(named: spec.name)?.spec == spec, let r = results.first(where: { $0.name == spec.name }) else { return .connecting }
         return r.isOK ? .connected : .failed(r.status, r.shortMessage)
+    }
+
+    /// Config del archivo más el agente de este Mac (que nunca se escribe en config.toml).
+    private func loadConfig(migratingLegacy: Bool = false) -> AppConfig {
+        var c = migratingLegacy ? AppConfig.loadMigratingLegacy() : AppConfig.load()
+        c.agents = BundledAgent.merge(c.agents, local: bundled.localSpec)
+        return c
+    }
+
+    /// Registra o quita el agente de este Mac según el ajuste y, cuando responde, empareja la app con él.
+    func syncBundledAgent() {
+        Task { @MainActor in
+            await bundled.sync(isPaired: { [weak self] in self?.isPaired(BundledAgent.agentName) ?? true },
+                               pair: { [weak self] agent, code in await self?.pair(agent: agent, code: code) })
+        }
+    }
+
+    /// Ajuste «Usar esta Mac como máquina».
+    func setUseThisMac(_ on: Bool) {
+        guard bundled.isEnabled != on else { return }
+        bundled.isEnabled = on
+        reloadConfig()
+        syncBundledAgent()
     }
 
     /// Mensaje `agents`: resultados crudos por agente (la UI los combina). Sin agentes configurados va la lista vacía;

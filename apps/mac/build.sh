@@ -1,6 +1,6 @@
 #!/bin/bash
-# Construye Chopshop.app: un único .app (SwiftUI + WKWebView) que es cliente puro de la API del agente.
-# Sin Python ni motor embebido: solo el ejecutable, la UI web (Resources/web) y el icono.
+# Construye Chopshop.app: un único .app (SwiftUI + WKWebView), cliente de la API del agente, que además lleva dentro el
+# agente de este Mac (Python fijado + apps/agent; lo registra la app con SMAppService, ver release/embed-agent.sh).
 #
 #   pnpm app                       # desde la raíz: construye la UI (apps/ui) y llama a este script
 #   apps/mac/build.sh              # solo el .app, con la UI ya construida en apps/mac/Resources/web
@@ -9,6 +9,7 @@
 #   CHOPSHOP_APP=/ruta/Chopshop.app   otra ruta de salida
 #   REBUILD_WEB=1                     reconstruir antes la UI (requiere `pnpm install`)
 #   UNIVERSAL=1                       binario arm64 + x86_64 (requiere Xcode completo)
+#   EMBED_AGENT=0                     sin el agente incrustado (sin descargar Python; el ajuste «Usar esta Mac» queda inactivo)
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -29,7 +30,9 @@ ARCHS=()
 [ "${UNIVERSAL:-0}" = 1 ] && ARCHS=(--arch arm64 --arch x86_64)
 
 swift build -c release ${ARCHS[@]+"${ARCHS[@]}"}
-BIN=$(swift build -c release ${ARCHS[@]+"${ARCHS[@]}"} --show-bin-path)/ChopshopUI
+BIN_DIR=$(swift build -c release ${ARCHS[@]+"${ARCHS[@]}"} --show-bin-path)
+BIN=$BIN_DIR/ChopshopUI
+BUNDLE_ID=local.chopshop.ui
 
 APP=${CHOPSHOP_APP:-$PWD/dist/Chopshop.app}
 rm -rf "$APP"
@@ -48,7 +51,7 @@ cat > "$APP/Contents/Info.plist" <<PL
 <plist version="1.0"><dict>
 <key>CFBundleName</key><string>Chopshop</string>
 <key>CFBundleDisplayName</key><string>Chopshop</string>
-<key>CFBundleIdentifier</key><string>local.chopshop.ui</string>
+<key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundleExecutable</key><string>Chopshop</string>
 <key>CFBundlePackageType</key><string>APPL</string>
@@ -61,6 +64,30 @@ cat > "$APP/Contents/Info.plist" <<PL
 <key>NSLocalNetworkUsageDescription</key><string>Chopshop se conecta a los agentes de tus máquinas por la red (Tailscale).</string>
 </dict></plist>
 PL
+
+# Agente incrustado: lanzador + LaunchAgent (BundleProgram relativo al bundle; la app lo registra con SMAppService, nunca
+# launchctl). Label y AssociatedBundleIdentifiers siguen al bundle id (release/assemble-app.sh los ajusta al de release).
+if [ "${EMBED_AGENT:-1}" != 0 ]; then
+  cp "$BIN_DIR/ChopshopAgent" "$APP/Contents/MacOS/chopshop-agent"
+  mkdir -p "$APP/Contents/Library/LaunchAgents"
+  cat > "$APP/Contents/Library/LaunchAgents/chopshop-agent.plist" <<PL
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>$BUNDLE_ID.agent</string>
+<key>BundleProgram</key><string>Contents/MacOS/chopshop-agent</string>
+<key>ProgramArguments</key><array><string>chopshop-agent</string><string>--launchd</string></array>
+<key>AssociatedBundleIdentifiers</key><array><string>$BUNDLE_ID</string></array>
+<key>RunAtLoad</key><true/>
+<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+<key>ThrottleInterval</key><integer>30</integer>
+<key>ProcessType</key><string>Background</string>
+<key>LowPriorityIO</key><true/>
+<key>Nice</key><integer>10</integer>
+</dict></plist>
+PL
+  bash "$PWD/release/embed-agent.sh" "$APP"
+fi
 
 # Sparkle (auto-actualización): el ejecutable enlaza Sparkle.framework, así que va dentro del bundle. Sin SUFeedURL en
 # el Info.plist (build local) el updater queda inactivo; las claves de release las pone release/assemble-app.sh.

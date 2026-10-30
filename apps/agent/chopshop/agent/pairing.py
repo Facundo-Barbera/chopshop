@@ -235,6 +235,7 @@ def build_parser():
     x = sp.add_parser("create", help="crea un código de un solo uso (se muestra una vez)")
     x.add_argument("--name", help="nombre del dispositivo (p. ej. \"MacBook\")")
     x.add_argument("--ttl", default="10m", help="caducidad: 90s, 10m, 1h (máx. 1h; por defecto 10m)")
+    x.add_argument("--json", action="store_true", help="salida JSON {id,code,name,expires_at} (para la app de Mac en esta máquina)")
     x = sp.add_parser("list", help="dispositivos y códigos vivos (sin secretos)")
     x.add_argument("--json", action="store_true")
     x = sp.add_parser("revoke", help="revoca un dispositivo o invalida un código (efecto inmediato)")
@@ -261,6 +262,9 @@ def main(argv, stdout=None, stderr=None, conn=None, clock=time.time):
             except (ValueError, PairError) as e:
                 print("error: %s" % getattr(e, "message", e), file=err)
                 return 2
+            if a.json:
+                print(json.dumps(res, ensure_ascii=False), file=out)
+                return 0
             print("código: %s  (id %s, caduca %s; un solo uso, no se vuelve a mostrar)"
                   % (res["code"], res["id"], _when(res["expires_at"])), file=out)
             return 0
