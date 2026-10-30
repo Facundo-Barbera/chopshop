@@ -81,8 +81,9 @@ if let mode = args.dropFirst().first, mode == "stable-floor" {
 }
 if let mode = args.dropFirst().first, mode == "employees" {
     let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../../../..").standardized
-    let fixture = args.count > 2 ? args[2] : repo.appendingPathComponent("packages/api/fixtures/snapshot.office.json").path
-    MainActor.assumeIsolated { Snapshots.renderEmployees(fixture: fixture, to: out) }
+    let office = repo.appendingPathComponent("packages/api/fixtures/snapshot.office.json").path
+    let fixture = args.count > 2 ? args[2] : office
+    MainActor.assumeIsolated { Snapshots.renderEmployees(fixture: fixture, office: args.count > 3 ? args[3] : office, to: out) }
     exit(0)
 }
 if let mode = args.dropFirst().first, mode == "multimachine" {
