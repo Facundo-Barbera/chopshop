@@ -81,6 +81,8 @@ public struct CityFloor: Hashable, Sendable, Identifiable {
     public var floorName: String? = nil
     /// Planta baja del edificio: el vestíbulo (`project` vacío; sus avisos llevan el proyecto del hilo).
     public var isLobby = false
+    public var temporary = false
+    public var outsourced = false
 
     public init(project: String, company: String, level: Int, status: CityFloorStatus, activeThreads: [String], running: Int,
                 needsYou: Int, stuck: Int, alert: CityAlert? = nil, floorIndex: Int? = nil, floorName: String? = nil, isLobby: Bool = false) {
@@ -111,13 +113,18 @@ public struct CityBuilding: Hashable, Sendable, Identifiable {
     /// Aspecto (material, ventanas, azotea, alturas…): por defecto de la semilla `company`. Gancho de la personalización.
     public var style: CityBuildingStyle
     public var campus: String
+    public var contractorOf: String? = nil
+    public var title: String? = nil
 
     public init(company: String, index: Int, x0: Double, y0: Double, w: Double, d: Double, floors: [CityFloor],
-                style: CityBuildingStyle? = nil, campus: String = "") {
+                style: CityBuildingStyle? = nil, campus: String = "", contractorOf: String? = nil, title: String? = nil) {
         self.company = company; self.index = index; self.x0 = x0; self.y0 = y0; self.w = w; self.d = d; self.floors = floors
         self.style = style ?? CityBuildingStyle(seed: company)
         self.campus = campus
+        self.contractorOf = contractorOf; self.title = title
     }
+
+    public var displayName: String { title ?? company }
 
     public var id: String { company }
     public var x1: Double { x0 + w }
@@ -158,12 +165,15 @@ public struct CityModel: Equatable, Sendable {
     public var roads: [CityRoad]
     public var trees: [CityPoint]
     public var seed: UInt64
+    public var links: [CityLink] = []
 
     public init(buildings: [CityBuilding], groundX: Double, groundY: Double, campuses: [CityCampus] = [], roads: [CityRoad] = [],
-                trees: [CityPoint] = [], seed: UInt64 = 0) {
+                trees: [CityPoint] = [], seed: UInt64 = 0, links: [CityLink] = []) {
         self.buildings = buildings; self.groundX = groundX; self.groundY = groundY
-        self.campuses = campuses; self.roads = roads; self.trees = trees; self.seed = seed
+        self.campuses = campuses; self.roads = roads; self.trees = trees; self.seed = seed; self.links = links
     }
+
+    public static func contractorKey(_ project: String) -> String { "\(project)⁺contratista" }
 
     public func campus(_ name: String) -> CityCampus? { campuses.first { $0.name == name } }
     public func campus(of project: String) -> String? { building(of: project)?.campus }
@@ -184,7 +194,11 @@ public struct CityModel: Equatable, Sendable {
     /// Piso más bajo del proyecto (al que entra el zoom).
     public func floor(_ project: String) -> CityFloor? { floors.first { $0.project == project } }
     public func floor(id: String) -> CityFloor? { floors.first { $0.id == id } }
-    public func building(of project: String) -> CityBuilding? { buildings.first { b in b.floors.contains { $0.project == project } } }
+    public func building(of project: String) -> CityBuilding? {
+        buildings.first { b in b.contractorOf == nil && b.floors.contains { $0.project == project } }
+            ?? buildings.first { b in b.floors.contains { $0.project == project } }
+    }
+    public func building(ofFloor id: String) -> CityBuilding? { buildings.first { b in b.floors.contains { $0.id == id } } }
 
     public var projectCount: Int { Set(floors.filter { !$0.isLobby }.map(\.project)).count }
     public var threadCount: Int { floors.reduce(0) { $0 + $1.activeThreads.count } }
@@ -266,37 +280,52 @@ public struct CityModel: Equatable, Sendable {
             (c, groups[c]!.sorted { ($0.name.lowercased(), $0.name) < ($1.name.lowercased(), $1.name) })
         }
         var entries: [(company: String, project: String, floors: [CityFloor])] = []
+        var annexes: [String: (host: String, title: String)] = [:]
         for (c, ps) in sorted {
             for p in ps {
                 var floors: [CityFloor] = []
+                var contracted: [CityFloor] = []
                 if let o = offices[p.name], !o.floors.isEmpty {
                     let parts = split(p, o)
+                    let declared = o.floors.filter { !$0.temporary }.count
                     for (k, f) in o.floors.enumerated() {
                         var fl = makeFloor(parts.floors[k], company: p.name, level: 0)
                         fl.floorIndex = f.index
-                        if o.floors.count > 1 { fl.floorName = f.name ?? "piso \(f.index + 1)" }
+                        fl.temporary = f.temporary
+                        if f.temporary { fl.floorName = "en obra · \(f.index - declared + 1)" }
+                        else if declared > 1 { fl.floorName = f.name ?? "piso \(f.index + 1)" }
                         floors.append(fl)
                     }
-                    floors = Array(floors.prefix(CityOffice.maxFloorsPerBuilding))
+                    floors = Array(floors.prefix(CityOffice.maxFloorsPerBuilding + CityOffice.maxExtraFloors))
                     floors.insert(lobbyFloor([parts.lobby], company: p.name), at: 0)
+                    for (k, f) in o.outsourced.enumerated() where parts.outsourced.indices.contains(k) {
+                        var fl = makeFloor(parts.outsourced[k], company: p.name, level: 0)
+                        fl.floorIndex = FloorPlan.outsourcedBase + f.index
+                        fl.outsourced = true
+                        fl.floorName = "\(o.outsourcedLabel.lowercased()) · \(f.index + 1)"
+                        contracted.append(fl)
+                    }
+                    if !contracted.isEmpty { annexes[contractorKey(p.name)] = (host: p.name, title: "\(o.outsourcedLabel) · \(p.name)") }
                 } else {
                     floors.append(makeFloor(p, company: p.name, level: 0))
                 }
                 entries.append((company: c, project: p.name, floors: floors))
+                if !contracted.isEmpty { entries.append((company: c, project: contractorKey(p.name), floors: contracted)) }
             }
         }
-        return place(entries, seed: seed)
+        return place(entries, seed: seed, annexes: annexes)
     }
 
-    public static func place(_ entries: [(company: String, project: String, floors: [CityFloor])], seed: UInt64) -> CityModel {
+    public static func place(_ entries: [(company: String, project: String, floors: [CityFloor])], seed: UInt64,
+                             annexes: [String: (host: String, title: String)] = [:]) -> CityModel {
         var order: [String] = []
         var byCampus: [String: [String]] = [:]
-        for e in entries {
+        for e in entries where annexes[e.project] == nil {
             if byCampus[e.company] == nil { order.append(e.company) }
             byCampus[e.company, default: []].append(e.project)
         }
         let campuses: [(name: String, projects: [String])] = order.map { (name: $0, projects: byCampus[$0] ?? []) }
-        let map = WorldGenerator.layout(seed: seed, campuses: campuses)
+        let map = WorldGenerator.layout(seed: seed, campuses: campuses, annexes: annexes.mapValues(\.host))
         var buildings: [CityBuilding] = []
         var placed = Set<String>()
         for e in entries where !placed.contains(e.project) {
@@ -304,11 +333,13 @@ public struct CityModel: Equatable, Sendable {
             placed.insert(e.project)
             var floors = e.floors
             for k in floors.indices { let id = floors[k].id; floors[k].level = k; floors[k].alert?.floor = id }
+            let annex = annexes[e.project]
             buildings.append(CityBuilding(company: e.project, index: buildings.count, x0: r.x0, y0: r.y0, w: r.w, d: r.d, floors: floors,
-                                          style: CityBuildingStyle(seed: WorldGenerator.styleSeed(seed, e.project)), campus: e.company))
+                                          style: CityBuildingStyle(seed: WorldGenerator.styleSeed(seed, e.project)), campus: e.company,
+                                          contractorOf: annex?.host, title: annex?.title))
         }
         return CityModel(buildings: buildings, groundX: map.groundX, groundY: map.groundY, campuses: map.campuses, roads: map.roads,
-                         trees: map.trees, seed: seed)
+                         trees: map.trees, seed: seed, links: map.links)
     }
 
     // MARK: - Oficina v3
@@ -316,8 +347,10 @@ public struct CityModel: Equatable, Sendable {
     /// Reparte las tareas (y su atención) de un proyecto con `office` entre sus pisos y el vestíbulo: la tarea cuyo hilo ocupa un
     /// escritorio va a ese piso; la que no, al vestíbulo si sigue viva y al piso más bajo si ya terminó (como en un agente v2, el
     /// piso guarda lo fallido). La atención que no es de una tarea va al piso más bajo. `floors[k]` = `o.floors[k]`.
-    static func split(_ p: LiveState.Project, _ o: CityOffice) -> (floors: [LiveState.Project], lobby: LiveState.Project) {
+    static func split(_ p: LiveState.Project, _ o: CityOffice)
+        -> (floors: [LiveState.Project], lobby: LiveState.Project, outsourced: [LiveState.Project]) {
         var floors = o.floors.map { _ in LiveState.Project(name: p.name) }
+        var outsourced = o.outsourced.map { _ in LiveState.Project(name: p.name) }
         var lobby = LiveState.Project(name: p.name)
         var place: [String: Int] = [:]          // id de tarea → índice en `floors` (−1 = vestíbulo)
         for t in p.tasks {
@@ -325,19 +358,25 @@ public struct CityModel: Equatable, Sendable {
             let thread = SnapshotMapper.nonEmpty(t["thread_id"]?.string) ?? id
             let k: Int
             if let fi = o.floor(ofThread: thread), let at = o.floors.firstIndex(where: { $0.index == fi }) { k = at }
+            else if let fi = o.outsourcedFloor(ofThread: thread), let at = o.outsourced.firstIndex(where: { $0.index == fi }) { k = outsourcedSlot - at }
             else if let ph = t["phase"]?.string, alive.contains(ph) || ph == "queued" { k = -1 }
             else { k = 0 }
             place[id] = k
-            if k < 0 { lobby.tasks.append(t) } else { floors[k].tasks.append(t) }
+            if k <= outsourcedSlot { outsourced[outsourcedSlot - k].tasks.append(t) }
+            else if k < 0 { lobby.tasks.append(t) } else { floors[k].tasks.append(t) }
         }
         for a in p.attention {
             let k = (a.subjectKind == nil || a.subjectKind == "task") ? a.subjectID.flatMap { place[$0] } ?? 0 : 0
-            if k < 0 { lobby.attention.append(a) } else { floors[k].attention.append(a) }
+            if k <= outsourcedSlot { outsourced[outsourcedSlot - k].attention.append(a) }
+            else if k < 0 { lobby.attention.append(a) } else { floors[k].attention.append(a) }
         }
         for k in floors.indices { floors[k].counts = LiveState.counts(floors[k]) }
+        for k in outsourced.indices { outsourced[k].counts = LiveState.counts(outsourced[k]) }
         lobby.counts = LiveState.counts(lobby)
-        return (floors, lobby)
+        return (floors, lobby, outsourced)
     }
+
+    static let outsourcedSlot = -2
 
     /// Vestíbulo: la parte "sin escritorio" de cada proyecto con oficina del edificio. Un aviso del vestíbulo lleva el proyecto del
     /// hilo (el clic entra en su oficina).

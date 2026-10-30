@@ -136,7 +136,9 @@ struct CityRenderer {
 
     private var pal: CityPalette { CityPalette(dark: dark) }
     private var p: Double { zoom?.p ?? 0 }
-    private var targetBuilding: String? { zoom.flatMap { z in model.building(of: z.project)?.company } }
+    private var targetBuilding: String? {
+        zoom.flatMap { z in (model.building(ofFloor: z.floorID) ?? model.building(of: z.project))?.company }
+    }
 
     private func P(_ x: Double, _ y: Double, _ z: Double = 0) -> CGPoint { cam.pt(x, y, z) }
     private func poly(_ pts: [CGPoint]) -> Path {
@@ -308,6 +310,10 @@ struct CityRenderer {
             var gc = g; gc.opacity = alpha * dim(c.name)
             drawCampusGround(&gc, c)
         }
+        for l in model.links where l.points.count > 1 {
+            var gl = g; gl.opacity = alpha * dim(l.campus)
+            drawLink(&gl, l)
+        }
         drawRoads(&g)
 
         let tile = CityGeo.tile
@@ -411,6 +417,18 @@ struct CityRenderer {
         for w in c.paths where w.count > 1 { walks.addPath(segments(w, 0.24 * tile)) }
         g.fill(walks, with: .color(pal.walk.color))
         for cm in c.commons where cm.kind == .plaza { drawFountain(&g, cm.rect) }
+    }
+
+    private func drawLink(_ g: inout GraphicsContext, _ l: CityLink) {
+        let tile = CityGeo.tile, accent = CityRGB(92, 148, 220)
+        g.fill(segments(l.points, 0.34 * tile), with: .color(pal.walk.color))
+        g.fill(segments(l.points, 0.22 * tile), with: .color(accent.color.opacity(dark ? 0.35 : 0.28)))
+        var c = Path()
+        c.move(to: P(l.points[0].x, l.points[0].y))
+        for q in l.points.dropFirst() { c.addLine(to: P(q.x, q.y)) }
+        let u = CGFloat(0.25 * tile * cam.s)
+        let phase = CGFloat((t * 0.6).truncatingRemainder(dividingBy: 1)) * 2 * u
+        g.stroke(c, with: .color(accent.color.opacity(0.85)), style: StrokeStyle(lineWidth: max(1, 1.2 * cam.s), lineCap: .round, dash: [u, u], dashPhase: -phase))
     }
 
     private func drawFountain(_ g: inout GraphicsContext, _ q: CityRect) {
@@ -560,6 +578,8 @@ struct CityRenderer {
             if hh > 0.5 {
                 if isTarget, let z = zoom {
                     drawHollow(&g, b, f, R, zb: zb, hh: hh, windows: windows, amber: tn.amber, red: tn.red, zoom: z)
+                } else if f.temporary {
+                    drawScaffold(&g, b, f, R, zb: zb, z1: z1, windows: windows, alpha: fade)
                 } else {
                     drawFacade(&g, b, f, R, zb: zb, z1: z1, windows: windows, amber: tn.amber, red: tn.red, alpha: fade)
                 }
@@ -587,7 +607,84 @@ struct CityRenderer {
         let tn = lights.tint(last.id, t: t)
         // topZ ya incluye la subida si el último piso está encima del elegido; si el elegido es el último, la azotea sube sola
         let roofZ = topZ + (last.level == targetLevel ? lift : 0)
-        drawRoof(&g, b, b.rect(last.level), z: roofZ, alpha: roofAlpha(b), amber: tn.amber, red: tn.red)
+        if last.temporary {
+            let R = b.rect(last.level), so = slabOverhang(b.style)
+            var gs = g; gs.opacity = g.opacity * 0.85
+            box(&gs, R.x0 - so, R.y0 - so, R.x1 + so, R.y1 + so, roofZ, roofZ + CityGeo.slabH * 0.6, band(b.style, tn.amber, tn.red), edge: bandEdge(b.style))
+            drawCrane(&g, b, R, z: roofZ + CityGeo.slabH * 0.6)
+        } else {
+            drawRoof(&g, b, b.rect(last.level), z: roofZ, alpha: roofAlpha(b), amber: tn.amber, red: tn.red)
+        }
+    }
+
+    private var scaffoldTone: CityRGB { dark ? CityRGB(196, 150, 70) : CityRGB(214, 150, 44) }
+    private var netTone: CityRGB { dark ? CityRGB(70, 110, 96) : CityRGB(96, 160, 132) }
+
+    private func drawScaffold(_ g: inout GraphicsContext, _ b: CityBuilding, _ f: CityFloor, _ R: CityRect, zb: Double, z1: Double,
+                              windows: [Double], alpha: Double) {
+        let wall = body(b.style.material)
+        var gw = g; gw.opacity = g.opacity * 0.42
+        box(&gw, R.x0, R.y0, R.x1, R.y1, zb, z1, wall, edge: pal.bodyEdge)
+        let lit = windows.reduce(0, +) / Double(max(1, windows.count))
+        if lit > 0.01 {
+            var gl = g; gl.opacity = g.opacity * 0.35 * min(1, lit) * alpha
+            gl.fill(poly([P(R.x0, R.y1, z1 - 4), P(R.x1, R.y1, z1 - 4), P(R.x1, R.y1, zb + 4), P(R.x0, R.y1, zb + 4)]), with: .color(pal.litL.color))
+        }
+        guard alpha > 0 else { return }
+        let off = 0.22 * CityGeo.tile, pole = scaffoldTone.color, w = max(0.8, 1.0 * cam.s)
+        var ga = g; ga.opacity = g.opacity * alpha
+        let ly = R.y1 + off, rx = R.x1 + off
+        var net = Path()
+        net.addPath(poly([P(R.x0, ly, z1), P(R.x1 + off, ly, z1), P(R.x1 + off, ly, zb), P(R.x0, ly, zb)]))
+        net.addPath(poly([P(rx, R.y0, z1), P(rx, ly, z1), P(rx, ly, zb), P(rx, R.y0, zb)]))
+        var gn = ga; gn.opacity = ga.opacity * 0.22
+        gn.fill(net, with: .color(netTone.color))
+        var frame = Path()
+        let nx = 5, ny = 4
+        for i in 0...nx {
+            let x = R.x0 + (R.x1 + off - R.x0) * Double(i) / Double(nx)
+            frame.move(to: P(x, ly, zb)); frame.addLine(to: P(x, ly, z1 + 3))
+        }
+        for j in 0...ny {
+            let y = R.y0 + (ly - R.y0) * Double(j) / Double(ny)
+            frame.move(to: P(rx, y, zb)); frame.addLine(to: P(rx, y, z1 + 3))
+        }
+        for z in [zb + 1, (zb + z1) / 2, z1] {
+            frame.move(to: P(R.x0, ly, z)); frame.addLine(to: P(rx, ly, z)); frame.addLine(to: P(rx, R.y0, z))
+        }
+        for i in 0..<nx where i % 2 == 0 {
+            let xa = R.x0 + (R.x1 + off - R.x0) * Double(i) / Double(nx), xb = R.x0 + (R.x1 + off - R.x0) * Double(i + 1) / Double(nx)
+            frame.move(to: P(xa, ly, zb + 1)); frame.addLine(to: P(xb, ly, z1))
+        }
+        for j in 0..<ny where j % 2 == 1 {
+            let ya = R.y0 + (ly - R.y0) * Double(j) / Double(ny), yb = R.y0 + (ly - R.y0) * Double(j + 1) / Double(ny)
+            frame.move(to: P(rx, ya, zb + 1)); frame.addLine(to: P(rx, yb, z1))
+        }
+        ga.stroke(frame, with: .color(pole.opacity(0.9)), style: StrokeStyle(lineWidth: w, lineCap: .round))
+        let tz = zb + (z1 - zb) * 0.32
+        var tape = Path()
+        tape.move(to: P(R.x0, ly + 0.5, tz)); tape.addLine(to: P(rx + 0.5, ly + 0.5, tz)); tape.addLine(to: P(rx + 0.5, R.y0, tz))
+        let u = CGFloat(0.22 * CityGeo.tile * cam.s)
+        ga.stroke(tape, with: .color(CityPalette.amber.color), style: StrokeStyle(lineWidth: max(1.4, 1.8 * cam.s)))
+        ga.stroke(tape, with: .color(Color.black.opacity(0.75)), style: StrokeStyle(lineWidth: max(1.4, 1.8 * cam.s), dash: [u, u]))
+    }
+
+    private func drawCrane(_ g: inout GraphicsContext, _ b: CityBuilding, _ R: CityRect, z: Double) {
+        let tile = CityGeo.tile, col = scaffoldTone.color, w = max(0.9, 1.2 * cam.s)
+        let mx = R.x0 + R.w * 0.28, my = R.y0 + R.d * 0.3, h = 2.2 * tile
+        var p = Path()
+        p.move(to: P(mx, my, z)); p.addLine(to: P(mx, my, z + h))
+        p.move(to: P(mx + 3, my, z)); p.addLine(to: P(mx + 3, my, z + h))
+        var k = 0.0
+        while k < h - 4 { p.move(to: P(mx, my, z + k)); p.addLine(to: P(mx + 3, my, z + k + 6)); k += 6 }
+        let jx = mx + 2.4 * tile
+        p.move(to: P(mx - 0.8 * tile, my, z + h)); p.addLine(to: P(jx, my, z + h))
+        p.move(to: P(mx + 1.5, my, z + h + 8)); p.addLine(to: P(jx, my, z + h))
+        p.move(to: P(mx + 1.5, my, z + h + 8)); p.addLine(to: P(mx - 0.8 * tile, my, z + h))
+        let hook = mx + (0.9 + 0.9 * (sin(t * 0.25 + Double(b.index)) + 1) / 2) * tile
+        p.move(to: P(hook, my, z + h)); p.addLine(to: P(hook, my, z + h - 0.9 * tile))
+        g.stroke(p, with: .color(col), style: StrokeStyle(lineWidth: w, lineCap: .round, lineJoin: .round))
+        box(&g, mx - 0.8 * tile, my - 2, mx - 0.4 * tile, my + 4, z + h - 4, z + h + 1, top: pal.parapet.0, left: pal.parapet.1, right: pal.parapet.2)
     }
 
     /// Plinto: zócalo de piedra algo más ancho que la planta baja, con un escalón delante de la puerta.

@@ -433,7 +433,7 @@ public struct CityView: View {
     }
 
     private func zoomData(p: Double, size: CGSize, content: CityZoom.Content?, city: IsoFrame) -> (CityZoom, IsoFrame)? {
-        guard p > 0, let pr = target, let fid = targetFloor, let content, let b = model.building(of: pr),
+        guard p > 0, let pr = target, let fid = targetFloor, let content, let b = model.building(ofFloor: fid) ?? model.building(of: pr),
               let f = model.floor(id: fid) else { return nil }
         var minX = Double.infinity, minY = Double.infinity, maxX = -Double.infinity, maxY = -Double.infinity
         let bounds: IsoBounds
@@ -709,7 +709,7 @@ struct CitySymbols: View {
             CityFloorPill(name: f.label, tint: lights.tint(f.id, t: t)).tag("cf:\(f.id)")
         }
         ForEach(model.buildings, id: \.index) { b in
-            CityCompanyTag(name: b.company, threads: b.floors.reduce(0) { $0 + $1.activeThreads.count }).tag("cb:\(b.company)")
+            CityCompanyTag(name: b.displayName, threads: b.floors.reduce(0) { $0 + $1.activeThreads.count }).tag("cb:\(b.company)")
         }
         ForEach(model.campuses) { c in
             CityCampusTag(name: c.name, projects: model.buildings.filter { $0.campus == c.name }.count).tag("cc:\(c.name)")
