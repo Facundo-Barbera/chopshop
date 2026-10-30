@@ -133,7 +133,7 @@ final class AppModel: ObservableObject {
             while !Task.isCancelled {
                 guard let self else { return }
                 await self.refresh()
-                let ns = UInt64(self.config.refreshSeconds * 1_000_000_000)
+                let ns = UInt64(max(self.config.refreshSeconds, self.live.relayRetryDelay ?? 0) * 1_000_000_000)
                 try? await Task.sleep(nanoseconds: ns)
             }
         }
@@ -169,11 +169,19 @@ final class AppModel: ObservableObject {
         refreshing = true
         let gen = generation
         defer { if gen == generation { refreshing = false } }
+        live.relayRetrying()
         let fetched = await hub.fetchAll()
         guard gen == generation else { return }     // la config cambió mientras tanto: este resultado ya no vale
         for r in fetched { if let m = r.machineId { labels[r.name] = m } }
         results = fetched
-        live.ingest(relaySnapshots: fetched.flatMap(\.relaySnapshots).compactMap { (try? JSONSerialization.data(withJSONObject: $0)).flatMap { try? JSONValue(data: $0) } })
+        func json(_ o: [String: Any]) -> JSONValue? { (try? JSONSerialization.data(withJSONObject: o)).flatMap { try? JSONValue(data: $0) } }
+        let relays = fetched.filter { hub.client(named: $0.name)?.spec.isRelay == true }
+        if let bad = relays.first(where: { !$0.isOK }) {
+            live.relayFailed(bad.status == .unreachable ? "relay no alcanzable" : bad.shortMessage, retry: bad.status == .unreachable || bad.status == .error)
+        } else {
+            live.ingest(relaySnapshots: fetched.flatMap(\.relaySnapshots).compactMap(json),
+                        machines: relays.isEmpty ? nil : relays.flatMap(\.relayMachines).compactMap(json))
+        }
         canAct = hub.canAct
         let s = Summarizer.summarize(fetched, labels: labels, previous: machines)
         machines = s.machines
@@ -298,7 +306,8 @@ final class AppModel: ObservableObject {
             if let fs = try? FixtureStream(contentsOf: URL(fileURLWithPath: AppConfig.expand(path)), speed: demoSpeed) { live.connect(fs) }
             return
         }
-        guard let spec = primary?.spec, !spec.isRelay, let url = spec.baseURL else { live.reset(); return }
+        guard let spec = primary?.spec, let url = spec.baseURL else { live.reset(); return }
+        if spec.isRelay { live.connectRelay(); return }
         live.connect(agent: url, credentials: credentials)
     }
 

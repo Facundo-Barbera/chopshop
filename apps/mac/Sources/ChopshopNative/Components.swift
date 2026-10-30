@@ -82,9 +82,16 @@ struct MachineStatusLabel: View {
         HStack(spacing: 12) {
             ForEach(machines) { m in
                 HStack(spacing: 5) {
-                    Circle().fill(m.ok ? Color.secondary.opacity(0.7) : Attention.needsYou).frame(width: 6, height: 6)
+                    Circle().fill(m.ok ? (m.badge == nil ? Color.secondary.opacity(0.7) : .orange) : Attention.needsYou).frame(width: 6, height: 6)
                     Text(m.name).foregroundStyle(.primary)
-                    Text(m.ok ? "\(m.cpuNow)%" : "sin datos").foregroundStyle(m.ok ? Color.secondary : Attention.needsYou).monospacedDigit()
+                    if let b = m.badge {
+                        Text(b).font(.caption.weight(.medium)).foregroundStyle(m.ok ? .orange : Attention.needsYou)
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background((m.ok ? Color.orange : Attention.needsYou).opacity(0.15), in: Capsule())
+                            .help(m.reason ?? b)
+                    } else {
+                        Text(m.ok ? "\(m.cpuNow)%" : "sin datos").foregroundStyle(m.ok ? Color.secondary : Attention.needsYou).monospacedDigit()
+                    }
                 }
             }
         }
@@ -120,7 +127,10 @@ struct MachinePopover: View {
                             HStack { Text("CPU").font(.caption).foregroundStyle(.secondary).frame(width: 28, alignment: .leading); Sparkline(values: m.cpu).frame(width: 90, height: 14); Text("\(m.cpuNow)%").font(.caption.monospacedDigit()) }
                             HStack { Text("RAM").font(.caption).foregroundStyle(.secondary).frame(width: 28, alignment: .leading); Sparkline(values: m.ram).frame(width: 90, height: 14); Text("\(m.ramNow)%").font(.caption.monospacedDigit()) }
                         }
-                        Text("\(m.runNow) hilos").font(.caption).foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(m.runNow) hilos").font(.caption).foregroundStyle(.secondary)
+                            if m.badge != nil, let r = m.reason { Text(r).font(.caption).foregroundStyle(.orange) }
+                        }
                     } else {
                         Text(m.reason ?? "sin datos").font(.caption).foregroundStyle(Attention.needsYou).gridCellColumns(2)
                     }
