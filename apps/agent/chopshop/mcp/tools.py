@@ -1,9 +1,11 @@
 import re
 import uuid
 
-from .. import profile
+from .. import employees, profile
+from .. import queue as equeue
 from ..agent import client as agent_client
-from ..agent import layout, registry
+from ..agent import config as agent_config
+from ..agent import db, layout, registry
 from .fleet import ACTIVE, ToolError
 
 RUNTIME_MODES = ["approval-required", "auto-accept-edits", "auto", "full-access"]
@@ -51,8 +53,8 @@ def _call(fn, *args, **kw):
 
 
 class Tools:
-    def __init__(self, fleet, hooks):
-        self.fleet, self.hooks = fleet, hooks
+    def __init__(self, fleet, hooks, conn=None):
+        self.fleet, self.hooks, self.conn = fleet, hooks, conn
         self.specs = [
             ("machines_list", "Estado de cada máquina de Chopshop: alcanzable, T3, carga, hilos y preguntas.", _obj({}),
              self.machines_list),
@@ -101,6 +103,17 @@ class Tools:
             ("role_list", "Roles del perfil de un proyecto: escritorios, permanentes y disparadores de wake.",
              _obj({"project": {"type": "string", "description": "Nombre del proyecto (perfil)."}}, ["project"]),
              self.role_list),
+            ("task_enqueue", "Encola una tarea para el empleado (escritorio permanente) de un rol de un proyecto.",
+             _obj({"project": {"type": "string", "description": "Nombre del proyecto (perfil)."},
+                   "role": S, "title": S, "slot": I, "floor": I, "priority": I, "by": S,
+                   "key": {"type": "string", "description": "Clave de idempotencia por empleado."}},
+                  ["project", "role", "title"]), self.task_enqueue),
+            ("queue_show", "Colas de los empleados de un proyecto (opcionalmente de un rol), en orden de ejecución.",
+             _obj({"project": {"type": "string", "description": "Nombre del proyecto (perfil)."}, "role": S},
+                  ["project"]), self.queue_show),
+            ("task_cancel", "Cancela una tarea en cola (q:…) antes de que arranque.",
+             _obj({"task": S, "reason": {"type": "string", "enum": list(equeue.CANCEL_REASONS)}, "note": S, "by": S},
+                  ["task"]), self.task_cancel),
         ]
         self.by_name = {n: fn for n, _d, _s, fn in self.specs}
 
@@ -299,3 +312,56 @@ class Tools:
             r["prompt_file"] = spec.get("prompt_file") if isinstance(spec, dict) else None
         return {"project": prof.get("project") or project, "registered": registry.counts(project),
                 "roles": list(out.values())}
+
+    def _queue(self):
+        if self.conn is None:
+            self.conn = db.connect(agent_config.load()["db_path"])
+        return equeue.Queue(self.conn)
+
+    def _staff(self, project, role=None):
+        try:
+            prof = profile.load(project)
+        except profile.ProfileError as e:
+            raise ToolError(str(e))
+        staff = employees.declared(prof)
+        if role is not None:
+            if role not in layout.roles(prof) and not any(d["role"] == role for d in layout.desks(prof)):
+                raise ToolError(f"el proyecto {project} no tiene el rol {role}")
+            staff = [d for d in staff if d["role"] == role]
+            if not staff:
+                raise ToolError(f"el rol {role} de {project} no tiene escritorios permanentes")
+        return prof, staff
+
+    def task_enqueue(self, project, role, title, slot=None, floor=None, priority=0, by="human", key=None):
+        _prof, staff = self._staff(project, role)
+        staff = [d for d in staff if (slot is None or d["slot"] == slot) and (floor is None or d["floor"] == floor)]
+        if not staff:
+            raise ToolError(f"no hay empleado de {role} con slot={slot} floor={floor} en {project}")
+        q = self._queue()
+        emp = min(staff, key=lambda d: q.length(d["id"]))["id"]
+        try:
+            row, created = q.enqueue(emp, title, by or "human", priority=priority or 0, key=key)
+        except equeue.QueueError as e:
+            raise ToolError(str(e))
+        items = q.show(emp)
+        return {"task": row["task"], "employee": emp, "created": created, "state": row["state"],
+                "position": next((i for i, it in enumerate(items) if it["task"] == row["task"]), None),
+                "queue_len": len(items)}
+
+    def queue_show(self, project, role=None):
+        _prof, staff = self._staff(project, role)
+        q = self._queue()
+        snap = q.snapshot([d["id"] for d in staff])
+        return {"project": project, "queues": [dict(snap[d["id"]], employee=d["id"], role=d["role"]) for d in staff]}
+
+    def task_cancel(self, task, reason="manual", note=None, by="human"):
+        q = self._queue()
+        try:
+            r = q.cancel(task, by or "human", reason=reason or "manual", note=note)
+        except equeue.QueueError as e:
+            raise ToolError(str(e))
+        if r is None:
+            cur = q.get(task)
+            raise ToolError(f"no existe la tarea {task}" if cur is None else f"la tarea {task} ya está {cur['state']}")
+        return {"task": task, "employee": r["employee"], "state": r["state"], "reason": r["cancel_reason"],
+                "queue_len": q.length(r["employee"])}
