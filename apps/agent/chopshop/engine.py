@@ -150,7 +150,7 @@ def create_batch(prof, items, host, cap, notes):
             rec = {"id": "t-%s-%d" % (bid[2:], i), "title": t["title"], "prompt": t["prompt"], "issue": t.get("issue"),
                    "status": "queued", "threadId": None, "link": None, "t3status": None, "done": False,
                    "notified": [], "settled": False}
-            for k in ("role", "desk", "wake"):   # rol permanente despertado por agent/roles.py (aditivo)
+            for k in ("role", "desk", "wake", "qtask"):   # rol permanente despertado por agent/roles.py (aditivo)
                 if t.get(k):
                     rec[k] = t[k]
             why = skip_reason(prof, t)
