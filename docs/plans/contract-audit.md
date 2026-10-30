@@ -61,7 +61,7 @@ por otra tarea, no se toca aquí.
 |---|---|---|---|---|
 | `pair-create` (`POST /v1/pair/codes`) | operador (`curl` con `RELAY_OPERATOR_TOKEN`); ningún cliente del repo | R3 `createCode` (`onlyKeys`, `scope`, `name`, `ttl_s` 1–3600), solo `admin` por R6 | — | **OK** |
 | `pair-code` | R3 | — | operador | **OK** (`rc-` + 8 hex, código Crockford `XXXX-XXXX`) |
-| `pair-redeem` (`POST /v1/pair`, alias `/pair`) | **ninguno en el repo**: A3 recibe el token ya emitido (`--stdin`/`--token-file`), M5 pide pegar el `cr1_` | R3 `redeem` (normaliza el código, `machine_id` obligatorio en `agent`) | — | **OK\*** (sin cliente; ver BUG-9 por el alias) |
+| `pair-redeem` (`POST /v1/pair`) | **ninguno en el repo**: A3 recibe el token ya emitido (`--stdin`/`--token-file`), M5 pide pegar el `cr1_` | R3 `redeem` (normaliza el código, `machine_id` obligatorio en `agent`) | — | **OK\*** (sin cliente; alias `/pair` retirado, BUG-9) |
 | `pair-token` | R3 (`token_id`, `token`, `scope`, `machine_id`, `protocol: 1`) | — | nadie | **OK\*** (sin cliente) |
 | revocación (`DELETE /v1/tokens/<id>`, `/v1/pair/codes/<id>`) | operador | R3 + R6 (`admin`) | — | **F5** (el WebSocket del agente revocado no se cerraba) + **BUG-8** (el SSE del visor revocado sigue abierto) |
 
@@ -79,7 +79,7 @@ Convención de URL distinta en cada lado: el agente usa `[relay] url` **tal cual
 | `GET /stream` | R5: SSE, solo `viewer` | nadie | nadie (el `/stream` de la Mac es el de la API del agente) | ✓ ruta; **formato sin contrato** | BUG-3 |
 | `GET /state` | R5: `{v, type: "state", id, ts, head, machines[], snapshots[]}`, solo `viewer` | nadie | nadie | ✓ ruta; **cuerpo sin contrato** | BUG-3 |
 | `POST /v1/pair` | R3, solo `anónimo` | nadie | nadie | ✓ | **OK\*** (sin cliente) |
-| `POST /pair` | alias de `/v1/pair` | nadie | nadie | ✓ | BUG-9 (choca con `POST /pair` de la API del agente) |
+| `POST /pair` | retirado en R9 → 404 | nadie | nadie | ✓ (sin alias) | **OK** (BUG-9 resuelto) |
 | `POST /v1/pair/codes`, `DELETE /v1/tokens/<id>`, `DELETE /v1/pair/codes/<id>` | R3 + R6, solo `admin` | A3 `unpair` solo lo menciona | nadie | ✓ | **OK** |
 | `GET /health` | antes de mirar la credencial | nadie | nadie | ✓ | **OK** |
 
@@ -87,9 +87,10 @@ Convención de URL distinta en cada lado: el agente usa `[relay] url` **tal cual
 `whoami.result` (WebSocket): `scope: agent | viewer`. M6 `AgentRole` espera `agent` | `viewer` y lee `role ?? scope`
 (`AgentClient.swift:45`): un `role: "machine"` de `GET /whoami` no se reconoce (`nil`) y `canAct` queda en `true`. → **conocido** (BUG-2).
 
-**Nombres compartidos con la API del agente** (`docs/agent-api.md`): `/stream`, `/state` y `POST /pair` existen en las dos con
-semántica distinta (sobres v1 vs. frames K1; código `cs1_` con `device_id` vs. código `cr1_` con `machine_id`). Las rutas del
-relay solo se distinguen por el host.
+**Nombres compartidos con la API del agente** (`docs/agent-api.md`): `/stream` y `/state` existen en las dos con
+semántica distinta (sobres v1 vs. frames K1). Las rutas del relay solo se distinguen por el host. `POST /pair` ya es solo del
+agente (código `cs1_` con `device_id`); el relay canjea en `POST /v1/pair` (código `cr1_` con `machine_id`) y responde 404 a
+`POST /pair` desde R9 (BUG-9).
 
 ## K2: snapshot
 
@@ -166,6 +167,6 @@ que no: F7). Por el relay (A2) todos salen con `subject.id` = empleado o tarea, 
   `employee_rename` (o ruta de la API) que llame a `rename` y emita el sobre como `employees_sync`.
 - **BUG-8** Revocar un token `viewer` no cierra su `GET /stream` abierto (R5 no guarda el `token_id` de cada visor). *Tarea
   chica*: guardar `tokenId` en `Viewer` y cerrarlo desde el caso `revoke` de `index.ts`, igual que F5.
-- **BUG-9** (decisión) El alias `POST /pair` del relay comparte nombre con `POST /pair` de la API del agente (`cs1_`,
-  `device_id`). Un cliente que apunte al host equivocado recibe `400 campos desconocidos` en vez de un error claro. *Sugerencia*:
+- **BUG-9** (decisión; **resuelto en R9**: se retiró el alias, el relay responde 404 a `POST /pair`) El alias `POST /pair`
+  del relay comparte nombre con `POST /pair` de la API del agente (`cs1_`, `device_id`). Un cliente que apunte al host equivocado recibe `400 campos desconocidos` en vez de un error claro. *Sugerencia*:
   retirar el alias (no lo usa nadie) o documentar la diferencia en los dos contratos.
