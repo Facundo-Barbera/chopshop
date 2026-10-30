@@ -258,11 +258,14 @@ capacity:
   outsourcing: true       # (true): pasado el tope, pisos del edificio contratista del campus (máximo 4)
 ```
 
-- Ids: flex `<proyecto>/<piso>/_flex/<n>` (también en los pisos temporales), contratista `<proyecto>/<piso>/_out/<n>` (pisos
-  temporales desde 4 y del contratista desde 8, fijos aunque cambien los declarados; la app los rotula por orden: «En obra · 1»,
-  «Contratista · 1»). Los roles nunca empiezan por `_`.
-- `office` gana `capacity` (efectiva) y `outsourced: null | {label: "Contratista", floors: [...]}`; cada piso gana `temporary`
-  (`true` en los pisos en obra, índices ≥ pisos declarados) y cada sala `flex` (`true` en `_flex`/`_out`). Los pisos declarados
+- Ids: flex `<proyecto>/<piso>/_flex/<n>` (también en los pisos temporales), contratista `<proyecto>/<piso>/_out/<n>`. Los
+  índices de piso son estables y no dependen de cuántos pisos declare el perfil (`layout.py`): los declarados van de 0 a 3
+  (`MAX_FLOORS_PER_PROJECT` = 4), los temporales desde 4 (`EXTRA_FLOOR_BASE`, hasta 7) y los del contratista desde 8
+  (`OUT_FLOOR_BASE` = 4 + `MAX_EXTRA_FLOORS`, hasta 11). Cada tipo abre el siguiente índice libre tras el más alto abierto
+  (`layout.next_elastic_floor`); la app los rotula por orden: «En obra · 1», «Contratista · 1». Los roles nunca empiezan por `_`.
+- `office` gana `capacity` (efectiva) y `outsourced: null | {label: "Contratista", floors: [...]}`, con los pisos del
+  contratista abiertos (`index` 8 en adelante, `temporary: false`); cada piso gana `temporary` (`true` en los pisos en obra,
+  índices 4 a 7) y cada sala `flex` (`true` en `_flex`/`_out`). Los pisos declarados
   llevan al final una sala `_flex`; un piso temporal o del contratista lleva solo una sala elástica de N escritorios
   (N = máx(4, escritorios del piso declarado más grande con su flex), tope 24).
 - Orden (determinista): sala del rol (herencia o libre) → flex del piso de la sala, luego de los otros pisos declarados por
@@ -395,6 +398,45 @@ Sin el despachador habilitado o sin empleados declarados el agente no hace nada 
 | Método y ruta | Descripción |
 |---|---|
 | `POST /queue/cancel` | `{employee, task, by?, note?}` (`by` por defecto `human`) → cancela una tarea **en cola** (`task.cancelled {phase: queued, reason: manual}` + `queue.changed reason: cancelled`) → `{ok, task, employee, state: "cancelled", queue_len}`. 404 si la tarea no existe, es de otro empleado o ya salió de la cola; 400 si el cuerpo es inválido. Exige permiso de escritura. Funciona aunque el despachador esté apagado |
+
+Detalle de `POST /queue/cancel` (`server.r_queue_cancel`): `employee` (≤ 128) y `task` (`q:…`) son obligatorios; `by` ≤ 64
+caracteres y `note` ≤ 500, sin caracteres de control. La razón siempre es `manual`. Solo saca tareas en estado `queued`: para cortar
+una tarea ya despachada (con hilo en marcha) usa la herramienta MCP `task_cancel`. 503 si el agente no tiene cola (solo pasa fuera
+del servicio, p. ej. en tests). Ejemplo desde la propia máquina:
+
+```sh
+curl -s -X POST http://127.0.0.1:3790/queue/cancel -H 'Content-Type: application/json' \
+  -d '{"employee": "awesome-gb/0/triage/0", "task": "q:01MCC5Y3S0F8YH6PV8TEN7BD00", "note": "duplicada"}'
+```
+
+### Empleados y colas: resumen
+
+- **Empleado** = escritorio permanente (`permanent: true`) del perfil; id `<proyecto>/<piso>/<rol>/<n>`. Los elásticos (`_flex`,
+  `_out`) no son empleados. Su nombre se elige de forma determinista del pool de nombres (`chopshop/names.py`; un archivo local
+  `~/.chopshop/names/<proyecto>.yaml` con `names: [...]` y `mode: extend|replace` lo amplía o lo reemplaza); un
+  `employee_rename` lo fija y la sincronización con el perfil ya no lo pisa. Tabla `employees` (`chopshop/employees.py`).
+- **Cola** = FIFO por empleado (tabla `employee_queue`, `chopshop/queue.py`): máx. 20 tareas en cola por empleado (más → error
+  «cola llena»), orden `priority` descendente y luego orden de llegada. `key` hace idempotente el encargo: repetir la misma `key`
+  para el mismo empleado devuelve la tarea existente (`created: false`), aunque ya haya terminado. Estados: `queued`, `dequeued`
+  (despachada), `cancelled`, `done`, `failed`. Razones de cancelación: `manual`, `superseded`, `retired`, `expired`.
+- Se ven en `GET /snapshot` y `GET /state` (`employees[]`, `queues{}`), en los sobres `employee.*`, `queue.changed`, `task.*` y,
+  por el relay, en la parte `employees` del snapshot. Forma exacta y eventos: `docs/employees.md`.
+
+### Herramientas MCP de proyectos, empleados y colas
+
+Las sirve `chopshop mcp serve` (README, «Servidor MCP multi-máquina»). A diferencia de `thread_*` y `fanout`, que llaman a la API
+de cada agente, estas trabajan sobre la máquina donde corre el MCP: leen los perfiles locales (`profile.load`) y escriben en la
+SQLite del agente local (`[agent] db_path`), en el mismo bus. El despachador de ese agente las anuncia y las ejecuta.
+
+| herramienta | argumentos (obligatorios en **negrita**) | qué hace y devuelve |
+|---|---|---|
+| `registry_list` | `include_disabled` | Proyectos de `projects.toml` (junto al `config.toml`): empresa, proyecto de T3, host, roles. |
+| `project_register` | **`name`**, `company` (obligatoria si es nuevo), `t3_project`, `repo`, `host` | Registra o reactiva un proyecto (idempotente); crea un perfil mínimo si falta. |
+| `role_list` | **`project`** | Roles del perfil: `{role, desks, permanent, zones, wake, prompt_file}` por rol, más `registered`. |
+| `task_enqueue` | **`project`**, **`role`**, **`title`**, `slot`, `floor`, `priority`, `by` (`human`), `key` | Encola en el empleado del rol con la cola más corta (o el de `slot`/`floor`): `task.enqueued` + `queue.changed reason: enqueued` → `{task, employee, created, state, position, queue_len}`. El título es también el prompt de la tarea. |
+| `queue_show` | **`project`**, `role` | `{project, queues: [{employee, role, items, updated}]}` en orden de ejecución. |
+| `task_cancel` | **`task`**, `reason` (`manual`), `note`, `by` (`human`) | En cola: la saca (`task.cancelled phase: queued` + `queue.changed reason: cancelled`). Despachada con hilo: interrumpe el hilo en T3 (`t3_thread_interrupt`, nunca archiva), marca la tarea del motor como terminada y emite `task.cancelled phase: running` con `thread_id`; el despachador luego hace settle y emite `employee.idle reason: cancelled`. → `{task, employee, state, reason, phase, thread_id, queue_len}`. Error si no existe, ya terminó o aún no tiene hilo (reintentar en unos segundos). |
+| `employee_rename` | **`employee`**, **`name`** (`null` quita el nombre), `by` (`human`) | Nombre de 1 a 32 caracteres (letras, espacios, `'` o `-`); `by` no puede ser `profile`. Emite `employee.renamed` → `{employee, role, name, previous, by}`. |
 
 ## Suscripciones (webhooks v2)
 
