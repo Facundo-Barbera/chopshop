@@ -1,0 +1,41 @@
+{
+  "v": 1,
+  "id": "01MCC5Y3S0F8YH6PV8TEN7BD11",
+  "seq": 111,
+  "ts": "2027-01-15T09:11:00.000Z",
+  "machine": "contabo-dev",
+  "project": "awesome-gb",
+  "type": "queue.changed",
+  "severity": "info",
+  "needs": null,
+  "subject": {
+    "kind": "desk",
+    "id": "awesome-gb/0/triage/0",
+    "title": "Tría"
+  },
+  "cause": {
+    "id": "01MCC5Y3S0F8YH6PV8TEN7BD10",
+    "depth": 1
+  },
+  "body": {
+    "employee": "awesome-gb/0/triage/0",
+    "items": [
+      {
+        "task": "q:01MCC5Y3S0F8YH6PV8TEN7BD00",
+        "title": "Triage #212 · login falla en Safari",
+        "enqueued_at": "2027-01-15T09:00:00.000Z",
+        "by": "github.issue.opened",
+        "trigger": "github.issue.opened"
+      },
+      {
+        "task": "q:01MCC5Y3S0F8YH6PV8TEN7BD10",
+        "title": "Triage #213 · typo en README",
+        "enqueued_at": "2027-01-15T09:01:00.000Z",
+        "by": "triage-bot",
+        "trigger": "desk.note"
+      }
+    ],
+    "reason": "enqueued",
+    "task": "q:01MCC5Y3S0F8YH6PV8TEN7BD10"
+  }
+}

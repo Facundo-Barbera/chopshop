@@ -1,0 +1,31 @@
+{
+  "v": 1,
+  "id": "01MCC5Y3S0F8YH6PV8TEN7BD12",
+  "seq": 112,
+  "ts": "2027-01-15T09:12:00.000Z",
+  "machine": "contabo-dev",
+  "project": "awesome-gb",
+  "type": "employee.assigned",
+  "severity": "info",
+  "needs": null,
+  "subject": {
+    "kind": "desk",
+    "id": "awesome-gb/0/triage/0",
+    "title": "Tría"
+  },
+  "cause": {
+    "id": null,
+    "depth": 0
+  },
+  "body": {
+    "employee": "awesome-gb/0/triage/0",
+    "role": "triage",
+    "thread_id": "mcp:c41f",
+    "task": "q:01MCC5Y3S0F8YH6PV8TEN7BD00",
+    "reason": "queue",
+    "name": "Tría",
+    "title": "Triage #212 · login falla en Safari",
+    "since": "2027-01-15T09:12:00.000Z",
+    "queue_len": 1
+  }
+}

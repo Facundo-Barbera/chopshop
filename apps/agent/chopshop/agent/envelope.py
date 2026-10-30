@@ -33,6 +33,11 @@ LIGHTS = ("green", "amber", "red", "gray")
 ORIGIN_KINDS = ("thread", "automation", "bot", "schedule", "human", "unknown")
 FORGE_TYPES = ("forge.repo.state", "forge.run.state", "forge.dispatch")
 OFFICE_TYPES = ("desk.assigned", "desk.released", "desk.waiting", "desk.note", "office.changed", "listener.state")
+EMPLOYEE_TYPES = ("employee.assigned", "employee.idle", "employee.renamed", "queue.changed", "task.enqueued",
+                  "task.cancelled")
+EMPLOYEE_ASSIGN_REASONS = ("wake", "queue", "manual", "inherited")
+EMPLOYEE_IDLE_REASONS = ("done", "failed", "cancelled", "released", "retired")
+QUEUE_REASONS = ("enqueued", "dequeued", "cancelled", "reordered", "cleared")
 GITHUB_TYPES = ("github.issue.opened", "github.issue.updated", "github.issue.closed", "github.pr.opened",
                 "github.pr.updated", "github.pr.merged", "github.pr.review", "github.ci.completed", "github.push")
 
@@ -42,7 +47,7 @@ SEVERITY = {
     "batch.created": "info", "batch.done": "info", "graph.state": "info", "node.state": "info", "graph.done": "info",
     "reaction.applied": "info", "machine.health": "info", "automation.ran": "info", "agent.started": "info",
 }
-SEVERITY.update({t: "info" for t in GITHUB_TYPES + FORGE_TYPES + OFFICE_TYPES})
+SEVERITY.update({t: "info" for t in GITHUB_TYPES + FORGE_TYPES + OFFICE_TYPES + EMPLOYEE_TYPES})
 NEEDS = {t: None for t in SEVERITY}
 NEEDS.update({"question.opened": "human", "approval.requested": "approval"})
 TYPES = tuple(SEVERITY)
@@ -187,6 +192,10 @@ def default_subject(type, project, body, machine=None):
         return subject("desk", body.get("desk") or "?", body.get("role"))
     if type in ("desk.waiting", "desk.released"):          # vestíbulo: el sujeto es el hilo
         return subject("thread", body.get("thread_id") or "?", body.get("title"))
+    if type.startswith("employee.") or type == "queue.changed":
+        return subject("desk", body.get("employee") or "?", body.get("name") or body.get("role"))
+    if type in ("task.enqueued", "task.cancelled"):
+        return subject("task", body.get("task") or "?", body.get("title"))
     if type == "office.changed":
         return subject("office", body.get("project") or project or "?")
     if type == "forge.repo.state":
@@ -421,6 +430,15 @@ SCHEMAS.update({
                         "event": _opt_str, "origin": _ORIGIN},
     "forge.dispatch": {"provider": _str, "repo": _str, "workflow": _str, "ref": _str},
     "listener.state": {"name": _str, "state": _in(*HEALTH)},
+    "employee.assigned": {"employee": _str, "role": _str, "thread_id": _str, "task": _opt_str,
+                          "reason": _in(*EMPLOYEE_ASSIGN_REASONS)},
+    "employee.idle": {"employee": _str, "role": _str, "reason": _in(*EMPLOYEE_IDLE_REASONS), "thread_id": _opt_str,
+                      "since": _str},
+    "employee.renamed": {"employee": _str, "role": _str, "name": _opt_str, "previous": _opt_str, "by": _str},
+    "queue.changed": {"employee": _str, "items": _list, "reason": _in(*QUEUE_REASONS)},
+    "task.enqueued": {"task": _str, "employee": _str, "title": _str, "position": _int, "by": _str},
+    "task.cancelled": {"task": _str, "employee": _str, "phase": _in("queued", "running"), "by": _str,
+                       "reason": _in("manual", "superseded", "retired", "expired")},
 })
 
 
