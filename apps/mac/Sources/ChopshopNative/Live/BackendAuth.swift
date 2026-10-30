@@ -34,7 +34,7 @@ public enum BackendAuthOutcome: Error, Equatable, Sendable {
         switch e {
         case .unauthorized: return unauthorized
         case .network(let m): return .unreachable(m)
-        case .badResponse: return .failed(e.message)
+        case .badResponse, .missingToken: return .failed(e.message)
         case .http(let s): return s == 429 ? .rateLimited(retryAfter: nil) : .failed(e.message)
         case .api(let status, let body):
             switch body.code {
