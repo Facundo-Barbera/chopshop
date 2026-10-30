@@ -60,7 +60,7 @@ public struct OfficeShell<World: View, Unpaired: View>: View {
     }
 
     private var stage: some View {
-        let city = CityModel.build(store.state, perProject: true)
+        let city = CityModel.build(store.state, cloud: store.cloud, perProject: true)
         return ZStack(alignment: .bottomTrailing) {
             if shell.state.section == .city {
                 world(ShellWorldContext(focus: shell.state.focus, ownsEscape: !shell.state.paletteOpen && shell.state.inspector == nil,
@@ -208,7 +208,7 @@ public struct ShellCityWorld: View {
     }
 
     private func refresh() {
-        let m = CityModel.build(store.state, perProject: true)
+        let m = CityModel.build(store.state, cloud: store.cloud, perProject: true)
         lights.observe(m, at: Date().timeIntervalSinceReferenceDate)
         if m != model { model = m }
     }
