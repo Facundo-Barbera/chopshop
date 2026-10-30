@@ -114,6 +114,21 @@ final class CloudStreamTests: XCTestCase {
         XCTAssertEqual(store.status, .live)
     }
 
+    func testBackendStateFixtureLinksMachineToSnapshot() async throws {
+        let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../../../packages/api/backend/cty/fixtures")
+        for name in ["state.get.response.json", "state.get.response.watcher.json"] {
+            _ = try JSONDecoder().decode(BackendState.self, from: Data(contentsOf: repo.appendingPathComponent(name)))
+        }
+        let body = String(decoding: try Data(contentsOf: repo.appendingPathComponent("state.get.response.json")), as: UTF8.self)
+        let st = try StateCounter([body]).next()
+        let mid = try XCTUnwrap(st.machines.first?.id)
+        XCTAssertEqual(st.machineKeys()[mid], "mac-mini.local")
+        let store = LiveStore(coalesceInterval: 0.01)
+        try await store.handleCloud(.hello(rev: st.rev), id: nil, gen: 0, fetch: { try StateCounter([body]).next() })
+        XCTAssertEqual(Array(store.state.relayMachines.keys), ["mac-mini.local"])
+        XCTAssertFalse(store.snapshot.projects.isEmpty)
+    }
+
     func testStateFetch401StopsAsUnauthorized() async throws {
         let t = FakeByteTransport([.init(chunks: [sse("hello", #"{"rev":1}"#)])])
         let store = LiveStore(coalesceInterval: 0.01, sleep: { _ in })

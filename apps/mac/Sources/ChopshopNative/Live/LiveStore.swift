@@ -221,8 +221,9 @@ public final class LiveStore: ObservableObject {
     private func ingestCloud() {
         let snaps = cloudSnapshots.sorted { $0.key < $1.key }.map(\.value)
         var machines: [JSONValue] = []
+        let keys = cloud?.machineKeys(snapshots: snaps) ?? [:]
         for m in cloud?.machines ?? [] {
-            let local = snaps.first { $0["machine"]?["id"]?.string == m.id }?["machine_id"]?.string ?? m.name
+            let local = keys[m.id] ?? m.name
             var o: JSONValue.Object = ["machine_id": .string(local), "online": .bool(m.online && m.paused != true), "stale": .bool(m.stale)]
             if let s = m.seq { o["seq"] = .number(Double(s)) }
             if let a = m.snapshotAgeS { o["snapshot_age_s"] = .number(a.rounded()) }

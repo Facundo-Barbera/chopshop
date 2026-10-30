@@ -68,3 +68,22 @@ public struct CloudStream: Sendable {
         }
     }
 }
+
+extension BackendState {
+    public func machineKeys(snapshots: [JSONValue]? = nil) -> [String: String] {
+        let snaps = snapshots ?? self.snapshots
+        let locals = snaps.compactMap { $0["machine_id"]?.string }
+        var out: [String: String] = [:]
+        for m in machines {
+            if let id = snaps.first(where: { $0["machine"]?["id"]?.string == m.id })?["machine_id"]?.string {
+                out[m.id] = id
+            } else if let id = locals.first(where: { $0 == m.name || $0.split(separator: ".").first.map(String.init) == m.name }) {
+                out[m.id] = id
+            } else {
+                let only = Set(city.workspaces.filter { $0.machineIDs == [m.id] }.map(\.id))
+                out[m.id] = snaps.first(where: { only.contains($0["workspace_id"]?.string ?? "") })?["machine_id"]?.string ?? m.name
+            }
+        }
+        return out
+    }
+}
