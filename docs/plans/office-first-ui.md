@@ -71,7 +71,7 @@ Reglas de aspecto (las mismas del resto de la app nativa):
 | Actividad | los últimos eventos, legibles, el más nuevo arriba | panel Actividad (`snapshot.events`) |
 | Reacciones | qué hizo el decisor por cada tarea (nivel, acción, nota) | panel Reacciones (`task.reactions`) |
 | Lotes | lotes por proyecto con su máquina, paralelismo y tareas (en curso, en cola, terminadas); settle de hilos terminados | panel Lotes + paleta («Settle …») |
-| Grafo | progreso del grafo (nodos hechos/en curso/fallidos, hilos usados de su presupuesto) | panel Lotes (fila del grafo: `n de m hilos`, nodos por estado); la oficina muestra los hilos |
+| Grafo | progreso del grafo (nodos hechos/fallidos, hilos usados de su presupuesto); planificador (modo de throttle, CPU/RAM) y bitácora | panel Lotes (fila del grafo: nodos hechos/fallidos y `n de m hilos`, fase 1); planificador y bitácora en esa fila (fase 2); la oficina muestra los hilos |
 | Sala de máquinas | listeners, automatizaciones, suscripciones, rack | panel Sala de máquinas (`LiveMachineRoomScreen` dentro del inspector); en la fase 3, sala del sótano en el mundo |
 | Máquinas (sidebar) | CPU/RAM por máquina, cuáles fallan | HUD (`ok/total`, ámbar si alguna ≥ 100 % CPU) + panel Máquinas |
 
@@ -118,19 +118,23 @@ de ahí y el test de Python comprueba que esta tabla coincide.
 
 ## Contrato con el mundo
 
-`OfficeShell` (fase 1) recibe el mundo como vista y habla con él por dos valores, sin conocer su dibujo:
+`OfficeShell` (fase 1) recibe el mundo como vista (`world: (ShellWorldContext) -> World`) y habla con él sin conocer su dibujo:
 
-- mundo → armazón: `onSelect(ShellTarget)`: el usuario pulsó un piso (`.project`), un escritorio/hilo (`.thread`). Abre el
-  panel de ese objetivo.
-- armazón → mundo: `focus: ShellFocus?` (objetivo + `token` que sube en cada petición): la paleta o el minimapa piden ir a
-  un proyecto o a un hilo; el mundo hace su zoom. En la fase 1 lo cumple `CityView` (parámetro `focusRequest`, zoom al piso
-  del proyecto); `OfficeWorldView` lo adopta al integrarse (fase 2).
+- mundo → armazón: `context.select(ShellTarget)`: el usuario pulsó un piso (`.project`) o un escritorio (`.thread`, con el hilo
+  de T3 traducido a la tarea del snapshot por `MockSnapshot.shellTask`). Abre el panel de ese objetivo, sin mover la cámara.
+- armazón → mundo: `context.focus: ShellFocus?` (objetivo + `token` que sube en cada petición): la paleta, el minimapa o ⌘J
+  piden ir a un proyecto o a un hilo; el mundo hace su zoom. En la fase 1 lo cumple `CityView` (`focusRequest`: zoom al piso
+  del proyecto, sin volver a avisar al armazón); `OfficeWorldView` lo adopta al integrarse (fase 2).
+- `context.ownsEscape`: `false` mientras hay paleta o panel abiertos. El Esc del mundo es un atajo de botón (se procesa antes
+  que el `onKeyPress` del armazón), así que el mundo lo desactiva entonces (`CityView(escapeZoomsOut:)`).
+- El mundo no lleva tooltips ni tarjetas de hover (fase 1: fuera `IsoTooltip` de `FloorOfficeView`/`IsoOfficeView`; el
+  resaltado de hover se queda).
 
 ## Fases
 
 | Fase | Qué | Dónde |
 |---|---|---|
-| **1** | Quitar Grafo entero (web y nativo, tests). Modelo puro del armazón (`ShellModel.swift`: HUD, paneles, paleta con búsqueda difusa, atajos, ciclo de atención, minimapa) con tests de Swift. `OfficeShell` en macOS 26: mundo a ventana completa (`LiveCityScreen`), HUD en la toolbar, inspector con los paneles, paleta ⌘K, minimapa, menú «Oficina». Fuera la barra lateral en macOS 26 (la web queda de reserva). Settle cableado (`AttentionActions.settle`). Test de Python de invariantes (sin Grafo, sin tooltips en el mundo, atajos = doc). | `feat/office-first-ui` |
+| **1** | Quitar Grafo entero (web y nativo, tests). Modelo puro del armazón (`ShellModel.swift`: HUD, paneles, paleta con búsqueda difusa, atajos, ciclo de atención, minimapa) con tests de Swift. `OfficeShell` en macOS 26: mundo a ventana completa (`LiveCityScreen`), HUD en la toolbar, inspector con los paneles, paleta ⌘K, minimapa, menú «Oficina». Fuera la barra lateral en macOS 26 (la web queda de reserva). Settle cableado (`AttentionActions.settle`). Fuera las tarjetas de hover del mundo (`IsoTooltip`). `MockTask.threadID` para casar escritorio (hilo) y tarea. Test de Python de invariantes (sin Grafo, sin tooltips en el mundo, atajos = doc). | `feat/office-first-ui` |
 | 2 | Integrar el mundo de `fix/or-office-layout` (`OfficeWorldView` en el hueco, `focus` en su cámara, `ThreadDetail` como panel de hilo). Paleta: tocar, asignar del vestíbulo, notas. Panel de escritorio (linaje, notas). | tras fusionar `fix/or-office-layout` |
 | 3 | Rutas del agente para lanzar, parar, fanout y correr grafos (con tests de Python del agente) y sus órdenes en la paleta. Sala de máquinas como sótano del mundo. | agente + app |
 | 4 | Podar la UI web a lo que necesita la reserva (macOS < 26) o retirarla; renombrar `GraphScene`/`GraphInspector` o borrarlos con `IsoOfficeView` si ya no hay agentes v2. | |
@@ -141,7 +145,7 @@ de ahí y el test de Python comprueba que esta tabla coincide.
 2. `pnpm --filter @chopshop/ui test` y `build` (se borró la vista Grafo de la web y su test).
 3. Arranque en macOS 26 con `--demo-fixture`: ventana sin barra lateral, ciudad a ventana completa, HUD en la toolbar con
    los 3 contadores (ámbar solo si hay atención), ⌘K abre la paleta y responde/settle funcionan contra un agente real.
-4. Prioridad de Esc: paleta > panel > salir del piso (el mundo tiene su propio Esc en `CitySwitch`; si se pisan, la paleta
-   y el panel deben ganar).
+4. Prioridad de Esc: paleta > panel > salir del piso. El `onKeyPress(.escape)` del armazón necesita foco: comprobar que llega
+   con el foco en el mundo y en el inspector (si no, pasar a un atajo de menú que solo se active con algo abierto).
 5. Capturas headless de `OfficeShell` (`ChopshopSnap shell`): HUD, panel Atención abierto, paleta abierta, minimapa.
 6. macOS < 26 (o `preferWeb`): sigue la UI web de siempre, sin la entrada Grafo.

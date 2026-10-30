@@ -9,7 +9,6 @@ Las capturas del repo muestran **solo datos de ejemplo**: hosts `host-a`/`host-b
 | `assets/project.png` | Proyecto: lotes, tareas y detalle |
 | `assets/batches.png` | Lotes |
 | `assets/questions.png` | Preguntas pendientes y respondidas |
-| `assets/graph.png` | Grafo de tareas |
 | `assets/reactions.png` | Reacciones por niveles (auto / bot / humano) |
 | `assets/events.png` | Actividad / eventos |
 

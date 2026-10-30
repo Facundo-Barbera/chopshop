@@ -199,7 +199,7 @@ graph:
 
 ## App de macOS
 
-`apps/mac`: ejecutable SwiftPM `ChopshopUI` (SwiftUI, macOS 13+; vidrio líquido en macOS 26) con `NavigationSplitView` y un `WKWebView` transparente que carga la app React (`apps/ui`). Es un **cliente puro de la API del agente** ([`docs/agent-api.md`](docs/agent-api.md)): no ejecuta Python ni habla con T3, y se empaqueta como un único `Chopshop.app`. Vistas: **Resumen**, **Preguntas** (responder), **Actividad**, **Reacciones**, **Grafo**, **Lotes**, **Máquinas** (CPU/RAM/disco por app y proyecto) y una vista por proyecto. Los permisos (approvals) son de solo lectura: se aprueban en T3.
+`apps/mac`: ejecutable SwiftPM `ChopshopUI` (SwiftUI, macOS 13+; vidrio líquido en macOS 26) con `NavigationSplitView` y un `WKWebView` transparente que carga la app React (`apps/ui`). Es un **cliente puro de la API del agente** ([`docs/agent-api.md`](docs/agent-api.md)): no ejecuta Python ni habla con T3, y se empaqueta como un único `Chopshop.app`. Vistas: **Resumen**, **Preguntas** (responder), **Actividad**, **Reacciones**, **Lotes**, **Máquinas** (CPU/RAM/disco por app y proyecto) y una vista por proyecto. Los permisos (approvals) son de solo lectura: se aprueban en T3.
 
 ### Build
 
@@ -248,7 +248,6 @@ Las capturas de la interfaz están en `assets/` y usan datos de demostración.
 Para regenerarlas con datos de ejemplo, ver [`docs/screenshots.md`](docs/screenshots.md).
 
 ![Resumen](assets/overview.png)
-![Grafo de tareas](assets/graph.png)
 
 ## Agente headless por máquina
 

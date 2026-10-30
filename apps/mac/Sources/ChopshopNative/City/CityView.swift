@@ -48,6 +48,10 @@ public struct CityView: View {
     var onSelectFloor: ((String) -> Void)?
     /// Hilo cuyo inspector se abre en un piso (cuenta como «tocar», `POST /touch`).
     var onInspect: ((String) -> Void)?
+    /// Petición del armazón (paleta, minimapa, ⌘J): ir al piso de ese proyecto. Cada petición nueva trae otro `token`.
+    var focusRequest: ShellFocus?
+    /// Esc sale del piso (false mientras el armazón tiene la paleta o un panel abiertos: el Esc es suyo).
+    var escapeZoomsOut = true
 
     @State private var box = CityViewBox()
     @State private var focus: String?
@@ -57,7 +61,6 @@ public struct CityView: View {
     @State private var zoomTo = 0.0
     @State private var zoomAt = -Double.infinity
     @State private var mounted = false
-    @State private var showGraph = false
     @State private var hovered: String?
     @Environment(\.colorScheme) private var scheme
 
@@ -66,17 +69,19 @@ public struct CityView: View {
 
     /// Ciudad desde una proyección viva y sus ventanas (`CityLights`, que el llamador va alimentando con `observe`).
     public init(state: LiveState, lights: CityLights, directory: CompanyDirectory = .standard, onSelectFloor: ((String) -> Void)? = nil,
-                onInspect: ((String) -> Void)? = nil) {
+                onInspect: ((String) -> Void)? = nil, focusRequest: ShellFocus? = nil, escapeZoomsOut: Bool = true) {
         self.init(model: CityModel.build(state, directory: directory), lights: lights, snapshot: SnapshotMapper.snapshot(state),
-                  state: state, onSelectFloor: onSelectFloor, onInspect: onInspect)
+                  state: state, onSelectFloor: onSelectFloor, onInspect: onInspect, focusRequest: focusRequest, escapeZoomsOut: escapeZoomsOut)
     }
 
     init(model: CityModel, lights: CityLights, snapshot: MockSnapshot, state: LiveState? = nil, frozenTime: Double? = nil,
          frozenNow: Date? = nil, growth: Double? = nil, frozenZoom: CityFocus? = nil, flatChrome: Bool = false,
-         onSelectFloor: ((String) -> Void)? = nil, onInspect: ((String) -> Void)? = nil) {
+         onSelectFloor: ((String) -> Void)? = nil, onInspect: ((String) -> Void)? = nil, focusRequest: ShellFocus? = nil,
+         escapeZoomsOut: Bool = true) {
         self.model = model; self.lights = lights; self.snapshot = snapshot; self.state = state; self.frozenTime = frozenTime
         self.frozenNow = frozenNow; self.growth = growth; self.frozenZoom = frozenZoom; self.flatChrome = flatChrome
-        self.onSelectFloor = onSelectFloor; self.onInspect = onInspect
+        self.onSelectFloor = onSelectFloor; self.onInspect = onInspect; self.focusRequest = focusRequest
+        self.escapeZoomsOut = escapeZoomsOut
     }
 
     // MARK: zoom
@@ -130,10 +135,10 @@ public struct CityView: View {
     }
 
     /// `floor`: `CityFloor.id` del piso pulsado (nil = el primero del proyecto, p. ej. desde un aviso del vestíbulo).
-    private func select(_ project: String, floor: String? = nil) {
-        onSelectFloor?(project)
+    /// `notify: false` cuando lo pide el armazón (`focusRequest`): ya sabe adónde va y no hay que reabrirle el panel del piso.
+    private func select(_ project: String, floor: String? = nil, notify: Bool = true) {
+        if notify { onSelectFloor?(project) }
         guard frozenZoom == nil, canZoom(project) else { return }
-        showGraph = false
         zoomIn(project, floor: floor)
     }
 
@@ -153,7 +158,7 @@ public struct CityView: View {
     private func zoomOut() {
         let t = now()
         let cur = mounted ? 1 : progress(t)
-        mounted = false; showGraph = false
+        mounted = false
         zoomFrom = cur; zoomTo = 0; zoomAt = t
         box.zoomGen += 1
         let gen = box.zoomGen
@@ -178,6 +183,15 @@ public struct CityView: View {
                 }
             }
         }
+        .onChange(of: focusRequest) { _, r in
+            // `nil` (volver a la ciudad) o un proyecto: el zoom de siempre; un hilo cae en el piso de su proyecto
+            guard let r else { return }
+            if let pr = r.target.project {
+                if pr != focus || !(zoomed || mounted) { select(pr, notify: false) }
+            } else if zoomed || mounted {
+                zoomOut()
+            }
+        }
     }
 
     private func content(p: Double, t: Double, office: Bool) -> some View {
@@ -197,10 +211,7 @@ public struct CityView: View {
             header(t: t, chrome: ch)
                 .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 4)
             ZStack(alignment: .top) {
-                // el grafo primero: con la oficina montada, "Grafo" también tiene que verse
-                if showGraph, let pr = graphProject, let g = graph(pr) {
-                    GraphView(graph: g, tasks: tasks(pr), hostOf: hosts(pr), frozenTime: frozenTime, flatChrome: flatChrome)
-                } else if office, let plan = targetPlan {
+                if office, let plan = targetPlan {
                     FloorOfficeView(plan: plan, frozenNow: officeNow, flatChrome: flatChrome, onInspect: onInspect)
                 } else if office, let pr = target, let g = graph(pr) {
                     IsoOfficeView(graph: g, tasks: tasks(pr), hostOf: hosts(pr), frozenTime: frozenTime, flatChrome: flatChrome)
@@ -211,14 +222,9 @@ public struct CityView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .background { if showGraph { GraphBackdrop() } else { IsoBackdrop() } }
+        .background(IsoBackdrop())
         .clipShape(shape)
         .overlay(shape.strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5))
-    }
-
-    /// Proyecto del grafo: el piso enfocado; si no, el primero que pide algo; si no, el primero.
-    private var graphProject: String? {
-        target ?? model.alerts.first { graph($0.project) != nil }?.project ?? model.floors.first { graph($0.project) != nil }?.project
     }
 
     private func litCount(_ t: Double) -> Int {
@@ -250,11 +256,8 @@ public struct CityView: View {
                 if let o { Text(o.count).opacity(CityTransition.chromeIn(ch)) }
             }
             .font(.caption).foregroundStyle(.secondary).padding(.trailing, 6)
-            CitySwitch(first: ch > 0.5 ? "Oficina" : "Ciudad", graph: showGraph, zoomed: zoomed || mounted,
-                       pickFirst: {
-                           if showGraph { showGraph = false } else if zoomed || mounted { zoomOut() }
-                       },
-                       pickGraph: { if graphProject != nil { showGraph = true } })
+            CitySwitch(first: ch > 0.5 ? "Oficina" : "Ciudad", zoomed: (zoomed || mounted) && escapeZoomsOut,
+                       pickFirst: { if zoomed || mounted { zoomOut() } })
         }
     }
 
@@ -404,21 +407,19 @@ struct CityStatusLine: View {
     }
 }
 
-/// Selector Ciudad (u Oficina, con el zoom dentro) | Grafo. Dibujado a mano: se ve igual en la app y en capturas.
+/// Ciudad (u Oficina, con el zoom dentro): con el zoom puesto, clic o Esc vuelve a la ciudad. Dibujado a mano: se ve igual en
+/// la app y en capturas.
 @available(macOS 26.0, *)
 struct CitySwitch: View {
     let first: String
-    let graph: Bool
     let zoomed: Bool
     let pickFirst: () -> Void
-    let pickGraph: () -> Void
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         HStack(spacing: 0) {
-            segment(first, on: !graph, action: pickFirst)
-                .keyboardShortcut(zoomed || graph ? KeyboardShortcut(.escape, modifiers: []) : nil)
-            segment("Grafo", on: graph, action: pickGraph)
+            segment(first, on: true, action: pickFirst)
+                .keyboardShortcut(zoomed ? KeyboardShortcut(.escape, modifiers: []) : nil)
         }
         .padding(2)
         .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.primary.opacity(0.08)))

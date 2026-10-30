@@ -95,6 +95,7 @@ public enum SnapshotMapper {
         let q = nd == nil ? nil : s.questions[key]
         var m = MockTask(id: id, title: nonEmpty(t["title"]?.string) ?? id, kind: Self.kind(phase: phase, needs: nd, hasQuestion: q != nil))
         m.link = nonEmpty(t["link"]?.string).flatMap(URL.init(string:))
+        m.threadID = nonEmpty(t["thread_id"]?.string)
         m.result = nonEmpty(t["result"]?.string)
         m.lastError = nonEmpty(t["error"]?.string)
         m.level = t["level"]?.string.flatMap(Level.init(rawValue:))
