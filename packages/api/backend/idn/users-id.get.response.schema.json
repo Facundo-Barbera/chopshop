@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/backend/v2/idn/users-id.get.response.schema.json",
+  "title": "GET /v1/users/{id}",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "user"
+  ],
+  "properties": {
+    "user": {
+      "$ref": "../common.schema.json#/$defs/user"
+    }
+  }
+}
