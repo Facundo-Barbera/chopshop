@@ -28,6 +28,8 @@ DEFAULT_EXTRA_FLOORS = 2
 MAX_EXTRA_FLOORS = 4
 MAX_OUTSOURCED_FLOORS = 4
 MIN_ELASTIC_FLOOR_DESKS = 4
+EXTRA_FLOOR_BASE = MAX_FLOORS_PER_PROJECT
+OUT_FLOOR_BASE = EXTRA_FLOOR_BASE + MAX_EXTRA_FLOORS
 FLEX_ROLE = "_flex"
 OUT_ROLE = "_out"
 OUTSOURCED_LABEL = "Contratista"
@@ -377,6 +379,14 @@ def zone(floor, role, declared):
     return "room"
 
 
+def next_elastic_floor(role, open_floors):
+    return max(list(open_floors) + [(OUT_FLOOR_BASE if role == OUT_ROLE else EXTRA_FLOOR_BASE) - 1]) + 1
+
+
+def _elastic_floors(v, base):
+    return list(range(base, base + v)) if isinstance(v, int) else sorted(v)
+
+
 def floors(prof):
     f = _office(prof).get("floors")
     return [x for x in f if _mapping(x)] if isinstance(f, list) else []
@@ -452,8 +462,7 @@ def structure(prof, retired=(), extra_floors=0, outsourced_floors=0, building=No
             room["desks"].append({"id": did, "slot": slot, "retired": True})
             room["desks"].sort(key=lambda d: d["slot"])
     n = elastic_floor_desks(prof)
-    for k in range(extra_floors):
-        fi = declared + k
+    for fi in _elastic_floors(extra_floors, EXTRA_FLOOR_BASE):
         floor = next((x for x in fl if x["index"] == fi), None)
         if floor is None:
             floor = {"index": fi, "name": None, "rooms": [], "temporary": True}
@@ -463,7 +472,7 @@ def structure(prof, retired=(), extra_floors=0, outsourced_floors=0, building=No
     fl.sort(key=lambda x: x["index"])
     out = {"label": OUTSOURCED_LABEL,
            "floors": [{"index": k, "name": None, "temporary": False, "rooms": [_elastic_room(project, k, OUT_ROLE, n)]}
-                      for k in range(outsourced_floors)]} if outsourced_floors else None
+                      for k in _elastic_floors(outsourced_floors, OUT_FLOOR_BASE)]} if outsourced_floors else None
     return {"company": company(prof), "half_life_s": half_life_s(prof), "floors": fl, "machine_rooms": machine_rooms(prof),
             "capacity": capacity(prof, building), "outsourced": out}
 
