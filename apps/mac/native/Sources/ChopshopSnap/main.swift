@@ -79,6 +79,12 @@ if let mode = args.dropFirst().first, mode == "stable-floor" {
     MainActor.assumeIsolated { Snapshots.renderStableFloor(to: out) }
     exit(0)
 }
+if let mode = args.dropFirst().first, mode == "employees" {
+    let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../../../..").standardized
+    let fixture = args.count > 2 ? args[2] : repo.appendingPathComponent("packages/api/fixtures/snapshot.office.json").path
+    MainActor.assumeIsolated { Snapshots.renderEmployees(fixture: fixture, to: out) }
+    exit(0)
+}
 if let mode = args.dropFirst().first, mode == "floor" || mode == "city-office" {
     MainActor.assumeIsolated {
         if mode == "floor" { Snapshots.renderFloors(to: out) } else { Snapshots.renderCityOffice(to: out) }

@@ -46,6 +46,7 @@ public struct FloorOfficeView: View {
 
     /// Lo que dice la etiqueta del hueco en el piso: el nombre corto del hilo; un escritorio sin hilo, su `rol · n`.
     static func tag(_ plan: FloorPlan, _ id: String, now: Date) -> String {
+        if let e = plan.desk(id)?.employee { return e.name ?? e.role }
         if let o = plan.occupant(of: id, now: now) {
             let name = ProjectOffice.shortName(o.title ?? o.threadID)
             return o.waitingRole.map { "\(name) → \($0)" } ?? name
