@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/backend/v2/str/imports.get.response.schema.json",
+  "title": "GET /v1/imports",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "imports"
+  ],
+  "properties": {
+    "imports": {
+      "type": "array",
+      "items": {
+        "$ref": "../common.schema.json#/$defs/import_summary"
+      }
+    }
+  }
+}
