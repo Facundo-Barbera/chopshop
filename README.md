@@ -312,9 +312,11 @@ interval = 5
 ## Relay (Cloudflare)
 
 `apps/relay` es un Worker de Cloudflare con un Durable Object al que cada agente se conecta **de salida** para publicar su
-estado; la app de Mac lo lee con un token de visor, sin Tailscale. Es de solo lectura: no despacha nada. Arquitectura, roles,
-pairing, tokens, deploy y límites en [`docs/relay.md`](docs/relay.md); formato de los mensajes en
-[`docs/relay-protocol.md`](docs/relay-protocol.md).
+estado; la app de Mac lo lee con un token de visor, sin Tailscale. Es de solo lectura: no despacha nada. Es el relay **v1**
+(tokens `cr1_`, obsoleto desde el backend con cuentas `apps/backend`): mensajes en
+[`docs/relay-protocol-v1.md`](docs/relay-protocol-v1.md) y operación resumida al final de [`docs/relay.md`](docs/relay.md). El
+backend nuevo: operación en [`docs/relay.md`](docs/relay.md), API en [`docs/backend-api.md`](docs/backend-api.md) y protocolo
+del agente v2 en [`docs/relay-protocol.md`](docs/relay-protocol.md).
 
 ```sh
 chopshop relay pair --stdin        # guarda el token cr1_ (lee una línea de stdin) en ~/.config/chopshop/relay/token, 0600
