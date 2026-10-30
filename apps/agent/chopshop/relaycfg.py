@@ -253,6 +253,43 @@ def cmd_unlink(a, out, err):
     return 0
 
 
+def _company(p):
+    office = p.get("office") if isinstance(p.get("office"), dict) else {}
+    return office.get("company") or p.get("company") or (p.get("registry") or {}).get("company") or "Personal"
+
+
+def cmd_import(a, out, err):
+    if not a.dry_run:
+        raise RelayCfgError("solo existe --dry-run: la oferta la manda el agente al conectar")
+    from . import relaysync
+    from .agent import registry
+    cloud = relaysync.cached_sync_names()
+    try:
+        projects = relaysync.local_projects(cloud)
+    except registry.RegistryError as e:
+        raise RelayCfgError(e.message)
+    msg, skipped = relaysync.import_offer(projects)
+    if cloud:
+        print("ya en la nube (no se ofrecen): %s" % ", ".join(sorted(cloud)), file=out)
+    for name in skipped:
+        print("aviso: %s no cabe en la oferta (máx. %d bytes)" % (name, relaysync.MAX_OFFER_BYTES), file=err)
+    if msg is None:
+        print("nada que ofrecer", file=out)
+        return 0
+    for p in msg["projects"]:
+        roles = ((p.get("office") or {}).get("roles") or {}) if isinstance(p.get("office"), dict) else {}
+        print("%s: campus %s, %d roles%s" % (p["project"], _company(p), len(roles),
+                                              ", registro" if "registry" in p else ""), file=out)
+    size = len(json.dumps(msg, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+    h = relaysync.offer_hash(msg["projects"])
+    print("tamaño: %d de %d bytes" % (size, relaysync.MAX_OFFER_BYTES), file=out)
+    print("sha256: %s" % h, file=out)
+    sent = relaysync.read_import_hash() == h
+    print("sin cambios desde la última oferta: no se reenviaría" if sent else "se enviaría al conectar (no se envía nada ahora)",
+          file=out)
+    return 0
+
+
 def build():
     p = argparse.ArgumentParser(prog="chopshop relay", description="Credenciales del relay en esta máquina (cm1_ en machine.json, cr1_ heredado; nunca se imprimen)")
     sp = p.add_subparsers(dest="action", required=True)
@@ -267,6 +304,9 @@ def build():
     x = sp.add_parser("status", help="API, máquina y credencial enmascarada"); x.set_defaults(f=cmd_status)
     x = sp.add_parser("unlink", help="borra machine.json"); x.set_defaults(f=cmd_unlink)
     x = sp.add_parser("unpair", help="borra el token local"); x.set_defaults(f=cmd_unpair)
+    x = sp.add_parser("import", help="enseña la oferta de importación (perfiles y projects.toml) sin enviarla")
+    x.add_argument("--dry-run", action="store_true", help="solo muestra qué se ofrecería")
+    x.set_defaults(f=cmd_import)
     return p
 
 
