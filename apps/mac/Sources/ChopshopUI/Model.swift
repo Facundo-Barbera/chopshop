@@ -67,6 +67,7 @@ final class AppModel: ObservableObject {
     @Published var pairingRevision = 0
     /// El usuario pidió la vista clásica (UI web con barra lateral) en esta sesión (agente sin emparejamiento).
     @Published var preferWeb = false
+    @Published private(set) var canAct = true { didSet { if oldValue != canAct { shell.actions = attentionActions } } }
     /// Armazón de la oficina (macOS 26): HUD, paleta, paneles y atajos del menú «Oficina».
     let shell = ShellController()
 
@@ -173,6 +174,7 @@ final class AppModel: ObservableObject {
         guard gen == generation else { return }     // la config cambió mientras tanto: este resultado ya no vale
         for r in fetched { if let m = r.machineId { labels[r.name] = m } }
         results = fetched
+        canAct = hub.canAct
         let s = Summarizer.summarize(fetched, labels: labels, previous: machines)
         machines = s.machines
         projects = s.projects
@@ -199,6 +201,7 @@ final class AppModel: ObservableObject {
         let oldPrimary = primary?.spec
         config = loadConfig()
         hub = AgentHub(specs: config.enabledAgents, credentials: credentials, relayCredentials: relayCredentials)
+        canAct = hub.canAct
         let active = Set(hub.clients.map(\.spec.name))
         results = results.filter { active.contains($0.name) }
         labels = labels.filter { active.contains($0.key) }
@@ -268,7 +271,7 @@ final class AppModel: ObservableObject {
     /// antes de la primera respuesta no se envía nada (la UI muestra «conectando»).
     func pushAgents() {
         if results.isEmpty && !hub.isEmpty { return }
-        push("agents", ["agents": results.map { $0.bridgeObject }, "configPath": AppConfig.configPath(), "interval": config.refreshSeconds])
+        push("agents", ["agents": results.map { $0.bridgeObject }, "canAct": canAct, "configPath": AppConfig.configPath(), "interval": config.refreshSeconds])
     }
 
     // --- stream en vivo, emparejamiento ---
@@ -392,7 +395,7 @@ final class AppModel: ObservableObject {
         }, open: { [weak self] url in self?.open(url) }, settle: { [weak self] id in
             guard let self else { return "la app se está cerrando" }
             return await self.settle(id)
-        })
+        }, canAct: canAct)
     }
 
     /// `POST /settle {thread_id}` al agente principal (cierra el hilo en T3, nunca archiva). nil = hecho.
@@ -410,7 +413,7 @@ final class AppModel: ObservableObject {
         if let e = lastError { return "⚠︎ " + e.prefix(60) }
         guard let d = lastUpdate else { return "cargando…" }
         let f = DateFormatter(); f.dateFormat = "HH:mm:ss"
-        return "actualizado " + f.string(from: d)
+        return (canAct ? "" : "modo visualizador · ") + "actualizado " + f.string(from: d)
     }
 
     /// `POST /answer {thread_id, choice, request}` al agente principal. nil = enviado.
