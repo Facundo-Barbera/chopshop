@@ -59,6 +59,9 @@ struct SettingsView: View {
                 Text(message).font(.callout).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
             }
 
+            Divider()
+            BundledAgentSection(bundled: model.bundled)
+
             HStack {
                 Spacer()
                 Button("Cerrar") { dismiss() }

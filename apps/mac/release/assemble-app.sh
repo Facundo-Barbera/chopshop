@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Ensambla Chopshop.app listo para firmar. Reutiliza apps/mac/build.sh (UI + Swift + motor + icono) y le
+# Ensambla Chopshop.app listo para firmar. Reutiliza apps/mac/build.sh (UI + Swift + agente incrustado + icono) y le
 # aplica, vía PlistBuddy, lo que depende del release: bundle id, versiones, sistema mínimo y claves de Sparkle.
 # Así el Info.plist de desarrollo y el de release no divergen (cualquier clave nueva de build.sh se conserva).
 #
@@ -57,6 +57,19 @@ plist_put CFBundleIdentifier string "$BUNDLE_ID"
 plist_put CFBundleShortVersionString string "$SHORT_VERSION"
 plist_put CFBundleVersion string "$BUILD_NUMBER"
 plist_put LSMinimumSystemVersion string "$MIN_MACOS_VERSION"
+
+# 2b) LaunchAgent del agente incrustado (si build.sh lo puso): Label y app asociada siguen al bundle id de release
+AGENT_PLIST="$OUT/Contents/Library/LaunchAgents/chopshop-agent.plist"
+if [ -f "$AGENT_PLIST" ]; then
+  APP_PLIST="$PLIST"
+  PLIST="$AGENT_PLIST"
+  plist_put Label string "$BUNDLE_ID.agent"
+  plist_del AssociatedBundleIdentifiers
+  "$PLISTBUDDY" -c "Add :AssociatedBundleIdentifiers array" "$PLIST"
+  "$PLISTBUDDY" -c "Add :AssociatedBundleIdentifiers:0 string $BUNDLE_ID" "$PLIST"
+  [ "$(plist_get Label)" = "$BUNDLE_ID.agent" ] || die "Label del LaunchAgent no quedó aplicado"
+  PLIST="$APP_PLIST"
+fi
 
 # 3) Sparkle: solo si hay feed y clave pública; si no (dev/dry-run sin vars) el updater queda desactivado
 if [ -n "$FEED" ] && [ -n "$PUBKEY" ]; then
