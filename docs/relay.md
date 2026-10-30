@@ -7,7 +7,7 @@ partes opacas del snapshot. Lanzar, responder, asentar o encolar sigue siendo de
 
 Este documento cubre la arquitectura, los roles, el pairing, los tokens, el deploy y los límites. El formato de cada mensaje
 (campos, lista blanca de lo que sale de la máquina, schemas) está en [`relay-protocol.md`](relay-protocol.md); si los dos no
-coinciden, mandan los schemas de `packages/api/relay/` y el código de `packages/relay/src/`.
+coinciden, mandan los schemas de `packages/api/relay/` y el código de `apps/relay/src/`.
 
 ## Arquitectura
 
@@ -24,7 +24,7 @@ flowchart LR
 
 | pieza | archivo | qué hace |
 |---|---|---|
-| Worker | `packages/relay/src/index.ts` | Reenvía toda petición al único Durable Object (`HUB.idFromName("global")`). |
+| Worker | `apps/relay/src/index.ts` | Reenvía toda petición al único Durable Object (`HUB.idFromName("global")`). |
 | `Hub` (Durable Object) | `src/index.ts` | Resuelve el rol del llamador, autoriza la ruta y la despacha. Su `alarm()` purga snapshots caducados y cierra conexiones de agente sin `hello` o inactivas. |
 | rutas y roles | `src/routes.ts` | Tabla `ROUTES` (ruta, método, roles permitidos), `resolveCaller` y `authorize`. |
 | pairing | `src/pair.ts` | Crear, canjear y revocar códigos; revocar tokens; rate limit de canje. |
@@ -96,7 +96,7 @@ agente y el del visor tienen que salir de códigos de la **misma** cuenta (ver �
 ## Pairing
 
 Los comandos usan `RELAY` como la URL base del Worker (`https://chopshop-relay.<subdominio>.workers.dev`, por
-`workers_dev = true` en `packages/relay/wrangler.toml`) y la copia local del token de operador en
+`workers_dev = true` en `apps/relay/wrangler.toml`) y la copia local del token de operador en
 `~/.config/chopshop/relay/operator` (0600). Ningún paso imprime un token `cr1_` ni el de operador.
 
 ### 0. Elegir la cuenta
@@ -200,8 +200,8 @@ El Worker se despliega **solo** desde GitHub Actions (`.github/workflows/relay-d
 
 El job (Node 24, pnpm, `concurrency: relay-deploy` sin cancelar el que está en curso) hace:
 
-1. `pnpm install --frozen-lockfile --filter @chopshop/relay...` y `pnpm --filter @chopshop/relay run check` (`tsc --noEmit`).
-2. `cloudflare/wrangler-action` con `command: deploy` en `packages/relay`, con `apiToken` = secret `CLOUDFLARE_API_TOKEN`,
+1. `pnpm install --frozen-lockfile --filter @chopshop/relay...`, `pnpm --filter @chopshop/relay run check` (`tsc --noEmit`) y `run test`.
+2. `cloudflare/wrangler-action` con `command: deploy` en `apps/relay`, con `apiToken` = secret `CLOUDFLARE_API_TOKEN`,
    `accountId` = secret `CLOUDFLARE_ACCOUNT_ID` y `secrets: RELAY_OPERATOR_TOKEN`: el valor sale del secret del repositorio del
    mismo nombre (expuesto como variable de entorno del paso) y se sube como secret del Worker en **cada** deploy, sin imprimirlo.
 

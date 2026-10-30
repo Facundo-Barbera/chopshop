@@ -174,6 +174,18 @@ importers:
 
   apps/mac: {}
 
+  apps/relay:
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: ^5.20261030.1
+        version: 5.20261030.1
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      wrangler:
+        specifier: ^4.156.0
+        version: 4.156.0(@cloudflare/workers-types@5.20261030.1)
+
   apps/ui:
     dependencies:
       '@chopshop/api':
@@ -191,18 +203,6 @@ importers:
         version: 0.28.2
 
   packages/api: {}
-
-  packages/relay:
-    devDependencies:
-      '@cloudflare/workers-types':
-        specifier: ^5.20261030.1
-        version: 5.20261030.1
-      typescript:
-        specifier: ^7.0.2
-        version: 7.0.2
-      wrangler:
-        specifier: ^4.156.0
-        version: 4.156.0(@cloudflare/workers-types@5.20261030.1)
 
 packages:
 
