@@ -56,6 +56,7 @@ DEFAULTS = {
         "projects_root": "~/projects",
         "worktrees_root": "~/.t3/worktrees",
         "projects": {},
+        "projects_file": "",           # registro de proyectos (agent/registry.py); vacío = projects.toml junto a config.toml
         "webhook_files": {},           # nombre -> ruta a un archivo (0600) con la URL
         "automations": {"enabled": True, "interval": 2},   # interruptor global + s entre pasadas del hilo `automations`
         "office": {"enabled": True, "interval": 2},        # escritorios por rol y herencia (agent/office.py): s entre pasadas

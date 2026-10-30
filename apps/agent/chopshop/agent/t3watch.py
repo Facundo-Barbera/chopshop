@@ -199,6 +199,7 @@ class _Pass:
         self.baseline, self.last_poll, self.reads_left = baseline, last_poll, max_reads
         self.changes, self.errors, self.seen = [], [], set()
         self.profiles = {}
+        self.allowed = None
 
     def role(self, project, title, branch):
         """Rol de la oficina por las reglas `match` del perfil (perfil leído una vez por pasada)."""
@@ -211,6 +212,8 @@ class _Pass:
         return layout.role_for(prof, title, branch) if prof else None
 
     def emit(self, event, project, body):
+        if self.allowed is not None and project not in self.allowed:
+            return
         seq = self.emit_fn(event, project, body)
         self.changes.append({"event": event, "thread_id": body.get("thread_id"), "project": project,
                              **({"seq": seq} if isinstance(seq, int) else {})})
@@ -290,7 +293,7 @@ def _process(p, t, project, project_id, prev):
              ended_at))
 
 
-def poll(conn, cfg, t3, emit_fn, max_reads=MAX_READS, level_fn=None):
+def poll(conn, cfg, t3, emit_fn, max_reads=MAX_READS, level_fn=None, project_fn=None):
     """Una pasada de vigilancia -> {"threads": n, "changes": [...], "errors": [...], "reachable": bool, "backoff": s}.
     Respeta el backoff de `t3`: si T3 está caído y aún no toca reintentar, no llama (devuelve `skipped`)."""
     now = t3.clock()
@@ -302,9 +305,12 @@ def poll(conn, cfg, t3, emit_fn, max_reads=MAX_READS, level_fn=None):
     prev_rows = _known_rows(conn)
     try:
         projects = t3.projects()
+        if project_fn is not None:
+            names = {pr["id"]: project_fn(pr) for pr in projects}
+            p.allowed = {n for n in names.values() if n}
         listed = failed = 0
         for pr in projects:
-            title = pr.get("title") or pr["id"]
+            title = (names.get(pr["id"]) if project_fn is not None else None) or pr.get("title") or pr["id"]
             try:
                 ths = t3.threads(pr["id"], stop=None if baseline else
                                  (lambda page: all(_stable(prev_rows.get(x["threadId"]), x) for x in page)))
