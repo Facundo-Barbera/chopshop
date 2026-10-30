@@ -52,7 +52,7 @@ private struct AccountSettingsFixture: AccountSettingsBackend {
 
     private var me: String {
         role == .owner
-            ? #"{"id":"u1","email":"dueno@ejemplo.com","display_name":"Bixku","role":"owner","status":"active"}"#
+            ? #"{"id":"u1","email":"dueno@ejemplo.com","display_name":"Dueño","role":"owner","status":"active"}"#
             : #"{"id":"u2","email":"ana@ejemplo.com","display_name":"Ana","role":"watcher","status":"active"}"#
     }
 
