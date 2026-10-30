@@ -466,19 +466,40 @@ public struct BackendErrorBody: Codable, Equatable, Sendable {
     public let type: String?
     public let id: String?
     public let ts: String?
+    public let re: String?
     public let code: Code
     public let message: String
     public let field: String?
     public let retryAfterS: Int?
     public let current: JSONValue?
+    public let close: Bool?
 
     public init(code: Code, message: String, field: String? = nil, retryAfterS: Int? = nil, current: JSONValue? = nil) {
-        v = 2; type = "error"; id = nil; ts = nil
+        v = 2; type = "error"; id = nil; ts = nil; re = nil; close = nil
         self.code = code; self.message = message; self.field = field; self.retryAfterS = retryAfterS; self.current = current
     }
 
     enum CodingKeys: String, CodingKey {
-        case v, type, id, ts, code, message, field, current
+        case v, type, id, ts, re, code, message, field, current, close
         case retryAfterS = "retry_after_s"
     }
+}
+
+public struct BackendStreamHello: Codable, Equatable, Sendable {
+    public let v: Int
+    public let type: String
+    public let ts: String
+    public let head: String
+    public let resume: String
+    public let rev: Int
+}
+
+public struct BackendStreamMachine: Codable, Equatable, Sendable {
+    public let id: String
+    public let online: Bool
+    public let paused: Bool
+}
+
+public struct BackendStreamStructure: Codable, Equatable, Sendable {
+    public let rev: Int
 }
