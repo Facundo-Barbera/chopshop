@@ -392,12 +392,16 @@ public struct CityView: View {
     }
 
     private func tourStart() -> (project: String, floor: String)? {
+        var best: (project: String, floor: String, n: Int)?
         for b in model.buildings {
             for fl in b.floors where !fl.isLobby {
-                if let pr = project(of: fl), canZoom(pr), floors(pr).count > 0 { return (pr, fl.id) }
+                guard let pr = project(of: fl), canZoom(pr) else { continue }
+                let all = floors(pr)
+                let n = all.filter { $0.kind != .lobby }.count * 100 + all.reduce(0) { $0 + $1.desks.count }
+                if n > (best?.n ?? 0) { best = (pr, fl.id, n) }
             }
         }
-        return nil
+        return best.map { ($0.project, $0.floor) }
     }
 
     private func floorPosition() -> (i: Int, n: Int)? {
