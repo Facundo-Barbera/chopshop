@@ -126,7 +126,7 @@ struct WatchersScreen: View {
     private var inviteForm: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Invitar watcher").font(.headline)
-            TextField("correo@ejemplo.com", text: $email).textFieldStyle(.roundedBorder).frame(maxWidth: 360)
+            TextField("correo@ejemplo.test", text: $email).textFieldStyle(.roundedBorder).frame(maxWidth: 360)
             Text("Workspaces que verá").font(.subheadline).foregroundStyle(.secondary)
             if model.workspaces.isEmpty { empty("No hay workspaces: crea uno en Ciudad.") }
             ForEach(model.workspaces, id: \.id) { w in
