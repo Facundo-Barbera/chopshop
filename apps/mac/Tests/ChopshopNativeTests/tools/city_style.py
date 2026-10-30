@@ -50,12 +50,18 @@ def pick(seed, salt, table):
     return table[mix(fnv1a("%s|%s" % (seed, salt))) % len(table)]
 
 
+# Sales de ventanas y azotea: elegidas para que las seis empresas de las escenas no repitan más de dos veces ni ritmo ni
+# remate, y los cuatro edificios con pisos altos (los que enseñan ventanas) tengan ritmos distintos. Cambiarlas cambia la ciudad.
+WINDOWS_SALT = "windows29"
+ROOF_SALT = "roof41"
+
+
 def style(seed):
     return {
         "seed": seed,
         "material": pick(seed, "material", MATERIALS),
-        "windows": pick(seed, "windows", WINDOWS),
-        "roof": pick(seed, "roof", ROOFS),
+        "windows": pick(seed, WINDOWS_SALT, WINDOWS),
+        "roof": pick(seed, ROOF_SALT, ROOFS),
         "plinth_h": pick(seed, "plinth", PLINTH_H),
         "ground_scale": pick(seed, "ground", GROUND_SCALE),
         "door_bay": pick(seed, "door", DOOR_BAY),
