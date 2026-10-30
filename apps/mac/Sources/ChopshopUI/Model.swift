@@ -349,6 +349,7 @@ final class AppModel: ObservableObject {
         shell.state.role = isWatcher ? .watcher : .owner
         shell.machines = phase == .signedOut || isWatcher ? nil
             : MachinesModel(client: auth.client, agentURL: URL(string: "http://127.0.0.1:\(BundledAgent.port())")!, hostName: deviceName)
+        shell.backend = auth.session != nil ? auth.client : nil
         pairingRevision += 1
         if case .signedIn(let s) = phase { ensureCloudSpec(s.apiURL) }
         reloadConfig()
