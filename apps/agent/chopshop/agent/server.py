@@ -15,6 +15,7 @@
 - `AgentHTTPServer` + `Handler`: JSON UTF-8, cuerpo máximo `MAX_BODY`, timeout por conexión, errores siempre en JSON.
   Nunca se devuelven ni se registran URLs de webhook ni tokens (las suscripciones solo guardan RUTAS de archivo).
 Todo lo externo es inyectable (`runner` de tailscale, reloj, módulos falsos)."""
+import base64
 import hmac
 import ipaddress
 import json
@@ -29,6 +30,7 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from .. import relaycfg
 from . import API_VERSION, __version__, collector as collector_mod, db, envelope, events, halflife, layout, notes as notes_mod, office as office_mod, pairing as pairing_mod, projection, registry, stream, \
     structure as structure_mod, t3watch, webhooks
 
@@ -48,6 +50,8 @@ RUNTIME_MODES = ("approval-required", "auto-accept-edits", "auto", "full-access"
 SEND_MODES = ("auto", "queue", "steer", "restart")
 MAX_MESSAGE = 60000
 PUBLIC = {("GET", "/health"), ("POST", "/pair")}       # sin credencial (pero sí con identidad de Tailscale en ese modo)
+LINK_NONCE_HEADER = "X-Chopshop-Link-Nonce"
+LINK_KEYS = ("api_url", "machine_id", "local_machine_id", "credential")
 
 
 class ApiError(Exception):
@@ -249,6 +253,44 @@ class Authenticator:
         return Identity("tailscale", login, owner and cred, device, str(ip))
 
 
+def link_nonce_path():
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    return os.path.join(base, "chopshop", "agent", "link.nonce")
+
+
+class LinkNonce:
+    def __init__(self, path=None):
+        self.path = path or link_nonce_path()
+        self.lock = threading.Lock()
+        self._value = None
+
+    def rotate(self):
+        value = base64.urlsafe_b64encode(os.urandom(32)).rstrip(b"=").decode("ascii")
+        self._value = None
+        try:
+            relaycfg._write_private(self.path, value)
+        except OSError as e:
+            log.warning("no pude escribir el nonce de enlace en %s (%s)", self.path, e.strerror or type(e).__name__)
+            return False
+        self._value = value
+        return True
+
+    def verify(self, header):
+        value = self._value
+        if not value or not header or not hmac.compare_digest(header.strip().encode("utf-8"), value.encode("utf-8")):
+            raise ApiError(401, "nonce de enlace inválido")
+
+
+def local_guard(listen_host, port, peer, headers):
+    listen, ip = parse_ip(listen_host), parse_ip(peer)
+    if listen is None or ip is None or not listen.is_loopback or not ip.is_loopback:
+        raise ApiError(404, "ruta desconocida")
+    if headers.get("Origin") is not None:
+        raise ApiError(403, "no se aceptan peticiones con cabecera Origin (navegadores)")
+    if (headers.get("Host") or "").strip().lower() not in {"127.0.0.1:%d" % port, "localhost:%d" % port, "[::1]:%d" % port}:
+        raise ApiError(403, "Host no reconocido")
+
+
 # ---------------------------------------------------------------- estado en ejecución
 
 class Runtime:
@@ -327,6 +369,8 @@ class AgentApp:
         ("POST", "/threads/send"): "thread_send", ("POST", "/threads/interrupt"): "thread_interrupt",
         ("GET", "/projects"): "projects", ("POST", "/projects"): "project_register",
         ("POST", "/queue/cancel"): "queue_cancel",
+        ("GET", "/local/relay/status"): "relay_status", ("POST", "/local/relay/link"): "relay_link",
+        ("POST", "/local/relay/unlink"): "relay_unlink",
     }
 
     def __init__(self, cfg, conn, collector, t3, auth, runtime=None, emit_fn=None, orchestrator_fn=None,
@@ -349,6 +393,9 @@ class AgentApp:
                                        device_active=getattr(auth, "device_active", None), **(stream_opts or {}))
         self.listen_ips = set()           # IPs de todos los listeners (las rellena el servicio; para validar Host)
         self.desk_fn = notes_mod.declared_desk   # id de escritorio -> escritorio del perfil local o None (inyectable)
+        self.link_nonce = LinkNonce()
+        self.relay_fn = lambda: None
+        self.relay_reload = None
 
     # -- enrutado
     def match(self, method, path):
@@ -788,6 +835,59 @@ class AgentApp:
         return {"ok": True, "project": project, "rev": res["rev"], "changed": res["changed"], "seq": seq,
                 "office": res["structure"], "diff": res["diff"]}
 
+    def r_relay_status(self, ident, q, body):
+        out = {"local_machine_id": self.machine_id, "linked": False, "api_url": None, "machine_id": None,
+               "connected": False, "last_error": None}
+        try:
+            m = relaycfg.read_machine()
+        except relaycfg.RelayCfgError as e:
+            m, out["last_error"] = None, str(e)
+        if m:
+            out.update(linked=True, api_url=m["api_url"], machine_id=m["machine_id"])
+        else:
+            try:
+                out["api_url"] = relaycfg.relay_url() or None
+            except relaycfg.RelayCfgError:
+                pass
+        link = self.relay_fn()
+        if link is not None:
+            out["connected"] = bool(link.connected)
+            out["last_error"] = link.last_error or out["last_error"]
+        return out
+
+    def r_relay_link(self, ident, q, body):
+        d = {k: body.get(k) for k in LINK_KEYS}
+        try:
+            relaycfg.validate_machine(dict(d, v=1, linked_at="-"))
+        except relaycfg.RelayCfgError as e:
+            raise ApiError(400, str(e))
+        if d["local_machine_id"] != self.machine_id:
+            raise ApiError(409, "local_machine_id no coincide con el de este agente", {"local_machine_id": self.machine_id})
+        try:
+            relaycfg.write_machine(d)
+        except OSError as e:
+            raise ApiError(503, "no pude guardar la credencial (%s)" % (e.strerror or type(e).__name__))
+        log.info("máquina %s enlazada por la app local", d["machine_id"])
+        self._relay_changed()
+        return 204, None
+
+    def r_relay_unlink(self, ident, q, body):
+        try:
+            relaycfg.remove_machine()
+        except OSError as e:
+            raise ApiError(503, "no pude borrar la credencial (%s)" % (e.strerror or type(e).__name__))
+        log.info("máquina desenlazada por la app local")
+        self._relay_changed()
+        return 204, None
+
+    def _relay_changed(self):
+        self.link_nonce.rotate()
+        if self.relay_reload is not None:
+            try:
+                self.relay_reload()
+            except Exception:  # noqa: BLE001
+                log.exception("no pude reiniciar el hilo del relay")
+
 
 def _registry(fn, *args):
     try:
@@ -832,11 +932,12 @@ class Handler(BaseHTTPRequestHandler):
         self._serve("PATCH")
 
     def _reply(self, status, obj, headers=None):
-        data = json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        data = b"" if status == 204 else json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         self.send_response(status)
         for k, v in (headers or {}).items():
             self.send_header(k, v)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
+        if status != 204:
+            self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
@@ -905,6 +1006,10 @@ class Handler(BaseHTTPRequestHandler):
         try:
             try:
                 raw = self._read_raw()
+                if path == "/local" or path.startswith("/local/"):
+                    status = self._serve_local(app, method, path, raw)
+                    who = "local"
+                    return
                 local = self.server.local_addrs | app.listen_ips
                 app.auth.check_web(self.headers, local)
                 ident = app.auth.authorize(self.client_address[0], local, method != "GET",
@@ -935,6 +1040,22 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             lvl = logging.INFO if (method != "GET" or status >= 400 or status == 0) else logging.DEBUG
             log.log(lvl, "%s %s %s -> %s (%s)", self.client_address[0], method, path, status, who)
+
+    def _serve_local(self, app, method, path, raw):
+        local_guard(self.server.server_address[0], self.server.server_address[1], self.client_address[0], self.headers)
+        app.match(method, path)
+        ident = Identity("local", None, True, ip=self.client_address[0])
+        if method == "GET":
+            code, obj = app.call(method, path, ident)
+            return self._reply(code, obj)
+        with app.link_nonce.lock:
+            app.link_nonce.verify(self.headers.get(LINK_NONCE_HEADER))
+            body = {}
+            if path == "/local/relay/link":
+                app.auth.check_json(method, self.headers, bool(raw))
+                body = self._parse_body(raw)
+            code, obj = app.call(method, path, ident, {}, body)
+        return self._reply(code, obj)
 
 
 class AgentHTTPServer(ThreadingHTTPServer):
