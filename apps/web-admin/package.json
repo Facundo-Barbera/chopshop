@@ -1,0 +1,11 @@
+{
+  "name": "@chopshop/web-admin",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Web admin de chopshop (estática, la sirve el Worker de apps/backend con Workers Assets).",
+  "scripts": {
+    "build": "mkdir -p dist && cp src/index.html dist/",
+    "check": "test -f src/index.html",
+    "test": "node -e \"\""
+  }
+}
