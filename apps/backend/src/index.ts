@@ -6,7 +6,9 @@ import { importHandlers } from "./routes/imports";
 import { invitationHandlers } from "./routes/invitations";
 import { liveHandlers } from "./routes/live";
 import { machineHandlers } from "./routes/machines";
+import { isOperatorPath, operatorHandlers, operatorPrincipal } from "./routes/operator";
 import { projectHandlers } from "./routes/projects";
+import { recoveryHandlers } from "./routes/recovery";
 import { sessionHandlers } from "./routes/sessions";
 import { userHandlers } from "./routes/users";
 import { workspaceHandlers } from "./routes/workspaces";
@@ -21,7 +23,9 @@ export interface Env extends LiveEnv {}
 const api = createApi<Env>(
   {
     health: () => json({ ok: true, version: VERSION }),
+    ...operatorHandlers,
     ...authHandlers,
+    ...recoveryHandlers,
     ...sessionHandlers,
     ...invitationHandlers,
     ...userHandlers,
@@ -31,7 +35,11 @@ const api = createApi<Env>(
     ...importHandlers,
     ...liveHandlers,
   },
-  { resolvePrincipal, csrfHash },
+  {
+    resolvePrincipal: (request, env) =>
+      isOperatorPath(new URL(request.url).pathname) ? operatorPrincipal(request, env) : resolvePrincipal(request, env),
+    csrfHash,
+  },
 );
 
 export default {
