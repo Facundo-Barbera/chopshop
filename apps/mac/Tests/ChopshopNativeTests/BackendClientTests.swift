@@ -70,6 +70,42 @@ final class BackendClientTests: XCTestCase {
         XCTAssertEqual(flag.hits, 1)
     }
 
+    func testWrongPasswordKeepsLiveSession() async throws {
+        let http = FakeHTTP()
+        let denied = #"{"v":2,"type":"error","id":"e","ts":"t","re":null,"code":"unauthorized","message":"no"}"#
+        http.responses["POST /v1/auth/password"] = (401, denied)
+        http.responses["POST /v1/auth/recovery-code"] = (401, denied)
+        http.responses["GET /v1/auth/me"] = (200, #"{"user":\#(user),"session":{"id":"s1","client":"mac","expires_at":"x"}}"#)
+        let store = InMemorySessionStore()
+        try store.save(token, apiURL: api)
+        let flag = Flag()
+        let c = client(http, store, flag: flag)
+        do {
+            try await c.changePassword(current: "mala-mala-mala", new: "nueva-clave-larga")
+            XCTFail("debía fallar")
+        } catch let e as BackendError {
+            XCTAssertEqual(e.code, .unauthorized)
+            XCTAssertNotEqual(e, .unauthorized)
+        }
+        do {
+            _ = try await c.regenerateRecoveryCode(password: "mala-mala-mala")
+            XCTFail("debía fallar")
+        } catch let e as BackendError {
+            XCTAssertNotEqual(e, .unauthorized)
+        }
+        XCTAssertEqual(store.load(apiURL: api), token)
+        XCTAssertEqual(flag.hits, 0)
+        http.responses["GET /v1/auth/me"] = (401, denied)
+        do {
+            try await c.changePassword(current: "mala-mala-mala", new: "nueva-clave-larga")
+            XCTFail("debía fallar")
+        } catch let e as BackendError {
+            XCTAssertEqual(e, .unauthorized)
+        }
+        XCTAssertNil(store.load(apiURL: api))
+        XCTAssertEqual(flag.hits, 1)
+    }
+
     func testLoginFailureDoesNotTouchOtherSession() async throws {
         let http = FakeHTTP()
         http.responses["POST /v1/auth/login"] = (401, #"{"v":2,"type":"error","id":"e","ts":"t","re":null,"code":"unauthorized","message":"correo o contraseña incorrectos"}"#)
