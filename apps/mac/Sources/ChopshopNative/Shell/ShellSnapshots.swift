@@ -48,6 +48,9 @@ public extension Snapshots {
         shot("shell-visor-hilo", actions: viewer) { $0.select(.thread(id: "e", project: "awesome-gb")) }
         shot("shell-agente-hilo", actions: agent) { $0.select(.thread(id: "e", project: "awesome-gb")) }
         shot("shell-visor-paleta", actions: viewer) { $0.openPalette() }
+        for sec in ShellSection.allCases where sec != .city { shot("shell-seccion-\(sec.rawValue)") { $0.open(sec) } }
+        shot("shell-watcher") { $0.role = .watcher }
+        shot("shell-watcher-ajustes") { $0.role = .watcher; $0.open(.settings) }
     }
 }
 
@@ -78,22 +81,30 @@ struct ShellSnapshotFrame: View {
             .background(Color(nsColor: .windowBackgroundColor))
             Divider()
             HStack(spacing: 0) {
-                ZStack(alignment: .bottomTrailing) {
-                    CityView(model: model, lights: lights, snapshot: snapshot, state: state, frozenTime: 10, frozenNow: FloorFixture.now,
-                             flatChrome: true)
-                        .padding(.horizontal, 18).padding(.vertical, 14)
-                    if shell.state.minimap {
-                        ShellMinimapView(model: model, focused: shell.state.focus?.target.project, flat: true) { _ in }.padding(14)
+                ShellSidebarView(sections: shell.state.sections, selection: shell.state.section, flat: true) { _ in }
+                    .frame(width: 220)
+                    .background(Color(nsColor: .underPageBackgroundColor))
+                Divider()
+                if shell.state.section != .city {
+                    ShellSectionPlaceholder(section: shell.state.section)
+                } else {
+                    ZStack(alignment: .bottomTrailing) {
+                        CityView(model: model, lights: lights, snapshot: snapshot, state: state, frozenTime: 10, frozenNow: FloorFixture.now,
+                                 flatChrome: true)
+                            .padding(.horizontal, 18).padding(.vertical, 14)
+                        if shell.state.minimap {
+                            ShellMinimapView(model: model, focused: shell.state.focus?.target.project, flat: true) { _ in }.padding(14)
+                        }
                     }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .overlay(alignment: .bottom) {
-                    if let n = notice { ShellNoticeView(notice: n, flat: true).padding(.bottom, 20) }
-                }
-                .overlay(alignment: .top) {
-                    if shell.state.paletteOpen {
-                        ShellPalette(shell: shell, commands: ShellCommands.all(snapshot, selected: shell.state.selectedThread, canAct: shell.actions?.canAct ?? true), flat: true)
-                            .padding(.top, 56)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .overlay(alignment: .bottom) {
+                        if let n = notice { ShellNoticeView(notice: n, flat: true).padding(.bottom, 20) }
+                    }
+                    .overlay(alignment: .top) {
+                        if shell.state.paletteOpen {
+                            ShellPalette(shell: shell, commands: ShellCommands.all(snapshot, selected: shell.state.selectedThread, canAct: shell.actions?.canAct ?? true), flat: true)
+                                .padding(.top, 56)
+                        }
                     }
                 }
                 if shell.state.inspector != nil {
