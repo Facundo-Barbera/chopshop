@@ -1,0 +1,9 @@
+{
+  "invitation": {
+    "id": "3e6b9d2a-4f8c-4b17-9a3e-6d1c8f5b2e79",
+    "email": "dueno@chopshop.test",
+    "kind": "owner_bootstrap",
+    "expires_at": "2026-11-29T12:05:00.000Z"
+  },
+  "link": "https://chopshop.novarix.online/invite?t=ci1_EXAMPLEexampleEXAMPLEexampleEXAMPLEexampleE"
+}

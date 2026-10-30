@@ -1,0 +1,13 @@
+{
+  "v": 2,
+  "ts": "2026-10-30T14:02:11.250Z",
+  "type": "sync",
+  "id": "01MCB2QJ9K1M3P5R7T9W1Y3A5C",
+  "rev": 42,
+  "machine": {
+    "id": "c3f8a2d1-6e4b-4a97-b2c5-8d1e7f3a9b52",
+    "name": "mac-mini"
+  },
+  "workspaces": [],
+  "projects": []
+}

@@ -1,0 +1,17 @@
+{
+  "workspaces": [
+    {
+      "id": "7c2e9f14-3a6b-4d5e-8f17-2b9c4e6a0d31",
+      "name": "Awesome GB",
+      "slug": "awesome-gb",
+      "position": 0,
+      "style": {
+        "color": "#3a7bd5"
+      },
+      "rev": 3,
+      "project_count": 2,
+      "created_at": "2026-10-30T12:00:00.000Z",
+      "updated_at": "2026-10-30T12:05:00.000Z"
+    }
+  ]
+}
