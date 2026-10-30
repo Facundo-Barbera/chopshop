@@ -289,11 +289,12 @@ public struct CityModel: Equatable, Sendable {
                 if let o = offices[p.name], !o.floors.isEmpty {
                     let parts = split(p, o)
                     let declared = o.floors.filter { !$0.temporary }.count
+                    var temporaries = 0
                     for (k, f) in o.floors.enumerated() {
                         var fl = makeFloor(parts.floors[k], company: p.name, level: 0)
                         fl.floorIndex = f.index
                         fl.temporary = f.temporary
-                        if f.temporary { fl.floorName = "en obra · \(f.index - declared + 1)" }
+                        if f.temporary { temporaries += 1; fl.floorName = "en obra · \(temporaries)" }
                         else if declared > 1 { fl.floorName = f.name ?? "piso \(f.index + 1)" }
                         floors.append(fl)
                     }
@@ -303,7 +304,7 @@ public struct CityModel: Equatable, Sendable {
                         var fl = makeFloor(parts.outsourced[k], company: p.name, level: 0)
                         fl.floorIndex = FloorPlan.outsourcedBase + f.index
                         fl.outsourced = true
-                        fl.floorName = "\(o.outsourcedLabel.lowercased()) · \(f.index + 1)"
+                        fl.floorName = "\(o.outsourcedLabel.lowercased()) · \(k + 1)"
                         contracted.append(fl)
                     }
                     if !contracted.isEmpty { annexes[contractorKey(p.name)] = (host: p.name, title: "\(o.outsourcedLabel) · \(p.name)") }
