@@ -91,6 +91,7 @@ struct OfficeRoot: View {
                 .saturation(model.live.status.isDimmed ? 0.2 : 1)
                 .opacity(model.live.status.isDimmed ? 0.55 : 1)
                 .animation(.easeOut(duration: 0.3), value: model.live.status.isDimmed)
+                .overlay(alignment: .bottomLeading) { CityWorkspacesBar(model: model.workspaces, store: model.live).padding(.leading, 30).padding(.bottom, 48) }
         } unpaired: {
             PairingScreen()
         }
