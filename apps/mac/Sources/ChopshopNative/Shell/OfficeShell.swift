@@ -13,12 +13,11 @@ public struct OfficeShell<World: View, Unpaired: View>: View {
     @ObservedObject var shell: ShellController
     let world: (ShellWorldContext) -> World
     let unpaired: Unpaired
-    let backend: BackendClient?
 
-    public init(store: LiveStore, shell: ShellController, backend: BackendClient? = nil,
+    public init(store: LiveStore, shell: ShellController,
                 @ViewBuilder world: @escaping (ShellWorldContext) -> World,
                 @ViewBuilder unpaired: () -> Unpaired) {
-        self.store = store; self.shell = shell; self.backend = backend; self.world = world; self.unpaired = unpaired()
+        self.store = store; self.shell = shell; self.world = world; self.unpaired = unpaired()
     }
 
     public var body: some View {
@@ -71,7 +70,11 @@ public struct OfficeShell<World: View, Unpaired: View>: View {
                     ShellMinimapView(model: city, focused: shell.state.focus?.target.project) { shell.state.go(.project($0)) }
                         .padding(16)
                 }
-            } else if shell.state.section == .employees, let backend {
+            } else if shell.state.section == .machines, let m = shell.machines {
+                MachinesView(model: m)
+            } else if shell.state.section == .watchers, let backend = shell.backend {
+                WatchersSection(client: backend)
+            } else if shell.state.section == .employees, let backend = shell.backend {
                 EmployeesSection(client: backend, canEdit: shell.state.role == .owner, live: store.state)
             } else {
                 ShellSectionPlaceholder(section: shell.state.section)
