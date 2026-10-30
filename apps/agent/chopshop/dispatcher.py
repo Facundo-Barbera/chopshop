@@ -24,6 +24,8 @@ def launch(batch_id):
 
 
 def outcome(t):
+    if t.get("cancelled"):
+        return "cancelled", t.get("last_error")
     if t.get("status") == "launched" and t.get("t3status") == "completed":
         return "done", None
     why = t.get("t3status") if t.get("status") == "launched" else t.get("status")
@@ -57,7 +59,7 @@ class Dispatcher:
                     st_, why = outcome(t)
                     if t.get("threadId") and not t.get("settled"):
                         why = ("%s; settle: %s" % (why, t["last_error"]) if why else "settle: " + t["last_error"])[:300]
-                    if t.get("qtask"):
+                    if t.get("qtask") and st_ != "cancelled":
                         self.queue.finish(t["qtask"], st_, why)
                     t["closed"] = True
                     out.append({"employee": t["desk"], "task": t.get("qtask"), "state": st_, "reason": why,
