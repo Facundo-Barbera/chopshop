@@ -65,7 +65,7 @@ final class ShellModelTests: XCTestCase {
         XCTAssertNil(s.focus, "lo eligió el mundo: ya está ahí")
         s.select(.project("chopshop"))
         XCTAssertNil(s.selectedThread)
-        XCTAssertEqual(s.inspector, .target(.project("chopshop")))
+        XCTAssertNil(s.inspector)
     }
 
     func testGoAsksTheWorldWithANewTokenEachTime() {
@@ -77,7 +77,7 @@ final class ShellModelTests: XCTestCase {
         XCTAssertEqual(s.focus?.token, (a?.token ?? 0) + 1, "pedir lo mismo otra vez vuelve a hacer zoom")
         s.go(.city)
         XCTAssertEqual(s.focus?.target, .city)
-        XCTAssertEqual(s.inspector, .target(.project("nuskills")), "volver a la ciudad no cierra el panel")
+        XCTAssertNil(s.inspector)
     }
 
     // MARK: atención
