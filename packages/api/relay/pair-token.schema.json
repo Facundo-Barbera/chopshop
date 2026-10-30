@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/relay/v1/pair-token.schema.json",
+  "title": "Respuesta de POST /v1/pair: token cr1_ (se muestra una vez) (relay -> cliente nuevo, HTTP)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "token_id",
+    "token",
+    "scope",
+    "machine_id",
+    "protocol"
+  ],
+  "properties": {
+    "token_id": {
+      "$ref": "common.schema.json#/$defs/token_id"
+    },
+    "token": {
+      "$ref": "common.schema.json#/$defs/token"
+    },
+    "scope": {
+      "$ref": "common.schema.json#/$defs/scope"
+    },
+    "machine_id": {
+      "oneOf": [
+        {
+          "$ref": "common.schema.json#/$defs/machine_id"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "protocol": {
+      "const": 1
+    }
+  }
+}

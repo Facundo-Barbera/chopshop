@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/relay/v1/pair-create.schema.json",
+  "title": "POST /v1/pair/codes: pide un código de un solo uso (dueño -> relay, HTTP)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "scope"
+  ],
+  "properties": {
+    "scope": {
+      "$ref": "common.schema.json#/$defs/scope"
+    },
+    "name": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 128,
+      "pattern": "^[^\\u0000-\\u001f]*$"
+    },
+    "ttl_s": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3600
+    }
+  }
+}
