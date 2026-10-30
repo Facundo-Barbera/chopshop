@@ -71,6 +71,14 @@ if let mode = args.dropFirst().first, mode == "login" {
     MainActor.assumeIsolated { Snapshots.renderBackendLogin(to: out) }
     exit(0)
 }
+if let mode = args.dropFirst().first, mode == "machines" {
+    MainActor.assumeIsolated { Snapshots.renderMachines(to: out) }
+    exit(0)
+}
+if let mode = args.dropFirst().first, mode == "watchers" {
+    MainActor.assumeIsolated { Snapshots.renderWatchers(to: out) }
+    exit(0)
+}
 if let mode = args.dropFirst().first, mode == "roles" {
     MainActor.assumeIsolated { Snapshots.renderEmployeesScreen(to: out) }
     exit(0)
