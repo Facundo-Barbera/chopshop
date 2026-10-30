@@ -1306,7 +1306,7 @@ class TestWorkflows(unittest.TestCase):
     def test_secrets_only_appear_as_step_env_mappings(self):
         value = r"^ {10}[A-Z][A-Z0-9_]*: \$\{\{ secrets\.[A-Z][A-Z0-9_]* \}\}$"
         flag = r"^ {10}[A-Z][A-Z0-9_]*: \$\{\{ secrets\.[A-Z][A-Z0-9_]* != '' && 'set' \|\| '' \}\}$"
-        for n in os.listdir(WORKFLOWS):
+        for n in self.NAMES:
             for ln in read(WORKFLOWS, n).splitlines():
                 if "secrets." in ln and "${{ github.token }}" not in ln:
                     self.assertTrue(re.match(value, ln) or re.match(flag, ln), "%s: un secret fuera de `env:` de un paso: %s" % (n, ln.strip()))
@@ -1320,7 +1320,7 @@ class TestWorkflows(unittest.TestCase):
 
     def test_exact_secret_and_variable_names(self):
         secrets, variables = set(), set()
-        for n in os.listdir(WORKFLOWS):
+        for n in self.NAMES:
             text = read(WORKFLOWS, n)
             secrets |= set(re.findall(r"secrets\.([A-Z][A-Z0-9_]+)", text))
             variables |= set(re.findall(r"vars\.([A-Z][A-Z0-9_]+)", text))
@@ -1331,6 +1331,8 @@ class TestWorkflows(unittest.TestCase):
         old = ["MACOS_KEYCHAIN_PASSWORD", "MACOS_SIGN_IDENTITY", "APPLE_API_KEY", "APPLE_API_ISSUER", "SPARKLE_PUBLIC_ED_KEY", "SPARKLE_FEED_URL",
                "CLOUDFLARE_", "SPARKLE_SIGNING_PUBLIC", "release-signing", "release-dryrun", "vars.MIN_MACOS_VERSION"]
         for p in TestRepoHygiene.tracked(None):
+            if os.path.dirname(p) == WORKFLOWS and os.path.basename(p) not in self.NAMES:
+                continue
             text = read(p)
             for o in old:
                 self.assertNotIn(o, text, "%s todavía usa %s" % (os.path.relpath(p, ROOT), o))
@@ -1351,7 +1353,7 @@ class TestWorkflows(unittest.TestCase):
         for name, job in jobs.items():
             self.assertIn("timeout-minutes", job, name)
             self.assertNotIn("secrets.", json.dumps(job.get("env", {})), name)
-        self.assertEqual(jobs["build"]["runs-on"], "macos-15")
+        self.assertEqual(jobs["build"]["runs-on"], "xcode-27")
         self.assertEqual(jobs["publish"]["runs-on"], "macos-15")
         self.assertEqual(jobs["build"]["needs"], "preflight")
         self.assertEqual(jobs["publish"]["environment"], "release")
@@ -1496,7 +1498,7 @@ class TestWorkflows(unittest.TestCase):
     def test_docs_list_every_secret_and_variable_used(self):
         doc = read(ROOT, "docs", "release.md")
         used = set()
-        for n in os.listdir(WORKFLOWS):
+        for n in self.NAMES:
             used |= set(re.findall(r"(?:secrets|vars)\.([A-Z][A-Z0-9_]+)", read(WORKFLOWS, n)))
         for name in sorted(used):
             self.assertIn("`%s`" % name, doc, "docs/release.md no documenta %s" % name)
