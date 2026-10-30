@@ -5,7 +5,7 @@ import socket
 import time
 
 from .. import relaycfg, relaysync, wsclient
-from . import __version__, envelope, events
+from . import USER_AGENT, envelope, events
 
 log = logging.getLogger("chopshop.agent.relay")
 
@@ -61,7 +61,7 @@ class RelayLink:
         self.sent = {"snapshot": 0, "event": 0}
 
     def _client(self):
-        headers = {"Authorization": "Bearer " + self._token, "User-Agent": "chopshop-agent/" + __version__}
+        headers = {"Authorization": "Bearer " + self._token, "User-Agent": USER_AGENT}
         return wsclient.WSClient(self.url, headers=headers, timeout=IO_TIMEOUT)
 
     def run(self):

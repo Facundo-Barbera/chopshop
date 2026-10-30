@@ -11,7 +11,7 @@ import urllib.error
 import urllib.request
 
 from . import home, state
-from .agent import __version__
+from .agent import USER_AGENT
 
 
 def _read_url(path):
@@ -29,7 +29,7 @@ def post(webhook_file, payload, timeout=10):
     except (OSError, ValueError) as e:
         return False, "archivo de webhook ilegible (%s)" % type(e).__name__
     req = urllib.request.Request(url, data=json.dumps(payload, ensure_ascii=False).encode(),
-                                 headers={"Content-Type": "application/json", "User-Agent": "chopshop-agent/%s" % __version__},
+                                 headers={"Content-Type": "application/json", "User-Agent": USER_AGENT},
                                  method="POST")
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
