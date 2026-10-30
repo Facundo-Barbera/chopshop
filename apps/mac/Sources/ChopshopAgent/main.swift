@@ -15,7 +15,7 @@ import Foundation
 //   chopshop-agent <args…>        `chopshop <args…>` (p. ej. `pair create --json`), salida normal
 
 let args = Array(CommandLine.arguments.dropFirst())
-let exe = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
+let exe = (Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0])).resolvingSymlinksInPath()
 let agentDir = exe.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Resources/agent")
 let python = agentDir.appendingPathComponent("python/bin/python3").path
 let entry = agentDir.appendingPathComponent("chopshop-agent.py").path
