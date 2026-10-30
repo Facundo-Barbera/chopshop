@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/relay/v1/pair-redeem.schema.json",
+  "title": "POST /v1/pair: canjea el código por un token (cliente nuevo -> relay, HTTP, sin credencial)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "code"
+  ],
+  "properties": {
+    "code": {
+      "type": "string",
+      "minLength": 8,
+      "maxLength": 16
+    },
+    "client_name": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 128,
+      "pattern": "^[^\\u0000-\\u001f]*$"
+    },
+    "machine_id": {
+      "$ref": "common.schema.json#/$defs/machine_id"
+    }
+  }
+}
