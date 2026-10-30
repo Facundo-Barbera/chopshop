@@ -17,7 +17,7 @@ Schemas (JSON Schema 2020-12): `packages/api/relay/<mensaje>.schema.json`, con l
 | HTTP JSON | `GET /whoami` | `Bearer cr1_…` (`agent` o `viewer`) → `{role, machine_id}` |
 | HTTP SSE / JSON | `GET /stream`, `GET /state` | `Bearer cr1_…` con scope `viewer` |
 | HTTP JSON | `POST /v1/pair/codes` | token de operador (ver «Pairing») |
-| HTTP JSON | `POST /v1/pair` (alias `POST /pair`) | sin credencial (el código es la credencial) |
+| HTTP JSON | `POST /v1/pair` | sin credencial (el código es la credencial) |
 | HTTP JSON | `DELETE /v1/tokens/<token_id>`, `DELETE /v1/pair/codes/<id>` | token de operador |
 | HTTP JSON | `GET /health` | pública (no mira la credencial) |
 
@@ -33,13 +33,15 @@ ruta. Un `viewer` recibe **403** en **cualquier** método que no sea `GET` (`POS
 | `GET /whoami` | 401 | 200 `{role: "viewer", machine_id: null}` | 200 `{role: "machine", machine_id}` | 403 |
 | `GET /stream`, `GET /state` | 401 | 200 | 403 | 403 |
 | `GET /agent/ws`, `GET /v1/connect` | 401 | 403 | 101 (upgrade) | 403 |
-| `POST /v1/pair`, `POST /pair` | 200 | 403 | 403 | 403 |
+| `POST /v1/pair` | 200 | 403 | 403 | 403 |
 | `POST /v1/pair/codes` | 401 | 403 | 403 | 200 |
 | `DELETE /v1/tokens/<token_id>`, `DELETE /v1/pair/codes/<id>` | 401 | 403 | 403 | 204 |
 | cualquier otra ruta, o `PUT`/`PATCH` en las de arriba | 404 / 405 | 403 | 404 / 405 | 404 / 405 |
 
 Los 200/204/101 son el caso feliz: la ruta puede seguir respondiendo 400, 404, 410 o 429 por su propia validación. Un método
 distinto en una ruta que el rol sí puede usar → 405 con `Allow`. Los 401/403 llevan cuerpo `error` (`unauthorized`/`forbidden`).
+El relay no tiene `POST /pair` (ese es el canje `cs1_` de la API del agente, `docs/agent-api.md`): aquí cae en «cualquier otra
+ruta» → 404; el canje del relay es solo `POST /v1/pair`.
 
 - Cada frame del WebSocket es **un** objeto JSON UTF-8 (texto, nunca binario) con la cabecera común
   `{"v": 1, "type": "...", "id": "<ULID>", "ts": "<ISO-8601 UTC con Z>"}`. Las respuestas llevan `re` = `id` del mensaje al que
@@ -200,4 +202,3 @@ crea una sola vez al hacer el primer deploy (R7) y se guarda como secret del rep
 `wrangler-action` (equivale a `wrangler secret put RELAY_OPERATOR_TOKEN` leyendo la variable de entorno, sin imprimirla). El
 Worker lo compara por SHA-256 en tiempo constante; sin el secret, nadie puede crear códigos ni revocar. Un código creado
 por el operador abre una cuenta nueva (`ac-…`) salvo que la petición lleve `?account=ac-…` para añadir a una existente.
-`POST /pair` es un alias de `POST /v1/pair`.
