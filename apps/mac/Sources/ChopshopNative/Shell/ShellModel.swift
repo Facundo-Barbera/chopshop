@@ -74,6 +74,45 @@ public enum ShellPanel: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+public enum ShellRole: String, Sendable {
+    case owner, watcher
+}
+
+public enum ShellSection: String, CaseIterable, Identifiable, Sendable {
+    case city, machines, employees, watchers, settings
+    public var id: String { rawValue }
+    public var title: String {
+        switch self {
+        case .city: return "Ciudad"
+        case .machines: return "Máquinas"
+        case .employees: return "Empleados"
+        case .watchers: return "Watchers"
+        case .settings: return "Ajustes"
+        }
+    }
+    public var subtitle: String {
+        switch self {
+        case .city: return "Workspaces"
+        case .machines: return "Ligadas a tu cuenta"
+        case .employees: return "Roles y colas"
+        case .watchers: return "Invitaciones y accesos"
+        case .settings: return "Cuenta y sesiones"
+        }
+    }
+    public var symbol: String {
+        switch self {
+        case .city: return "building.2"
+        case .machines: return "server.rack"
+        case .employees: return "person.2"
+        case .watchers: return "eye"
+        case .settings: return "gearshape"
+        }
+    }
+    public static func visible(for role: ShellRole) -> [ShellSection] {
+        role == .owner ? allCases : [.city, .settings]
+    }
+}
+
 /// Lo que muestra el inspector: un panel fijo o el detalle de lo elegido en el mundo.
 public enum ShellInspector: Hashable, Sendable {
     case panel(ShellPanel)
@@ -96,8 +135,18 @@ public struct ShellState: Equatable, Sendable {
     /// Posición en la lista de atención para ⌘J / ⇧⌘J (-1 = todavía ninguna).
     public var attentionCursor = -1
     public var backToken = 0
+    public private(set) var section: ShellSection = .city
+    public var role: ShellRole = .owner {
+        didSet { if !sections.contains(section) { section = .city } }
+    }
 
     public init() {}
+
+    public var sections: [ShellSection] { ShellSection.visible(for: role) }
+
+    public mutating func open(_ s: ShellSection) {
+        if sections.contains(s) { section = s }
+    }
 
     /// El usuario pulsó algo en el mundo: se abre su detalle (sin mover la cámara: ya está ahí).
     public mutating func select(_ target: ShellTarget) {
@@ -117,6 +166,7 @@ public struct ShellState: Equatable, Sendable {
 
     /// La paleta, el minimapa o ⌘J piden ir a algo: el mundo hace zoom y el inspector muestra su detalle.
     public mutating func go(_ target: ShellTarget) {
+        section = .city
         focus = ShellFocus(target: target, token: (focus?.token ?? 0) + 1)
         if target == .city { selectedThread = nil; return }
         select(target)
