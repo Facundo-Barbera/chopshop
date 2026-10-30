@@ -810,6 +810,7 @@ class AgentApp:
             raise ApiError(e.status, e.message, {"problems": e.problems} if e.problems else None)
 
     def r_office_put(self, ident, q, body, project):
+        _registry(registry.guard_local, project)
         by = _text(body, "by", True, 64)
         base = _text(body, "base_rev", False, 64)
         react = body.get("reactivate") or []
