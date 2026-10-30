@@ -339,8 +339,8 @@ final class CityTests: XCTestCase {
         for b in m.buildings {
             for fl in b.floors {
                 // centro de la cara izquierda del piso
-                let z = Double(fl.level) * CityGeo.floorH + CityGeo.floorH / 2
-                let p = f.pt((b.x0 + b.x1) / 2, b.y1 + CityGeo.overhang, z)
+                let z = b.floorZ(fl.level) + b.floorHeight(fl.level) / 2, r = b.rect(fl.level)
+                let p = f.pt((r.x0 + r.x1) / 2, r.y1 + CityGeo.overhang, z)
                 XCTAssertEqual(CityHit.floor(at: p, in: m, frame: f), fl.project, fl.project)
             }
         }
