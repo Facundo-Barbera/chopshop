@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import ChopshopNative
 
 /// Estado de la última consulta a un agente. Los textos para el usuario los compone la UI web (`statusMessage`).
@@ -110,6 +111,138 @@ struct URLSessionTransport: HTTPTransport {
     }
 }
 
+// MARK: - Relay
+
+enum RelayError: Error {
+    case http(Int)
+    case relay(code: String, message: String)
+    case timeout
+}
+
+protocol RelayTransport {
+    func exchange(_ request: URLRequest, send frames: [String], until done: @escaping ([String: Any]) -> Bool) async throws -> [[String: Any]]
+}
+
+struct URLSessionRelayTransport: RelayTransport {
+    var timeout: TimeInterval = 6
+
+    func exchange(_ request: URLRequest, send frames: [String], until done: @escaping ([String: Any]) -> Bool) async throws -> [[String: Any]] {
+        let cfg = URLSessionConfiguration.ephemeral
+        cfg.timeoutIntervalForRequest = timeout
+        cfg.waitsForConnectivity = false
+        let session = URLSession(configuration: cfg)
+        let task = session.webSocketTask(with: request)
+        task.maximumMessageSize = 1 << 20
+        defer {
+            task.cancel(with: .normalClosure, reason: nil)
+            session.invalidateAndCancel()
+        }
+        task.resume()
+        let deadline = Date().addingTimeInterval(timeout)
+        return try await withThrowingTaskGroup(of: [[String: Any]]?.self) { group in
+            group.addTask {
+                do {
+                    for f in frames { try await task.send(.string(f)) }
+                    var out: [[String: Any]] = []
+                    while true {
+                        let msg = try await task.receive()
+                        guard case .string(let text) = msg,
+                              let obj = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] else { continue }
+                        out.append(obj)
+                        if done(obj) { return out }
+                    }
+                } catch {
+                    if let http = task.response as? HTTPURLResponse, http.statusCode >= 400 { throw RelayError.http(http.statusCode) }
+                    throw error
+                }
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(max(0, deadline.timeIntervalSinceNow) * 1_000_000_000))
+                return nil
+            }
+            defer { group.cancelAll() }
+            guard let first = try await group.next(), let out = first else { throw RelayError.timeout }
+            return out
+        }
+    }
+}
+
+enum RelayView {
+    static func connectURL(_ base: String) -> URL? {
+        guard var c = URLComponents(string: base), let scheme = c.scheme?.lowercased(), c.host != nil else { return nil }
+        switch scheme {
+        case "https", "wss": c.scheme = "wss"
+        case "http", "ws": c.scheme = "ws"
+        default: return nil
+        }
+        var path = c.path
+        while path.hasSuffix("/") { path.removeLast() }
+        c.path = path + "/v1/connect"
+        c.query = nil
+        c.fragment = nil
+        return c.url
+    }
+
+    static func frame(_ type: String) -> (id: String, text: String) {
+        let id = ULIDLite.make()
+        let ts = ISO8601DateFormatter.relay.string(from: Date())
+        let obj: [String: Any] = ["v": 1, "type": type, "id": id, "ts": ts]
+        let data = (try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys])) ?? Data()
+        return (id, String(decoding: data, as: UTF8.self))
+    }
+
+    static func decodeParts(_ snapshot: [String: Any]) -> [String: Any] {
+        var out: [String: Any] = [:]
+        for p in snapshot["parts"] as? [[String: Any]] ?? [] {
+            guard let name = p["name"] as? String, (p["enc"] as? String) == "none",
+                  let b64 = p["data"] as? String, let data = Data(base64Encoded: b64),
+                  (p["bytes"] as? Int) == data.count,
+                  (p["sha256"] as? String)?.lowercased() == SHA256.hash(data: data).map({ String(format: "%02x", $0) }).joined(),
+                  let json = try? JSONSerialization.jsonObject(with: data) else { continue }
+            out[name] = json
+        }
+        return out
+    }
+
+    static func machineSnapshot(_ snapshot: [String: Any]) -> [String: Any] {
+        var o = snapshot
+        for k in ["v", "type", "id", "re", "parts"] { o[k] = nil }
+        o["parts"] = decodeParts(snapshot)
+        o["source"] = "relay"
+        return o
+    }
+
+    static func status(forCode code: String) -> AgentStatus {
+        switch code {
+        case "unauthorized": return .unauthorized
+        case "forbidden": return .forbidden
+        case "unsupported_version": return .incompatible
+        default: return .error
+        }
+    }
+}
+
+enum ULIDLite {
+    private static let alphabet = Array("0123456789ABCDEFGHJKMNPQRSTVWXYZ")
+
+    static func make(now: Date = Date()) -> String {
+        var ms = UInt64(max(0, now.timeIntervalSince1970 * 1000))
+        var time: [Character] = []
+        for _ in 0..<10 { time.append(alphabet[Int(ms & 31)]); ms >>= 5 }
+        let rand = (0..<16).map { _ in alphabet[Int.random(in: 0..<32)] }
+        return String(time.reversed()) + String(rand)
+    }
+}
+
+extension ISO8601DateFormatter {
+    static let relay: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        f.timeZone = TimeZone(identifier: "UTC")
+        return f
+    }()
+}
+
 // MARK: - Cliente
 
 /// Cliente de la API de un agente. La credencial de dispositivo (`cs1_…`, emparejamiento) se lee del almacén (Keychain) en cada
@@ -117,16 +250,33 @@ struct URLSessionTransport: HTTPTransport {
 final class AgentClient {
     let spec: AgentSpec
     private let transport: HTTPTransport
+    private let relayTransport: RelayTransport
     let credentials: CredentialStore
+    let relayCredentials: CredentialStore
 
-    init(spec: AgentSpec, transport: HTTPTransport = URLSessionTransport(), credentials: CredentialStore) {
+    init(spec: AgentSpec, transport: HTTPTransport = URLSessionTransport(), relayTransport: RelayTransport = URLSessionRelayTransport(),
+         credentials: CredentialStore, relayCredentials: CredentialStore = InMemoryCredentialStore()) {
         self.spec = spec
         self.transport = transport
+        self.relayTransport = relayTransport
         self.credentials = credentials
+        self.relayCredentials = relayCredentials
     }
 
-    /// Credencial guardada para este agente (nil = sin emparejar).
-    var credential: String? { spec.baseURL.flatMap { credentials.find(baseURL: $0)?.credential } }
+    static func relayAccount(_ url: URL) -> String { CredentialAccount.endpoint(url) }
+
+    static func isRelayToken(_ s: String) -> Bool {
+        s.hasPrefix("cr1_") && s.count > 4 && s.unicodeScalars.allSatisfy { CharacterSet.alphanumerics.contains($0) || $0 == "_" || $0 == "-" }
+    }
+
+    var relayToken: String? {
+        spec.baseURL.flatMap { relayCredentials.credential(account: Self.relayAccount($0)) }.flatMap { Self.isRelayToken($0) ? $0 : nil }
+    }
+
+    var credential: String? {
+        if spec.isRelay { return relayToken }
+        return spec.baseURL.flatMap { credentials.find(baseURL: $0)?.credential }
+    }
     var isPaired: Bool { credential != nil }
 
     enum Outcome {
@@ -179,7 +329,71 @@ final class AgentClient {
 
     // --- operaciones ---
 
+    func fetchRelaySnapshot() async -> AgentResult {
+        var r = AgentResult(name: spec.name, status: .error)
+        guard let url = RelayView.connectURL(spec.url) else { r.error = "URL del relay inválida"; return r }
+        guard let token = relayToken else { r.status = .unauthorized; return r }
+        var req = URLRequest(url: url)
+        req.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
+        let whoami = RelayView.frame("whoami")
+        var expected: Set<String>?
+        var seen = Set<String>()
+        let frames: [[String: Any]]
+        do {
+            frames = try await relayTransport.exchange(req, send: [whoami.text]) { f in
+                switch f["type"] as? String {
+                case "error":
+                    return (f["re"] as? String) == whoami.id || (f["close"] as? Bool) == true
+                case "whoami.result":
+                    let machines = f["machines"] as? [[String: Any]] ?? []
+                    expected = Set(machines.filter { ($0["stale"] as? Bool) != true }.compactMap { $0["machine_id"] as? String })
+                case "snapshot":
+                    if let m = f["machine_id"] as? String { seen.insert(m) }
+                default: break
+                }
+                return expected.map { $0.isSubset(of: seen) } ?? false
+            }
+        } catch RelayError.http(let code) {
+            switch code {
+            case 401: r.status = .unauthorized
+            case 403: r.status = .forbidden
+            case 426: r.status = .incompatible; r.error = "versión del protocolo del relay no compatible"
+            default: r.error = "relay: HTTP \(code)"
+            }
+            return r
+        } catch RelayError.timeout {
+            r.status = .unreachable
+            r.error = "tiempo de espera agotado"
+            return r
+        } catch {
+            r.status = .unreachable
+            r.error = Self.describe(error)
+            return r
+        }
+        if let e = frames.first(where: { ($0["type"] as? String) == "error" }) {
+            r.status = RelayView.status(forCode: e["code"] as? String ?? "")
+            if r.status != .unauthorized && r.status != .forbidden { r.error = String((e["message"] as? String ?? "error del relay").prefix(200)) }
+            return r
+        }
+        var latest: [String: [String: Any]] = [:]
+        for f in frames where (f["type"] as? String) == "snapshot" {
+            if let m = f["machine_id"] as? String { latest[m] = RelayView.machineSnapshot(f) }
+        }
+        let who = frames.first(where: { ($0["type"] as? String) == "whoami.result" })
+        let order = (who?["machines"] as? [[String: Any]] ?? []).compactMap { $0["machine_id"] as? String }
+        let machines = order.compactMap { latest[$0] } + latest.filter { !order.contains($0.key) }.map(\.value)
+        guard var snap = latest[spec.name] ?? machines.first else {
+            r.error = "el relay no tiene ningún snapshot vivo"
+            return r
+        }
+        snap["relay_machines"] = who?["machines"] ?? []
+        r.status = .ok
+        r.snapshot = snap
+        return r
+    }
+
     func fetchSnapshot() async -> AgentResult {
+        if spec.isRelay { return await fetchRelaySnapshot() }
         var r = AgentResult(name: spec.name, status: .error)
         switch await request("GET", "/snapshot") {
         case .failure(let status, let message):
@@ -203,6 +417,7 @@ final class AgentClient {
     }
 
     func perform(_ action: AgentAction) async -> ActionResult {
+        if spec.isRelay { return ActionResult(ok: false, message: "el relay es solo lectura: las acciones van al agente por Tailscale") }
         switch await request(action.method, action.path, body: action.body) {
         case .failure(_, let message):
             return ActionResult(ok: false, message: "agente no alcanzable (\(message))")
@@ -224,8 +439,10 @@ final class AgentClient {
 final class AgentHub {
     let clients: [AgentClient]
 
-    init(specs: [AgentSpec], transport: HTTPTransport = URLSessionTransport(), credentials: CredentialStore) {
-        clients = specs.map { AgentClient(spec: $0, transport: transport, credentials: credentials) }
+    init(specs: [AgentSpec], transport: HTTPTransport = URLSessionTransport(), relayTransport: RelayTransport = URLSessionRelayTransport(),
+         credentials: CredentialStore, relayCredentials: CredentialStore = InMemoryCredentialStore()) {
+        clients = specs.map { AgentClient(spec: $0, transport: transport, relayTransport: relayTransport,
+                                          credentials: credentials, relayCredentials: relayCredentials) }
     }
 
     var isEmpty: Bool { clients.isEmpty }

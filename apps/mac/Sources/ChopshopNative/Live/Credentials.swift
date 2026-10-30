@@ -63,6 +63,7 @@ public final class InMemoryCredentialStore: CredentialStore, @unchecked Sendable
 /// Guarda en memoria lo ya leído (la app pregunta en cada petición; así el Keychain se consulta una vez por cuenta).
 public final class KeychainCredentialStore: CredentialStore, @unchecked Sendable {
     public static let service = "com.chopshop.agent"
+    public static let relayService = "com.chopshop.relay"
     public let service: String
     private let lock = NSLock()
     private var cache: [String: String] = [:]
@@ -100,7 +101,7 @@ public final class KeychainCredentialStore: CredentialStore, @unchecked Sendable
         let data = Data(credential.utf8)
         let attrs: [String: Any] = [kSecValueData as String: data,
                                     kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
-                                    kSecAttrLabel as String: "Chopshop · agente \(account)"]
+                                    kSecAttrLabel as String: (service == Self.relayService ? "Chopshop · relay " : "Chopshop · agente ") + account]
         var st = SecItemUpdate(base(account) as CFDictionary, attrs as CFDictionary)
         if st == errSecItemNotFound {
             var q = base(account)
@@ -141,6 +142,11 @@ public final class FileCredentialStore: CredentialStore, @unchecked Sendable {
     public static var dev: FileCredentialStore {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Chopshop Dev")
         return FileCredentialStore(url: dir.appendingPathComponent("credentials.json"))
+    }
+
+    public static var devRelay: FileCredentialStore {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Chopshop Dev")
+        return FileCredentialStore(url: dir.appendingPathComponent("relay-credentials.json"))
     }
 
     public let url: URL
