@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/backend/v2/hub/ws-pong.schema.json",
+  "title": "WS v2 pong",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "v",
+    "type",
+    "id",
+    "ts",
+    "re"
+  ],
+  "properties": {
+    "v": {
+      "$ref": "../common.schema.json#/$defs/v"
+    },
+    "id": {
+      "$ref": "../common.schema.json#/$defs/msg_id"
+    },
+    "ts": {
+      "$ref": "../common.schema.json#/$defs/ts"
+    },
+    "type": {
+      "const": "pong"
+    },
+    "re": {
+      "$ref": "../common.schema.json#/$defs/msg_id"
+    }
+  }
+}

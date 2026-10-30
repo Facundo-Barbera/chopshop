@@ -1,0 +1,256 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/backend/v2/cty/state.get.response.schema.json",
+  "title": "GET /v1/state: la ciudad del principal (§5.5)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "v",
+    "type",
+    "id",
+    "ts",
+    "rev",
+    "head",
+    "user",
+    "city",
+    "machines",
+    "snapshots"
+  ],
+  "properties": {
+    "v": {
+      "$ref": "../common.schema.json#/$defs/v"
+    },
+    "type": {
+      "const": "state"
+    },
+    "id": {
+      "$ref": "../common.schema.json#/$defs/msg_id"
+    },
+    "ts": {
+      "$ref": "../common.schema.json#/$defs/ts"
+    },
+    "rev": {
+      "$ref": "../common.schema.json#/$defs/count"
+    },
+    "head": {
+      "$ref": "../common.schema.json#/$defs/stream_id"
+    },
+    "user": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "role"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "../common.schema.json#/$defs/uuid"
+        },
+        "role": {
+          "$ref": "../common.schema.json#/$defs/user_role"
+        }
+      }
+    },
+    "city": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workspaces"
+      ],
+      "properties": {
+        "workspaces": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "name",
+              "slug",
+              "position",
+              "style",
+              "campus",
+              "projects",
+              "machine_ids"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "../common.schema.json#/$defs/uuid"
+              },
+              "name": {
+                "$ref": "../common.schema.json#/$defs/workspace_name"
+              },
+              "slug": {
+                "$ref": "../common.schema.json#/$defs/slug"
+              },
+              "position": {
+                "$ref": "../common.schema.json#/$defs/count"
+              },
+              "style": {
+                "$ref": "../common.schema.json#/$defs/json_object"
+              },
+              "campus": {
+                "$ref": "../common.schema.json#/$defs/campus"
+              },
+              "projects": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "name",
+                    "title",
+                    "machine_id",
+                    "disabled",
+                    "layout",
+                    "roles",
+                    "sync_errors"
+                  ],
+                  "properties": {
+                    "id": {
+                      "$ref": "../common.schema.json#/$defs/uuid"
+                    },
+                    "name": {
+                      "$ref": "../common.schema.json#/$defs/name"
+                    },
+                    "title": {
+                      "oneOf": [
+                        {
+                          "type": "string",
+                          "maxLength": 120
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "machine_id": {
+                      "oneOf": [
+                        {
+                          "$ref": "../common.schema.json#/$defs/uuid"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "disabled": {
+                      "type": "boolean"
+                    },
+                    "layout": {
+                      "$ref": "../common.schema.json#/$defs/project_layout"
+                    },
+                    "roles": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "../common.schema.json#/$defs/name"
+                      },
+                      "uniqueItems": true
+                    },
+                    "sync_errors": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "message"
+                        ],
+                        "properties": {
+                          "message": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512
+                          },
+                          "rev": {
+                            "$ref": "../common.schema.json#/$defs/count"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "machine_ids": {
+                "type": "array",
+                "items": {
+                  "$ref": "../common.schema.json#/$defs/uuid"
+                },
+                "uniqueItems": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "machines": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "online",
+          "stale"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "../common.schema.json#/$defs/uuid"
+          },
+          "name": {
+            "$ref": "../common.schema.json#/$defs/machine_name"
+          },
+          "platform": {
+            "$ref": "../common.schema.json#/$defs/platform"
+          },
+          "online": {
+            "type": "boolean"
+          },
+          "paused": {
+            "type": "boolean"
+          },
+          "stale": {
+            "type": "boolean"
+          },
+          "seq": {
+            "oneOf": [
+              {
+                "$ref": "../common.schema.json#/$defs/count"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "snapshot_age_s": {
+            "oneOf": [
+              {
+                "$ref": "../common.schema.json#/$defs/count"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expires_at": {
+            "oneOf": [
+              {
+                "$ref": "../common.schema.json#/$defs/ts"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "snapshots": {
+      "type": "array",
+      "items": {
+        "$ref": "../hub/ws-snapshot.schema.json"
+      }
+    }
+  }
+}

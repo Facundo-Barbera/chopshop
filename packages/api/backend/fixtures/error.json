@@ -1,0 +1,10 @@
+{
+  "v": 2,
+  "type": "error",
+  "id": "01MCB2QD4E6G8J0M2P4R6T8V0X",
+  "ts": "2026-10-30T12:05:00.000Z",
+  "re": null,
+  "code": "rate_limited",
+  "message": "demasiados intentos",
+  "retry_after_s": 120
+}

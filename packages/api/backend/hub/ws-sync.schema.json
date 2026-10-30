@@ -1,0 +1,213 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/backend/v2/hub/ws-sync.schema.json",
+  "title": "WS v2 sync: estructura de la nube para esta máquina (relay → agente)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "v",
+    "type",
+    "id",
+    "ts",
+    "rev",
+    "machine",
+    "workspaces",
+    "projects"
+  ],
+  "properties": {
+    "v": {
+      "$ref": "../common.schema.json#/$defs/v"
+    },
+    "id": {
+      "$ref": "../common.schema.json#/$defs/msg_id"
+    },
+    "ts": {
+      "$ref": "../common.schema.json#/$defs/ts"
+    },
+    "type": {
+      "const": "sync"
+    },
+    "rev": {
+      "$ref": "../common.schema.json#/$defs/count"
+    },
+    "machine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "../common.schema.json#/$defs/uuid"
+        },
+        "name": {
+          "$ref": "../common.schema.json#/$defs/machine_name"
+        }
+      }
+    },
+    "workspaces": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "slug"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "../common.schema.json#/$defs/uuid"
+          },
+          "name": {
+            "$ref": "../common.schema.json#/$defs/workspace_name"
+          },
+          "slug": {
+            "$ref": "../common.schema.json#/$defs/slug"
+          }
+        }
+      }
+    },
+    "projects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "workspace_id",
+          "title",
+          "t3_project",
+          "repo",
+          "runtime_mode",
+          "model",
+          "disabled",
+          "settings",
+          "layout",
+          "roles",
+          "rev"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "../common.schema.json#/$defs/uuid"
+          },
+          "name": {
+            "$ref": "../common.schema.json#/$defs/name"
+          },
+          "workspace_id": {
+            "$ref": "../common.schema.json#/$defs/uuid"
+          },
+          "title": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 120
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "t3_project": {
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "repo": {
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 300
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "runtime_mode": {
+            "$ref": "../common.schema.json#/$defs/runtime_mode"
+          },
+          "model": {
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "disabled": {
+            "type": "boolean"
+          },
+          "settings": {
+            "$ref": "../common.schema.json#/$defs/json_object"
+          },
+          "layout": {
+            "$ref": "../common.schema.json#/$defs/project_layout"
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "prompt",
+                "model",
+                "match_rules",
+                "wake",
+                "settings"
+              ],
+              "properties": {
+                "name": {
+                  "$ref": "../common.schema.json#/$defs/name"
+                },
+                "prompt": {
+                  "type": "string",
+                  "maxLength": 262144
+                },
+                "model": {
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 120
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "match_rules": {
+                  "$ref": "../common.schema.json#/$defs/json_object"
+                },
+                "wake": {
+                  "type": "array"
+                },
+                "settings": {
+                  "$ref": "../common.schema.json#/$defs/json_object"
+                }
+              }
+            }
+          },
+          "rev": {
+            "$ref": "../common.schema.json#/$defs/rev"
+          }
+        }
+      }
+    }
+  }
+}

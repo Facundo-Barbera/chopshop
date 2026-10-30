@@ -1,0 +1,1344 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chopshop.local/backend/v2/common.schema.json",
+  "title": "Definiciones comunes de la API del backend (v2)",
+  "$defs": {
+    "v": {
+      "const": 2
+    },
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "time": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+    },
+    "ts": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$"
+    },
+    "msg_id": {
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "stream_id": {
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{8}-[0-9]+$"
+    },
+    "email": {
+      "type": "string",
+      "maxLength": 254,
+      "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$"
+    },
+    "password": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "new_password": {
+      "type": "string",
+      "minLength": 12,
+      "maxLength": 256
+    },
+    "device_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "client": {
+      "enum": [
+        "mac",
+        "web",
+        "cli"
+      ]
+    },
+    "user_role": {
+      "enum": [
+        "owner",
+        "watcher"
+      ]
+    },
+    "user_status": {
+      "enum": [
+        "active",
+        "disabled"
+      ]
+    },
+    "invitation_kind": {
+      "enum": [
+        "owner_bootstrap",
+        "owner_reset",
+        "watcher"
+      ]
+    },
+    "platform": {
+      "enum": [
+        "macos",
+        "linux",
+        "other"
+      ]
+    },
+    "runtime_mode": {
+      "enum": [
+        "approval-required",
+        "auto-accept-edits",
+        "auto",
+        "full-access"
+      ]
+    },
+    "session_token": {
+      "type": "string",
+      "pattern": "^ss1_[A-Za-z0-9_-]{43}$"
+    },
+    "machine_credential": {
+      "type": "string",
+      "pattern": "^cm1_[A-Za-z0-9_-]{43}$"
+    },
+    "invitation_token": {
+      "type": "string",
+      "pattern": "^ci1_[A-Za-z0-9_-]{43}$"
+    },
+    "csrf_token": {
+      "type": "string",
+      "pattern": "^cx1_[A-Za-z0-9_-]{43}$"
+    },
+    "invitation_link": {
+      "type": "string",
+      "pattern": "^https://[A-Za-z0-9.-]+(:[0-9]+)?/invite#t=ci1_[A-Za-z0-9_-]{43}$"
+    },
+    "api_url": {
+      "type": "string",
+      "pattern": "^https?://[A-Za-z0-9.-]+(:[0-9]+)?$"
+    },
+    "recovery_code": {
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{5}(-[0-9A-HJKMNP-TV-Z]{5}){3}$"
+    },
+    "recovery_code_input": {
+      "type": "string",
+      "minLength": 20,
+      "maxLength": 40,
+      "pattern": "^[0-9A-Za-z -]+$"
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"
+    },
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+    },
+    "workspace_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "machine_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "local_machine_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.:-]{1,128}$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+([-+][0-9A-Za-z.-]{1,32})?$"
+    },
+    "rev": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "ttl_h": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 720
+    },
+    "json_object": {
+      "type": "object"
+    },
+    "campus_layout": {
+      "type": "object"
+    },
+    "project_layout": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "floors": {
+          "type": "array"
+        },
+        "half_life": {
+          "type": [
+            "string",
+            "integer"
+          ]
+        },
+        "capacity": {
+          "type": "object"
+        },
+        "machine_rooms": {}
+      }
+    },
+    "command_name": {
+      "enum": [
+        "thread.read",
+        "t3.projects",
+        "answer",
+        "settle",
+        "thread.launch",
+        "thread.send",
+        "thread.interrupt",
+        "desk.assign",
+        "desk.note",
+        "queue.cancel",
+        "touch"
+      ]
+    },
+    "user": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "email",
+        "display_name",
+        "role",
+        "status",
+        "created_at"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "email": {
+          "$ref": "#/$defs/email"
+        },
+        "display_name": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "role": {
+          "$ref": "#/$defs/user_role"
+        },
+        "status": {
+          "$ref": "#/$defs/user_status"
+        },
+        "created_at": {
+          "$ref": "#/$defs/time"
+        }
+      }
+    },
+    "user_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "email",
+        "display_name",
+        "role",
+        "status",
+        "created_at",
+        "workspace_ids",
+        "last_login_at",
+        "sessions_active"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "email": {
+          "$ref": "#/$defs/email"
+        },
+        "display_name": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "role": {
+          "$ref": "#/$defs/user_role"
+        },
+        "status": {
+          "$ref": "#/$defs/user_status"
+        },
+        "created_at": {
+          "$ref": "#/$defs/time"
+        },
+        "workspace_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/uuid"
+          },
+          "uniqueItems": true
+        },
+        "last_login_at": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sessions_active": {
+          "$ref": "#/$defs/count"
+        }
+      }
+    },
+    "session": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "user_id",
+        "client",
+        "device_name",
+        "user_agent",
+        "created_at",
+        "last_seen_at",
+        "expires_at",
+        "current"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "client": {
+          "$ref": "#/$defs/client"
+        },
+        "device_name": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 64
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "user_agent": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 200
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "created_at": {
+          "$ref": "#/$defs/time"
+        },
+        "last_seen_at": {
+          "$ref": "#/$defs/time"
+        },
+        "expires_at": {
+          "$ref": "#/$defs/time"
+        },
+        "current": {
+          "type": "boolean"
+        }
+      }
+    },
+    "session_brief": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "client",
+        "expires_at"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "client": {
+          "$ref": "#/$defs/client"
+        },
+        "device_name": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 64
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "user_agent": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 200
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "created_at": {
+          "$ref": "#/$defs/time"
+        },
+        "last_seen_at": {
+          "$ref": "#/$defs/time"
+        },
+        "expires_at": {
+          "$ref": "#/$defs/time"
+        },
+        "current": {
+          "type": "boolean"
+        }
+      }
+    },
+    "invitation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "email",
+        "kind",
+        "role",
+        "workspace_ids",
+        "created_at",
+        "expires_at",
+        "used_at",
+        "revoked_at",
+        "status"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "email": {
+          "$ref": "#/$defs/email"
+        },
+        "kind": {
+          "$ref": "#/$defs/invitation_kind"
+        },
+        "role": {
+          "$ref": "#/$defs/user_role"
+        },
+        "workspace_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/uuid"
+          },
+          "uniqueItems": true
+        },
+        "created_at": {
+          "$ref": "#/$defs/time"
+        },
+        "expires_at": {
+          "$ref": "#/$defs/time"
+        },
+        "used_at": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revoked_at": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "used",
+            "revoked",
+            "expired"
+          ]
+        }
+      }
+    },
+    "invitation_brief": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "email",
+        "kind",
+        "expires_at"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "email": {
+          "$ref": "#/$defs/email"
+        },
+        "kind": {
+          "$ref": "#/$defs/invitation_kind"
+        },
+        "role": {
+          "$ref": "#/$defs/user_role"
+        },
+        "workspace_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/uuid"
+          },
+          "uniqueItems": true
+        },
+        "created_at": {
+          "$ref": "#/$defs/time"
+        },
+        "expires_at": {
+          "$ref": "#/$defs/time"
+        },
+        "used_at": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revoked_at": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "used",
+            "revoked",
+            "expired"
+          ]
+        }
+      }
+    },
+    "invitation_issued": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "invitation",
+        "link"
+      ],
+      "properties": {
+        "invitation": {
+          "$ref": "#/$defs/invitation"
+        },
+        "link": {
+          "$ref": "#/$defs/invitation_link"
+        }
+      }
+    },
+    "machine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "platform",
+        "local_machine_id",
+        "linked_via",
+        "agent_version",
+        "workspace_ids",
+        "created_at",
+        "last_seen_at",
+        "paused_at",
+        "revoked_at",
+        "online"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "name": {
+          "$ref": "#/$defs/machine_name"
+        },
+        "platform": {
+          "$ref": "#/$defs/platform"
+        },
+        "local_machine_id": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/local_machine_id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "linked_via": {
+          "enum": [
+            "app",
+            "token"
+          ]
+        },
+        "agent_version": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/version"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "workspace_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/uuid"
+          },
+          "uniqueItems": true
+        },
+        "created_at": {
+          "$ref": "#/$defs/time"
+        },
+        "last_seen_at": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "paused_at": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revoked_at": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "online": {
+          "type": "boolean"
+        }
+      }
+    },
+    "machine_issued": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "machine",
+        "credential",
+        "api_url"
+      ],
+      "properties": {
+        "machine": {
+          "$ref": "#/$defs/machine"
+        },
+        "credential": {
+          "$ref": "#/$defs/machine_credential"
+        },
+        "api_url": {
+          "$ref": "#/$defs/api_url"
+        }
+      }
+    },
+    "workspace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "slug",
+        "position",
+        "style",
+        "rev",
+        "project_count",
+        "created_at",
+        "updated_at"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "name": {
+          "$ref": "#/$defs/workspace_name"
+        },
+        "slug": {
+          "$ref": "#/$defs/slug"
+        },
+        "position": {
+          "$ref": "#/$defs/count"
+        },
+        "style": {
+          "$ref": "#/$defs/json_object"
+        },
+        "rev": {
+          "$ref": "#/$defs/rev"
+        },
+        "project_count": {
+          "$ref": "#/$defs/count"
+        },
+        "machine_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/uuid"
+          },
+          "uniqueItems": true
+        },
+        "watcher_count": {
+          "$ref": "#/$defs/count"
+        },
+        "created_at": {
+          "$ref": "#/$defs/time"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/time"
+        }
+      }
+    },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "workspace_id",
+        "name",
+        "title",
+        "t3_project",
+        "repo",
+        "machine_id",
+        "runtime_mode",
+        "model",
+        "settings",
+        "position",
+        "disabled",
+        "rev",
+        "created_at",
+        "updated_at"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "workspace_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "name": {
+          "$ref": "#/$defs/name"
+        },
+        "title": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 120
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "t3_project": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "repo": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "machine_id": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "runtime_mode": {
+          "$ref": "#/$defs/runtime_mode"
+        },
+        "model": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "settings": {
+          "$ref": "#/$defs/json_object"
+        },
+        "position": {
+          "$ref": "#/$defs/count"
+        },
+        "disabled": {
+          "type": "boolean"
+        },
+        "rev": {
+          "$ref": "#/$defs/rev"
+        },
+        "created_at": {
+          "$ref": "#/$defs/time"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/time"
+        }
+      }
+    },
+    "role": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "project_id",
+        "name",
+        "model",
+        "position",
+        "rev",
+        "created_at",
+        "updated_at"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "project_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "name": {
+          "$ref": "#/$defs/name"
+        },
+        "prompt": {
+          "type": "string",
+          "maxLength": 262144
+        },
+        "model": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "match_rules": {
+          "$ref": "#/$defs/json_object"
+        },
+        "wake": {
+          "type": "array"
+        },
+        "settings": {
+          "$ref": "#/$defs/json_object"
+        },
+        "position": {
+          "$ref": "#/$defs/count"
+        },
+        "rev": {
+          "$ref": "#/$defs/rev"
+        },
+        "created_at": {
+          "$ref": "#/$defs/time"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/time"
+        }
+      }
+    },
+    "campus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "layout",
+        "rev"
+      ],
+      "properties": {
+        "layout": {
+          "$ref": "#/$defs/campus_layout"
+        },
+        "rev": {
+          "$ref": "#/$defs/rev"
+        }
+      }
+    },
+    "project_layout_doc": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "layout",
+        "rev"
+      ],
+      "properties": {
+        "layout": {
+          "$ref": "#/$defs/project_layout"
+        },
+        "rev": {
+          "$ref": "#/$defs/rev"
+        }
+      }
+    },
+    "login_mac": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "user",
+        "session",
+        "token"
+      ],
+      "properties": {
+        "user": {
+          "$ref": "#/$defs/user"
+        },
+        "session": {
+          "$ref": "#/$defs/session_brief"
+        },
+        "token": {
+          "$ref": "#/$defs/session_token"
+        },
+        "recovery_code": {
+          "$ref": "#/$defs/recovery_code"
+        }
+      }
+    },
+    "login_web": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "user",
+        "session",
+        "csrf_token"
+      ],
+      "properties": {
+        "user": {
+          "$ref": "#/$defs/user"
+        },
+        "session": {
+          "$ref": "#/$defs/session_brief"
+        },
+        "csrf_token": {
+          "$ref": "#/$defs/csrf_token"
+        },
+        "recovery_code": {
+          "$ref": "#/$defs/recovery_code"
+        }
+      }
+    },
+    "import_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "machine_id",
+        "created_at",
+        "summary",
+        "applied_at",
+        "dismissed_at"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "machine_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/time"
+        },
+        "summary": {
+          "type": "array"
+        },
+        "applied_at": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dismissed_at": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "import_project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "company",
+        "t3_project",
+        "repo",
+        "roles",
+        "floors",
+        "has_prompts",
+        "conflicts"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/name"
+        },
+        "company": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "t3_project": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "repo": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "roles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/name"
+          },
+          "uniqueItems": true
+        },
+        "floors": {
+          "$ref": "#/$defs/count"
+        },
+        "has_prompts": {
+          "type": "boolean"
+        },
+        "conflicts": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "name_taken"
+            ]
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "audit_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "at",
+        "actor_kind",
+        "actor_user_id",
+        "session_id",
+        "machine_id",
+        "action",
+        "target_kind",
+        "target_id",
+        "command",
+        "result",
+        "status",
+        "detail"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "at": {
+          "$ref": "#/$defs/time"
+        },
+        "actor_kind": {
+          "enum": [
+            "user",
+            "operator",
+            "machine",
+            "system"
+          ]
+        },
+        "actor_user_id": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "session_id": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "machine_id": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "action": {
+          "enum": [
+            "auth.login",
+            "auth.login_failed",
+            "auth.logout",
+            "auth.password_changed",
+            "auth.recovered",
+            "auth.recovery_code_regenerated",
+            "session.revoked",
+            "user.disabled",
+            "user.enabled",
+            "invitation.created",
+            "invitation.reissued",
+            "invitation.revoked",
+            "invitation.accepted",
+            "operator.bootstrap",
+            "operator.recover",
+            "machine.linked",
+            "machine.token_issued",
+            "machine.paused",
+            "machine.resumed",
+            "machine.revoked",
+            "workspace.shared",
+            "workspace.unshared",
+            "import.applied",
+            "command"
+          ]
+        },
+        "target_kind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "target_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "command": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/command_name"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "result": {
+          "enum": [
+            "ok",
+            "denied",
+            "error",
+            "timeout"
+          ]
+        },
+        "status": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "detail": {
+          "$ref": "#/$defs/json_object"
+        }
+      }
+    },
+    "pct": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "severity": {
+      "enum": [
+        "info",
+        "notice",
+        "warn",
+        "error"
+      ]
+    },
+    "needs": {
+      "enum": [
+        null,
+        "human",
+        "bot",
+        "approval"
+      ]
+    },
+    "subject_kind": {
+      "enum": [
+        "task",
+        "batch",
+        "node",
+        "graph",
+        "thread",
+        "machine",
+        "pr",
+        "issue",
+        "automation",
+        "agent",
+        "desk",
+        "office",
+        "repo",
+        "run",
+        "listener"
+      ]
+    },
+    "event_type": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*){1,3}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "part": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "media_type",
+        "enc",
+        "bytes",
+        "sha256",
+        "data"
+      ],
+      "properties": {
+        "name": {
+          "enum": [
+            "state",
+            "queue",
+            "events",
+            "office",
+            "employees",
+            "body"
+          ]
+        },
+        "media_type": {
+          "const": "application/json"
+        },
+        "enc": {
+          "enum": [
+            "none",
+            "e2e-v1"
+          ]
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 786432
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "data": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9+/]*={0,2}$",
+          "maxLength": 1048576
+        }
+      }
+    }
+  }
+}
