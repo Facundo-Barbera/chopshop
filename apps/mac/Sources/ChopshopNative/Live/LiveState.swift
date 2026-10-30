@@ -26,6 +26,8 @@ public struct LiveState: Equatable, Sendable {
         public var attention: [Attention] = []
         /// v3: oficina por escritorios (nil = el proyecto no declara `office:` o el agente es anterior a la v3).
         public var office: Office?
+        public var roster: [Employee] = []
+        public var queue: [QueueItem] = []
     }
 
     public static let apiVersion = 3
@@ -131,7 +133,9 @@ public struct LiveState: Equatable, Sendable {
             if l.count > 5 { l.removeFirst(l.count - 5) }
             answered[tid] = l
         }
-        if let proj = env.project, !proj.isEmpty {
+        if env.type == "roster.changed" {
+            applyRoster(env)
+        } else if let proj = env.project, !proj.isEmpty {
             let pi = projectIndex(proj)
             let sid = env.subject?.id
             let typ = env.type
@@ -238,6 +242,8 @@ public struct LiveState: Equatable, Sendable {
             p.tasks = (pj["tasks"]?.array ?? []).compactMap(\.object)
             p.graphs = (pj["graphs"]?.array ?? []).compactMap(\.object)
             p.office = pj["office"].flatMap(Office.init(json:))
+            p.roster = Self.roster(pj["roster"])
+            p.queue = Self.queue(pj["queue"])
             p.attention = (pj["attention"]?.array ?? []).compactMap { a in
                 guard let key = a["key"]?.string, let needs = a["needs"]?.string else { return nil }
                 return Attention(key: key, id: a["id"]?.string, seq: a["seq"]?.int ?? 0, type: a["type"]?.string ?? "", needs: needs,

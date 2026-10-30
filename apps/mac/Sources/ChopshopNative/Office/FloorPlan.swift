@@ -97,6 +97,7 @@ public struct FloorPlan: Equatable, Sendable {
         public var notesPending: Int
         /// Últimos ocupantes (hilo, motivo de salida), el más reciente primero.
         public var lineage: [Lineage]
+        public var name: String? = nil
     }
 
     public struct Room: Equatable, Sendable, Identifiable {
@@ -159,6 +160,7 @@ public struct FloorPlan: Equatable, Sendable {
         guard let pj = state["projects"]?.array?.first(where: { $0["name"]?.string == project }),
               let office = pj["office"], office.object != nil else { return [] }
         let company = nonEmpty(office["company"]?.string)
+        let staff = Dictionary(LiveState.roster(pj["roster"]).map { ($0.desk, $0) }, uniquingKeysWith: { a, _ in a })
         let hl = office["half_life_s"]?.double ?? defaultHalfLife
         let declared = (office["floors"]?.array ?? []).enumerated().map { (i, f) in (f, f["index"]?.int ?? i, false) }
         let label = nonEmpty(office["outsourced"]?["label"]?.string) ?? "Contratista"
@@ -178,7 +180,8 @@ public struct FloorPlan: Equatable, Sendable {
                     }
                     return Desk(id: id, slot: d["slot"]?.int ?? k, retired: d["retired"]?.bool ?? false,
                                 occupant: Occupant(d["occupant"], project: project, halfLife: hl),
-                                notesPending: d["notes_pending"]?.int ?? 0, lineage: lineage)
+                                notesPending: d["notes_pending"]?.int ?? 0, lineage: lineage,
+                                name: nonEmpty(d["name"]?.string) ?? nonEmpty(staff[id]?.name))
                 }
                 return Room(role: role, permanent: r["permanent"]?.bool ?? false, desks: desks.sorted { $0.slot < $1.slot },
                             flex: r["flex"]?.bool)
@@ -226,7 +229,8 @@ public struct FloorPlan: Equatable, Sendable {
 
     /// Pisos de un proyecto de la proyección viva (vacío si no trae `office`).
     public static func floors(in state: LiveState, project: String) -> [FloorPlan] {
-        guard let office = state.projects.first(where: { $0.name == project })?.office else { return [] }
+        guard let pj = state.projects.first(where: { $0.name == project }), let office = pj.office else { return [] }
+        let staff = Dictionary(pj.roster.map { ($0.desk, $0) }, uniquingKeysWith: { a, _ in a })
         let hl = office.halfLifeS
         let label = office.outsourced?.label
         let all = office.floors.map { ($0, $0.index, false) } + office.outsourcedFloors.map { ($0, outsourcedBase + $0.index, true) }
@@ -238,7 +242,8 @@ public struct FloorPlan: Equatable, Sendable {
             plan.rooms = f.rooms.map { r in
                 let desks = r.desks.map { d in
                     Desk(id: d.id, slot: d.slot, retired: d.retired, occupant: d.occupant.map { Occupant($0, project: project) },
-                         notesPending: d.notesPending, lineage: d.lineage.map { Lineage(thread: $0.threadID, reason: $0.reason) })
+                         notesPending: d.notesPending, lineage: d.lineage.map { Lineage(thread: $0.threadID, reason: $0.reason) },
+                         name: nonEmpty(d.name) ?? nonEmpty(staff[d.id]?.name))
                 }
                 return Room(role: r.role, permanent: r.permanent, desks: desks.sorted { $0.slot < $1.slot }, flex: r.flex)
             }
@@ -417,8 +422,8 @@ public struct FloorLayout: Equatable, Sendable {
 
     static func shown(_ r: FloorPlan.Room) -> [FloorPlan.Desk] {
         let ds = r.desks.sorted { $0.slot < $1.slot }
-        let busy = ds.filter { $0.occupant != nil }
-        guard let free = ds.first(where: { $0.occupant == nil && !$0.retired }) else { return busy }
+        let busy = ds.filter { $0.occupant != nil || ($0.name != nil && !$0.retired) }
+        guard let free = ds.first(where: { $0.occupant == nil && !$0.retired && $0.name == nil }) else { return busy }
         return (busy + [free]).sorted { $0.slot < $1.slot }
     }
 

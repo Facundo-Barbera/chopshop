@@ -35,6 +35,7 @@ public struct FloorOfficeView: View {
             let who = d.occupant?.role.map { " · \($0)" } ?? ""
             return "\(plan.outsourced ? "contratista" : "flex") \(d.slot + 1)\(who)"
         }
+        if let n = d.name { return "\(n) · \(r.role)" }
         return "\(r.role) · \(d.slot + 1)"
     }
 
@@ -47,10 +48,12 @@ public struct FloorOfficeView: View {
     /// Lo que dice la etiqueta del hueco en el piso: el nombre corto del hilo; un escritorio sin hilo, su `rol · n`.
     static func tag(_ plan: FloorPlan, _ id: String, now: Date) -> String {
         if let o = plan.occupant(of: id, now: now) {
-            let name = ProjectOffice.shortName(o.title ?? o.threadID)
+            let short = ProjectOffice.shortName(o.title ?? o.threadID)
+            let name = plan.desk(id)?.name.map { "\($0) · \(short)" } ?? short
             return o.waitingRole.map { "\(name) → \($0)" } ?? name
         }
         if id.hasPrefix("bot:") { return String(id.dropFirst(4)) }
+        if let n = plan.desk(id)?.name { return n }
         return label(plan, id)
     }
 

@@ -83,7 +83,7 @@ public struct OfficeShell<World: View, Unpaired: View>: View {
             }
         }
         .inspector(isPresented: inspectorShown) {
-            ShellInspectorView(shell: shell, snapshot: store.snapshot, machineRoom: MachineRoom(store.state.machineRoom))
+            ShellInspectorView(shell: shell, snapshot: store.snapshot, machineRoom: MachineRoom(store.state.machineRoom), state: store.state)
                 .inspectorColumnWidth(min: 300, ideal: shell.state.inspector == .panel(.machineRoom) ? 640 : 380, max: 920)
         }
         .background {

@@ -96,6 +96,7 @@ struct ThreadPanel: View {
                 } else {
                     Text(ProjectContent.subtitle(snapshot.summary(of: project)).capitalizedFirst).font(.headline)
                     attention
+                    RosterPanel(project: state.project(project)) { tid in withAnimation(.snappy(duration: 0.2)) { selected = tid } }
                     group("En curso", tasks.filter { $0.state == .running || $0.state == .waitingBot })
                     group("En cola", tasks.filter { $0.state == .queued })
                     let done = tasks.filter { $0.state == .done || $0.state == .skipped }

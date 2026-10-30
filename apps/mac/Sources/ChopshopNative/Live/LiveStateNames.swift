@@ -54,7 +54,9 @@ extension LiveState {
 
     /// Etiquetas de todos los hilos conocidos (calcularlas una vez por cambio de estado: desambiguar mira el conjunto entero).
     public var threadLabels: [String: ThreadLabel] {
-        let names = HumanNames.names(for: knownThreads)
+        let staff = employeeNames
+        var names = HumanNames.names(for: knownThreads.filter { staff[$0] == nil })
+        for t in knownThreads { if let n = staff[t] { names[t] = n } }
         var out: [String: ThreadLabel] = [:]
         for (id, n) in names {
             out[id] = ThreadLabel(threadID: id, name: n, subtitle: HumanNames.subtitle(title: title(ofThread: id), threadID: id))
@@ -64,7 +66,7 @@ extension LiveState {
 
     /// Etiqueta de un hilo (si no lo conoce la proyección: el nombre sin desambiguar y el id de subtítulo).
     public func label(ofThread id: String) -> ThreadLabel {
-        threadLabels[id] ?? ThreadLabel(threadID: id, name: HumanNames.name(for: id),
+        threadLabels[id] ?? ThreadLabel(threadID: id, name: employeeNames[id] ?? HumanNames.name(for: id),
                                         subtitle: HumanNames.subtitle(title: title(ofThread: id), threadID: id))
     }
 }

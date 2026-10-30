@@ -60,10 +60,12 @@ extension LiveState {
         public var occupant: Occupant?
         public var lineage: [Lineage] = []
         public var notesPending: Int = 0
+        public var name: String?
 
         init?(json: JSONValue) {
             guard let id = json["id"]?.string else { return nil }
             self.id = id
+            name = LiveState.nonEmpty(json["name"]?.string)
             slot = json["slot"]?.int ?? 0
             retired = json["retired"]?.bool ?? false
             occupant = json["occupant"].flatMap(Occupant.init(json:))

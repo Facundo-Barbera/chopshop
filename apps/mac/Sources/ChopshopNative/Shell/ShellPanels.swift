@@ -9,6 +9,7 @@ struct ShellInspectorView: View {
     let snapshot: MockSnapshot
     let machineRoom: MachineRoom
     var flat = false
+    var state = LiveState()
 
     var body: some View {
         let s = snapshot
@@ -26,7 +27,7 @@ struct ShellInspectorView: View {
             case .panel(let p)?:
                 ShellPanelFrame(title: p.title, symbol: p.symbol, flat: flat, close: close) { panel(p, s) }
             case .target(.project(let pr))?:
-                ShellPanelFrame(title: pr, symbol: "square.stack", flat: flat, close: close) { ShellProjectPanel(shell: shell, snapshot: s, project: pr) }
+                ShellPanelFrame(title: pr, symbol: "square.stack", flat: flat, close: close) { ShellProjectPanel(shell: shell, snapshot: s, project: pr, state: state) }
             case .target(.thread(let id, let pr))?:
                 ShellPanelFrame(title: "Hilo", symbol: "person.crop.square", flat: flat, close: close) { ShellThreadPanel(shell: shell, snapshot: s, threadID: id, project: pr) }
             case .target(.city)?, nil:
@@ -366,6 +367,7 @@ struct ShellProjectPanel: View {
     @ObservedObject var shell: ShellController
     let snapshot: MockSnapshot
     let project: String
+    var state = LiveState()
 
     var body: some View {
         let ts = snapshot.tasks(of: project)
@@ -383,6 +385,7 @@ struct ShellProjectPanel: View {
                 }
             }
         }
+        RosterPanel(project: state.project(project)) { tid in shell.state.go(.thread(id: tid, project: project)) }
         group("En curso", ts.filter { $0.state == .running || $0.state == .waitingBot }, host)
         group("En cola", ts.filter { $0.state == .queued }, host)
         group("Terminados", ts.filter { $0.state == .done || $0.state == .skipped }, host)
