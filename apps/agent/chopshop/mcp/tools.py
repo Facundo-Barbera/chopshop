@@ -1,7 +1,7 @@
 import re
 import uuid
 
-from .. import employees, profile, state, t3
+from .. import employees, engine, profile, state, t3
 from .. import queue as equeue
 from ..agent import client as agent_client
 from ..agent import config as agent_config
@@ -99,13 +99,17 @@ class Tools:
             ("project_register", "Registra (o reactiva y actualiza) un proyecto en el registro. Idempotente; crea un perfil mínimo si falta.",
              _obj({"name": {"type": "string", "description": "Nombre del proyecto (perfil)."},
                    "company": {"type": "string", "description": "Empresa. Obligatoria al registrar uno nuevo."},
-                   "t3_project": S, "repo": S, "host": S}, ["name"]), self.project_register),
+                   "t3_project": S, "repo": S, "host": S,
+                   "model": {"type": "string", "description": "instancia/modelo del perfil nuevo (obligatorio si T3 no tiene default)."}},
+                  ["name"]), self.project_register),
             ("role_list", "Roles del perfil de un proyecto: escritorios, permanentes y disparadores de wake.",
              _obj({"project": {"type": "string", "description": "Nombre del proyecto (perfil)."}}, ["project"]),
              self.role_list),
             ("task_enqueue", "Encola una tarea para el empleado (escritorio permanente) de un rol de un proyecto.",
              _obj({"project": {"type": "string", "description": "Nombre del proyecto (perfil)."},
-                   "role": S, "title": S, "slot": I, "floor": I, "priority": I, "by": S,
+                   "role": S, "title": S,
+                   "prompt": {"type": "string", "description": "Prompt del hilo (instrucciones). Vacío: el título."},
+                   "slot": I, "floor": I, "priority": I, "by": S,
                    "key": {"type": "string", "description": "Clave de idempotencia por empleado."}},
                   ["project", "role", "title"]), self.task_enqueue),
             ("queue_show", "Colas de los empleados de un proyecto (opcionalmente de un rol), en orden de ejecución.",
@@ -289,10 +293,10 @@ class Tools:
             raise ToolError(e.message)
         return {"projects": [p for p in rows if include_disabled or p["enabled"]], "path": registry.path()}
 
-    def project_register(self, name, company=None, t3_project=None, repo=None, host=None):
+    def project_register(self, name, company=None, t3_project=None, repo=None, host=None, model=None):
         try:
             return registry.api_register({"name": name, "company": company, "t3_project": t3_project, "repo": repo,
-                                          "host": host})
+                                          "host": host, "model": model})
         except (registry.RegistryError, OSError) as e:
             raise ToolError(getattr(e, "message", None) or str(e))
 
@@ -346,15 +350,19 @@ class Tools:
                 raise ToolError(f"el rol {role} de {project} no tiene escritorios permanentes")
         return prof, staff
 
-    def task_enqueue(self, project, role, title, slot=None, floor=None, priority=0, by="human", key=None):
-        _prof, staff = self._staff(project, role)
+    def task_enqueue(self, project, role, title, prompt=None, slot=None, floor=None, priority=0, by="human", key=None):
+        prof, staff = self._staff(project, role)
+        why = engine.model_problem(prof)
+        if why:
+            raise ToolError(why)
         staff = [d for d in staff if (slot is None or d["slot"] == slot) and (floor is None or d["floor"] == floor)]
         if not staff:
             raise ToolError(f"no hay empleado de {role} con slot={slot} floor={floor} en {project}")
         q = self._queue()
         emp = min(staff, key=lambda d: q.length(d["id"]))["id"]
         try:
-            row, created = q.enqueue(emp, title, by or "human", priority=priority or 0, key=key)
+            row, created = q.enqueue(emp, title, by or "human", priority=priority or 0, key=key,
+                                     extra={"prompt": prompt} if prompt else None)
         except equeue.QueueError as e:
             raise ToolError(str(e))
         items = q.show(emp)
