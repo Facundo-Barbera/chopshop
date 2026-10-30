@@ -509,6 +509,62 @@ struct CityCompanyTag: View {
     }
 }
 
+@available(macOS 26.0, *)
+struct CityCampusTag: View {
+    let name: String
+    let projects: Int
+    @Environment(\.colorScheme) private var scheme
+    var body: some View {
+        Text("\(name.uppercased())  ·  \(projects) \(projects == 1 ? "proyecto" : "proyectos")")
+            .font(.system(size: 11, weight: .semibold, design: .monospaced)).tracking(1.2)
+            .padding(.horizontal, 10).padding(.vertical, 4)
+            .background(Capsule().fill(scheme == .dark ? Color(white: 0.05).opacity(0.85) : Color.white.opacity(0.85)))
+            .overlay(Capsule().strokeBorder(Color.primary.opacity(0.28), lineWidth: 0.8))
+            .foregroundStyle(Color.primary.opacity(0.8))
+    }
+}
+
+@available(macOS 26.0, *)
+struct CitySymbols: View {
+    let model: CityModel
+    let lights: CityLights
+    let t: Double
+
+    var body: some View {
+        ForEach(model.floors) { f in
+            CityFloorPill(name: f.label, tint: lights.tint(f.id, t: t)).tag("cf:\(f.id)")
+        }
+        ForEach(model.buildings, id: \.index) { b in
+            CityCompanyTag(name: b.company, threads: b.floors.reduce(0) { $0 + $1.activeThreads.count }).tag("cb:\(b.company)")
+        }
+        ForEach(model.campuses) { c in
+            CityCampusTag(name: c.name, projects: model.buildings.filter { $0.campus == c.name }.count).tag("cc:\(c.name)")
+        }
+    }
+}
+
+@available(macOS 26.0, *)
+final class CityCameraEase {
+    private(set) var current: IsoFrame?
+    private var lastT = 0.0
+
+    func frame(_ goal: IsoFrame, t: Double, animate: Bool = true) -> IsoFrame {
+        guard animate, var c = current else { current = goal; lastT = t; return goal }
+        if t < lastT - 0.5 { lastT = t }
+        let dt = min(0.1, max(0, t - lastT)); lastT = t
+        let k = 1 - exp(-dt * 6)
+        c.s = exp(log(c.s) + (log(goal.s) - log(c.s)) * k)
+        c.cu += (goal.cu - c.cu) * k; c.cv += (goal.cv - c.cv) * k
+        c.ax += (goal.ax - c.ax) * k; c.ay += (goal.ay - c.ay) * k
+        if abs(log(c.s / goal.s)) < 1e-3, abs(c.cu - goal.cu) * c.s < 0.3, abs(c.cv - goal.cv) * c.s < 0.3,
+           abs(c.ax - goal.ax) < 0.3, abs(c.ay - goal.ay) < 0.3 { c = goal }
+        current = c
+        return c
+    }
+
+    func snap(_ f: IsoFrame) { current = f }
+}
+
 /// Etiqueta de escritorio: el mismo estilo que los símbolos "d:" de IsoOfficeView.
 @available(macOS 26.0, *)
 struct IsoDeskLabel: View {

@@ -57,6 +57,10 @@ public struct CityAlert: Hashable, Sendable {
     public var title: String
     /// `CityFloor.id` del piso que lo pide (un proyecto con varios pisos puede tener un aviso en cada uno).
     public var floor: String = ""
+
+    public init(project: String, status: CityFloorStatus, title: String, floor: String = "") {
+        self.project = project; self.status = status; self.title = title; self.floor = floor
+    }
 }
 
 public struct CityFloor: Hashable, Sendable, Identifiable {
@@ -77,6 +81,14 @@ public struct CityFloor: Hashable, Sendable, Identifiable {
     public var floorName: String? = nil
     /// Planta baja del edificio: el vestíbulo (`project` vacío; sus avisos llevan el proyecto del hilo).
     public var isLobby = false
+
+    public init(project: String, company: String, level: Int, status: CityFloorStatus, activeThreads: [String], running: Int,
+                needsYou: Int, stuck: Int, alert: CityAlert? = nil, floorIndex: Int? = nil, floorName: String? = nil, isLobby: Bool = false) {
+        self.project = project; self.company = company; self.level = level; self.status = status; self.activeThreads = activeThreads
+        self.running = running; self.needsYou = needsYou; self.stuck = stuck; self.alert = alert
+        self.floorIndex = floorIndex; self.floorName = floorName; self.isLobby = isLobby
+    }
+
     public var id: String { isLobby ? "lobby:\(company)" : floorIndex.map { "\(project)#\($0)" } ?? project }
     /// Texto de la píldora (en un edificio por proyecto, el proyecto ya está en la azotea: solo el piso).
     public var label: String {
@@ -98,11 +110,13 @@ public struct CityBuilding: Hashable, Sendable, Identifiable {
     public var floors: [CityFloor]
     /// Aspecto (material, ventanas, azotea, alturas…): por defecto de la semilla `company`. Gancho de la personalización.
     public var style: CityBuildingStyle
+    public var campus: String
 
     public init(company: String, index: Int, x0: Double, y0: Double, w: Double, d: Double, floors: [CityFloor],
-                style: CityBuildingStyle? = nil) {
+                style: CityBuildingStyle? = nil, campus: String = "") {
         self.company = company; self.index = index; self.x0 = x0; self.y0 = y0; self.w = w; self.d = d; self.floors = floors
         self.style = style ?? CityBuildingStyle(seed: company)
+        self.campus = campus
     }
 
     public var id: String { company }
@@ -140,9 +154,30 @@ public struct CityModel: Equatable, Sendable {
     /// Lado del suelo (cuadrado de 0 a `groundX` × 0 a `groundY`).
     public var groundX: Double
     public var groundY: Double
+    public var campuses: [CityCampus]
+    public var roads: [CityRoad]
+    public var trees: [CityPoint]
+    public var seed: UInt64
 
-    public init(buildings: [CityBuilding], groundX: Double, groundY: Double) {
+    public init(buildings: [CityBuilding], groundX: Double, groundY: Double, campuses: [CityCampus] = [], roads: [CityRoad] = [],
+                trees: [CityPoint] = [], seed: UInt64 = 0) {
         self.buildings = buildings; self.groundX = groundX; self.groundY = groundY
+        self.campuses = campuses; self.roads = roads; self.trees = trees; self.seed = seed
+    }
+
+    public func campus(_ name: String) -> CityCampus? { campuses.first { $0.name == name } }
+    public func campus(of project: String) -> String? { building(of: project)?.campus }
+
+    public func bounds(campus name: String) -> IsoBounds? {
+        guard let c = campus(name) else { return nil }
+        var b = IsoBounds.empty
+        let r = c.bounds, m = CityGeo.tile
+        for (x, y) in [(r.x0 - m, r.y0 - m), (r.x1 + m, r.y0 - m), (r.x0 - m, r.y1 + m), (r.x1 + m, r.y1 + m)] { b.add(x, y, 0) }
+        for bd in buildings where bd.campus == name {
+            let top = bd.height + bd.style.roofH
+            for (x, y) in [(bd.x0, bd.y0), (bd.x1, bd.y0), (bd.x0, bd.y1), (bd.x1, bd.y1)] { b.add(x, y, top) }
+        }
+        return b
     }
 
     public var floors: [CityFloor] { buildings.flatMap(\.floors) }
@@ -215,52 +250,65 @@ public struct CityModel: Equatable, Sendable {
                          running: running, needsYou: needsYou(p), stuck: stuck(p), alert: alert(p, status: st))
     }
 
-    /// Agrupa los proyectos por empresa (orden estable: el de la tabla, luego por nombre; pisos por nombre de proyecto y, dentro, por
-    /// índice de piso) y reparte los edificios en una cuadrícula. Un edificio con algún proyecto con `office` lleva el vestíbulo en la
+    /// Agrupa los proyectos por empresa (orden estable: el de la tabla, luego por nombre). Un edificio con algún proyecto con `office` lleva el vestíbulo en la
     /// planta baja; los proyectos sin `office` (agente v2 o perfil sin bloque) siguen en un piso con todos sus hilos.
-    /// `perProject`: un edificio por proyecto (el nombre del proyecto en la azotea; sus pisos y su vestíbulo), como la «Ciudad»
-    /// de la barra lateral; si no, uno por empresa con un piso por proyecto.
-    public static func build(_ s: LiveState, directory: CompanyDirectory = .standard, perProject: Bool = false) -> CityModel {
+    public static func build(_ s: LiveState, directory: CompanyDirectory = .standard, perProject: Bool = false,
+                             seed: UInt64 = WorldSeed.current) -> CityModel {
         var groups: [String: [LiveState.Project]] = [:]
         var offices: [String: CityOffice] = [:]
         for p in s.projects {
             let o = CityOffice(p.office)
             offices[p.name] = o
-            groups[perProject ? p.name : (o?.company ?? directory.company(of: p.name)), default: []].append(p)
+            groups[o?.company ?? directory.company(of: p.name), default: []].append(p)
         }
-        let companies = perProject ? groups.keys.sorted { ($0.lowercased(), $0) < ($1.lowercased(), $1) }
-                                   : groups.keys.sorted { directory.rank($0) < directory.rank($1) }
-        let cols = max(1, Int(Double(companies.count).squareRoot().rounded(.up)))
-        var buildings: [CityBuilding] = []
-        for (i, c) in companies.enumerated() {
-            let ps = groups[c]!.sorted { ($0.name.lowercased(), $0.name) < ($1.name.lowercased(), $1.name) }
-            var floors: [CityFloor] = []
-            var lobby: [LiveState.Project] = []
+        let companies = groups.keys.sorted { directory.rank($0) < directory.rank($1) }
+        let sorted = companies.map { c in
+            (c, groups[c]!.sorted { ($0.name.lowercased(), $0.name) < ($1.name.lowercased(), $1.name) })
+        }
+        var entries: [(company: String, project: String, floors: [CityFloor])] = []
+        for (c, ps) in sorted {
             for p in ps {
-                guard let o = offices[p.name], !o.floors.isEmpty else {
-                    floors.append(makeFloor(p, company: c, level: 0)); continue
+                var floors: [CityFloor] = []
+                if let o = offices[p.name], !o.floors.isEmpty {
+                    let parts = split(p, o)
+                    for (k, f) in o.floors.enumerated() {
+                        var fl = makeFloor(parts.floors[k], company: p.name, level: 0)
+                        fl.floorIndex = f.index
+                        if o.floors.count > 1 { fl.floorName = f.name ?? "piso \(f.index + 1)" }
+                        floors.append(fl)
+                    }
+                    floors = Array(floors.prefix(CityOffice.maxFloorsPerBuilding))
+                    floors.insert(lobbyFloor([parts.lobby], company: p.name), at: 0)
+                } else {
+                    floors.append(makeFloor(p, company: p.name, level: 0))
                 }
-                let parts = split(p, o)
-                lobby.append(parts.lobby)
-                for (k, f) in o.floors.enumerated() {
-                    var fl = makeFloor(parts.floors[k], company: c, level: 0)
-                    fl.floorIndex = f.index
-                    if o.floors.count > 1 { fl.floorName = f.name ?? "piso \(f.index + 1)" }
-                    floors.append(fl)
-                }
+                entries.append((company: c, project: p.name, floors: floors))
             }
-            floors = Array(floors.prefix(CityOffice.maxFloorsPerBuilding))
-            if !lobby.isEmpty { floors.insert(lobbyFloor(lobby, company: c), at: 0) }
-            for k in floors.indices { let id = floors[k].id; floors[k].level = k; floors[k].alert?.floor = id }
-            let col = i % cols, row = i / cols
-            buildings.append(CityBuilding(company: c, index: i, x0: CityGeo.margin + Double(col) * CityGeo.pitchX,
-                                          y0: CityGeo.margin + Double(row) * CityGeo.pitchY,
-                                          w: CityGeo.footprintW, d: CityGeo.footprintD, floors: floors))
         }
-        let rows = max(1, (companies.count + cols - 1) / cols)
-        let gx = 2 * CityGeo.margin + Double(cols - 1) * CityGeo.pitchX + CityGeo.footprintW
-        let gy = 2 * CityGeo.margin + Double(rows - 1) * CityGeo.pitchY + CityGeo.footprintD
-        return CityModel(buildings: buildings, groundX: gx, groundY: gy)
+        return place(entries, seed: seed)
+    }
+
+    public static func place(_ entries: [(company: String, project: String, floors: [CityFloor])], seed: UInt64) -> CityModel {
+        var order: [String] = []
+        var byCampus: [String: [String]] = [:]
+        for e in entries {
+            if byCampus[e.company] == nil { order.append(e.company) }
+            byCampus[e.company, default: []].append(e.project)
+        }
+        let campuses: [(name: String, projects: [String])] = order.map { (name: $0, projects: byCampus[$0] ?? []) }
+        let map = WorldGenerator.layout(seed: seed, campuses: campuses)
+        var buildings: [CityBuilding] = []
+        var placed = Set<String>()
+        for e in entries where !placed.contains(e.project) {
+            guard let r = map.plots[e.project], map.campusOf[e.project] == e.company else { continue }
+            placed.insert(e.project)
+            var floors = e.floors
+            for k in floors.indices { let id = floors[k].id; floors[k].level = k; floors[k].alert?.floor = id }
+            buildings.append(CityBuilding(company: e.project, index: buildings.count, x0: r.x0, y0: r.y0, w: r.w, d: r.d, floors: floors,
+                                          style: CityBuildingStyle(seed: WorldGenerator.styleSeed(seed, e.project)), campus: e.company))
+        }
+        return CityModel(buildings: buildings, groundX: map.groundX, groundY: map.groundY, campuses: map.campuses, roads: map.roads,
+                         trees: map.trees, seed: seed)
     }
 
     // MARK: - Oficina v3

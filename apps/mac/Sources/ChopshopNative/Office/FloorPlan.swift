@@ -244,6 +244,29 @@ public struct FloorPlan: Equatable, Sendable {
     }
     public func guest(_ threadID: String) -> Occupant? { lobby.first { $0.threadID == threadID } }
 
+    public var bots: [String] {
+        var names = Set<String>()
+        for mr in machineRooms {
+            for u in mr.rack {
+                for r in u.runs where r.origin.kind == .bot {
+                    names.insert(FloorPlan.nonEmpty(r.origin.id) ?? FloorPlan.nonEmpty(r.origin.label) ?? FloorPlan.nonEmpty(r.actor) ?? "bot")
+                }
+            }
+        }
+        return names.sorted()
+    }
+
+    public func botActive(_ name: String) -> Bool {
+        machineRooms.contains { mr in
+            mr.rack.contains { u in
+                u.runs.contains { r in
+                    r.active && r.origin.kind == .bot
+                        && (FloorPlan.nonEmpty(r.origin.id) ?? FloorPlan.nonEmpty(r.origin.label) ?? FloorPlan.nonEmpty(r.actor) ?? "bot") == name
+                }
+            }
+        }
+    }
+
     // MARK: - utilidades
 
     static func nonEmpty(_ s: String?) -> String? { s.flatMap { $0.isEmpty ? nil : $0 } }
@@ -260,133 +283,183 @@ public struct FloorPlan: Equatable, Sendable {
     }
 }
 
-/// Disposición fija de un piso en el mundo isométrico (las mismas coordenadas que IsoScene: +x baja a la derecha, +y baja a la
-/// izquierda). Depende solo de la **estructura** (departamentos y huecos), nunca de quién ocupa qué: un escritorio está siempre en
-/// el mismo sitio. Puro (macOS 13) para poder probarlo y encuadrarlo desde la ciudad.
+public struct FloorFrame: Equatable, Hashable, Sendable {
+    public var width: Double
+    public var depth: Double
+    public var seed: UInt64
+    public var entrance: Double
+
+    public init(width: Double, depth: Double, seed: UInt64, entrance: Double = 0.4) {
+        self.width = width; self.depth = depth; self.seed = seed; self.entrance = entrance
+    }
+
+    public static func key(of floors: [FloorPlan]) -> String {
+        floors.compactMap(\.project).first ?? floors.compactMap(\.company).first ?? "edificio"
+    }
+
+    public static func building(_ floors: [FloorPlan], key: String? = nil, world: UInt64 = WorldSeed.current) -> FloorFrame {
+        let k = key ?? Self.key(of: floors)
+        let shape = WorldGenerator.buildingShape(seed: world, key: k)
+        let style = CityBuildingStyle(seed: WorldGenerator.styleSeed(world, k))
+        let entrance = 0.04 + 0.92 * (Double(style.doorBay) + 0.5) / Double(CityGeo.windowsLeft)
+        let areas = floors.map { f -> Double in
+            let s = FloorLayout.spec(f, frame: FloorFrame(width: 1, depth: 1, seed: 0))
+            return FloorPlanGenerator.requiredArea(roles: s.roles, machineRooms: s.machineRooms, grokSeats: s.grokSeats, lobbyGuests: s.lobbyGuests)
+        }
+        let scale = FloorPlanGenerator.fitScale(width: shape.w, depth: shape.d, areas: areas)
+        return FloorFrame(width: (shape.w * scale).rounded(), depth: (shape.d * scale).rounded(),
+                          seed: WorldSeed.hash(world, "building", k), entrance: entrance)
+    }
+}
+
 public struct FloorLayout: Equatable, Sendable {
-    public static let cellW = 78.0, cellD = 90.0, pad = 24.0, gap = 52.0
-    /// Departamentos por fila (un piso tiene hasta 6: dos filas de tres).
-    public static let roomsPerRow = 3
+    public static let cellW = FloorPlanGenerator.cellW, cellD = FloorPlanGenerator.cellD, pad = FloorPlanGenerator.pad, gap = 52.0
+    public static let grokIndex = 100_000, coreIndex = 100_001, corridorIndex = 100_002, commonsBase = 100_100
+    public static let topH = 58.0
+
+    public typealias Opening = FloorPlanGenerator.Opening
 
     public struct RoomBox: Equatable, Sendable {
         public var index: Int
         public var role: String
         public var x0: Double, y0: Double, w: Double, d: Double
+        public var door: Opening? = nil
+        public var windows: [Opening] = []
+
+        public var x1: Double { x0 + w }
+        public var y1: Double { y0 + d }
+
+        public var commons: FloorPlanGenerator.Commons? {
+            role.hasPrefix("commons:") ? FloorPlanGenerator.Commons(rawValue: String(role.dropFirst(8))) : nil
+        }
     }
-    /// Hueco de un escritorio (id del escritorio), de un invitado del vestíbulo (`lobby:<hilo>`) o, en la sala de máquinas k
-    /// (`room == machineRoomIndex(k)`), de un armario del rack (`rack:<k>:<proveedor>:<repo>`) o de la consola (`machine:<k>`).
+
     public struct Spot: Equatable, Sendable {
         public var id: String
         public var room: Int
         public var cx: Double, cy: Double
         public var isMachine: Bool { room < 0 }
     }
-    /// Sala de máquinas k: un armario por repo del rack al fondo y la consola (listeners, scripts, webhooks) delante.
+
     public struct MachineBox: Equatable, Sendable {
-        /// Posición en `FloorPlan.machineRooms`.
         public var index: Int
         public var x0: Double, y0: Double, w: Double, d: Double
-        /// Armarios en el orden del rack (ids `rack:<unidad>`); vacío = rack sin repos (se pinta un armario apagado).
         public var cabinets: [Spot]
         public var console: Spot
+        public var door: Opening? = nil
+        public var windows: [Opening] = []
+        public var cabinetsAtBack = true
+
+        public var x1: Double { x0 + w }
+        public var y1: Double { y0 + d }
     }
 
-    /// Índice de sala (negativo) de la sala de máquinas k, para `Spot.room`/`RoomBox.index`; y al revés.
     public static func machineRoomIndex(_ k: Int) -> Int { -1 - k }
     public static func machineSlot(_ roomIndex: Int) -> Int? { roomIndex < 0 ? -1 - roomIndex : nil }
     public static func consoleID(_ k: Int) -> String { "machine:\(k)" }
     public static func cabinetID(_ k: Int, _ unitID: String) -> String { "rack:\(k):\(unitID)" }
-    /// (sala k, unidad del rack o nil = consola) de un hueco de la sala de máquinas; nil si `id` no lo es.
+    public static func botID(_ name: String) -> String { "bot:\(name)" }
     public static func machinePart(_ id: String) -> (room: Int, unit: String?)? {
         let p = id.split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false)
         if p.count == 2, p[0] == "machine", let k = Int(p[1]) { return (k, nil) }
         if p.count == 3, p[0] == "rack", let k = Int(p[1]) { return (k, String(p[2])) }
         return nil
     }
-    public static let cabW = 34.0, cabD = 26.0, cabH = 46.0, cabGap = 14.0
+    public static let cabW = FloorPlanGenerator.cabW, cabD = FloorPlanGenerator.cabD, cabH = 46.0, cabGap = FloorPlanGenerator.cabGap
 
+    public var frame: FloorFrame
+    public var shell = FloorPlanGenerator.Rect(x0: 0, y0: 0, w: 1, d: 1)
+    public var entrance: Opening?
     public var rooms: [RoomBox] = []
+    public var extras: [RoomBox] = []
     public var spots: [Spot] = []
     public var machines: [MachineBox] = []
     public var minU = 0.0, maxU = 1.0, minV = 0.0, maxV = 1.0
 
     public func spot(_ id: String) -> Spot? { spots.first { $0.id == id } }
+    public var core: RoomBox? { extras.first { $0.index == Self.coreIndex } }
+    public var corridor: RoomBox? { extras.first { $0.index == Self.corridorIndex } }
+    public var grok: RoomBox? { extras.first { $0.index == Self.grokIndex } }
 
-    /// Columnas de un departamento de `n` escritorios (≤ 6 por departamento).
-    static func columns(_ n: Int) -> Int { n <= 3 ? max(1, n) : (n == 4 ? 2 : 3) }
-
-    public init(plan: FloorPlan) {
-        if plan.kind == .lobby {
-            // Una sola sala ancha; los invitados se colocan en orden (vestíbulo ordenado por empresa, proyecto, llegada).
-            let n = plan.lobby.count
-            let cols = max(4, min(8, Int(Double(n).squareRoot().rounded(.up)) + 2))
-            let rows = max(1, (n + cols - 1) / cols)
-            let room = RoomBox(index: 0, role: "lobby", x0: 0, y0: 0, w: Double(cols) * Self.cellW + 2 * Self.pad,
-                               d: Double(rows) * Self.cellD * 0.8 + 2 * Self.pad)
-            rooms = [room]
-            for (i, g) in plan.lobby.enumerated() {
-                let r = i / cols, k = i % cols
-                spots.append(Spot(id: "lobby:\(g.threadID)", room: 0, cx: room.x0 + Self.pad + (Double(k) + 0.5) * Self.cellW,
-                                  cy: room.y0 + Self.pad + (Double(r) + 0.5) * Self.cellD * 0.8))
-            }
-        } else {
-            var y = 0.0
-            // las salas de máquinas ocupan los huecos siguientes al último departamento (Self.machineRoomIndex(k) en la rejilla)
-            let cells = plan.rooms.indices.map { $0 } + plan.machineRooms.indices.map(Self.machineRoomIndex)
-            let rows = stride(from: 0, to: cells.count, by: Self.roomsPerRow).map { Array(cells[$0..<min($0 + Self.roomsPerRow, cells.count)]) }
-            for row in rows {
-                var x = 0.0, depth = 0.0
-                for i in row {
-                    if let k = Self.machineSlot(i) {
-                        let m = Self.machineBox(plan.machineRooms[k], index: k, x0: x, y0: y)
-                        machines.append(m)
-                        spots += m.cabinets + [m.console]
-                        x += m.w + Self.gap
-                        depth = max(depth, m.d)
-                        continue
-                    }
-                    let r = plan.rooms[i]
-                    // El tamaño sale de los huecos declarados (retirados incluidos): no cambia con la ocupación.
-                    let n = max(1, r.desks.map(\.slot).max().map { $0 + 1 } ?? 1, r.desks.count)
-                    let cols = Self.columns(n), nrows = (n + cols - 1) / cols
-                    let box = RoomBox(index: i, role: r.role, x0: x, y0: y, w: Double(cols) * Self.cellW + 2 * Self.pad,
-                                      d: Double(nrows) * Self.cellD + 2 * Self.pad)
-                    rooms.append(box)
-                    for dk in r.desks {
-                        let rr = dk.slot / cols, k = dk.slot % cols
-                        spots.append(Spot(id: dk.id, room: i, cx: box.x0 + Self.pad + (Double(k) + 0.5) * Self.cellW,
-                                          cy: box.y0 + Self.pad + (Double(rr) + 0.5) * Self.cellD))
-                    }
-                    x += box.w + Self.gap
-                    depth = max(depth, box.d)
-                }
-                y += depth + Self.gap
-            }
-        }
-        var us: [Double] = [], vs: [Double] = []
-        var boxes: [(Double, Double, Double, Double)] = rooms.map { ($0.x0, $0.y0, $0.w, $0.d) }
-        boxes += machines.map { ($0.x0, $0.y0, $0.w, $0.d) }
-        let top = machines.isEmpty ? 52.0 : 12 + Self.cabH        // los armarios son más altos que los muros
-        for r in boxes {
-            for (cx, cy) in [(r.0, r.1), (r.0 + r.2, r.1), (r.0, r.1 + r.3), (r.0 + r.2, r.1 + r.3)] {
-                for z in [0.0, top] { us.append(cx - cy); vs.append((cx + cy) * 0.5 - z) }
-            }
-        }
-        if let a = us.min(), let b = us.max(), let c = vs.min(), let d = vs.max() {
-            minU = a - 14; maxU = b + 14; minV = c - 6; maxV = d + 6
-        }
+    static func slots(_ r: FloorPlan.Room) -> Int {
+        max(1, r.desks.map(\.slot).max().map { $0 + 1 } ?? 1, r.desks.count)
     }
 
-    /// Geometría de la sala de máquinas: depende solo de cuántos repos hay en el rack (no de sus luces ni de sus runs).
-    static func machineBox(_ mr: MachineRoom, index k: Int, x0: Double, y0: Double) -> MachineBox {
-        let row = Double(max(1, mr.rack.count)) * (cabW + cabGap) - cabGap
-        let w = max(3 * cellW, row + 40) + 2 * pad
-        let d = cellD + cabD + 2 * pad + 20
-        let cy = y0 + pad + 6 + cabD / 2, left = x0 + (w - row) / 2
-        let cabinets = mr.rack.enumerated().map { (j, u) in
-            Spot(id: cabinetID(k, u.id), room: machineRoomIndex(k), cx: left + cabW / 2 + Double(j) * (cabW + cabGap), cy: cy)
+    static func spec(_ plan: FloorPlan, frame f: FloorFrame) -> FloorPlanGenerator.Spec {
+        if plan.kind == .lobby {
+            return FloorPlanGenerator.Spec(width: f.width, depth: f.depth, seed: f.seed, salt: "lobby", lobbyGuests: plan.lobby.count,
+                                           entrance: f.entrance)
         }
-        let console = Spot(id: consoleID(k), room: machineRoomIndex(k), cx: x0 + w / 2, cy: y0 + d - pad - cellD / 2 + 6)
-        return MachineBox(index: k, x0: x0, y0: y0, w: w, d: d, cabinets: cabinets, console: console)
+        return FloorPlanGenerator.Spec(width: f.width, depth: f.depth, seed: f.seed, salt: "floor\(plan.floorIndex)",
+                                       roles: plan.rooms.map(slots), machineRooms: plan.machineRooms.map(\.rack.count),
+                                       grokSeats: plan.bots.count, entrance: f.entrance)
+    }
+
+    public init(plan: FloorPlan, frame: FloorFrame? = nil) {
+        let fr = frame ?? FloorFrame.building([plan])
+        self.frame = fr
+        let g = FloorPlanGenerator.generate(Self.spec(plan, frame: fr))
+        shell = g.footprint
+        entrance = g.entrance
+        var commonsCount = 0
+        for room in g.rooms {
+            let r = room.rect
+            func box(_ index: Int, _ role: String) -> RoomBox {
+                RoomBox(index: index, role: role, x0: r.x0, y0: r.y0, w: r.w, d: r.d, door: room.door, windows: room.windows)
+            }
+            switch room.kind {
+            case .role(let k):
+                guard plan.rooms.indices.contains(k), !room.seats.isEmpty else { continue }
+                rooms.append(box(k, plan.rooms[k].role))
+                for dk in plan.rooms[k].desks {
+                    let s = room.seats.indices.contains(dk.slot) ? room.seats[dk.slot] : room.seats[room.seats.count - 1]
+                    spots.append(Spot(id: dk.id, room: k, cx: s.cx, cy: s.cy))
+                }
+            case .hall:
+                rooms.append(box(0, "lobby"))
+                for (i, gst) in plan.lobby.enumerated() where room.seats.indices.contains(i) {
+                    spots.append(Spot(id: "lobby:\(gst.threadID)", room: 0, cx: room.seats[i].cx, cy: room.seats[i].cy))
+                }
+            case .machine(let k):
+                guard plan.machineRooms.indices.contains(k) else { continue }
+                let m = Self.machineBox(plan.machineRooms[k], index: k, room: room)
+                machines.append(m)
+                spots += m.cabinets + [m.console]
+            case .grok:
+                extras.append(box(Self.grokIndex, "grok"))
+                for (name, s) in zip(plan.bots, room.seats) {
+                    spots.append(Spot(id: Self.botID(name), room: Self.grokIndex, cx: s.cx, cy: s.cy))
+                }
+            case .core:
+                extras.append(box(Self.coreIndex, "core"))
+            case .corridor:
+                extras.append(box(Self.corridorIndex, "corridor"))
+            case .commons(let c):
+                extras.append(box(Self.commonsBase + commonsCount, "commons:\(c.rawValue)"))
+                commonsCount += 1
+            }
+        }
+        var b = IsoBounds.empty
+        for (x, y) in [(shell.x0, shell.y0), (shell.x1, shell.y0), (shell.x0, shell.y1), (shell.x1, shell.y1)] {
+            b.add(x, y, 0); b.add(x, y, Self.topH)
+        }
+        minU = b.minU - 14; maxU = b.maxU + 14; minV = b.minV - 6; maxV = b.maxV + 6
+    }
+
+    static func machineBox(_ mr: MachineRoom, index k: Int, room: FloorPlanGenerator.Room) -> MachineBox {
+        let r = room.rect
+        let atBack = room.door?.side != .north
+        let n = max(1, mr.rack.count)
+        let step = min(cabW + cabGap, (r.w - 2 * pad) / Double(n))
+        let row = Double(n - 1) * step + cabW
+        let left = r.x0 + (r.w - row) / 2
+        let cy = atBack ? r.y0 + pad + 6 + cabD / 2 : r.y1 - pad - 6 - cabD / 2
+        let cabinets = mr.rack.enumerated().map { (j, u) in
+            Spot(id: cabinetID(k, u.id), room: machineRoomIndex(k), cx: left + cabW / 2 + Double(j) * step, cy: cy)
+        }
+        let consoleY = atBack ? min(r.y1 - pad - cellD / 2 + 6, cy + cabD / 2 + 50) : max(r.y0 + pad + 30, cy - cabD / 2 - 50)
+        let console = Spot(id: consoleID(k), room: machineRoomIndex(k), cx: r.midX, cy: consoleY)
+        return MachineBox(index: k, x0: r.x0, y0: r.y0, w: r.w, d: r.d, cabinets: cabinets, console: console,
+                          door: room.door, windows: room.windows, cabinetsAtBack: atBack)
     }
 }
