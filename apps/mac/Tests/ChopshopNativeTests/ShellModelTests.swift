@@ -185,6 +185,7 @@ final class ShellModelTests: XCTestCase {
         XCTAssertTrue(ShellMinimap.layout(CityModel(buildings: [], groundX: 1, groundY: 1), size: size).blocks.isEmpty)
     }
 
+    @available(macOS 26.0, *)
     func testShellTaskFindsByTaskOrThread() throws {
         let state = try XCTUnwrap(CityOfficeFixture.state)
         let s = SnapshotMapper.snapshot(state, now: FloorFixture.now)
