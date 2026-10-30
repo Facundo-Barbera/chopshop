@@ -17,12 +17,14 @@ extension LiveState {
         public var halfLifeS: Double
         /// `{thread_id, title, summary, branch, worktree, pull_requests, phase, ended_at}` del ocupante anterior.
         public var inheritance: JSONValue.Object?
+        public var zone: String?
 
         public init(threadID: String, title: String? = nil, role: String? = nil, phase: String = "running", attention: String? = nil,
                     since: String? = nil, endedAt: String? = nil, touchedAt: String? = nil, halfLifeS: Double = HalfLife.defaultSeconds,
-                    inheritance: JSONValue.Object? = nil) {
+                    inheritance: JSONValue.Object? = nil, zone: String? = nil) {
             self.threadID = threadID; self.title = title; self.role = role; self.phase = phase; self.attention = attention
             self.since = since; self.endedAt = endedAt; self.touchedAt = touchedAt; self.halfLifeS = halfLifeS; self.inheritance = inheritance
+            self.zone = zone
         }
 
         init?(json: JSONValue) {
@@ -30,7 +32,7 @@ extension LiveState {
             self.init(threadID: tid, title: json["title"]?.string, role: json["role"]?.string, phase: json["phase"]?.string ?? "running",
                       attention: LiveState.nonEmpty(json["attention"]?.string), since: json["since"]?.string, endedAt: json["ended_at"]?.string,
                       touchedAt: json["touched_at"]?.string, halfLifeS: json["half_life_s"]?.double ?? HalfLife.defaultSeconds,
-                      inheritance: json["inheritance"]?.object)
+                      inheritance: json["inheritance"]?.object, zone: LiveState.nonEmpty(json["zone"]?.string))
         }
     }
 
@@ -74,12 +76,14 @@ extension LiveState {
     public struct Room: Equatable, Sendable {
         public var role: String
         public var permanent: Bool
+        public var flex: Bool
         public var desks: [Desk]
 
         init?(json: JSONValue) {
             guard let role = json["role"]?.string else { return nil }
             self.role = role
             permanent = json["permanent"]?.bool ?? false
+            flex = json["flex"]?.bool ?? role.hasPrefix("_")
             desks = (json["desks"]?.array ?? []).compactMap(Desk.init(json:))
         }
     }
@@ -87,12 +91,14 @@ extension LiveState {
     public struct Floor: Equatable, Sendable {
         public var index: Int
         public var name: String?
+        public var temporary: Bool
         public var rooms: [Room]
 
         init?(json: JSONValue) {
             guard let index = json["index"]?.int else { return nil }
             self.index = index
             name = json["name"]?.string
+            temporary = json["temporary"]?.bool ?? false
             rooms = (json["rooms"]?.array ?? []).compactMap(Room.init(json:))
         }
     }
@@ -103,6 +109,8 @@ extension LiveState {
         public var floors: [Floor]
         /// Salas de máquinas que declara el perfil (0..N; vacío = ninguna).
         public var machineRooms: [MachineRoomConfig]
+        public var capacity: Capacity
+        public var outsourced: Outsourced?
 
         init?(json: JSONValue) {
             guard json.object != nil else { return nil }
@@ -110,9 +118,16 @@ extension LiveState {
             halfLifeS = json["half_life_s"]?.double ?? HalfLife.defaultSeconds
             floors = (json["floors"]?.array ?? []).compactMap(Floor.init(json:)).sorted { $0.index < $1.index }
             machineRooms = (json["machine_rooms"]?.array ?? []).compactMap(MachineRoomConfig.init(json:))
+            capacity = Capacity(json: json["capacity"])
+            outsourced = json["outsourced"].flatMap(Outsourced.init(json:))
         }
 
-        public var desks: [Desk] { floors.flatMap { $0.rooms.flatMap(\.desks) } }
+        public var declaredFloors: [Floor] { floors.filter { !$0.temporary } }
+        public var temporaryFloors: [Floor] { floors.filter(\.temporary) }
+        public var outsourcedFloors: [Floor] { outsourced?.floors ?? [] }
+        public var allFloors: [Floor] { floors + outsourcedFloors }
+
+        public var desks: [Desk] { allFloors.flatMap { $0.rooms.flatMap(\.desks) } }
         public func desk(_ id: String) -> Desk? { desks.first { $0.id == id } }
         /// Escritorio que ocupa un hilo (si ocupa alguno).
         public func desk(occupiedBy thread: String) -> Desk? { desks.first { $0.occupant?.threadID == thread } }
@@ -120,6 +135,19 @@ extension LiveState {
         /// Cambia el escritorio `id` en su sitio. Devuelve false si no existe.
         @discardableResult
         mutating func update(_ id: String, _ f: (inout Desk) -> Void) -> Bool {
+            if Self.update(&floors, id, f) { return true }
+            guard var o = outsourced else { return false }
+            let hit = Self.update(&o.floors, id, f)
+            if hit { outsourced = o }
+            return hit
+        }
+
+        mutating func updateAll(_ f: (inout Desk) -> Void) {
+            Self.updateAll(&floors, f)
+            if var o = outsourced { Self.updateAll(&o.floors, f); outsourced = o }
+        }
+
+        private static func update(_ floors: inout [Floor], _ id: String, _ f: (inout Desk) -> Void) -> Bool {
             for fi in floors.indices {
                 for ri in floors[fi].rooms.indices {
                     if let di = floors[fi].rooms[ri].desks.firstIndex(where: { $0.id == id }) {
@@ -130,8 +158,34 @@ extension LiveState {
             return false
         }
 
-        mutating func updateAll(_ f: (inout Desk) -> Void) {
+        private static func updateAll(_ floors: inout [Floor], _ f: (inout Desk) -> Void) {
             for fi in floors.indices { for ri in floors[fi].rooms.indices { for di in floors[fi].rooms[ri].desks.indices { f(&floors[fi].rooms[ri].desks[di]) } } }
+        }
+    }
+
+    public struct Capacity: Equatable, Sendable {
+        public var flexPerFloor: Int
+        public var maxExtraFloors: Int
+        public var outsourcing: Bool
+
+        public init(flexPerFloor: Int = 4, maxExtraFloors: Int = 2, outsourcing: Bool = true) {
+            self.flexPerFloor = flexPerFloor; self.maxExtraFloors = maxExtraFloors; self.outsourcing = outsourcing
+        }
+
+        init(json: JSONValue?) {
+            self.init(flexPerFloor: json?["flex_per_floor"]?.int ?? 4, maxExtraFloors: json?["max_extra_floors"]?.int ?? 2,
+                      outsourcing: json?["outsourcing"]?.bool ?? true)
+        }
+    }
+
+    public struct Outsourced: Equatable, Sendable {
+        public var label: String
+        public var floors: [Floor]
+
+        init?(json: JSONValue) {
+            guard json.object != nil else { return nil }
+            label = LiveState.nonEmpty(json["label"]?.string) ?? "Contratista"
+            floors = (json["floors"]?.array ?? []).compactMap(Floor.init(json:)).sorted { $0.index < $1.index }
         }
     }
 
@@ -225,7 +279,8 @@ extension LiveState {
             let occ = Occupant(threadID: tid, title: Self.nonEmpty(t?["title"]?.string) ?? body["title"]?.string, role: body["role"]?.string,
                                phase: t?["phase"]?.string ?? "running", attention: Self.nonEmpty(t?["attention"]?.string),
                                since: body["since"]?.string ?? env.ts, endedAt: t?["ended_at"]?.string, touchedAt: t?["touched_at"]?.string,
-                               halfLifeS: office.halfLifeS, inheritance: body["inheritance"]?.object)
+                               halfLifeS: office.halfLifeS, inheritance: body["inheritance"]?.object,
+                               zone: Self.nonEmpty(body["zone"]?.string))
             office.update(did) { d in
                 d.occupant = occ
                 if let n = body["notes_pending"]?.int { d.notesPending = n }

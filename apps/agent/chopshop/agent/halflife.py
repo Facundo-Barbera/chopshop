@@ -108,7 +108,8 @@ def _attention_open(project, thread_id):
 def _occupants(state):
     """(project, desk_id | None, item) por ocupante de escritorio y por elemento del vestíbulo."""
     for p in state.get("projects") or []:
-        for fl in ((p.get("office") or {}).get("floors") or []):
+        office = p.get("office") or {}
+        for fl in (office.get("floors") or []) + ((office.get("outsourced") or {}).get("floors") or []):
             for room in fl.get("rooms") or []:
                 for d in room.get("desks") or []:
                     if d.get("occupant"):

@@ -24,7 +24,8 @@ _TOP = re.compile(r"^(?P<k>[A-Za-z_][A-Za-z0-9_]*)\s*:")
 _PLAIN_KEY = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
 LIMITS = {"floors_per_project": layout.MAX_FLOORS_PER_PROJECT, "rooms_per_floor": layout.MAX_ROOMS_PER_FLOOR,
           "desks_per_room": layout.MAX_DESKS_PER_ROOM, "desks_per_floor": layout.MAX_DESKS_PER_FLOOR,
-          "building_floors": layout.MAX_BUILDING_FLOORS}
+          "building_floors": layout.MAX_BUILDING_FLOORS, "flex_per_floor": layout.MAX_FLEX_PER_FLOOR,
+          "extra_floors": layout.MAX_EXTRA_FLOORS, "outsourced_floors": layout.MAX_OUTSOURCED_FLOORS}
 
 
 class StructureError(Exception):
@@ -268,4 +269,5 @@ def changed_body(res):
     """Cuerpo del sobre `office.changed` (docs/event-envelope.md) a partir del resultado de `apply`."""
     s = res["structure"]
     return {"project": res["project"], "by": res["by"], "company": s["company"], "half_life_s": s["half_life_s"],
-            "floors": s["floors"], "machine_rooms": s["machine_rooms"], "diff": res["diff"]}
+            "floors": s["floors"], "machine_rooms": s["machine_rooms"], "capacity": s["capacity"],
+            "outsourced": s["outsourced"], "diff": res["diff"]}

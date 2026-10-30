@@ -31,7 +31,7 @@ si necesitas columnas, usa los campos `extra` JSON). `user_version` 2: la migrac
 | `actions.py` | hilo actions | `ActionsPoller(conn, cfg, emit, runner, clock, profiles_fn, head_fn)` (subclase de `GitHubPoller`: mismo `gh`, ETag y backoff; el `machine.health` de GitHub lo publica solo el hilo `github`). Sondea `/actions/runs` de `[agent.github] repos` + `rack.repos` (github) y emite `forge.run.state` (en curso + 5 completados por repo; `warn` si terminó mal) con `origin` por prioridad: `thread` (rama del hilo fuera de la rama por defecto, o sha = HEAD de su worktree en `push`/`pull_request*`; etiqueta `rol · escritorio`), `automation` (`forge.dispatch` reciente: `nonce` en el título del run o mismo workflow+ref en 10 min), `bot` (`rack.actors` kind bot o cuenta `…[bot]`; no en `schedule`), `schedule`, `human`/`unknown`. Un origen `thread`/`automation` no se degrada. Tabla propia `forge_runs` (`CREATE TABLE IF NOT EXISTS`, sin tocar `user_version`). `[agent.github] actions = false` lo apaga. |
 | `stream.py` | integrador | `Bus` (`publish(seq)`, `wait(seq, timeout)`, `close()`; `AgentService.emit` publica) y `StreamHub` (`serve(handler, ident, query)`, `revoke(device_id)`, `close()`, `active`): ver «`GET /stream`». |
 | `projection.py` | integrador | `apply(state, envelope) -> state` (pura, idempotente por `seq`), `fold(envs)`, `state(conn, cfg)`, `Projector(conn, cfg).current()` (incremental), `envelopes_after(conn, after)` (sobres del bus sin `event`/`machine_id`), `filter_project`. |
-| `office.py` | hilo office | `Office(conn, cfg, emit_fn, profiles_fn=None, clock)`: `.reload()` (perfiles con `office:` → tabla `desks`; retira, nunca borra; emite `office.changed {by: "profile"}` al cambiar la estructura o si el último ya no está retenido), `.tick()` (pliega los `task.state` nuevos del bus con cursor `office_cursor` en `meta`: asigna, hereda, encola por rol lleno), `.assign(desk_id, thread_id)` (`OfficeError` 404/409/400), `.release(desk_id, reason)` (para quien decida la salida, p. ej. la semivida), `.desk(desk_id)`. Tablas `desks`, `desk_occupancy` (ocupante = `until` nulo; linaje ≤ 20), `office_threads` (última `task.state` por hilo), `desk_waiting`; `t3_threads` gana `role` y `ended_at` (esquema 5). Herencia: si un ocupante del rol ya terminó (fase terminal, sin atención), el hilo nuevo hereda el que terminó antes (`reason: inherited`); si no, el primer libre (`start`); la herencia es el último ocupante del escritorio (también ya salido). Rol lleno o sin escritorios → `desk.waiting`; sube en cuanto uno queda libre o su ocupante termina. Los hilos sin rol no se sientan (vestíbulo: aparte). `[agent.office] enabled, interval`. |
+| `office.py` | hilo office | `Office(conn, cfg, emit_fn, profiles_fn=None, clock)`: `.reload()` (perfiles con `office:` → tabla `desks`; retira, nunca borra; emite `office.changed {by: "profile"}` al cambiar la estructura o si el último ya no está retenido), `.tick()` (pliega los `task.state` nuevos del bus con cursor `office_cursor` en `meta`: asigna, hereda, encola por rol lleno), `.assign(desk_id, thread_id)` (`OfficeError` 404/409/400), `.release(desk_id, reason)` (para quien decida la salida, p. ej. la semivida), `.desk(desk_id)`. Tablas `desks`, `desk_occupancy` (ocupante = `until` nulo; linaje ≤ 20), `office_threads` (última `task.state` por hilo), `desk_waiting`; `t3_threads` gana `role` y `ended_at` (esquema 5). Herencia: si un ocupante del rol ya terminó (fase terminal, sin atención), el hilo nuevo hereda el que terminó antes (`reason: inherited`); si no, el primer libre (`start`); la herencia es el último ocupante del escritorio (también ya salido). Rol lleno o sin escritorios → `desk.waiting`; sube en cuanto uno queda libre o su ocupante termina. Los hilos sin rol no se sientan (vestíbulo: aparte). Rol lleno → escritorios elásticos (`capacity:`; ver «Escritorios elásticos»): flex, pisos temporales y contratista, con vuelta a la sala y cierre con histéresis en `.tick()`. `[agent.office] enabled, interval`. |
 | `halflife.py` | hilo semivida | `opacity/exit_at/gone(phase, attention, ended_at, touched_at, half_life_s[, now])` (pura, tabla `fixtures/office/halflife.json`); `touch(conn, thread_id, now)` / `touched_at` / `touches` (tabla propia `thread_touch`, `CREATE TABLE IF NOT EXISTS`, sin tocar `user_version`); `stamp(conn, event, body)` (añade `touched_at` a los `task.state` que emite `AgentService.emit`); `schedule(state, touches)` / `due(state, now, touches)` sobre la proyección v3 (ocupantes y `lobby`; con `attention` en el ocupante o abierta en `projects[].attention` no sale); `Fader(conn, state_fn, emit_fn, clock)`: `.sweep()` emite `desk.released reason: faded` (`desk: null` en el vestíbulo), `.next_delay()` (1–30 s). Hilo `halflife` del servicio (`agent.halflife_enabled`, por defecto `true`). `POST /touch` y `POST /answer` tocan. |
 | `listeners.py` | integrador | `Listeners(emit, clock).report(hilo, estado, error, backoff_s)` → `listener.state` por transición + latido horario. |
 | `machine_room.py` | integrador | Reductor de `machine_room` (listeners y automatizaciones: `apply`, `filter_project`; el rack es de otro módulo) que llama `projection._apply`; `subscriptions(conn)` / `live(state, conn)` rellenan `machine_room.subscriptions` (`{name, projects, last_ok, last_error, last_error_at, signed}`) en `Projector.current()`; `rooms(state)` / `scope(mr, project, cfg)` resuelven `projects[].machine_rooms` (0..N salas, las de `office.machine_rooms`). |
@@ -245,14 +245,43 @@ Sin `machine_rooms` en el perfil (o sin `office`): `machine_rooms: []` y el proy
 `projects[].machine_room` se conserva para clientes anteriores: la primera sala o `null`. Se recalcula tras cada sobre
 (`machine_room.rooms`, parte de `fold`) y tras rellenar `subscriptions`.
 
+### Escritorios elásticos (flex, pisos temporales y contratista)
+
+Para que un hilo con rol no espere en el vestíbulo, la oficina (`office.py`) tiene capacidad elástica, configurable en el
+bloque opcional `capacity:` del perfil (`chopshop profile check` lo valida y muestra la capacidad efectiva):
+
+```yaml
+capacity:
+  flex_per_floor: 4       # 0-8 (4): escritorios sin asignación por piso declarado (sin pasar de 24 por piso)
+  max_extra_floors: 2     # 0-4 (2): pisos temporales "en obra"; recortado a lo que quede de los 16 pisos del edificio
+  outsourcing: true       # (true): pasado el tope, pisos del edificio contratista del campus (máximo 4)
+```
+
+- Ids: flex `<proyecto>/<piso>/_flex/<n>` (también en los pisos temporales), contratista `<proyecto>/<piso>/_out/<n>` (pisos
+  del contratista desde 0). Los roles nunca empiezan por `_`.
+- `office` gana `capacity` (efectiva) y `outsourced: null | {label: "Contratista", floors: [...]}`; cada piso gana `temporary`
+  (`true` en los pisos en obra, índices ≥ pisos declarados) y cada sala `flex` (`true` en `_flex`/`_out`). Los pisos declarados
+  llevan al final una sala `_flex`; un piso temporal o del contratista lleva solo una sala elástica de N escritorios
+  (N = máx(4, escritorios del piso declarado más grande con su flex), tope 24).
+- Orden (determinista): sala del rol (herencia o libre) → flex del piso de la sala, luego de los otros pisos declarados por
+  distancia → pisos temporales abiertos → abrir uno nuevo → contratista (abiertos, luego abrir otro) → `desk.waiting`. Un
+  elástico cuyo ocupante terminó se reutiliza (`desk.released reason: reclaimed`). Entra con `desk.assigned reason: overflow`.
+- Estable: un hilo en un elástico solo se mueve para volver a su sala cuando un escritorio de su rol queda libre o su ocupante
+  termina (`reason: return`, por orden de llegada; comparte cola con los que esperan en el vestíbulo).
+- Abrir o cerrar pisos re-emite `office.changed {by: "capacity"}` (`diff.added` con los escritorios abiertos, `diff.closed`
+  con los cerrados). Se cierra el piso más alto (contratista primero) cuando lleva ≥ 180 s vacío y el resto de elásticos
+  abiertos está por debajo del 50 %; se borra (no queda `retired`).
+
 ### Regla `apply` de los sobres nuevos (la misma en `projection.py` y en `LiveState.swift`)
 
-- `office.changed` → `projects[project].office = {company, half_life_s, floors, machine_rooms}` (`machine_rooms` = la
-  configuración de las salas del perfil, `[]` si no declara ninguna); cada escritorio conserva `occupant`,
+- `office.changed` → `projects[project].office = {company, half_life_s, floors, machine_rooms, capacity, outsourced}`
+  (`machine_rooms` = la configuración de las salas del perfil, `[]` si no declara ninguna); cada escritorio (también los de
+  `outsourced.floors`) conserva `occupant`,
   `lineage` y `notes_pending` que ya tuviera (por `id`); los nuevos empiezan con `occupant: null, lineage: [], notes_pending: 0`.
   Un `office.changed` es la estructura **completa** (los retirados vienen con `retired: true`).
 - `desk.assigned` → el escritorio `desk` (si no existe en `office`, se ignora) pasa a `occupant = {thread_id, title, role,
-  phase, attention, since: body.since || ts, ended_at, touched_at, half_life_s: office.half_life_s, inheritance}`, donde
+  phase, attention, since: body.since || ts, ended_at, touched_at, half_life_s: office.half_life_s, inheritance, zone}`
+  (`role` = rol del hilo también en un elástico; `zone` = `body.zone` o `room`: `room | flex | extra | outsourced`), donde
   `title/phase/attention/ended_at/touched_at` salen de la última `task.state` de ese hilo en el mismo proyecto (o `title` del
   cuerpo y `phase: "running"` si aún no hay). `notes_pending` = `body.notes_pending` si viene. El hilo sale del `lobby`. Si el hilo
   ocupaba otro escritorio, ese queda libre (sin linaje: es un traslado).

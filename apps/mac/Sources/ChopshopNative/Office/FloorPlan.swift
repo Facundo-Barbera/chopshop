@@ -23,6 +23,7 @@ public struct FloorPlan: Equatable, Sendable {
         /// Hilo del que heredó el escritorio (si lo hubo) y su resumen final.
         public var inheritedFrom: String?
         public var inheritedSummary: String?
+        public var zone: String? = nil
 
         public var isTerminal: Bool { FloorPlan.terminal.contains(phase) }
 
@@ -49,6 +50,7 @@ public struct FloorPlan: Equatable, Sendable {
             waitingRole = FloorPlan.nonEmpty(o["waiting_role"]?.string)
             inheritedFrom = FloorPlan.nonEmpty(o["inheritance"]?["thread_id"]?.string)
             inheritedSummary = FloorPlan.nonEmpty(o["inheritance"]?["summary"]?.string)
+            zone = FloorPlan.nonEmpty(o["zone"]?.string)
         }
 
         /// Ocupante tipado de un escritorio (`LiveState.Occupant`); su `half_life_s` ya viene resuelto por la proyección.
@@ -64,6 +66,7 @@ public struct FloorPlan: Equatable, Sendable {
             waitingRole = nil
             inheritedFrom = FloorPlan.nonEmpty(o.inheritance?["thread_id"]?.string)
             inheritedSummary = FloorPlan.nonEmpty(o.inheritance?["summary"]?.string)
+            zone = o.zone
         }
 
         /// Invitado tipado del vestíbulo (`LiveState.LobbyEntry`).
@@ -100,7 +103,12 @@ public struct FloorPlan: Equatable, Sendable {
         public var role: String
         public var permanent: Bool
         public var desks: [Desk]
+        public var flex: Bool = false
         public var id: String { role }
+
+        public init(role: String, permanent: Bool, desks: [Desk], flex: Bool? = nil) {
+            self.role = role; self.permanent = permanent; self.desks = desks; self.flex = flex ?? FloorPlan.isFlexRole(role)
+        }
     }
 
     public enum Kind: Equatable, Sendable {
@@ -120,6 +128,13 @@ public struct FloorPlan: Equatable, Sendable {
     public var lobby: [Occupant] = []
     /// Salas de máquinas de este piso, en el orden del perfil (vacío si no declara ninguna aquí, y en el vestíbulo).
     public var machineRooms: [MachineRoom] = []
+    public var temporary = false
+    public var outsourced = false
+    public var outsourcedLabel: String? = nil
+
+    public static let outsourcedBase = 1000
+    public static func isFlexRole(_ role: String) -> Bool { role.hasPrefix("_") }
+    public var isElastic: Bool { temporary || outsourced }
 
     public static let terminal: Set<String> = ["done", "failed", "settled", "skipped"]
     public static let fadeOut = 0.1
@@ -145,9 +160,15 @@ public struct FloorPlan: Equatable, Sendable {
               let office = pj["office"], office.object != nil else { return [] }
         let company = nonEmpty(office["company"]?.string)
         let hl = office["half_life_s"]?.double ?? defaultHalfLife
-        let plans = (office["floors"]?.array ?? []).enumerated().map { (i, f) -> FloorPlan in
-            var plan = FloorPlan(kind: .floor(project: project, index: f["index"]?.int ?? i), company: company,
+        let declared = (office["floors"]?.array ?? []).enumerated().map { (i, f) in (f, f["index"]?.int ?? i, false) }
+        let label = nonEmpty(office["outsourced"]?["label"]?.string) ?? "Contratista"
+        let contracted = (office["outsourced"]?["floors"]?.array ?? []).enumerated().map { (i, f) in (f, outsourcedBase + (f["index"]?.int ?? i), true) }
+        let plans = (declared + contracted).map { (f, index, out) -> FloorPlan in
+            var plan = FloorPlan(kind: .floor(project: project, index: index), company: company,
                                  name: nonEmpty(f["name"]?.string), halfLife: hl)
+            plan.temporary = f["temporary"]?.bool ?? false
+            plan.outsourced = out
+            plan.outsourcedLabel = out ? label : nil
             plan.rooms = (f["rooms"]?.array ?? []).compactMap { r -> Room? in
                 guard let role = r["role"]?.string else { return nil }
                 let desks: [Desk] = (r["desks"]?.array ?? []).enumerated().compactMap { (k, d) -> Desk? in
@@ -159,7 +180,8 @@ public struct FloorPlan: Equatable, Sendable {
                                 occupant: Occupant(d["occupant"], project: project, halfLife: hl),
                                 notesPending: d["notes_pending"]?.int ?? 0, lineage: lineage)
                 }
-                return Room(role: role, permanent: r["permanent"]?.bool ?? false, desks: desks.sorted { $0.slot < $1.slot })
+                return Room(role: role, permanent: r["permanent"]?.bool ?? false, desks: desks.sorted { $0.slot < $1.slot },
+                            flex: r["flex"]?.bool)
             }
             return plan
         }.sorted { $0.floorIndex < $1.floorIndex }
@@ -206,19 +228,24 @@ public struct FloorPlan: Equatable, Sendable {
     public static func floors(in state: LiveState, project: String) -> [FloorPlan] {
         guard let office = state.projects.first(where: { $0.name == project })?.office else { return [] }
         let hl = office.halfLifeS
-        let plans = office.floors.map { f -> FloorPlan in
-            var plan = FloorPlan(kind: .floor(project: project, index: f.index), company: office.company, name: nonEmpty(f.name), halfLife: hl)
+        let label = office.outsourced?.label
+        let all = office.floors.map { ($0, $0.index, false) } + office.outsourcedFloors.map { ($0, outsourcedBase + $0.index, true) }
+        let plans = all.map { (f, index, out) -> FloorPlan in
+            var plan = FloorPlan(kind: .floor(project: project, index: index), company: office.company, name: nonEmpty(f.name), halfLife: hl)
+            plan.temporary = f.temporary
+            plan.outsourced = out
+            plan.outsourcedLabel = out ? (label ?? "Contratista") : nil
             plan.rooms = f.rooms.map { r in
                 let desks = r.desks.map { d in
                     Desk(id: d.id, slot: d.slot, retired: d.retired, occupant: d.occupant.map { Occupant($0, project: project) },
                          notesPending: d.notesPending, lineage: d.lineage.map { Lineage(thread: $0.threadID, reason: $0.reason) })
                 }
-                return Room(role: r.role, permanent: r.permanent, desks: desks.sorted { $0.slot < $1.slot })
+                return Room(role: r.role, permanent: r.permanent, desks: desks.sorted { $0.slot < $1.slot }, flex: r.flex)
             }
             return plan
         }.sorted { $0.floorIndex < $1.floorIndex }
-        let all = MachineRoom(state.machineRoom)
-        return withMachineRooms(plans, office.machineRooms.map { all.scoped(to: project, $0) })
+        let machines = MachineRoom(state.machineRoom)
+        return withMachineRooms(plans, office.machineRooms.map { machines.scoped(to: project, $0) })
     }
 
     public static func floor(in state: LiveState, project: String, index: Int) -> FloorPlan? {
@@ -298,11 +325,14 @@ public struct FloorFrame: Equatable, Hashable, Sendable {
     }
 
     public static func building(_ floors: [FloorPlan], key: String? = nil, world: UInt64 = WorldSeed.current) -> FloorFrame {
-        let k = key ?? Self.key(of: floors)
+        let outsourced = !floors.isEmpty && floors.allSatisfy(\.outsourced)
+        let k = key ?? (outsourced ? CityModel.contractorKey(Self.key(of: floors)) : Self.key(of: floors))
         let shape = WorldGenerator.buildingShape(seed: world, key: k)
         let style = CityBuildingStyle(seed: WorldGenerator.styleSeed(world, k))
         let entrance = 0.04 + 0.92 * (Double(style.doorBay) + 0.5) / Double(CityGeo.windowsLeft)
-        let areas = floors.map { f -> Double in
+        let fixed = floors.filter { !$0.isElastic }
+        let sized = outsourced || fixed.isEmpty ? floors : fixed
+        let areas = sized.map { f -> Double in
             let s = FloorLayout.spec(f, frame: FloorFrame(width: 1, depth: 1, seed: 0))
             return FloorPlanGenerator.requiredArea(roles: s.roles, machineRooms: s.machineRooms, grokSeats: s.grokSeats, lobbyGuests: s.lobbyGuests)
         }
