@@ -52,8 +52,8 @@ private struct AccountSettingsFixture: AccountSettingsBackend {
 
     private var me: String {
         role == .owner
-            ? #"{"id":"u1","email":"dueno@ejemplo.com","display_name":"Dueño","role":"owner","status":"active"}"#
-            : #"{"id":"u2","email":"ana@ejemplo.com","display_name":"Ana","role":"watcher","status":"active"}"#
+            ? #"{"id":"u1","email":"dueno@ejemplo.test","display_name":"Dueño","role":"owner","status":"active"}"#
+            : #"{"id":"u2","email":"ana@ejemplo.test","display_name":"Ana","role":"watcher","status":"active"}"#
     }
 
     func me() async throws -> BackendMeResponse {
@@ -76,7 +76,7 @@ private struct AccountSettingsFixture: AccountSettingsBackend {
 
     func users() async throws -> [BackendUser] {
         try decode("[\(me),"
-            + #"{"id":"u2","email":"ana@ejemplo.com","display_name":"Ana","role":"watcher"},{"id":"u3","email":"luis@ejemplo.com","display_name":null,"role":"watcher"}]"#)
+            + #"{"id":"u2","email":"ana@ejemplo.test","display_name":"Ana","role":"watcher"},{"id":"u3","email":"luis@ejemplo.test","display_name":null,"role":"watcher"}]"#)
     }
 
     func revokeSession(id: String) async throws {}
