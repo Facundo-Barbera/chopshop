@@ -68,6 +68,17 @@ public final class ShellController: ObservableObject {
         }
     }
 
+    public var canCancel: Bool { actions?.canAct == true && actions?.cancel != nil }
+
+    public func cancelQueued(employee: String, task: String) {
+        guard canCancel, let cancel = actions?.cancel else { say("No se puede cancelar desde aquí."); return }
+        say("Cancelando…")
+        Task { @MainActor in
+            let err = await cancel(employee, task)
+            say(err.map { "No se pudo cancelar: \($0)" } ?? "Tarea cancelada", error: err != nil)
+        }
+    }
+
     public func say(_ text: String, error: Bool = false) {
         noticeGen += 1
         let gen = noticeGen
