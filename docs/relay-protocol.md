@@ -60,7 +60,7 @@ distinto en una ruta que el rol sí puede usar → 405 con `Allow`. Los 401/403 
 | `snapshot` | `snapshot` | agente → relay → visores | solo scope `agent`, después de `welcome` |
 | `event` | `event` | agente → relay → visores | solo scope `agent`, después de `welcome` |
 | `ping` / `pong` | `ping`, `pong` | ambos sentidos | todos |
-| `whoami` / `whoami.result` | `whoami`, `whoami-result` | cliente → relay → cliente | todos |
+| `whoami` / `whoami.result` | `whoami`, `whoami-result` | agente → relay → agente | solo por el WebSocket (scope `agent`); un visor usa `GET /whoami` |
 | `error` | `error` | relay → cliente (también cuerpo de errores HTTP) | relay |
 | pairing (HTTP) | `pair-create`, `pair-code`, `pair-redeem`, `pair-token` | ver «Pairing» | ver «Pairing» |
 
@@ -101,7 +101,8 @@ mucho cada 5 s) y, aunque no cambie, al menos cada `ttl_s / 2`.
 Un sobre v1 (`docs/event-envelope.md`) reducido: la cabecera visible lleva `machine_id`, `event_id` (el `id` ULID del sobre),
 `seq`, `event_ts`, `project`, `event_type`, `severity`, `needs` y `subject {kind, id}` (**sin** `title` ni `url`); el `body` del
 sobre viaja como una parte opaca con `name: "body"`, ya filtrada por la lista blanca. El relay reenvía el evento a los visores
-conectados de la cuenta y **no lo guarda** (el estado que sobrevive es el snapshot; el `body` es estado completo, así que perder
+conectados de la cuenta y **no lo guarda** (solo lo retiene en memoria, máx. 512 frames o 5 min, para reanudar un `GET /stream`
+con `Last-Event-ID`; el estado que sobrevive es el snapshot; el `body` es estado completo, así que perder
 un evento no rompe nada: el siguiente lo arregla).
 
 ### `ping` / `pong`
