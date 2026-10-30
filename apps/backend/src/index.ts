@@ -22,6 +22,8 @@ const api = createApi<Env>(
     health: () => json({ ok: true, version: VERSION }),
     ...authHandlers,
     ...sessionHandlers,
+    ...invitationHandlers,
+    ...userHandlers,
     ...machineHandlers,
     ...workspaceHandlers,
     ...projectHandlers,
