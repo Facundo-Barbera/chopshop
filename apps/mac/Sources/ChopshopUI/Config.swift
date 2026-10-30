@@ -4,7 +4,7 @@ import ChopshopNative
 enum AgentDestination: String, CaseIterable, Equatable {
     case local, relay
 
-    var label: String { self == .local ? "Local (Tailscale)" : "Relay" }
+    var label: String { self == .local ? "Local (Tailscale)" : "Nube (sesión)" }
 }
 
 /// Un agente remoto al que se conecta la app.
