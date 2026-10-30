@@ -134,6 +134,24 @@ public extension Snapshots {
         }
     }
 
+    static func renderMultiMachine(fixture path: String, to out: String) {
+        guard let data = FileManager.default.contents(atPath: path), let frames = (try? JSONValue(data: data))?.array else { print("sin fixture: \(path)"); return }
+        let store = LiveStore(coalesceInterval: 0)
+        store.ingest(relaySnapshots: frames)
+        let state = store.state
+        let model = CityModel.build(state)
+        for b in model.buildings { print("\(b.campus) / \(b.company): \(b.floors.filter { !$0.isLobby }.map { "\($0.project) (\($0.activeThreads.count) hilos)" }.joined(separator: ", "))") }
+        var lights = CityLights()
+        lights.observe(model, at: 0)
+        let now = SnapshotMapper.date("2026-10-30T14:03:00Z") ?? Date()
+        for dark in [true, false] {
+            write(CityView(model: model, lights: lights, snapshot: SnapshotMapper.snapshot(state, now: now), state: state, frozenTime: 10, frozenNow: now,
+                           flatChrome: true)
+                    .padding(.horizontal, 26).padding(.vertical, 22).background(Color(nsColor: .windowBackgroundColor)),
+                  dark: dark, size: CGSize(width: 1440, height: 900), to: "\(out)/multimachine-\(dark ? "dark" : "light").png")
+        }
+    }
+
     private static func write(_ v: some View, dark: Bool, size: CGSize, to path: String) {
         NSApp?.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
         let r = ImageRenderer(content: v.frame(width: size.width, height: size.height).environment(\.colorScheme, dark ? .dark : .light))

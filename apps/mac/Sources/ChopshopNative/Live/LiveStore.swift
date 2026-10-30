@@ -19,10 +19,12 @@ public final class LiveStore: ObservableObject {
     /// Máquina del agente (del `hello`).
     @Published public private(set) var machine: String?
     public private(set) var state = LiveState()
+    private var local = LiveState() { didSet { remerge() } }
+    public private(set) var remotes: [String: LiveState] = [:]
     /// Cursor de reanudación.
     public private(set) var lastEventID: String?
     /// Ya llegó algo del agente (un `state` o algún sobre).
-    public var hasData: Bool { state.headSeq > 0 || !state.projects.isEmpty }
+    public var hasData: Bool { local.headSeq > 0 || !state.projects.isEmpty }
     /// Se llama al recibir 401 (credencial revocada o inválida).
     public var onUnauthorized: (() -> Void)?
 
@@ -69,7 +71,7 @@ public final class LiveStore: ObservableObject {
     /// Olvida el estado (otro agente, o desemparejado).
     public func reset() {
         disconnect()
-        state = LiveState(); lastEventID = nil; machine = nil; awaitingState = false; failures = 0
+        remotes = [:]; local = LiveState(); lastEventID = nil; machine = nil; awaitingState = false; failures = 0
         status = .idle
         flush()
     }
@@ -114,22 +116,38 @@ public final class LiveStore: ObservableObject {
         case .hello(_, let m, _, let resume):
             failures = 0
             status = .live
-            if let m { machine = m; if state.machine == nil { state.machine = m } }
+            if let m { machine = m; if local.machine == nil { local.machine = m } }
             awaitingState = resume == "snapshot"
         case .state(let json):
             guard var st = LiveState(json: json) else { return }
             if st.machine == nil { st.machine = machine }
             // las series no vienen en la proyección: se conservan las que ya se tenían
-            for (k, v) in state.series where !v.cpu.isEmpty { st.series[k] = v }
-            state = st
+            for (k, v) in local.series where !v.cpu.isEmpty { st.series[k] = v }
+            local = st
             awaitingState = false
             lastEventID = id ?? String(st.headSeq)
             flush()
         case .envelope(let e):
-            state.apply(e)
+            local.apply(e)
             if let id = id ?? e.seq.map(String.init) { lastEventID = id }
             if !awaitingState { scheduleFlush() }
         }
+    }
+
+    public func ingest(relaySnapshots: [JSONValue]) {
+        var next: [String: LiveState] = [:]
+        for j in relaySnapshots {
+            guard let st = LiveState(relaySnapshot: j), let m = st.machine else { continue }
+            if let old = next[m] ?? remotes[m], old.headSeq > st.headSeq { next[m] = old } else { next[m] = st }
+        }
+        remotes = next
+        remerge()
+        flush()
+    }
+
+    private func remerge() {
+        let others = remotes.filter { $0.key != local.machine || local.headSeq == 0 }.sorted { $0.key < $1.key }
+        state = others.reduce(local) { $0.merging($1.value) }
     }
 
     private func publish() {
