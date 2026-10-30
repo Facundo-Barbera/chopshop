@@ -552,6 +552,8 @@ class AgentService:
         res = t3watch.poll(self.conn, self.cfg, self.t3, self.emit, project_fn=registry.t3_matcher())
         if not res.get("skipped"):
             self.runtime.last_poll = self.clock()
+            if res.get("reachable") is False and getattr(self.t3, "failures", 0) == 1:
+                log.warning("T3 no responde: %s", getattr(self.t3, "last_error", None))
         return res
 
     def automations_once(self):
