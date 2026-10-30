@@ -121,9 +121,9 @@ public extension Snapshots {
         }
     }
 
-    static func renderEmployees(fixture path: String, to out: String) {
+    static func renderEmployees(fixture path: String, office: String, to out: String) {
         guard let data = FileManager.default.contents(atPath: path), let json = try? JSONDecoder().decode(JSONValue.self, from: data),
-              let state = LiveState(json: json) else { print("sin fixture: \(path)"); return }
+              let state = employeesState(json, office: office) else { print("sin fixture: \(path)"); return }
         for project in Set(state.employees.map(\.project)).sorted() {
             for plan in FloorPlan.floors(in: state, project: project) {
                 for dark in [true, false] {
@@ -132,6 +132,16 @@ public extension Snapshots {
                 }
             }
         }
+    }
+
+    private static func employeesState(_ json: JSONValue, office: String) -> LiveState? {
+        if let s = LiveState(json: json), s.projects.contains(where: { $0.office != nil }) { return s }
+        let parts = (json.array ?? [json]).compactMap { $0["parts"] == nil ? $0.object : LiveState.relayParts($0["parts"])["employees"]?.object }
+        guard !parts.isEmpty, let data = FileManager.default.contents(atPath: office),
+              let base = try? JSONDecoder().decode(JSONValue.self, from: data), var state = LiveState(json: base) else { return nil }
+        let queues = parts.reduce(into: JSONValue.Object()) { acc, p in acc.merge(p["queues"]?.object ?? [:]) { a, _ in a } }
+        state.readEmployees(["employees": .array(parts.flatMap { $0["employees"]?.array ?? [] }), "queues": .object(queues)])
+        return state
     }
 
     static func renderMultiMachine(fixture path: String, to out: String) {

@@ -2,3 +2,4 @@
 hilos de T3 y eventos/webhooks. Solo observa y resume: los worktrees, servers y comandos son cosa de T3."""
 API_VERSION = 1
 __version__ = "0.9.0"
+USER_AGENT = "chopshop-agent/" + __version__
