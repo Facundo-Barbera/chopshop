@@ -94,6 +94,33 @@ public extension Snapshots {
         }
     }
 
+    static func renderStableFloor(to out: String) {
+        let now = ProjectOfficeFixture.now
+        let floors = ProjectOffice.floors(in: ProjectOfficeFixture.state(office: true), project: ProjectOfficeFixture.project, now: now)
+        guard let i = floors.firstIndex(where: { $0.kind != .lobby }) else { print("sin piso"); return }
+        var desk = floors
+        let r = desk[i].rooms.count - 1
+        let slot = (desk[i].rooms[r].desks.map(\.slot).max() ?? -1) + 1
+        desk[i].rooms[r].desks.append(FloorPlan.Desk(id: "\(ProjectOfficeFixture.project)/0/\(desk[i].rooms[r].role)/\(slot)", slot: slot,
+                                                     retired: false, occupant: nil, notesPending: 0, lineage: []))
+        var room = desk
+        room[i].rooms.append(FloorPlan.Room(role: "qa", permanent: false, desks: [FloorPlan.Desk(
+            id: "\(ProjectOfficeFixture.project)/0/qa/0", slot: 0, retired: false, occupant: nil, notesPending: 0, lineage: [])]))
+        let base = WorldLayout(floors: floors)
+        for (name, fs) in [("antes", floors), ("escritorio", desk), ("sala", room)] {
+            let w = WorldLayout(floors: fs)
+            var moved = 0
+            for a in base.regions {
+                guard let b = w.region(a.id), a.x0 == b.x0, a.y0 == b.y0, a.oz == b.oz else { moved += 1; continue }
+                moved += a.layout.spots.filter { s in b.layout.spot(s.id).map { $0.cx != s.cx || $0.cy != s.cy } ?? true }.count
+                moved += a.layout.rooms.filter { x in !b.layout.rooms.contains { $0.index == x.index && $0.x0 == x.x0 && $0.y0 == x.y0 && $0.w == x.w && $0.d == x.d } }.count
+            }
+            print("\(name): \(w.regions.map { $0.layout.spots.count }) huecos, \(moved) movidos")
+            write(FloorOfficeView(plan: fs[i], frozenNow: now, flatChrome: true).background(IsoBackdrop()), dark: true,
+                  size: CGSize(width: 1400, height: 900), to: "\(out)/floor-estable-\(name).png")
+        }
+    }
+
     private static func write(_ v: some View, dark: Bool, size: CGSize, to path: String) {
         NSApp?.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
         let r = ImageRenderer(content: v.frame(width: size.width, height: size.height).environment(\.colorScheme, dark ? .dark : .light))
